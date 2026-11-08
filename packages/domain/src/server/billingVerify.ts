@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 
 import type { PolarSnapshot } from "@lobbystack/providers";
-import { billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
+import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
+import { billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "@lobbystack/shared";
 
-import { billingDeploymentPolar, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
+import { billingCatalogDeployment, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, type PolarStep, type PolarStepObject } from "./billingPolar";
 import { polarProductVariableName } from "./billingPlans";
 import type { DomainContext } from "./context";
@@ -198,15 +199,17 @@ export function billingProblems(checks: readonly BillingCheckResult[]): ApiBilli
 const pairTitles: Record<BillingCheckPair, string> = { file_postgres: "File and Postgres", file_polar: "File and Polar", postgres_polar: "Postgres and Polar", file_provider: "File and the provider", postgres_provider: "Postgres and the provider" };
 const levelLabels: Record<BillingCheckLevel, string> = { ok: "ok    ", drift: "DRIFT ", warn: "warn  ", info: "info  " };
 
-/** The report pnpm billing prints, one line per check under its pair. */
-export function billingVerifyReport(result: BillingVerifyResult, heading: string): string {
+/** The report pnpm billing prints, one line per check under its pair; provider names the one a Stripe deployment's pairs compare with. */
+export function billingVerifyReport(result: BillingVerifyResult, heading: string, provider?: string): string {
   const lines = [heading];
-  for (const pair of Object.keys(pairTitles) as BillingCheckPair[]) {
+  const titles: Record<BillingCheckPair, string> = provider ? { ...pairTitles, file_provider: `File and ${provider}`, postgres_provider: `Postgres and ${provider}` } : pairTitles;
+  for (const pair of Object.keys(titles) as BillingCheckPair[]) {
     const checks = result.checks.filter((check) => check.pair === pair);
     if (!checks.length) continue;
-    lines.push("", pairTitles[pair], ...checks.map((check) => `  ${levelLabels[check.level]} ${check.level === "ok" ? check.message : `${check.code}: ${check.message}`}`));
+    lines.push("", titles[pair], ...checks.map((check) => `  ${levelLabels[check.level]} ${check.level === "ok" ? check.message : `${check.code}: ${check.message}`}`));
   }
-  const ending = result.status === "passed" ? "Result: in sync (exit 0)." : result.status === "drift" ? "Result: drift (exit 1). Run pnpm billing apply, or change billing.json in a pull request." : "Result: failed (exit 2). Polar couldn't be read: check the token's scopes and run again.";
+  const unreadable = provider ? `${provider} couldn't be read: check the key's permissions and run again.` : "Polar couldn't be read: check the token's scopes and run again.";
+  const ending = result.status === "passed" ? "Result: in sync (exit 0)." : result.status === "drift" ? "Result: drift (exit 1). Run pnpm billing apply, or change billing.json in a pull request." : `Result: failed (exit 2). ${unreadable}`;
   lines.push("", ending);
   return lines.join("\n");
 }
@@ -215,42 +218,57 @@ export type DailyBillingVerifyInput = {
   brand: string;
   env: Record<string, string | undefined>;
   /** Reads the worker's Polar organization with its own token, webhooks left out. */
-  readPolar(): Promise<PolarSnapshot>;
+  readPolar?(): Promise<PolarSnapshot>;
+  /** Reads the worker's Stripe account with its own key, endpoints left out. */
+  readStripe?(): Promise<StripeSnapshot>;
 };
 
 export type DailyBillingVerifyOutcome =
   | { status: "skipped"; reason: string }
-  | { status: BillingVerifyStatus; previousStatus: string | null; problems: ApiBillingCheck[]; polarEnv: PolarEnv; provider: BillingProviderId; providerEnv: "sandbox" | "live"; runId: string };
+  /** polarEnv is Polar's server, null on another provider. */
+  | { status: BillingVerifyStatus; previousStatus: string | null; problems: ApiBillingCheck[]; polarEnv: PolarEnv | null; provider: BillingProviderId; providerEnv: BillingProviderEnv; runId: string };
 
 /**
  * The worker's daily check: every check but the webhook's, against the
  * profile stored on the latest catalog run. Polar lists the webhook with its
  * signing secret, so the worker's token goes without webhooks:read, and
- * pnpm billing verify checks the webhook. Skipped until the deployment has a
- * Polar organization and a first link.
+ * pnpm billing verify checks the webhook; on Stripe it checks the endpoint and
+ * the meter error destination too. Skipped until the deployment has its
+ * provider's account and a first link.
  */
 export async function runDailyBillingVerify(context: DomainContext, input: DailyBillingVerifyInput): Promise<DailyBillingVerifyOutcome> {
-  const polar = readBillingDeployment(input.env, { withSecret: false });
-  if (!polar.org) return { status: "skipped", reason: "POLAR_ORGANIZATION_ID isn't set" };
-  const catalog = await getBillingCatalogForApi(context, { deployment: { brand: input.brand, polar } });
+  const deployment = readBillingDeployment(input.env, { withSecret: false });
+  if (!deployment.account) return { status: "skipped", reason: deployment.provider === "stripe" ? "STRIPE_ACCOUNT_ID isn't set" : "POLAR_ORGANIZATION_ID isn't set" };
+  const catalog = await getBillingCatalogForApi(context, { deployment: billingCatalogDeployment(input.brand, input.env, { withSecret: false }) });
   const latest = catalog.last_run;
   if (!latest || !catalog.profile || !catalog.provider.last_link) return { status: "skipped", reason: "nothing was linked yet" };
   const parsed = billingProfileSchema.safeParse(catalog.profile);
   if (!parsed.success) throw new Error(`The profile stored on catalog run ${latest.id} no longer passes billingProfileSchema.`);
-  let snapshot: { env: PolarEnv; snapshot: PolarSnapshot } | { env: PolarEnv; error: string };
-  try {
-    snapshot = { env: polar.env, snapshot: await input.readPolar() };
-  } catch (error) {
-    snapshot = { env: polar.env, error: error instanceof Error ? error.message : String(error) };
+  const file = { brand: latest.brand, hash: latest.hash, profile: parsed.data, plans: desiredBillingPlans(parsed.data) };
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  let result: BillingVerifyResult;
+  if (deployment.stripe) {
+    if (!input.readStripe) return { status: "skipped", reason: "the worker has no Stripe key" };
+    const env = deployment.stripe.env;
+    let stripe: { env: BillingProviderEnv; snapshot: StripeSnapshot } | { env: BillingProviderEnv; error: string };
+    try {
+      stripe = { env, snapshot: await input.readStripe() };
+    } catch (error) {
+      stripe = { env, error: message(error) };
+    }
+    result = plannerFor("stripe").verify({ file, catalog, stripe, webhookUrl: null, checkWebhookSecret: false });
+  } else {
+    if (!input.readPolar) return { status: "skipped", reason: "the worker has no Polar token" };
+    const env = deployment.polar!.env;
+    let polar: { env: PolarEnv; snapshot: PolarSnapshot } | { env: PolarEnv; error: string };
+    try {
+      polar = { env, snapshot: await input.readPolar() };
+    } catch (error) {
+      polar = { env, error: message(error) };
+    }
+    result = plannerFor("polar").verify({ file, catalog, polar, webhookUrl: null, checkWebhookSecret: false });
   }
-  const result = plannerFor(polar.provider).verify({
-    file: { brand: latest.brand, hash: latest.hash, profile: parsed.data, plans: desiredBillingPlans(parsed.data) },
-    catalog,
-    polar: snapshot,
-    webhookUrl: null,
-    checkWebhookSecret: false,
-  });
   const problems = billingProblems(result.checks);
-  const recorded = await recordBillingVerifyRun(context, { catalog: { brand: latest.brand, ver: latest.ver, hash: latest.hash }, codeHash: catalog.code_hash, status: result.status, problems, provider: polar.provider, providerEnv: polar.providerEnv, providerAccount: polar.org });
-  return { status: result.status, previousStatus: recorded.previousStatus, problems, polarEnv: polar.env, provider: polar.provider, providerEnv: polar.providerEnv, runId: recorded.run.id! };
+  const recorded = await recordBillingVerifyRun(context, { catalog: { brand: latest.brand, ver: latest.ver, hash: latest.hash }, codeHash: catalog.code_hash, status: result.status, problems, provider: deployment.provider, providerEnv: deployment.providerEnv, providerAccount: deployment.account });
+  return { status: result.status, previousStatus: recorded.previousStatus, problems, polarEnv: deployment.polar?.env ?? null, provider: deployment.provider, providerEnv: deployment.providerEnv, runId: recorded.run.id! };
 }

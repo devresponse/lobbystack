@@ -53,7 +53,7 @@ const domain = vi.hoisted(() => ({
   getBillingCatalogForApi: vi.fn(),
   applyBillingCatalogForApi: vi.fn(),
   linkBillingCatalogForApi: vi.fn(),
-  billingDeploymentPolar: vi.fn(() => ({ env: "sandbox", org: "org_test", secretSha256: null, productVars: {} })),
+  billingCatalogDeployment: vi.fn((brand: string) => ({ brand, polar: { env: "sandbox", org: "org_test", secretSha256: null, productVars: {} } })),
   listBillingCatalogRunsForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
   createBillingCodeForApi: vi.fn(),
   listBillingCodesForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
@@ -849,7 +849,7 @@ describe("billing", () => {
       expect(await catalog.json()).toEqual({ data: { brand: "lobbystack", plans: [] } });
       // With the Polar settings this process runs with.
       expect(domain.getBillingCatalogForApi).toHaveBeenCalledWith(expect.anything(), { deployment: { brand: expect.any(String), polar: { env: "sandbox", org: "org_test", secretSha256: null, productVars: {} } } });
-      expect(domain.billingDeploymentPolar).toHaveBeenLastCalledWith(process.env);
+      expect(domain.billingCatalogDeployment).toHaveBeenLastCalledWith(expect.any(String), process.env);
 
       // A dry run answers 200 and needs no key; the domain decides what a real apply without one gets.
       domain.applyBillingCatalogForApi.mockResolvedValueOnce({ run: { ...run, id: null, status: "preview" }, replayed: false, status: 200 });

@@ -1,7 +1,7 @@
 import { knowledgeCallAnswer } from "@lobbystack/agent-core/live/directAnswer";
 import {
   applyBillingCatalogForApi,
-  billingDeploymentPolar,
+  billingCatalogDeployment,
   callerPrincipalId,
   cancelAppointmentForApi,
   polarCheckoutConfigured,
@@ -210,9 +210,9 @@ function requireOperatorKey(credential: ApiCredential, action = `manage a plan o
   if (credential.kind !== "platform_key" || credential.access !== "all") throw new PublicApiError(403, "forbidden", `Only an operator's platform key, one with access to every business, can ${action}.`);
 }
 
-/** The brand this deployment shows and the Polar settings it runs with, for the billing catalog. */
+/** The brand this deployment shows and its billing provider's settings, for the billing catalog. */
 function billingDeployment() {
-  return { brand: currentBrand().id, polar: billingDeploymentPolar(process.env) };
+  return billingCatalogDeployment(currentBrand().id, process.env);
 }
 
 /**

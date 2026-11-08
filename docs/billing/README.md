@@ -93,6 +93,8 @@ pnpm billing apply  --brand alloplace --polar sandbox --profile ops --railway-fi
 pnpm billing verify --brand alloplace --polar sandbox --profile ops
 ```
 
+A deployment that bills through Stripe takes `--stripe sandbox|live` in place of `--polar`, with `STRIPE_SETUP_KEY` and `STRIPE_READ_KEY` in place of Polar's tokens, and every flag but `--adopt`; Stripe billing is a preview until it's done ([Stripe billing](../roadmap/stripe-billing.md#step-11-pnpm-billing-on-stripe)).
+
 `plan` and `verify` take `--json` for scripts. `apply` asks before it changes anything; `--yes` skips the question. A run that stops part-way is finished by running it again: everything is found again by its `lobbystack_*` tags in Polar, and the webhook by its address.
 
 | Exit code | Means |
@@ -176,7 +178,7 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 
 | Signal | Sent as | Means | Suggested alert |
 | --- | --- | --- | --- |
-| `ops.billing.profile_drift` | PostHog event from the worker | The daily check found the file, tables and Polar disagreeing, or couldn't read Polar. It names the deployment's `provider` and `providerEnv` (`sandbox` or `live`) beside `polarEnv` | Any in a day |
+| `ops.billing.profile_drift` | PostHog event from the worker | The daily check found the file, tables and Polar disagreeing, or couldn't read Polar. It names the deployment's `provider` and `providerEnv` (`sandbox` or `live`), and on Polar its `polarEnv` | Any in a day |
 | `ops.billing.profile_drift_recovered` | PostHog event from the worker | The first clean check after drift | None; it closes the drift alert |
 | `ops.billing.usage_sync_failed` | PostHog event from the worker | Usage couldn't reach Polar, so a business may be undercharged | Any in an hour |
 | "Billing work waited longer than it should." | Error tracking, from the worker, and the `lobbystack.billing.overdue_work` counter | A Polar event or usage waited over an hour, or a checkout request failed for waiting | Any ([BillingWorkOverdue](../operations/alerts.md#billingworkoverdue)) |
@@ -198,7 +200,7 @@ Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set (
 | Usage, allowances and the spending cap | `packages/domain/src/server/usage.ts` |
 | The billing provider interface, and Polar behind it | `packages/providers/src/billing/` (`types.ts`, `errors.ts`, `factory.ts`, `usage.ts`), `packages/providers/src/polar/adapter.ts` ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)) |
 | Checkout, reconcile and plan changes | `packages/domain/src/server/billing.ts`, `packages/providers/src/polar/polarBilling.ts`, `packages/providers/src/polar/webhook.ts` |
-| Catalog, Polar setup and the daily check | `packages/domain/src/server/billingCatalog.ts`, `billingPolar.ts`, `billingStripe.ts` (Stripe's planner, which pnpm billing runs from step 11 of the Stripe plan), `billingVerify.ts`, `billingProvider.ts` (the planner for the deployment's provider), `packages/providers/src/polar/polarCatalog.ts` (the catalog client, which runs a plan's calls), `scripts/billing.ts` |
+| Catalog, Polar setup and the daily check | `packages/domain/src/server/billingCatalog.ts`, `billingPolar.ts`, `billingStripe.ts` (Stripe's planner, which pnpm billing runs from step 11 of the Stripe plan), `billingVerify.ts`, `billingProvider.ts` (the planner for the deployment's provider), `packages/providers/src/polar/polarCatalog.ts` and `packages/providers/src/stripe/catalog.ts` (the catalog clients, which run a plan's calls), `scripts/billing.ts` |
 | Promo codes and endings | `packages/domain/src/server/billingCodes.ts`, `billingPromoEnd.ts`, `packages/shared/src/billingCodes.ts` |
 | The sweep | `packages/domain/src/server/billingSweep.ts` |
 | Dashboard routes | `apps/admin/app/api/billing/` (plan, `checkout`, `portal`, `promo`), `apps/admin/app/api/webhooks/polar/route.ts` with the shared `apps/admin/src/lib/billing-webhook.ts`, `apps/admin/src/lib/billing-limit.ts` |

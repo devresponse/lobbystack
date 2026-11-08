@@ -33,10 +33,10 @@ describe("billing jobs: the daily catalog check", () => {
       .mockResolvedValueOnce({ status: "failed", previousStatus: "drift", problems: [{ ...drift, code: "unreadable", subject: "Polar" }], polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox", runId: "run-2" })
       .mockResolvedValueOnce({ status: "passed", previousStatus: "failed", problems: [warn], polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox", runId: "run-3" })
       .mockResolvedValueOnce({ status: "passed", previousStatus: "passed", problems: [], polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox", runId: "run-4" });
-    const dependencies = { domain, billingCatalog: { readSnapshot }, productAnalytics: { capture } };
+    const dependencies = { domain, billingCatalog: { provider: "polar" as const, readSnapshot }, productAnalytics: { capture } };
     expect(await handleJob(job, dependencies)).toEqual({ status: "skipped" });
     expect(runDailyBillingVerify).toHaveBeenLastCalledWith(domain, { brand: expect.any(String), env: process.env, readPolar: expect.any(Function) });
-    await vi.mocked(runDailyBillingVerify).mock.calls[0]![1].readPolar().catch(() => undefined);
+    await vi.mocked(runDailyBillingVerify).mock.calls[0]![1].readPolar!().catch(() => undefined);
     // Never the webhook, whose listing carries its signing secret.
     expect(readSnapshot).toHaveBeenCalledExactlyOnceWith({ webhooks: false });
 
@@ -49,5 +49,19 @@ describe("billing jobs: the daily catalog check", () => {
       [{ event: "ops.billing.profile_drift", distinctId: "system:deployment", properties: { status: "failed", problemCodes: ["unreadable"], problemCount: 1, polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox" } }],
       [{ event: "ops.billing.profile_drift_recovered", distinctId: "system:deployment", properties: { status: "passed", problemCodes: [], problemCount: 0, polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox" } }],
     ]);
+  });
+
+  it("reads a Stripe deployment's account with the worker's key, endpoints left out, and names Stripe in its drift event", async () => {
+    const domain = { db: undefined as never };
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.verifyCatalog", queue: "maintenance", businessId: null, payload: {}, trace: {}, idempotencyKey: "billing-verify", scheduled: true };
+    const capture = vi.fn(async () => undefined);
+    const readSnapshot = vi.fn(async () => { throw new Error("not read in this test"); });
+    const drift = { code: "price", pair: "file_provider", level: "drift", subject: "Price ls_realinfobot_pro_monthly_cad_615a3175", message: "x" } as const;
+    vi.mocked(runDailyBillingVerify).mockResolvedValueOnce({ status: "drift", previousStatus: "passed", problems: [drift], polarEnv: null, provider: "stripe", providerEnv: "sandbox", runId: "run-5" });
+    expect(await handleJob(job, { domain, billingCatalog: { provider: "stripe" as const, readSnapshot }, productAnalytics: { capture } })).toEqual({ status: "completed", entityId: "run-5:drift" });
+    expect(runDailyBillingVerify).toHaveBeenLastCalledWith(domain, { brand: expect.any(String), env: process.env, readStripe: expect.any(Function) });
+    await vi.mocked(runDailyBillingVerify).mock.calls[0]![1].readStripe!().catch(() => undefined);
+    expect(readSnapshot).toHaveBeenCalledExactlyOnceWith({ webhooks: false });
+    expect(capture).toHaveBeenCalledWith([expect.objectContaining({ event: "ops.billing.profile_drift", properties: { status: "drift", problemCodes: ["price"], problemCount: 1, provider: "stripe", providerEnv: "sandbox" } })]);
   });
 });

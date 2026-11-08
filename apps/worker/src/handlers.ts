@@ -24,6 +24,7 @@ import type { DomainContext } from "@lobbystack/domain";
 import { callTranscriptSubject, cancellationSubject, invitationSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import type { BillingProvider } from "@lobbystack/providers/billing/types";
 import type { PolarSnapshot } from "@lobbystack/providers/polar/polarCatalog";
+import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
 import type { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import type OpenAI from "openai";
@@ -73,7 +74,7 @@ export type WorkerDependencies = {
   /** The deployment's billing provider (ADR 0010), from createBillingProvider. Without it, billing jobs wait or report the provider unavailable. */
   billing?: BillingProvider;
   /** Reads the deployment's Polar organization for the daily billing check, with the worker's POLAR_ACCESS_TOKEN. */
-  billingCatalog?: { readSnapshot(options: { webhooks: false }): Promise<PolarSnapshot> };
+  billingCatalog?: { provider: "polar"; readSnapshot(options: { webhooks: false }): Promise<PolarSnapshot> } | { provider: "stripe"; readSnapshot(options: { webhooks: false }): Promise<StripeSnapshot> };
   embeddings?: { fingerprint?: string; embed(values: string[], onUsage?: (usage: DurableAiUsage) => Promise<void> | void): Promise<number[][]> };
   crawler?: { crawl(input: { url: string; limit?: number }): Promise<Array<{ url: string; title?: string; markdown?: string }>> };
   calendar?: CalendarOperations;

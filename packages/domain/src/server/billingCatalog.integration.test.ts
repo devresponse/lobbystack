@@ -8,10 +8,12 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfi
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { getBillingUsageStatus, getWebVoiceBillingAllowance } from "./billing";
-import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
+import { applyBillingCatalogForApi, billingDeploymentPolar, billingDeploymentStripe, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
 import { billingPlanList, brandBillingCatalog, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
+import { desiredStripeCatalog, planStripeChanges, stripeLinkBody } from "./billingStripe";
+import { emptyStripeSnapshot, runStripeSteps } from "./billingStripe.testing";
 import { runDailyBillingVerify } from "./billingVerify";
 import { NumberSelectionError, numberMarketInTransaction } from "./phoneNumbers";
 import { PublicApiError } from "./publicApi/errors";
@@ -718,6 +720,84 @@ describe.skipIf(!testUrl)("billing catalog limits", () => {
       await as(tx, "owner");
       const callers = await rows(tx, sql`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.prosrc like '%business_included_numbers%' order by p.proname`);
       expect(callers.map((row) => row.proname)).toEqual(["reserve_api_number_claim", "reserve_onboarding_number_claim", "reserve_replacement_number_claim"]);
+    });
+  });
+});
+
+// A Stripe deployment: its variables, and a file with a stripe block, which it needs.
+const stripeEnv = { BILLING_PROVIDER: "stripe", STRIPE_API_KEY: "rk_test_worker123", STRIPE_ACCOUNT_ID: "acct_test" };
+const stripeBlock = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: true, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "separate", managedPayments: false };
+const stripeDeployment = (extra: Record<string, string> = {}): BillingCatalogDeployment => ({ brand: "alloplace", stripe: billingDeploymentStripe({ ...stripeEnv, STRIPE_WEBHOOK_SECRET: "whsec_test", ...extra }) });
+
+/** Sets an empty Stripe account up from a file, as pnpm billing apply does, and returns it with the link it would send. */
+function seededStripe(billingFile: Record<string, any>) {
+  const profile = billingProfileSchema.parse(billingFile);
+  const plans = desiredBillingPlans(profile);
+  const catalog = desiredStripeCatalog({ brand: "alloplace", profile, plans, webhookUrl: "https://demo.alloplace.com/api/webhooks/stripe" });
+  const { snapshot } = runStripeSteps(emptyStripeSnapshot({ account: "acct_test" }), planStripeChanges({ catalog, snapshot: emptyStripeSnapshot({ account: "acct_test" }), options: { adopt: false, allowReplace: false, allowArchive: false } }).steps);
+  const body = stripeLinkBody({ catalog, plans, snapshot });
+  return { snapshot, plans: body.plans, objects: { ...body.objects, webhook_secret_sha256: createHash("sha256").update("whsec_test").digest("hex") } };
+}
+
+describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
+  it("refuses a file without a stripe block, then takes a Stripe link with its objects, refusing Polar's, another account and a new one later", async () => {
+    await rollbackTest(async (tx) => {
+      const blocked = await apply(tx, file(), { dryRun: true, key: null, deployment: stripeDeployment() });
+      expect(blocked.run.blocked_by.map((item) => [item.code, item.path])).toEqual([["provider_block_missing", "billing_file.stripe"]]);
+      const withStripe = file((value) => { value.stripe = stripeBlock; });
+      await apply(tx, withStripe, { deployment: stripeDeployment() });
+      const { plans, objects } = seededStripe(withStripe);
+      // A Polar link records no objects beyond its plans.
+      const send = (body: Record<string, unknown>, deployment = stripeDeployment()) => linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: hashOf(withStripe), plans, ...(body.provider === "stripe" ? { objects } : {}), ...body }), deployment });
+      const polar = await refusal(send({ provider: "polar", provider_env: "sandbox", provider_account: "org_test" }));
+      expect(polar.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["provider_mismatch provider"]);
+      const other = await refusal(send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_other" }));
+      expect(other.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_mismatch provider_account"]);
+      const live = await refusal(send({ provider: "stripe", provider_env: "live", provider_account: "acct_test" }));
+      expect(live.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_mismatch provider_env"]);
+
+      const first = await send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_test" });
+      expect(first.run).toMatchObject({ kind: "link", status: "applied", provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", polar_env: null, polar_org: null });
+      const catalog = await getBillingCatalogForApi(context(tx), { deployment: stripeDeployment() });
+      expect(catalog.polar).toBeNull();
+      expect(catalog.provider).toMatchObject({ id: "stripe", env: "sandbox", account: "acct_test", objects, product_vars: null, last_link: { id: first.run.id } });
+      const linked = catalog.plans.filter((plan) => plan.sold).flatMap((plan) => plan.prices.map((price) => [price.provider_ref, price.polar_id]));
+      expect(linked.length).toBe(4);
+      expect(linked.every(([ref, polarId]) => typeof ref === "string" && ref.startsWith("price_") && polarId === null)).toBe(true);
+
+      // A deployment pointed at another account later keeps the first one's.
+      const moved = await refusal(send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_other" }, stripeDeployment({ STRIPE_ACCOUNT_ID: "acct_other" })));
+      expect(moved.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_changed provider_account"]);
+    });
+  });
+
+  it("runs the daily check against the Stripe account with the worker's key, storing a verify run that names Stripe", async () => {
+    await rollbackTest(async (tx) => {
+      const unused = async () => { throw new Error("Stripe wasn't to be read."); };
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: { BILLING_PROVIDER: "stripe" }, readStripe: unused })).toEqual({ status: "skipped", reason: "STRIPE_ACCOUNT_ID isn't set" });
+      const withStripe = file((value) => { value.stripe = stripeBlock; });
+      await apply(tx, withStripe, { deployment: stripeDeployment() });
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: unused })).toEqual({ status: "skipped", reason: "nothing was linked yet" });
+      const { snapshot, plans, objects } = seededStripe(withStripe);
+      await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: hashOf(withStripe), provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", plans, objects }), deployment: stripeDeployment() });
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readPolar: unused })).toEqual({ status: "skipped", reason: "the worker has no Stripe key" });
+
+      const passed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: async () => snapshot });
+      expect(passed).toMatchObject({ status: "passed", previousStatus: null, polarEnv: null, provider: "stripe", providerEnv: "sandbox" });
+      // The build's file has no stripe block, so the code's hash is another file's: a warning, not a drift.
+      const codes = (outcome: Awaited<ReturnType<typeof runDailyBillingVerify>>) => (outcome.status === "skipped" ? [] : outcome.problems.map((problem) => `${problem.pair} ${problem.code} ${problem.level}`));
+      expect(codes(passed)).toEqual(["file_postgres code_hash warn"]);
+      const [stored] = await rows(tx, sql`select kind, status, provider, provider_env, provider_account, polar_env, polar_org from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);
+      expect(stored).toEqual({ kind: "verify", status: "passed", provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", polar_env: null, polar_org: null });
+
+      const drifted = structuredClone(snapshot);
+      drifted.prices.find((price) => price.metadata.lobbystack_plan === "pro" && price.recurring?.interval === "month")!.active = false;
+      const drift = await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: async () => drifted });
+      expect(drift).toMatchObject({ status: "drift", previousStatus: "passed" });
+      expect(codes(drift)).toEqual(["file_postgres code_hash warn", "file_provider price drift", "postgres_provider linked_id drift"]);
+      const failed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: async () => { throw new Error("Invalid API Key provided"); } });
+      expect(failed).toMatchObject({ status: "failed", previousStatus: "drift" });
+      expect(codes(failed)).toEqual(["file_postgres code_hash warn", "file_provider unreadable drift"]);
     });
   });
 });

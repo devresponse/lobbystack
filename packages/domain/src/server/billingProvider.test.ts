@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
@@ -5,10 +6,11 @@ import { describe, expect, it } from "vitest";
 import { PolarCatalogClient } from "@lobbystack/providers/polar/polarCatalog";
 import { billingProfileSchema } from "@lobbystack/shared";
 
-import { desiredBillingPlans } from "./billingCatalog";
+import { billingCatalogDeployment, desiredBillingPlans } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans } from "./billingPolar";
 import { createFakePolar, seedPolarSetup } from "./billingPolar.testing";
 import { plannerFor, polarPlanner, readBillingDeployment } from "./billingProvider";
+import { stripePlanner } from "./billingStripe";
 
 const profile = billingProfileSchema.parse(JSON.parse(readFileSync(new URL("../../../../brands/alloplace/billing.json", import.meta.url), "utf8")));
 const plans = desiredBillingPlans(profile);
@@ -36,14 +38,22 @@ describe("the catalog seam", () => {
     expect(polarPlanner.linkBody({ desired, snapshot: after, plans })).toEqual(polarLinkPlans({ catalog: desired, plans, snapshot: after }));
   });
 
-  it("has a planner for Polar, and none for Stripe yet", () => {
+  it("has a planner for each provider", () => {
     expect(plannerFor("polar")).toBe(polarPlanner);
     expect(polarPlanner.provider).toBe("polar");
-    expect(() => plannerFor("stripe")).toThrow("from step 11 of the Stripe plan");
+    expect(plannerFor("stripe")).toBe(stripePlanner);
+    expect(stripePlanner.provider).toBe("stripe");
   });
 
   it("reads the deployment's provider and its sandbox or live account from its variables", () => {
-    expect(readBillingDeployment({ POLAR_ORGANIZATION_ID: "org-1" })).toMatchObject({ provider: "polar", providerEnv: "live", env: "production", org: "org-1" });
-    expect(readBillingDeployment({ POLAR_ORGANIZATION_ID: "org-1", POLAR_API_BASE_URL: "https://sandbox-api.polar.sh" })).toMatchObject({ provider: "polar", providerEnv: "sandbox", env: "sandbox" });
+    expect(readBillingDeployment({ POLAR_ORGANIZATION_ID: "org-1" })).toMatchObject({ provider: "polar", providerEnv: "live", account: "org-1", polar: { env: "production", org: "org-1" }, stripe: null });
+    expect(readBillingDeployment({ POLAR_ORGANIZATION_ID: "org-1", POLAR_API_BASE_URL: "https://sandbox-api.polar.sh" })).toMatchObject({ provider: "polar", providerEnv: "sandbox", polar: { env: "sandbox" } });
+    const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+    // During a rotation the secret holds two; the endpoint's is the first.
+    const stripe = { BILLING_PROVIDER: "stripe", STRIPE_API_KEY: "rk_test_admin123", STRIPE_ACCOUNT_ID: "acct_1", STRIPE_WEBHOOK_SECRET: "whsec_new, whsec_old", POLAR_ORGANIZATION_ID: "org-1" };
+    expect(readBillingDeployment(stripe)).toEqual({ provider: "stripe", providerEnv: "sandbox", account: "acct_1", polar: null, stripe: { env: "sandbox", account: "acct_1", secretSha256: sha256("whsec_new") } });
+    expect(readBillingDeployment({ ...stripe, STRIPE_API_KEY: "rk_live_admin123" }, { withSecret: false })).toMatchObject({ providerEnv: "live", stripe: { env: "live", secretSha256: null } });
+    expect(billingCatalogDeployment("realinfobot", stripe)).toEqual({ brand: "realinfobot", stripe: { env: "sandbox", account: "acct_1", secretSha256: sha256("whsec_new") } });
+    expect(billingCatalogDeployment("alloplace", { POLAR_ORGANIZATION_ID: "org-1" })).toMatchObject({ brand: "alloplace", polar: { org: "org-1" } });
   });
 });

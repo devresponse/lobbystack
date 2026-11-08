@@ -167,6 +167,13 @@ export const POLAR_API_VERSION = "2026-10";
  */
 export const STRIPE_API_VERSION = "2026-10-28.endive";
 
+/** A Stripe secret or restricted key's mode: sandbox for a test key (sk_test_, rk_test_), live for a live one, and null for anything else. */
+export function stripeKeyMode(key: string): BillingProviderEnv | null {
+  const match = /^(?:sk|rk)_(test|live)_[A-Za-z0-9]/.exec(key.trim());
+  if (!match) return null;
+  return match[1] === "test" ? "sandbox" : "live";
+}
+
 /**
  * The events LobbyStack's Stripe webhook endpoint subscribes to: pnpm billing
  * makes the endpoint with them, and the webhook route takes no others.

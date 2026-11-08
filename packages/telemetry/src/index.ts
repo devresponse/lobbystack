@@ -253,7 +253,8 @@ export type TelemetryRequirementKey =
   | "status"
   | "problemCodes"
   | "problemCount"
-  | "polarEnv";
+  | "polarEnv"
+  | "providerEnv";
 
 export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "web.auth.login_succeeded": ["deploymentMode", "pathname"],
@@ -547,8 +548,9 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
     "monthKey",
   ],
   // The deployment's daily billing check: deployment-wide, so no business or deployment mode.
-  "ops.billing.profile_drift": ["status", "problemCodes", "problemCount", "polarEnv"],
-  "ops.billing.profile_drift_recovered": ["status", "problemCodes", "problemCount", "polarEnv"],
+  // polarEnv comes too on a Polar deployment, for the dashboards that read it.
+  "ops.billing.profile_drift": ["status", "problemCodes", "problemCount", "provider", "providerEnv"],
+  "ops.billing.profile_drift_recovered": ["status", "problemCodes", "problemCount", "provider", "providerEnv"],
   "ops.outbox.backlog_sample": ["deploymentMode", "backlogBucket"],
   "ops.outbox.flush_failed": ["deploymentMode"],
   "ops.service.health_check": [

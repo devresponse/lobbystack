@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 
+import { emptyFakeCatalog, type FakeCatalogState } from "./catalog";
 import { FakeClock } from "./clock";
 import { idempotencyMismatch } from "./errors";
 
@@ -11,6 +12,8 @@ export type FakeStripeState = {
   schedules: Map<string, Stripe.SubscriptionSchedule>;
   invoices: Map<string, Stripe.Invoice>;
   portalSessions: Stripe.BillingPortal.Session[];
+  /** Products, prices, meters, coupons, portal configurations, endpoints and Stripe Tax: what pnpm billing makes. */
+  catalog: FakeCatalogState;
 };
 
 /** One call the adapter made, with its parameters and idempotency key. */
@@ -24,7 +27,7 @@ export class FakeStripeContext {
   private counter = 0;
 
   constructor(readonly clock: FakeClock, accountId: string) {
-    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [] };
+    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], catalog: emptyFakeCatalog() };
   }
 
   /** A new ID with Stripe's prefix for the kind of object, numbered in the order the fake made them. */

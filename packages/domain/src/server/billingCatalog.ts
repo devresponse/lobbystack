@@ -16,6 +16,8 @@ import {
   resolveBillingPlans,
   billingCatalogLinkRequest,
   billingProviderNames,
+  billingProviderOf,
+  stripeKeyMode,
   type ApiBillingCatalog,
   type ApiBillingCatalogApply,
   type ApiBillingCatalogChange,
@@ -442,6 +444,16 @@ export type BillingDeploymentPolar = {
   productVars: Record<string, string | null>;
 };
 
+/** The Stripe settings a process runs with, from its environment. */
+export type BillingDeploymentStripe = {
+  /** The mode of the process's STRIPE_API_KEY: sandbox for a test key, live for a live one; sandbox without one. */
+  env: BillingProviderEnv;
+  /** STRIPE_ACCOUNT_ID. */
+  account: string | null;
+  /** SHA-256 of STRIPE_WEBHOOK_SECRET's first secret; null where it isn't set, as on the worker. */
+  secretSha256: string | null;
+};
+
 export type BillingCatalogDeployment = {
   /** The brand this deployment shows, as the sidebar resolves it. */
   brand: string;
@@ -449,6 +461,8 @@ export type BillingCatalogDeployment = {
   codeHashes?: Record<string, string>;
   /** Defaults to an instance with no Polar settings. */
   polar?: BillingDeploymentPolar;
+  /** Set on a deployment that bills through Stripe, which then has no Polar settings. */
+  stripe?: BillingDeploymentStripe;
 };
 
 const productVarKeys = ["starter/monthly", "starter/annual", "pro/monthly", "pro/annual"] as const;
@@ -470,8 +484,26 @@ export function billingDeploymentPolar(env: Record<string, string | undefined>, 
 
 const noPolar: BillingDeploymentPolar = { env: "production", org: null, secretSha256: null, productVars: Object.fromEntries(productVarKeys.map((key) => [key, null])) };
 
-/** The billing provider a deployment runs with: Polar, from its settings, until Stripe's join them. */
+/**
+ * STRIPE_ACCOUNT_ID, the mode of STRIPE_API_KEY and STRIPE_WEBHOOK_SECRET (as
+ * its hash), as a process's environment has them. During a rotation the
+ * secret holds two, separated by a comma; the first is the endpoint's.
+ */
+export function billingDeploymentStripe(env: Record<string, string | undefined>, options: { withSecret: boolean } = { withSecret: true }): BillingDeploymentStripe {
+  const value = (name: string) => env[name]?.trim() || null;
+  const key = value("STRIPE_API_KEY");
+  const secret = options.withSecret ? value("STRIPE_WEBHOOK_SECRET")?.split(",")[0]?.trim() || null : null;
+  return { env: (key ? stripeKeyMode(key) : null) ?? "sandbox", account: value("STRIPE_ACCOUNT_ID"), secretSha256: secret ? sha256(secret) : null };
+}
+
+/** The deployment as the billing catalog's operations take it: its brand, and the settings of BILLING_PROVIDER's provider, Polar when unset. */
+export function billingCatalogDeployment(brand: string, env: Record<string, string | undefined>, options: { withSecret: boolean } = { withSecret: true }): BillingCatalogDeployment {
+  return billingProviderOf(env) === "stripe" ? { brand, stripe: billingDeploymentStripe(env, options) } : { brand, polar: billingDeploymentPolar(env, options) };
+}
+
+/** The billing provider a deployment runs with, from its settings: Stripe's when it has them, else Polar's. */
 function deploymentProvider(deployment: BillingCatalogDeployment): { id: BillingProvider; env: BillingProviderEnv; account: string | null; secretSha256: string | null } {
+  if (deployment.stripe) return { id: "stripe", env: deployment.stripe.env, account: deployment.stripe.account, secretSha256: deployment.stripe.secretSha256 };
   const polar = deployment.polar ?? noPolar;
   return { id: "polar", env: providerEnvOfPolar(polar.env), account: polar.org, secretSha256: polar.secretSha256 };
 }

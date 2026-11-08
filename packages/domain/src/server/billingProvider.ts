@@ -1,9 +1,9 @@
 import type { BillingProviderId } from "@lobbystack/providers/billing/types";
-import type { BillingCatalogLinkRequest, BillingProfile } from "@lobbystack/shared";
+import { billingProviderOf, type BillingCatalogLinkRequest, type BillingProfile, type BillingProviderEnv } from "@lobbystack/shared";
 
-import { billingDeploymentPolar, providerEnvOfPolar, type BillingDeploymentPolar, type DesiredBillingPlan } from "./billingCatalog";
+import { billingDeploymentPolar, billingDeploymentStripe, providerEnvOfPolar, type BillingDeploymentPolar, type BillingDeploymentStripe, type DesiredBillingPlan } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, type DesiredPolarCatalog, type PolarPlanOptions, type PolarRefusal, type PolarStep } from "./billingPolar";
-import type { StripeRefusal } from "./billingStripe";
+import { stripePlanner, type StripeRefusal } from "./billingStripe";
 import { verifyBillingCatalog, type BillingVerifyInput, type BillingVerifyResult } from "./billingVerify";
 
 // The catalog seam (ADR 0010): what pnpm billing and the daily check decide
@@ -50,21 +50,33 @@ export const polarPlanner: CatalogPlanner<DesiredPolarCatalog, Parameters<typeof
   linkBody: (input) => polarLinkPlans({ catalog: input.desired, plans: input.plans, snapshot: input.snapshot }),
 };
 
-/**
- * The planner for a deployment's provider. Stripe's, stripePlanner in
- * billingStripe.ts, runs from pnpm billing and the daily check once step 11
- * of the Stripe plan wires it.
- */
-export function plannerFor(provider: BillingProviderId): typeof polarPlanner {
-  if (provider === "polar") return polarPlanner;
-  throw new Error("pnpm billing and the daily check run on Stripe from step 11 of the Stripe plan: Stripe billing is still being built.");
+/** The planner for a deployment's provider: polarPlanner, or stripePlanner in billingStripe.ts. */
+export function plannerFor(provider: "polar"): typeof polarPlanner;
+export function plannerFor(provider: "stripe"): typeof stripePlanner;
+export function plannerFor(provider: BillingProviderId): typeof polarPlanner | typeof stripePlanner;
+export function plannerFor(provider: BillingProviderId): typeof polarPlanner | typeof stripePlanner {
+  // Read when called: billingStripe.ts and this file import each other.
+  return provider === "stripe" ? stripePlanner : polarPlanner;
 }
 
 /** The deployment's billing provider and its settings, as the catalog and the daily check read them. */
-export type BillingDeployment = BillingDeploymentPolar & { provider: BillingProviderId; providerEnv: "sandbox" | "live" };
+export type BillingDeployment = {
+  provider: BillingProviderId;
+  providerEnv: BillingProviderEnv;
+  /** The provider's account: POLAR_ORGANIZATION_ID or STRIPE_ACCOUNT_ID. Null when unset. */
+  account: string | null;
+  /** Polar's settings on a Polar deployment, else null. */
+  polar: BillingDeploymentPolar | null;
+  /** Stripe's settings on a Stripe deployment, else null. */
+  stripe: BillingDeploymentStripe | null;
+};
 
-/** The deployment's billing settings from its variables: Polar's, the only provider until Stripe arrives. */
+/** The deployment's billing settings from its variables: BILLING_PROVIDER's, Polar when unset. */
 export function readBillingDeployment(env: Record<string, string | undefined>, options: { withSecret: boolean } = { withSecret: true }): BillingDeployment {
+  if (billingProviderOf(env) === "stripe") {
+    const stripe = billingDeploymentStripe(env, options);
+    return { provider: "stripe", providerEnv: stripe.env, account: stripe.account, polar: null, stripe };
+  }
   const polar = billingDeploymentPolar(env, options);
-  return { ...polar, provider: "polar", providerEnv: providerEnvOfPolar(polar.env) };
+  return { provider: "polar", providerEnv: providerEnvOfPolar(polar.env), account: polar.org, polar, stripe: null };
 }

@@ -4,6 +4,7 @@ import { PolarWebhook } from "../polar/events";
 import { PolarBillingProvider } from "../polar/polarBilling";
 import { PolarCatalogClient } from "../polar/polarCatalog";
 import { StripeBilling } from "../stripe/adapter";
+import { createStripeCatalogClient, type StripeCatalogClient } from "../stripe/catalog";
 import { createStripeClient, stripeKeyEnv } from "../stripe/client";
 import type { BillingEnv, BillingProvider, BillingProviderId, BillingWebhook } from "./types";
 
@@ -70,13 +71,19 @@ export function createBillingWebhook(env: Env): BillingWebhook {
 }
 
 /**
- * The catalog client the daily billing check reads with: the given token, or
- * else the worker's own POLAR_ACCESS_TOKEN with POLAR_ORGANIZATION_ID set.
- * Undefined without them, and on Stripe until step 11 of the Stripe plan adds
- * its client, so a preview worker starts and skips the daily check.
+ * The catalog client the daily billing check reads with: the given token or
+ * key, or else the worker's own, POLAR_ACCESS_TOKEN with POLAR_ORGANIZATION_ID
+ * set, or STRIPE_API_KEY with STRIPE_ACCOUNT_ID set. Undefined without them.
  */
-export function createBillingCatalogClient(env: Env, token?: string): PolarCatalogClient | undefined {
-  if (readBillingProviderId(env) === "stripe") return undefined;
+export function createBillingCatalogClient(env: Env, token?: string): PolarCatalogClient | StripeCatalogClient | undefined {
+  if (readBillingProviderId(env) === "stripe") {
+    const key = token?.trim() || (env.STRIPE_ACCOUNT_ID?.trim() ? env.STRIPE_API_KEY?.trim() : undefined);
+    if (!key) return undefined;
+    const keyEnv = stripeKeyEnv(key);
+    if (keyEnv === null) throw new Error("STRIPE_API_KEY must be a Stripe secret or restricted key (sk_ or rk_).");
+    if (keyEnv !== "sandbox") throw new Error("BILLING_STRIPE_PREVIEW takes Stripe test keys only (sk_test_ or rk_test_): live Stripe billing comes with step 18 of the Stripe plan.");
+    return createStripeCatalogClient(key);
+  }
   const key = token?.trim() || (env.POLAR_ORGANIZATION_ID?.trim() ? env.POLAR_ACCESS_TOKEN?.trim() : undefined);
   if (!key) return undefined;
   return new PolarCatalogClient({ token: key, baseUrl: env.POLAR_API_BASE_URL?.trim() || polarBaseUrls.production });

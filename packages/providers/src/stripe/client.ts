@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 
-import { STRIPE_API_VERSION, assertCertificationStripeKey } from "@lobbystack/shared";
+import { STRIPE_API_VERSION, assertCertificationStripeKey, stripeKeyMode } from "@lobbystack/shared";
 
 import type { BillingEnv } from "../billing/types";
 
@@ -41,9 +41,7 @@ export function stripeLocale(locale: string | null): string | null {
 
 /** sandbox for a test key (sk_test_, rk_test_), live for a live one, and null for anything that isn't a secret or restricted key. */
 export function stripeKeyEnv(key: string): BillingEnv | null {
-  const match = /^(?:sk|rk)_(test|live)_[A-Za-z0-9]/.exec(key.trim());
-  if (!match) return null;
-  return match[1] === "test" ? "sandbox" : "live";
+  return stripeKeyMode(key);
 }
 
 /**

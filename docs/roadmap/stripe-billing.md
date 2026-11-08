@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 10 are done: phases 1 and 2, and steps 9 and 10 of phase 3.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 11 are done: phases 1 and 2, and steps 9 to 11 of phase 3.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -153,3 +153,16 @@ On an empty account, RealInfoBot's file with the recommended block makes:
 | No coupon | The file has no discounted plan |
 | The billing portal | Plan changes between Starter and Pro; Settings > Plan cancels |
 | The webhook endpoint and the meter error destination | 14 events in `2026-10-28.endive`, and the two meter error events |
+
+## Step 11: `pnpm billing` on Stripe
+
+A deployment set to `BILLING_PROVIDER=stripe`, with the preview's test keys, can now have its catalog set up, linked and checked. Nothing sells yet: checkout comes with step 13.
+
+- **`pnpm billing plan|apply|verify --stripe sandbox|live`** in place of `--polar`, with every flag but `--adopt`. `apply` takes `STRIPE_SETUP_KEY`, `plan` and `verify` `STRIPE_READ_KEY` (else the setup key), each asked for with typing hidden when unset and never printed, and a key of the other mode is refused. Before it changes anything the run checks that the instance bills through Stripe, with the key's account (`STRIPE_ACCOUNT_ID`) and mode (its `STRIPE_API_KEY`'s), that it wasn't linked to another account, that it runs the checkout's file, and that the file has a `stripe` block.
+- **Apply** runs the planner's calls with `StripeCatalogClient` (`packages/providers/src/stripe/catalog.ts`): each create carries `catalog:<brand>:<object>:<key>` and a hash of what it sends as its idempotency key, and a run cut off halfway is finished by running it again. `--railway-file` gets `STRIPE_ACCOUNT_ID` for the admin and the worker, and the secrets Stripe shows once, `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET`, for the admin; nothing prints them. The link sends the prices' and coupons' IDs, the deployment-wide objects and the endpoint secret's SHA-256, which `billing_runs.provider_objects` keeps, since Stripe never shows the secret again.
+- **Plan and verify** list what's left for Stripe's Dashboard: the tax registrations (or Managed Payments), the grace period of `usageGraceHours`, the retries after a failed payment, and the branding and statement descriptor.
+- **The deployment's settings:** `billingCatalogDeployment(brand, env)` gives the catalog's operations Stripe's settings on a Stripe deployment (the account, the mode of `STRIPE_API_KEY`, and the hash of `STRIPE_WEBHOOK_SECRET`'s first secret, as a rotation holds two), so `GET /billing/catalog` shows them and a link to Polar, another account or another mode is refused.
+- **The daily check** reads a Stripe account with the worker's `STRIPE_API_KEY`, endpoints left out, and runs Stripe's checks. Its `ops.billing.profile_drift` events need `provider` and `providerEnv`; `polarEnv` comes only from a Polar deployment.
+- **Tests:** the client and the fake's catalog objects (`stripe/catalog.test.ts`), `pnpm billing --stripe` end to end on the fake (`scripts/billing.stripe.test.ts`: a full run, a second run with nothing to do, a run cut off halfway, the refusals and verify), and a Stripe deployment's links and daily check on PostgreSQL.
+
+The check for this step, on a Stripe sandbox of Yuri's: `apply` makes every object, a second `apply` plans nothing, and `verify` reports in sync once the admin has `STRIPE_WEBHOOK_SECRET`.

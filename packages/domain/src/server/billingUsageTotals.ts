@@ -26,9 +26,11 @@ export type UsageTotalsWork = {
   since: Date;
   /** What LobbyStack confirmed sending, in cents by kind: each row's confirmed quantity at its rate. */
   confirmed: Record<UsageTotalsKind, number>;
-  /** The open month, which corrections go into, and the number of its next correction. */
+  /** The month that numbers the corrections, and the number of its next correction. */
   periodKey: string;
   fixSeq: number;
+  /** Where the open invoice period starts, which corrections go into: the month's 1st, or the plan's renewal when overage bills on the plan subscription. */
+  openSince: Date;
   /** The live prices' currency, which a credit takes. */
   currency: string | null;
 };
@@ -39,9 +41,9 @@ export type UsageTotalsWork = {
  * sent, or a check made, within the last hour, which Stripe may not have
  * counted yet.
  */
-export async function loadUsageTotalsWork(context: DomainContext, input: { businessId: string; now: Date }): Promise<UsageTotalsWork | { wait: "nothing" | "in_flight" | "recent" }> {
+export async function loadUsageTotalsWork(context: DomainContext, input: { businessId: string; now: Date; overageOnPlan?: boolean }): Promise<UsageTotalsWork | { wait: "nothing" | "in_flight" | "recent" }> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const [account] = await tx.select({ source: billingAccounts.source, customerId: billingAccounts.customerId }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
+    const [account] = await tx.select({ source: billingAccounts.source, customerId: billingAccounts.customerId, periodStart: billingAccounts.currentPeriodStart }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
     if (account?.source !== "stripe" || !account.customerId) return { wait: "nothing" as const };
     const of = eq(billingUsageEvents.businessId, input.businessId);
     const [inFlight] = await tx.select({ id: billingUsageEvents.id }).from(billingUsageEvents).where(and(of, isNotNull(billingUsageEvents.sendingQuantity))).limit(1);
@@ -65,12 +67,15 @@ export async function loadUsageTotalsWork(context: DomainContext, input: { busin
     }
     if (!since) return { wait: "nothing" as const };
     const catalog = await readBillingCatalogSnapshot(tx);
+    const monthStart = new Date(Date.UTC(input.now.getUTCFullYear(), input.now.getUTCMonth(), 1));
+    const openSince = input.overageOnPlan && account.periodStart && account.periodStart <= input.now ? account.periodStart : monthStart;
     return {
       customerId: account.customerId,
       since,
       confirmed: { voice: round(confirmed.voice), alert_sms: round(confirmed.alert_sms), transfer: round(confirmed.transfer) },
       periodKey,
       fixSeq: month?.fixSeq ?? 0,
+      openSince,
       currency: catalog.prices.find((price) => !price.retired)?.currency ?? null,
     };
   }, { accessMode: "read only" });

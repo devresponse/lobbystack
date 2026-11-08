@@ -1,7 +1,7 @@
 // Sending usage to the billing provider, and the monthly unit economics.
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { meterEventTime, priceUsage } from "@lobbystack/shared";
-import { claimBillingUsageSync, confirmBillingUsageSync, loadBillingUsageEvent, loadUsageGraceHours, recordProductEvent } from "@lobbystack/domain";
+import { claimBillingUsageSync, confirmBillingUsageSync, loadBillingUsageEvent, loadStripeSelling, recordProductEvent } from "@lobbystack/domain";
 import { refreshUnitEconomicsMonth } from "@lobbystack/domain";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import type { JobResult, WorkerDependencies } from "../handlers";
@@ -45,7 +45,13 @@ export async function syncBillingUsage(job: JobEnvelope, dependencies: WorkerDep
     await confirmBillingUsageSync(dependencies.domain, { businessId: event.businessId, usageEventId: event.id, seq: send.seq });
     return { status: "completed", entityId: event.id };
   }
-  const occurredAt = meterMoney ? meterEventTime(event.createdAt, new Date(), await loadUsageGraceHours(dependencies.domain)) : event.createdAt;
+  let occurredAt = event.createdAt;
+  if (meterMoney) {
+    const selling = await loadStripeSelling(dependencies.domain);
+    // Overage on the plan subscription is invoiced at its renewal, not on the 1st.
+    const period = selling.overage === "checkout" && event.periodStart && event.periodEnd ? { start: event.periodStart, end: event.periodEnd } : null;
+    occurredAt = meterEventTime(event.createdAt, new Date(), selling.usageGraceHours, period);
+  }
   try {
     await dependencies.billing.reportUsage({
       customer: { id: event.customerId, billingKey: event.billingKey },

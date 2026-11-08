@@ -1336,7 +1336,11 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       await usage({ usageKind: "outbound_call_attempts", quantity: 1, syncedQuantity: 1, rateCents: 25 });
       // Unpriced rows, as on Polar, aren't Stripe's to hold.
       await usage({ quantity: 60, syncedQuantity: 60 });
-      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ customerId: "cus_1", since: new Date("2026-10-30T00:00:00.000Z"), confirmed: { voice: 30, alert_sms: 6, transfer: 25 }, periodKey: "2026-11", fixSeq: 0, currency: expect.toBeOneOf([expect.any(String), null]) });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ customerId: "cus_1", since: new Date("2026-10-30T00:00:00.000Z"), confirmed: { voice: 30, alert_sms: 6, transfer: 25 }, periodKey: "2026-11", fixSeq: 0, openSince: new Date("2026-11-01T00:00:00.000Z"), currency: expect.toBeOneOf([expect.any(String), null]) });
+      // Overage on the plan subscription is invoiced at its renewal: the open period starts there.
+      await tx.update(billingAccounts).set({ currentPeriodStart: new Date("2026-11-05T09:00:00.000Z") }).where(eq(billingAccounts.businessId, businessId));
+      expect(await loadUsageTotalsWork({ db }, { businessId, now, overageOnPlan: true })).toMatchObject({ openSince: new Date("2026-11-05T09:00:00.000Z") });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toMatchObject({ openSince: new Date("2026-11-01T00:00:00.000Z") });
 
       // The check keeps what it saw on the open month, and waits an hour before the next.
       await recordUsageTotalsCheck({ db }, { businessId, periodKey: "2026-11", providerOverageCents: 61.25, fixSeq: 2, checkedAt: new Date("2026-11-08T11:30:00.000Z") });

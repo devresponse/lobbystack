@@ -166,9 +166,9 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       await apply(tx, file((value) => { value.stripe = { upgrade: "reset", downgrade: "prorate", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "separate", managedPayments: false }; }));
       expect(await loadPlanChangeProration(context(tx), "stripe")).toEqual({ upgrade: "reset", downgrade: "prorate" });
       // How the file sells on Stripe: directly, until its block puts overage on the checkout with Stripe as the merchant of record.
-      expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: false, overage: "separate", currency: "cad" });
-      await apply(tx, file((value) => { value.stripe = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "checkout", managedPayments: true }; }));
-      expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: true, overage: "checkout", currency: "cad" });
+      expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: false, overage: "separate", currency: "cad", usageGraceHours: 1 });
+      await apply(tx, file((value) => { value.stripe = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 6, overage: "checkout", managedPayments: true }; }));
+      expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 6 });
     });
   });
 

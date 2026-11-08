@@ -103,7 +103,7 @@ describe("billing.ensureOverage", () => {
     const checkout = await billing.createCheckout({ customer: { id: "cus_1", billingKey: "business:b1" }, email: "owner@example.com", price: { ref: "price_starter_month", discountRef: null }, businessId: "b1", requestId: "request-2", metadata: { lobbystack_business: "b1" }, successUrl: "https://app.example/settings/plan", cancelUrl: "https://app.example/settings/plan", locale: null, overageOnCheckout: { currency: "cad" }, merchantOfRecord: true });
     const plan = stripe.completeCheckout(checkout.id).id;
     const businessId = randomUUID();
-    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad" });
+    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 1 });
     vi.mocked(loadOverageWork).mockResolvedValue(work({ subscriptionId: plan }));
     expect(await handleJob(job("billing.ensureOverage", businessId), { domain, billing })).toEqual({ status: "completed", entityId: plan });
     expect(recordOverageSubscription).toHaveBeenCalledWith(domain, { businessId, planSubscriptionId: plan, overageSubscriptionId: plan });

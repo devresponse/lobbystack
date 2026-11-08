@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { claimBillingUsageSync, confirmBillingUsageSync, loadBillingUsageEvent, loadUsageTotalsWork, recordProductEvent, recordUsageTotalsCheck, type UsageTotalsWork } from "@lobbystack/domain";
+import { claimBillingUsageSync, confirmBillingUsageSync, loadBillingUsageEvent, loadStripeSelling, loadUsageTotalsWork, recordProductEvent, recordUsageTotalsCheck, type UsageTotalsWork } from "@lobbystack/domain";
 import { StripeBilling } from "@lobbystack/providers/stripe/adapter";
 import { createFakeStripe, FakeClock, type FakeStripe } from "@lobbystack/providers/stripe/fake";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +11,6 @@ vi.mock("@lobbystack/domain", async (importOriginal) => ({
   ...(await (await import("./testing")).mockDomain(importOriginal)),
   loadUsageTotalsWork: vi.fn(),
   recordUsageTotalsCheck: vi.fn(),
-  loadUsageGraceHours: vi.fn(async () => 1),
 }));
 
 import { handleJob } from "../handlers";
@@ -48,8 +47,8 @@ function job(type: JobEnvelope["type"], businessId: string, payload: Record<stri
 }
 
 describe("billing.syncUsage on Stripe", () => {
-  function usageRow(businessId: string, createdAt: Date) {
-    vi.mocked(loadBillingUsageEvent).mockResolvedValue({ id: "usage-1", sourceKey: "voice:call-1", isFinal: true, plan: "pro", businessId, usageKind: "voice_seconds", quantity: 90, billableQuantity: null, billingIntervalAtRecordTime: null, createdAt, syncStatus: "pending", billingKey: `business:${businessId}`, customerId: "cus_1" });
+  function usageRow(businessId: string, createdAt: Date, period: { periodStart: Date; periodEnd: Date } | null = null) {
+    vi.mocked(loadBillingUsageEvent).mockResolvedValue({ id: "usage-1", sourceKey: "voice:call-1", isFinal: true, plan: "pro", businessId, usageKind: "voice_seconds", quantity: 90, billableQuantity: null, billingIntervalAtRecordTime: null, createdAt, syncStatus: "pending", billingKey: `business:${businessId}`, customerId: "cus_1", periodStart: period?.periodStart ?? null, periodEnd: period?.periodEnd ?? null });
   }
 
   it("sends the row's price at its first claimed rate, dated when the call happened, and confirms it", async () => {
@@ -81,10 +80,30 @@ describe("billing.syncUsage on Stripe", () => {
     expect(stripe.state.meterEvents).toHaveLength(1);
     expect(vi.mocked(confirmBillingUsageSync).mock.calls.map(([, input]) => input.seq)).toEqual([1, 2, 3]);
   });
+
+  it("dates usage by the plan's renewal when overage bills on the plan subscription, as under merchant of record", async () => {
+    const { stripe, billing } = withMeters();
+    const businessId = randomUUID();
+    // The plan renewed two hours ago; a call just before it is past that invoice's hour of grace.
+    const renewed = minutesAgo(120);
+    usageRow(businessId, minutesAgo(130), { periodStart: renewed, periodEnd: new Date(renewed.getTime() + 30 * 24 * 60 * 60_000) });
+    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 1 });
+    vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "voice:call-1", quantity: 90, seq: 0, rateCents: 20, sentAt: new Date(), expired: false });
+    const before = Math.floor(Date.now() / 1000);
+    await handleJob(job("billing.syncUsage", businessId, { usageEventId: "usage-1" }), { domain, billing });
+    expect(stripe.state.meterEvents[0]!.timestamp).toBeGreaterThanOrEqual(before);
+    // With three hours' grace that invoice still takes it, dated when the call happened.
+    const createdAt = minutesAgo(130);
+    usageRow(businessId, createdAt, { periodStart: renewed, periodEnd: new Date(renewed.getTime() + 30 * 24 * 60 * 60_000) });
+    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 3 });
+    vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "voice:call-2", quantity: 90, seq: 0, rateCents: 20, sentAt: new Date(), expired: false });
+    await handleJob(job("billing.syncUsage", businessId, { usageEventId: "usage-1" }), { domain, billing });
+    expect(stripe.state.meterEvents[1]).toMatchObject({ identifier: "voice:call-2", timestamp: Math.floor(createdAt.getTime() / 1000) });
+  });
 });
 
 describe("billing.checkUsageTotals", () => {
-  const work = (fields: Partial<UsageTotalsWork>): UsageTotalsWork => ({ customerId: "cus_1", since: new Date(monthStart().getTime() - 40 * 24 * 60 * 60_000), confirmed: { voice: 0, alert_sms: 0, transfer: 0 }, periodKey: new Date().toISOString().slice(0, 7), fixSeq: 0, currency: "cad", ...fields });
+  const work = (fields: Partial<UsageTotalsWork>): UsageTotalsWork => ({ customerId: "cus_1", since: new Date(monthStart().getTime() - 40 * 24 * 60 * 60_000), confirmed: { voice: 0, alert_sms: 0, transfer: 0 }, periodKey: new Date().toISOString().slice(0, 7), fixSeq: 0, openSince: monthStart(), currency: "cad", ...fields });
   const send = async (billing: StripeBilling, kind: "voice" | "alert_sms" | "transfer", cents: number, occurredAt = minutesAgo(5)) => await billing.reportUsage({ customer: { id: "cus_1", billingKey: "business:b1" }, businessId: "b1", kind, units: 1, amountCents: cents, occurredAt, identifier: randomUUID() });
 
   it("leaves a business whose meters hold what it sent, and keeps what the open month holds", async () => {
@@ -133,6 +152,24 @@ describe("billing.checkUsageTotals", () => {
     await handleJob(job("billing.checkUsageTotals", businessId), { domain, billing });
     expect(stripe.state.meterEvents).toHaveLength(4);
     expect(stripe.state.balanceTransactions).toHaveLength(1);
+  });
+
+  it("takes the open period from the plan's renewal when overage bills on the plan subscription", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-20T12:00:00Z") });
+    const { stripe, billing } = withMeters();
+    const businessId = randomUUID();
+    const renewed = new Date("2026-11-17T12:00:00Z");
+    // The last period's transfer went out twice, within this calendar month, and this period holds 10 cents.
+    await send(billing, "transfer", 100, new Date("2026-11-16T12:00:00Z"));
+    await send(billing, "transfer", 100, new Date("2026-11-16T12:00:00Z"));
+    await send(billing, "transfer", 10, new Date("2026-11-20T11:00:00Z"));
+    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 1 });
+    vi.mocked(loadUsageTotalsWork).mockResolvedValue(work({ confirmed: { voice: 0, alert_sms: 0, transfer: 110 }, openSince: renewed }));
+    await handleJob(job("billing.checkUsageTotals", businessId), { domain, billing });
+    expect(loadUsageTotalsWork).toHaveBeenCalledWith(domain, { businessId, now: expect.any(Date), overageOnPlan: true });
+    // The open period, invoiced at the next renewal, goes to zero, and the other 90 cents become a credit.
+    expect(stripe.state.meterEvents.at(-1)).toMatchObject({ event_name: "ls_overage_transfers", value: -0.1 });
+    expect(stripe.state.balanceTransactions).toMatchObject([{ amount: -90, currency: "cad" }]);
   });
 
   it("waits an hour while an event is in flight, skips a business with nothing priced, and leaves Polar alone", async () => {

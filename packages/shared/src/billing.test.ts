@@ -42,6 +42,20 @@ describe("usage as money (the Stripe plan's step 16)", () => {
     expect(meterEventTime(occurred, new Date("2026-12-03T23:00:00Z"), 72)).toEqual(occurred);
     expect(meterEventTime(new Date("2026-11-08T10:00:00Z"), new Date("2026-11-08T10:05:00Z"), 1)).toEqual(new Date("2026-11-08T10:00:00Z"));
   });
+
+  it("dates usage by the plan period's renewal instead of the month's end when overage bills on the plan subscription", () => {
+    const period = { start: new Date("2026-11-08T11:00:00Z"), end: new Date("2026-12-08T11:00:00Z") };
+    // Usage just before the renewal at 11:00 belongs to the period it ended, whose invoice takes it until 11:30 with an hour's grace.
+    const late = new Date("2026-11-08T10:50:00Z");
+    expect(meterEventTime(late, new Date("2026-11-08T11:29:00Z"), 1, period)).toEqual(late);
+    expect(meterEventTime(late, new Date("2026-11-08T11:31:00Z"), 1, period)).toEqual(new Date("2026-11-08T11:31:00Z"));
+    // The month's end means nothing then.
+    const monthEnd = new Date("2026-11-30T23:00:00Z");
+    expect(meterEventTime(monthEnd, new Date("2026-12-01T00:31:00Z"), 1, period)).toEqual(monthEnd);
+    // Usage past the period's end, before the renewal is recorded, keeps its time on the next period.
+    const next = new Date("2026-12-08T11:10:00Z");
+    expect(meterEventTime(next, new Date("2026-12-08T11:45:00Z"), 1, period)).toEqual(next);
+  });
 });
 
 describe("knowledge storage limits", () => {

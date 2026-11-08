@@ -42,7 +42,7 @@ export async function mockDomain(importOriginal: <T>() => Promise<T>): Promise<R
     loadPendingProductEvents: vi.fn(),
     loadPlanChangeProration: vi.fn(),
     // Stripe directly, as a file without a stripe block sells.
-    loadStripeSelling: vi.fn(async () => ({ managedPayments: false, overage: "separate", currency: "cad" })),
+    loadStripeSelling: vi.fn(async () => ({ managedPayments: false, overage: "separate", currency: "cad", usageGraceHours: 1 })),
     // No catalog rows: checkout sells through the product variables each test sets.
     readPolarProductLinks: vi.fn(async () => actual.polarProductLinks({ plans: [], prices: [] }, process.env)),
     markBillingPlanChanged: vi.fn(),

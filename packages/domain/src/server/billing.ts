@@ -633,6 +633,9 @@ export async function loadBillingUsageEvent(
   syncStatus: string;
   billingKey: string;
   customerId: string | null;
+  /** The account's plan period, which times usage when overage bills on the plan subscription. */
+  periodStart: Date | null;
+  periodEnd: Date | null;
 } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const row = (await tx.select({
@@ -649,6 +652,8 @@ export async function loadBillingUsageEvent(
       syncStatus: billingUsageEvents.syncStatus,
       billingKey: billingAccounts.billingKey,
       customerId: billingAccounts.customerId,
+      periodStart: billingAccounts.currentPeriodStart,
+      periodEnd: billingAccounts.currentPeriodEnd,
     })
       .from(billingUsageEvents)
       .innerJoin(billingAccounts, eq(billingAccounts.businessId, billingUsageEvents.businessId))

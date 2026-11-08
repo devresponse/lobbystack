@@ -1,6 +1,6 @@
 // The daily totals check of a business billed through Stripe's money meters (the Stripe plan's step 16).
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { loadUsageTotalsWork, recordProductEvent, recordUsageTotalsCheck, USAGE_TOTALS_QUIET_MS, type UsageTotalsKind } from "@lobbystack/domain";
+import { loadStripeSelling, loadUsageTotalsWork, recordProductEvent, recordUsageTotalsCheck, USAGE_TOTALS_QUIET_MS, type UsageTotalsKind } from "@lobbystack/domain";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 import type { JobResult, WorkerDependencies } from "../handlers";
@@ -15,10 +15,11 @@ const round = (cents: number) => Math.round(cents * 10_000) / 10_000;
 /**
  * billing.checkUsageTotals: compares what LobbyStack confirmed sending with
  * what Stripe's meters hold, less what earlier checks credited, over the
- * business's whole usage, and corrects a gap in the open month: an event
- * Stripe never had, or one it counted twice. A correction that would take the
- * open month below zero, which Stripe bills as nothing, goes to the
- * customer's balance for the rest. Corrections are keyed by the open month's
+ * business's whole usage, and corrects a gap in the open period: an event
+ * Stripe never had, or one it counted twice. The open period is the month,
+ * or the plan's since its renewal when overage bills on the plan
+ * subscription. A correction that would take the open period below zero,
+ * which Stripe bills as nothing, goes to the customer's balance for the rest. Corrections are keyed by the open month's
  * fix number, so a retried check sends each once. While an event is in
  * flight, or one went out within the hour, the check waits an hour.
  */
@@ -27,11 +28,11 @@ export async function checkBillingUsageTotals(job: JobEnvelope, dependencies: Wo
   const billing = dependencies.billing;
   if (!billing?.can.meterMoney || !billing.usageTotals || !billing.usageCredits || !billing.creditBalance) return { status: "skipped", entityId: businessId };
   const now = new Date();
-  const work = await loadUsageTotalsWork(dependencies.domain, { businessId, now });
+  const overageOnPlan = (await loadStripeSelling(dependencies.domain)).overage === "checkout";
+  const work = await loadUsageTotalsWork(dependencies.domain, { businessId, now, ...(overageOnPlan ? { overageOnPlan } : {}) });
   if ("wait" in work) return work.wait === "nothing" ? { status: "skipped", entityId: businessId } : { status: "deferred", entityId: businessId, retryAt: new Date(now.getTime() + USAGE_TOTALS_QUIET_MS) };
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const held = await billing.usageTotals({ customerId: work.customerId, from: work.since, to: now });
-  const openMonth = await billing.usageTotals({ customerId: work.customerId, from: monthStart, to: now });
+  const openMonth = await billing.usageTotals({ customerId: work.customerId, from: work.openSince, to: now });
   const credits = await billing.usageCredits({ customerId: work.customerId });
   let fixSeq = work.fixSeq;
   let openHeld = 0;

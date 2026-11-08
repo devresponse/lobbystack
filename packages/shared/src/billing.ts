@@ -58,14 +58,20 @@ export const METER_EVENT_MAX_AGE_MS = 35 * 24 * 60 * 60_000;
 
 /**
  * When a money meter's event says the usage happened: its own time while
- * its month's overage invoice can still take it, the month's end plus
+ * the invoice that takes it can still do so, until that invoice's date plus
  * billing.json's usageGraceHours less 30 minutes, else now, so a late
  * correction lands on the next invoice instead of being counted and never
- * billed. Usage past Stripe's 35 days goes out with now too.
+ * billed. Usage past Stripe's 35 days goes out with now too. The invoice is
+ * the month's, on the 1st, or with the plan's period given, as when overage
+ * bills on the plan subscription, the one at the renewal that ends the
+ * period the usage happened in.
  */
-export function meterEventTime(occurredAt: Date, now: Date, graceHours: number): Date {
-  const monthEnd = Date.UTC(occurredAt.getUTCFullYear(), occurredAt.getUTCMonth() + 1, 1);
-  const lastChance = monthEnd + graceHours * 3_600_000 - 30 * 60_000;
+export function meterEventTime(occurredAt: Date, now: Date, graceHours: number, period: { start: Date; end: Date } | null = null): Date {
+  // Usage after the period's end, before its renewal is recorded, belongs to the next period, which is still open.
+  const invoiced = period
+    ? occurredAt < period.start ? period.start.getTime() : occurredAt < period.end ? period.end.getTime() : Number.POSITIVE_INFINITY
+    : Date.UTC(occurredAt.getUTCFullYear(), occurredAt.getUTCMonth() + 1, 1);
+  const lastChance = invoiced + graceHours * 3_600_000 - 30 * 60_000;
   return now.getTime() < lastChance && now.getTime() - occurredAt.getTime() < METER_EVENT_MAX_AGE_MS ? occurredAt : now;
 }
 

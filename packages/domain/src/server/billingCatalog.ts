@@ -937,11 +937,6 @@ export type PlanChangeProration = (typeof prorations)[number];
  * invoiced at once and a downgrade waits for the next period.
  */
 /** The hours Stripe waits before finalizing a metered invoice, as the last applied billing.json's stripe block says, else Stripe's default of 1. */
-export async function loadUsageGraceHours(context: DomainContext): Promise<number> {
-  const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
-  const hours = (latest?.profile as { stripe?: { usageGraceHours?: unknown } } | null | undefined)?.stripe?.usageGraceHours;
-  return typeof hours === "number" && Number.isInteger(hours) && hours >= 1 && hours <= 72 ? hours : 1;
-}
 
 /** How the last applied billing.json charges plan changes on the deployment's provider: Polar's proration words, or the stripe block's upgrade and downgrade. */
 export async function loadPlanChangeProration(context: DomainContext, provider: BillingProviderId = "polar"): Promise<{ upgrade: PlanChangeProration; downgrade: PlanChangeProration }> {
@@ -952,14 +947,21 @@ export async function loadPlanChangeProration(context: DomainContext, provider: 
   return { upgrade: pick(profile?.polar?.upgradeProration, "invoice"), downgrade: pick(profile?.polar?.downgradeProration, "next_period") };
 }
 
-/** How the last applied billing.json sells on Stripe: its stripe block's managedPayments and overage, and its currency; Stripe directly without one. */
-export async function loadStripeSelling(context: DomainContext): Promise<{ managedPayments: boolean; overage: "separate" | "checkout"; currency: string | null }> {
+/**
+ * How the last applied billing.json sells on Stripe: its stripe block's
+ * managedPayments and overage, its currency, and the hours Stripe waits
+ * before finalizing an invoice with usage (usageGraceHours, 1 unless set);
+ * Stripe directly without a block.
+ */
+export async function loadStripeSelling(context: DomainContext): Promise<{ managedPayments: boolean; overage: "separate" | "checkout"; currency: string | null; usageGraceHours: number }> {
   const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
-  const profile = latest?.profile as { currency?: unknown; stripe?: { managedPayments?: unknown; overage?: unknown } } | null | undefined;
+  const profile = latest?.profile as { currency?: unknown; stripe?: { managedPayments?: unknown; overage?: unknown; usageGraceHours?: unknown } } | null | undefined;
+  const hours = profile?.stripe?.usageGraceHours;
   return {
     managedPayments: profile?.stripe?.managedPayments === true,
     overage: profile?.stripe?.overage === "checkout" ? "checkout" : "separate",
     currency: typeof profile?.currency === "string" ? profile.currency : null,
+    usageGraceHours: typeof hours === "number" && Number.isInteger(hours) && hours >= 1 && hours <= 72 ? hours : 1,
   };
 }
 

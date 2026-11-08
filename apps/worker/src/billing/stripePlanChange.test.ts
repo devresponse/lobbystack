@@ -75,7 +75,7 @@ describe("billing jobs: a checkout on Stripe", () => {
     const metered = (kind: string) => ({ id: `price_overage_${kind}`, active: true, product: "prod_overage", currency: "cad", unit_amount: 100, lookup_key: `ls_overage_${kind}_cad`, tax_behavior: "exclusive" as const, recurring: { interval: "month" as const, interval_count: 1, usage_type: "metered" as const, meter: `mtr_${kind}` }, metadata: {}, created: 1 });
     stripe.loadCatalog({ prices: [metered("voice"), metered("sms"), metered("transfers")] });
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "price_starter_month");
-    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad" });
+    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 1 });
     const requestId = randomUUID();
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
     vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", customerId: "cus_1", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });

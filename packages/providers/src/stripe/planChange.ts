@@ -3,7 +3,7 @@ import type Stripe from "stripe";
 import { BillingProviderError } from "../billing/errors";
 import type { BillingProvider, PlanChangeProration, PlanChangeResult, PriceRef, ProviderSubscription } from "../billing/types";
 import type { StripeApi } from "./client";
-import { providerSubscriptionFromStripe, stripePlanItem } from "./subscriptions";
+import { isStripeOveragePrice, providerSubscriptionFromStripe, stripePlanItem } from "./subscriptions";
 
 // Plan changes on Stripe (the Stripe plan's step 14). A change now moves the
 // plan's item to the new price as a pending update, which Stripe applies only
@@ -114,7 +114,9 @@ export async function changeStripePlan(api: StripeApi, input: Parameters<Billing
  * or a new one made from it, keeps the current phase to the period's end and
  * adds a second on the new price, then lets the subscription go on its own.
  * An upgrade waiting for its payment would be dropped by the phase, so it
- * refuses as change_pending.
+ * refuses as change_pending. Overage sold on the plan's checkout puts metered
+ * items on the subscription: each phase lists them too, without a quantity,
+ * as Stripe takes a metered price, or the renewal would drop them.
  */
 async function scheduleStripeChange(api: StripeApi, subscription: Stripe.Subscription, input: { to: PriceRef; discounts: Discounts; metadata?: Record<string, string>; key: string }): Promise<ProviderSubscription> {
   if (subscription.pending_update) throw new BillingProviderError("stripe", "refused", `Stripe subscription ${subscription.id} has an upgrade waiting for its payment.`, "change_pending");
@@ -126,6 +128,8 @@ async function scheduleStripeChange(api: StripeApi, subscription: Stripe.Subscri
   // The phase in force now: the one that ends with the period, or the schedule's first.
   const current = schedule.phases.find((phase) => phase.start_date <= item.current_period_start && (phase.end_date ?? Number.POSITIVE_INFINITY) > item.current_period_start) ?? schedule.phases[0];
   if (!current) throw new BillingProviderError("stripe", "not_found", `Stripe subscription schedule ${schedule.id} has no phase.`, "subscription_unavailable");
+  const metered = subscription.items.data.filter((entry) => isStripeOveragePrice(entry.price)).map((entry) => entry.price.id);
+  const itemOf = (price: string, quantity: number | null | undefined) => (metered.includes(price) ? { price } : { price, quantity: quantity ?? 1 });
   const currentDiscounts = (current.discounts ?? []).flatMap((discount) => {
     const coupon = idOf(discount.coupon);
     return coupon ? [{ coupon }] : [];
@@ -133,8 +137,8 @@ async function scheduleStripeChange(api: StripeApi, subscription: Stripe.Subscri
   await api.subscriptionSchedules.update(schedule.id, {
     end_behavior: "release",
     phases: [
-      { items: current.items.map((entry) => ({ price: idOf(entry.price)!, quantity: entry.quantity ?? 1 })), start_date: current.start_date, end_date: periodEnd, discounts: currentDiscounts.length ? currentDiscounts : "" },
-      { items: [{ price: input.to.ref, quantity: 1 }], discounts: input.discounts.length ? input.discounts : "", ...(input.metadata ? { metadata: input.metadata } : {}) },
+      { items: current.items.map((entry) => itemOf(idOf(entry.price)!, entry.quantity)), start_date: current.start_date, end_date: periodEnd, discounts: currentDiscounts.length ? currentDiscounts : "" },
+      { items: [{ price: input.to.ref, quantity: 1 }, ...metered.map((price) => ({ price }))], discounts: input.discounts.length ? input.discounts : "", ...(input.metadata ? { metadata: input.metadata } : {}) },
     ],
   }, { idempotencyKey: `${input.key}:phases` });
   return providerSubscriptionFromStripe(await readStripeSubscription(api, subscription.id));

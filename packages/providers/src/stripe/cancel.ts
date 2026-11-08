@@ -3,7 +3,7 @@ import type Stripe from "stripe";
 import type { BillingProvider, ProviderSubscription } from "../billing/types";
 import type { StripeApi } from "./client";
 import { isStripeAlreadyCanceled, isStripeMissing } from "./errors";
-import { providerSubscriptionFromStripe } from "./subscriptions";
+import { isStripeOveragePrice, providerSubscriptionFromStripe } from "./subscriptions";
 
 // Cancelling at the renewal, resuming, and keeping the plan (the Stripe
 // plan's step 15), which Settings > Plan offers on Stripe. Each is keyed by
@@ -17,12 +17,16 @@ async function readStripeSubscription(api: StripeApi, id: string): Promise<Strip
 
 /**
  * Ends the plan at its renewal, after releasing a schedule whose next phase
- * would undo the end, or now. Null once it has ended.
+ * would undo the end, or now. Null once it has ended. Ended now with overage
+ * on it, as when its checkout sold the overage prices, its last invoice takes
+ * the usage so far.
  */
 export async function cancelStripePlan(api: StripeApi, input: Parameters<BillingProvider["cancel"]>[0]): ReturnType<BillingProvider["cancel"]> {
   if (input.when === "now") {
     try {
-      await api.subscriptions.cancel(input.subscriptionId, {}, { idempotencyKey: `cancel:${input.requestId}` });
+      const current = await api.subscriptions.retrieve(input.subscriptionId);
+      const metered = current.items.data.some((item) => isStripeOveragePrice(item.price));
+      await api.subscriptions.cancel(input.subscriptionId, metered ? { invoice_now: true, prorate: false } : {}, { idempotencyKey: `cancel:${input.requestId}` });
     } catch (error) {
       if (!isStripeMissing(error) && !isStripeAlreadyCanceled(error)) throw error;
     }

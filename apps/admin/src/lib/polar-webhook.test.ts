@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { polarProductLinks, type BillingCatalogSnapshot } from "@lobbystack/domain";
-import { normalizePolarEvent } from "./polar-event";
+import { PolarWebhook } from "@lobbystack/providers/polar/events";
+
+// The Polar webhook's normalizer with the domain's price links, as the route runs it.
+const webhook = new PolarWebhook("unused");
+function normalizePolarEvent(type: string, data: Record<string, unknown>, links = polarProductLinks({ plans: [], prices: [] }, process.env)) {
+  return webhook.normalize({ id: "delivery-1", type, createdAt: new Date(), livemode: null, object: data }, links);
+}
 
 const variables = (env: Record<string, string>) => polarProductLinks({ plans: [], prices: [] }, env);
 
@@ -14,7 +20,7 @@ describe("Polar payload normalization", () => {
   });
   it("preserves prefixed legacy references without treating them as UUIDs", () => {
     const result = normalizePolarEvent("subscription.active", { customer: { external_id: "business:legacy-customer" } });
-    expect(result.businessId).toBeUndefined();
+    expect(result.businessId).toBeNull();
     expect(result.businessReference).toBe("legacy-customer");
   });
   it("resolves a migrated customer from its metadata rather than its stale external id", () => {
@@ -54,11 +60,11 @@ describe("Polar payload normalization", () => {
   it("names no other business when the checkout's and the customer's agree, and skips metadata that isn't an ID", () => {
     const agreeing = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", metadata: { lobbystack_business: businessId }, customer: { external_id: `business:${businessId}` } });
     expect(agreeing.businessId).toBe(businessId);
-    expect(agreeing).not.toHaveProperty("customerBusinessId");
+    expect(agreeing.customerBusinessId).toBeNull();
 
     const garbled = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", metadata: { lobbystack_business: "not-an-id" }, customer: { external_id: `business:${businessId}` } });
     expect(garbled.businessId).toBe(businessId);
-    expect(garbled).not.toHaveProperty("customerBusinessId");
+    expect(garbled.customerBusinessId).toBeNull();
   });
 
   it("still reports a legacy reference when no field carries a usable id", () => {
@@ -69,8 +75,17 @@ describe("Polar payload normalization", () => {
       },
     });
 
-    expect(result.businessId).toBeUndefined();
+    expect(result.businessId).toBeNull();
     expect(result.businessReference).toBe("kh797h57jgpq83314s4fj8ptmn866hbk");
+  });
+
+  it("adds what the event is about and its product as the price beside today's fields, which stay as they were", () => {
+    const subscription = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", product_id: "pro_month", customer: { id: "cust_1", external_id: `business:${businessId}` } }, variables({ POLAR_PRO_MONTHLY_PRODUCT_ID: "pro_month" }));
+    expect(subscription.kind).toBe("subscription");
+    expect(subscription.payload).toMatchObject({ productId: "pro_month", priceRef: "pro_month", kind: "subscription", plan: "pro" });
+    expect(subscription.fields).toMatchObject({ priceRef: "pro_month", billingKey: `business:${businessId}`, customerId: "cust_1", subscriptionId: "sub_1", plan: "pro" });
+    expect(normalizePolarEvent("order.paid", { id: "order_1", customer: { external_id: `business:${businessId}` } }).kind).toBe("payment");
+    expect(normalizePolarEvent("customer.updated", { id: "cust_1", external_id: `business:${businessId}` }).kind).toBe("other");
   });
 
   it("uses subscription status rather than a paid order's status", () => {

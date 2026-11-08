@@ -4,6 +4,7 @@ import { billingCheckoutRequests, billingUsageEvents, enqueueOutbox, providerEve
 
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, BILLING_CHECKOUT_EXPIRES_MS, expireBillingCheckoutRequest } from "./billing";
 import type { DomainContext } from "./context";
+import type { BillingProviderId } from "@lobbystack/providers/billing/types";
 
 // Billing work keeps its row until it is done: a Polar event stays received
 // until it applies, final usage stays pending until Polar's meter has it, and a
@@ -57,23 +58,23 @@ export function billingSweepKey(kind: BillingSweepKind, id: string, at: Date): s
 }
 
 /**
- * Stores a Polar event the webhook received, once, and queues it to apply.
- * Polar sends an event again when it never heard back, and when someone
- * redelivers it from Polar's dashboard: one stored before that never applied
- * is queued again, at most once an hour, as the sweep would queue it. Returns
- * whether the event is new.
+ * Stores an event a billing provider's webhook received, once, and queues it
+ * to apply. A provider sends an event again when it never heard back, and when
+ * someone redelivers it from its dashboard: one stored before that never
+ * applied is queued again, at most once an hour, as the sweep would queue it.
+ * Returns whether the event is new.
  */
-export async function storePolarWebhookEvent(
+export async function storeBillingWebhookEvent(
   tx: DatabaseTransaction,
-  input: { businessId: string; providerEventId: string; eventType: string; payload: Record<string, unknown>; now?: Date },
+  input: { provider: BillingProviderId; businessId: string; providerEventId: string; eventType: string; payload: Record<string, unknown>; now?: Date },
 ): Promise<boolean> {
   const { businessId, providerEventId } = input;
-  const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId, eventType: input.eventType, businessId, payload: input.payload }).onConflictDoNothing().returning({ id: providerEvents.id });
+  const [stored] = await tx.insert(providerEvents).values({ provider: input.provider, providerEventId, eventType: input.eventType, businessId, payload: input.payload }).onConflictDoNothing().returning({ id: providerEvents.id });
   if (stored) {
     await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: stored.id, dedupeKey: `provider-event:${providerEventId}:billing`, payload: { providerEventId: stored.id } });
     return true;
   }
-  const [waiting] = await tx.select({ id: providerEvents.id }).from(providerEvents).where(and(eq(providerEvents.provider, "polar"), eq(providerEvents.providerEventId, providerEventId), eq(providerEvents.businessId, businessId), eq(providerEvents.status, "received"))).limit(1);
+  const [waiting] = await tx.select({ id: providerEvents.id }).from(providerEvents).where(and(eq(providerEvents.provider, input.provider), eq(providerEvents.providerEventId, providerEventId), eq(providerEvents.businessId, businessId), eq(providerEvents.status, "received"))).limit(1);
   if (waiting) await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: waiting.id, dedupeKey: billingSweepKey("provider_event", waiting.id, input.now ?? new Date()), payload: { providerEventId: waiting.id } });
   return false;
 }

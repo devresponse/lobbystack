@@ -10,6 +10,7 @@ export * from "./billing/factory";
 export * from "./billing/types";
 export * from "./billing/usage";
 export * from "./polar/adapter";
+export * from "./polar/events";
 export * from "./polar/polarBilling";
 export * from "./polar/polarCatalog";
 export * from "./polar/webhook";

@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 and 2 are done.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 3 are done.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -51,3 +51,12 @@ Its first commit, on the code as it was, records every request Polar receives in
 - **Tests:** the worker's billing tests wrap their Polar fakes in the adapter and keep their assertions; contract tests in `packages/providers/src/billing/contract/` run each flow against the Polar adapter over a stub of `fetch`, refusals included, and the Stripe adapter joins them in step 9.
 
 Left to the steps that use them: the job types for the overage subscription, plan actions and the daily totals check, and the names that drop Polar, such as `PriceLinks`.
+
+## Step 3: the webhook seam and normalized events
+
+- **One handler for every provider's route:** `apps/admin/src/lib/billing-webhook.ts` checks a delivery, finds its business, stores it once and queues it, with the refusal, unresolved and customer mismatch log lines naming the provider. `POST /api/webhooks/polar` is now a few lines that hand it Polar's webhook.
+- **Polar's webhook:** `PolarWebhook` in `packages/providers/src/polar/events.ts` checks the signature with `POLAR_WEBHOOK_SECRET` and turns an event into LobbyStack's terms, as `apps/admin/src/lib/polar-event.ts` did. The stored payload keeps every field it had and adds `kind` (`subscription`, `payment` for an order, `refund`, `checkout` or `other`) and `priceRef`, Polar's product.
+- **Storage:** `storeBillingWebhookEvent` replaces `storePolarWebhookEvent` and stores each event under its provider.
+- **Reconcile** reads the stored kind, and for an event stored before it, the event's name, as before. A new test shows an event stored either way reconciles to the same rows.
+
+A Polar deployment sees no change: the same answers, the same log lines and the same rows, with two more fields in each stored payload.

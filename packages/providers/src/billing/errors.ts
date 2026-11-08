@@ -20,6 +20,16 @@ export class BillingProviderError extends Error {
   }
 }
 
+export type BillingWebhookRefusalReason = "unconfigured" | "missing_headers" | "bad_signature" | "too_old" | "wrong_mode" | "invalid_payload";
+
+/** Why a delivery isn't taken: answered 401, or 400 for a body that isn't an event, and logged without its body. */
+export class BillingWebhookRefusal extends Error {
+  constructor(readonly provider: BillingProviderId, readonly reason: BillingWebhookRefusalReason) {
+    super(`The ${provider} webhook refused a delivery: ${reason}.`);
+    this.name = "BillingWebhookRefusal";
+  }
+}
+
 export function isBillingProviderError(error: unknown, code?: BillingProviderErrorCode): error is BillingProviderError {
   return error instanceof BillingProviderError && (code === undefined || error.code === code);
 }

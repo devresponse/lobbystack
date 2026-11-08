@@ -62,7 +62,7 @@ async function referredBusiness(tx: DatabaseTransaction, label: string): Promise
   return { businessId, profileId: profile!.id };
 }
 
-/** Reconciles one Polar order webhook, shaped as polar-event.ts stores it. */
+/** Reconciles one Polar order webhook, shaped as the Polar webhook's normalizer (packages/providers/src/polar/events.ts) stores it. */
 async function reconcileOrder(tx: DatabaseTransaction, businessId: string, eventType: string, order: Record<string, unknown>): Promise<void> {
   const [event] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType, businessId, payload: { billingKey: `business:${businessId}`, currency: "usd", ...order } }).returning({ id: providerEvents.id });
   await asRole(tx, "lobbystack_worker", (db) => reconcileBillingProviderEvent({ db }, { businessId, providerEventId: event!.id }));

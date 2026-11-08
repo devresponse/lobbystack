@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { billingAccounts, billingCheckoutRequests, billingUsageEvents, businesses, createDatabaseClient, outboxMessages, providerEvents, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, claimBillingCheckoutRequest, releaseBillingCheckoutRequest } from "./billing";
-import { storePolarWebhookEvent, sweepBillingWork } from "./billingSweep";
+import { storeBillingWebhookEvent, sweepBillingWork } from "./billingSweep";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -220,7 +220,7 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
       // The webhook stores each delivery as the worker, in the event's business.
       const store = async (at: Date) => {
         await tx.execute(sql`set local role lobbystack_worker`);
-        const isNew = await withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, async (inner) => await storePolarWebhookEvent(inner, { businessId, providerEventId, eventType: "subscription.active", payload: { plan: "starter" }, now: at }));
+        const isNew = await withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, async (inner) => await storeBillingWebhookEvent(inner, { provider: "polar", businessId, providerEventId, eventType: "subscription.active", payload: { plan: "starter" }, now: at }));
         await tx.execute(sql`reset role`);
         return isNew;
       };

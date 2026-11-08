@@ -124,9 +124,12 @@ export interface BillingProvider {
 /** A webhook delivery whose signature checked out. */
 export type VerifiedDelivery = { id: string; type: string; createdAt: Date; livemode: boolean | null; object: Record<string, unknown> };
 
+/** What a billing event is about; other is one reconcile reads only for its customer. */
+export type BillingEventKind = "subscription" | "payment" | "refund" | "checkout" | "dispute" | "usage_error" | "other";
+
 /** A provider's event as reconcile reads it. */
 export type NormalizedBillingEvent = {
-  kind: "subscription" | "payment" | "refund" | "checkout" | "dispute" | "usage_error";
+  kind: BillingEventKind;
   /** From metadata, the checkout's reference or the billing key. */
   businessId: string | null;
   /** Whatever named the business, for the logs. */
@@ -140,26 +143,31 @@ export type NormalizedBillingEvent = {
     cancelAt?: string | null; checkoutRequestId?: string; checkoutOutcome?: "completed" | "expired";
     payment?: { id: string; status: string; amountCents: number; refundedCents: number; currency: string; invoiceUrl: string | null; subscriptionId: string | null; description: string | null; occurredAt: string };
   };
+  /**
+   * What gets stored: the provider's object with the normalized fields beside it at
+   * the top level, so a reconcile running the release before still reads it.
+   */
+  payload: Record<string, unknown>;
 };
 
 /** The prices a deployment's catalog sells, as the webhook and checkout read them. */
 export interface PriceLinks {
   /** A standard plan's live price. */
-  refFor(plan: string, period: BillingInterval): string | null;
+  refFor(plan: string, interval: BillingInterval): string | null;
   /** Any sold plan, with its discount. */
-  saleFor(planCode: string, period: BillingInterval): PriceRef | null;
+  saleFor(planCode: string, interval: BillingInterval): PriceRef | null;
   /** The plan a price sells, retired ones too. */
-  planFor(ref: string): { plan: string; code: string; period: BillingInterval } | null;
+  planFor(ref: string | null | undefined): { plan: string; code: string; interval: BillingInterval } | null;
   /** The metered price for one kind of overage (Stripe). */
   overageRef(kind: OverageKind): string | null;
 }
 
 export interface BillingWebhook {
   readonly provider: BillingProviderId;
-  /** Throws for an unconfigured secret, missing headers, a bad or old signature, or the wrong mode. */
+  /** Throws BillingWebhookRefusal: an unconfigured secret, missing headers, a bad or old signature, the wrong mode, or a body that isn't an event. */
   verify(rawBody: string, headers: Headers): VerifiedDelivery;
   /** Null for an event LobbyStack doesn't use, answered 202 and not stored. */
-  normalize(delivery: VerifiedDelivery, links: PriceLinks): NormalizedBillingEvent | null;
+  normalize(delivery: VerifiedDelivery, links: Pick<PriceLinks, "planFor">): NormalizedBillingEvent | null;
 }
 
 /** The calls `pnpm billing` and the daily catalog check make; the decisions are the domain's planner's. */

@@ -874,6 +874,15 @@ async function isPromoPlanDiscount(tx: DatabaseTransaction, discountId: string):
  */
 export type BillingReconcileResult = "processed" | "ignored" | "missing" | "held";
 
+/** What an event stored without a kind is about, from its name, as Polar names its events. */
+function billingEventKindOf(eventType: string): string {
+  if (eventType.startsWith("subscription.")) return "subscription";
+  if (eventType.startsWith("order.")) return "payment";
+  if (eventType.startsWith("refund.")) return "refund";
+  if (eventType.startsWith("checkout.")) return "checkout";
+  return "other";
+}
+
 export async function reconcileBillingProviderEvent(
   context: DomainContext,
   input: { businessId: string; providerEventId: string },
@@ -894,6 +903,8 @@ export async function reconcileBillingProviderEvent(
     if (event.status === "processed") return { result: "processed", started: null };
 
     const payload = recordObject(event.payload);
+    // What the event is about: the kind the webhook stored, or for an event stored before it, the event's name.
+    const kind = stringField(payload, "kind") ?? billingEventKindOf(event.eventType);
     const transactionPayload = recordObject(payload.order ?? payload);
     const customer = recordObject(payload.customer);
     const subscription = recordObject(payload.subscription);
@@ -932,7 +943,7 @@ export async function reconcileBillingProviderEvent(
       const billingInterval = stringField(transactionPayload, "billingInterval", "billing_interval", "interval") ?? stringField(payload, "billingInterval", "billing_interval", "interval") ?? stringField(subscription, "billingInterval", "billing_interval", "interval") ?? linked?.interval;
       // Only a subscription's own status is a subscription state. An order's status
       // (paid, refunded) is not, and an order without a nested subscription has none.
-      const subscriptionState = stringField(transactionPayload, "subscriptionState") ?? stringField(payload, "subscriptionState") ?? (event.eventType.startsWith("subscription.") ? stringField(payload, "status") ?? event.eventType.slice("subscription.".length) : undefined);
+      const subscriptionState = stringField(transactionPayload, "subscriptionState") ?? stringField(payload, "subscriptionState") ?? (kind === "subscription" ? stringField(payload, "status") ?? event.eventType.slice(event.eventType.indexOf(".") + 1) : undefined);
       const currentPeriodStart = dateField(transactionPayload, "currentPeriodStart", "current_period_start") ?? dateField(payload, "currentPeriodStart", "current_period_start") ?? dateField(subscription, "currentPeriodStart", "current_period_start");
       const currentPeriodEnd = dateField(transactionPayload, "currentPeriodEnd", "current_period_end") ?? dateField(payload, "currentPeriodEnd", "current_period_end") ?? dateField(subscription, "currentPeriodEnd", "current_period_end");
       // The worker names its checkout request in a promo sale's metadata, which Polar keeps on the subscription.
@@ -1007,7 +1018,7 @@ export async function reconcileBillingProviderEvent(
     }
 
     // Refunds arrive as order.refunded (refund.* payloads name no business, so the webhook route drops them).
-    const transactionKind = event.eventType.startsWith("order.") ? "order" : undefined;
+    const transactionKind = kind === "payment" ? "order" : undefined;
     const sourceId = stringField(transactionPayload, "id", "orderId") ?? stringField(payload, "id", "orderId") ?? event.providerEventId;
     const amountCents = numberField(transactionPayload, "totalAmount", "total_amount", "amountCents", "amount") ?? numberField(payload, "totalAmount", "total_amount", "amountCents", "amount");
     const currency = stringField(transactionPayload, "currency") ?? stringField(payload, "currency");

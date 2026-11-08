@@ -1,8 +1,9 @@
 import { polarBaseUrls } from "@lobbystack/shared";
 import { PolarBilling } from "../polar/adapter";
+import { PolarWebhook } from "../polar/events";
 import { PolarBillingProvider } from "../polar/polarBilling";
 import { PolarCatalogClient } from "../polar/polarCatalog";
-import type { BillingEnv, BillingProvider, BillingProviderId } from "./types";
+import type { BillingEnv, BillingProvider, BillingProviderId, BillingWebhook } from "./types";
 
 // Builds the deployment's billing provider from its variables. Apart from the
 // scripts in devops/ and scripts/, the only code that reads POLAR_* variables.
@@ -33,6 +34,12 @@ export function createBillingProvider(env: Env): BillingProvider | undefined {
   if (!accessToken || !organizationId) return undefined;
   const client = new PolarBillingProvider({ accessToken, organizationId, ...(env.POLAR_API_BASE_URL ? { baseUrl: env.POLAR_API_BASE_URL } : {}) });
   return new PolarBilling(client, { organizationId, env: polarEnv(env.POLAR_API_BASE_URL) });
+}
+
+/** The deployment's webhook: its signature check with POLAR_WEBHOOK_SECRET, and its events in LobbyStack's terms. */
+export function createBillingWebhook(env: Env): BillingWebhook {
+  readBillingProviderId(env);
+  return new PolarWebhook(env.POLAR_WEBHOOK_SECRET);
 }
 
 /**

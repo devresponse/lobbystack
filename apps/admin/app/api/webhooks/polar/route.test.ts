@@ -3,9 +3,8 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 
 const mocks = vi.hoisted(() => ({ lookup: vi.fn(), store: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn() }));
-// storePolarWebhookEvent's own tests run it against PostgreSQL.
-vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog, storePolarWebhookEvent: mocks.store }));
-vi.mock("@lobbystack/providers", () => import("../../../../../../packages/providers/src/polar/webhook"));
+// storeBillingWebhookEvent's own tests run it against PostgreSQL.
+vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog, storeBillingWebhookEvent: mocks.store }));
 vi.mock("@/lib/api-helpers", () => ({ getDispatcherDatabase: () => ({ db: {} }), getWorkerDatabase: () => ({ db: {} }) }));
 vi.mock("@lobbystack/db", async importOriginal => ({
   ...await importOriginal<typeof import("@lobbystack/db")>(),
@@ -50,7 +49,7 @@ it("stores a signed UUID delivery in its business, as the worker, and says when 
   expect(await (await POST(request())).json()).toEqual({ accepted: true, duplicate: true, eventId: "delivery-1" });
   expect(mocks.scope).toHaveBeenCalledWith({ businessId, actorType: "worker" });
   expect(mocks.store).toHaveBeenCalledTimes(2);
-  expect(mocks.store).toHaveBeenCalledWith({}, { businessId, providerEventId: "delivery-1", eventType: "subscription.active", payload: expect.any(Object) });
+  expect(mocks.store).toHaveBeenCalledWith({}, { provider: "polar", businessId, providerEventId: "delivery-1", eventType: "subscription.active", payload: expect.objectContaining({ kind: "subscription" }) });
   expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0]![0])).toMatchObject({ sql: '"businesses"."id" = $1', params: [businessId] });
 });
 

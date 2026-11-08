@@ -16727,7 +16727,8 @@
                             "billing_account_changed",
                             "billing_provider_changed",
                             "provider_mismatch",
-                            "provider_block_missing"
+                            "provider_block_missing",
+                            "selling_mode_changed"
                           ]
                         },
                         "message": {
@@ -17626,7 +17627,8 @@
                                     "billing_account_changed",
                                     "billing_provider_changed",
                                     "provider_mismatch",
-                                    "provider_block_missing"
+                                    "provider_block_missing",
+                                    "selling_mode_changed"
                                   ]
                                 },
                                 "message": {
@@ -18112,7 +18114,8 @@
                                 "billing_account_changed",
                                 "billing_provider_changed",
                                 "provider_mismatch",
-                                "provider_block_missing"
+                                "provider_block_missing",
+                                "selling_mode_changed"
                               ]
                             },
                             "message": {
@@ -19641,7 +19644,8 @@
                     "billing_account_changed",
                     "billing_provider_changed",
                     "provider_mismatch",
-                    "provider_block_missing"
+                    "provider_block_missing",
+                    "selling_mode_changed"
                   ]
                 },
                 "message": {

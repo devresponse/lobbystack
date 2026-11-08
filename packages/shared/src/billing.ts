@@ -64,15 +64,26 @@ export const METER_EVENT_MAX_AGE_MS = 35 * 24 * 60 * 60_000;
  * billed. Usage past Stripe's 35 days goes out with now too. The invoice is
  * the month's, on the 1st, or with the plan's period given, as when overage
  * bills on the plan subscription, the one at the renewal that ends the
- * period the usage happened in.
+ * period the usage happened in. Only the period now open is known, so
+ * usage from before the one it followed, whose invoice is final, goes out
+ * with now as well, and usage it can't place for sure does too.
  */
 export function meterEventTime(occurredAt: Date, now: Date, graceHours: number, period: { start: Date; end: Date } | null = null): Date {
-  // Usage after the period's end, before its renewal is recorded, belongs to the next period, which is still open.
-  const invoiced = period
-    ? occurredAt < period.start ? period.start.getTime() : occurredAt < period.end ? period.end.getTime() : Number.POSITIVE_INFINITY
-    : Date.UTC(occurredAt.getUTCFullYear(), occurredAt.getUTCMonth() + 1, 1);
+  const invoiced = period ? periodInvoice(occurredAt, period) : Date.UTC(occurredAt.getUTCFullYear(), occurredAt.getUTCMonth() + 1, 1);
   const lastChance = invoiced + graceHours * 3_600_000 - 30 * 60_000;
   return now.getTime() < lastChance && now.getTime() - occurredAt.getTime() < METER_EVENT_MAX_AGE_MS ? occurredAt : now;
+}
+
+/** When the invoice that takes the usage is made, with the plan's period now open; minus infinity for one long final. */
+function periodInvoice(occurredAt: Date, period: { start: Date; end: Date }): number {
+  // Usage after the period's end, before its renewal is recorded, belongs to the next period, which is still open.
+  if (occurredAt >= period.end) return Number.POSITIVE_INFINITY;
+  if (occurredAt >= period.start) return period.end.getTime();
+  // The period before, which the start's renewal invoiced, is at least this one's length less three days (a month
+  // beside February). Usage before that could be from the one before it: dated now, it's billed a period late,
+  // where with its own time it would be counted and never billed.
+  const previousSurelySince = period.start.getTime() - (period.end.getTime() - period.start.getTime()) + 3 * 86_400_000;
+  return occurredAt.getTime() >= previousSurelySince ? period.start.getTime() : Number.NEGATIVE_INFINITY;
 }
 
 /**

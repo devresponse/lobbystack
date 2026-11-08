@@ -1280,7 +1280,7 @@ export const billingAccounts = pgTable(
     subscriptionClaim: uuid("subscription_claim"),
     /** When that run's claim runs out, in case its worker died. */
     subscriptionClaimedUntil: timestamp("subscription_claimed_until", { withTimezone: true }),
-    /** Stripe's monthly overage subscription, beside the plan's; null on Polar. Migration 0146. */
+    /** Stripe's monthly overage subscription, beside the plan's, or the plan's own when overage is on its checkout (merchant of record); null on Polar. Migration 0146. */
     overageSubscriptionId: text("overage_subscription_id"),
     /** When the subscription ends unless resumed, as the provider last said; null when it renews. */
     cancelAt: timestamp("cancel_at", { withTimezone: true }),

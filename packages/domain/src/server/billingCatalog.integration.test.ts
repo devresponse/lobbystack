@@ -772,6 +772,13 @@ describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
       expect(linked.length).toBe(4);
       expect(linked.every(([ref, polarId]) => typeof ref === "string" && ref.startsWith("price_") && polarId === null)).toBe(true);
 
+      // Once linked, it keeps how it sells: a file switching overage to the plan's checkout, or Stripe to the merchant of record, is refused.
+      const switched = await apply(tx, file((value) => { value.stripe = { ...stripeBlock, overage: "checkout", managedPayments: true }; }), { dryRun: true, key: null, deployment: stripeDeployment() });
+      expect(switched.run.blocked_by.map((item) => [item.code, item.path])).toEqual([["selling_mode_changed", "billing_file.stripe.overage"], ["selling_mode_changed", "billing_file.stripe.managedPayments"]]);
+      // Other settings of the block still change.
+      const proration = await apply(tx, file((value) => { value.stripe = { ...stripeBlock, upgrade: "prorate" }; }), { dryRun: true, key: null, deployment: stripeDeployment() });
+      expect(proration.run.blocked_by.map((item) => item.code)).not.toContain("selling_mode_changed");
+
       // A deployment pointed at another account later keeps the first one's.
       const moved = await refusal(send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_other" }, stripeDeployment({ STRIPE_ACCOUNT_ID: "acct_other" })));
       expect(moved.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_changed provider_account"]);

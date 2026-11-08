@@ -52,6 +52,7 @@ import {
   SCENARIOS,
   scenarioKeyProblem,
   scenarioRun,
+  scenarioSandboxProblem,
   ScenarioUsage,
   type ScenarioName,
 } from "./lib/billing-scenarios-core";
@@ -421,22 +422,27 @@ async function readProfile(brand: string): Promise<{ profile: BillingProfile; wi
 /**
  * The brand's catalog in the sandbox, as pnpm billing apply makes it, without
  * the webhook endpoint; with merchantOfRecord, as the brand's block would be
- * with Managed Payments and overage on the plan's checkout.
+ * with Managed Payments and overage on the plan's checkout. A sandbox that
+ * sends events anywhere is taken as a deployment's, and refused.
  */
 async function setUp(key: string, brand: string, io: ScenarioIo, merchantOfRecord: boolean): Promise<Setup> {
   const read = await readProfile(brand);
   if (!read.withBlock) io.out(`brands/${brand}/billing.json has no stripe block yet, so the run uses Stripe billing's recommended one.`);
   const mor = merchantOfRecord || read.profile.stripe?.managedPayments === true;
   const profile = mor ? { ...read.profile, stripe: { ...read.profile.stripe!, ...MERCHANT_OF_RECORD_BLOCK } } as BillingProfile : read.profile;
-  if (mor) io.out("Stripe is the merchant of record in this run: each scenario's subscription starts from a checkout you pay.");  const plans = desiredBillingPlans(billingProfileForProvider(profile, "stripe"));
+  if (mor) io.out("Stripe is the merchant of record in this run: each scenario's subscription starts from a checkout you pay.");
+  const plans = desiredBillingPlans(billingProfileForProvider(profile, "stripe"));
   const links = BRANDS[brand]?.links;
   const desired = stripePlanner.desired({ brand, profile, plans, webhookUrl: null, links: { termsUrl: links?.termsUrl ?? null, privacyUrl: links?.privacyUrl ?? null } });
   const catalog = createStripeCatalogClient(key);
-  let snapshot = await catalog.readSnapshot({ webhooks: false });
+  // With its webhook endpoints and event destinations, to tell a deployment's sandbox.
+  let snapshot = await catalog.readSnapshot();
   if (snapshot.mode !== "sandbox") throw new ScenarioUsage("The key isn't a sandbox's.");
+  const elsewhere = scenarioSandboxProblem(snapshot);
+  if (elsewhere) throw new ScenarioUsage(elsewhere);
   // Stripe as the merchant of record works out the tax itself.
   if (!mor && !snapshot.tax?.headOffice) throw new ScenarioUsage("Stripe Tax has no origin address in this sandbox, and every subscription here uses automatic tax. Set it in the Dashboard (Settings > Tax), then run again.");
-  // The sandbox is the scenarios' own: a run in one mode archives the prices the other mode sold, and a run in that mode brings them back.
+  // The sandbox is the scenarios' own, as nothing listens to it: a run in one mode archives the prices the other mode sold, and a run in that mode brings them back.
   const plan = stripePlanner.plan({ desired, snapshot, options: { adopt: false, allowReplace: false, allowArchive: true } });
   if (plan.refusals.length) throw new ScenarioUsage(`The sandbox's catalog can't be set up as it is: ${plan.refusals.map((refusal) => refusal.message).join("; ")}`);
   if (plan.steps.length) {

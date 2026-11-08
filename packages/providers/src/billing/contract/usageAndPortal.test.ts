@@ -84,5 +84,15 @@ describe("the billing provider contract: usage and the billing portal", () => {
       expect(stripe.state.balanceTransactions).toMatchObject([{ amount: -250, currency: "cad", metadata: { lobbystack_role: "usage_credit", lobbystack_overage: "voice" } }]);
       await expect(billing.usageCredits({ customerId: "cus_1" })).resolves.toEqual({ voice: 250, alert_sms: 0, transfer: 0 });
     });
+
+    it("says which currency a customer is billed in, which a credit must match, and none for one that's gone", async () => {
+      const { billing, stripe } = withMeters();
+      stripe.addCustomer({ id: "cus_abroad", businessId: "b2", currency: "usd" });
+      stripe.addCustomer({ id: "cus_gone", deleted: true });
+      await expect(billing.customerCurrency("cus_abroad")).resolves.toBe("usd");
+      await expect(billing.customerCurrency("cus_gone")).resolves.toBeNull();
+      // A customer not billed yet has no currency.
+      await expect(billing.customerCurrency("cus_1")).resolves.toBeNull();
+    });
   });
 });

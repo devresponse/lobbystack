@@ -132,6 +132,8 @@ export interface BillingProvider {
   usageCredits?(input: { customerId: string }): Promise<Record<OverageKind, number>>;
   /** Credits the customer's balance with a correction a month's overage can't take; the identifier keys it. */
   creditBalance?(input: { customerId: string; kind: OverageKind; cents: number; currency: string; identifier: string }): Promise<void>;
+  /** The currency the customer is billed in, which a balance credit must match to reach their invoices; null when the provider doesn't say. */
+  customerCurrency?(customerId: string): Promise<string | null>;
 
   /** A page where the customer manages cards, invoices and billing details. */
   createPortalSession(input: { customer: CustomerRef; returnUrl: string; locale: string | null }): Promise<{ url: string }>;

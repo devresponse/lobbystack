@@ -124,6 +124,7 @@ export const OPERATIONS_EVENT_NAMES = [
   "ops.billing.overage_unpaid",
   "ops.billing.provider_mismatch",
   "ops.billing.usage_totals_mismatch",
+  "ops.billing.usage_credit_unapplied",
   "ops.outbox.backlog_sample",
   "ops.outbox.flush_failed",
   "ops.service.health_check",
@@ -563,6 +564,8 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "ops.billing.provider_mismatch": ["provider", "providerEnv", "expectedAccount", "foundAccount"],
   // The daily totals check found Stripe's meters off what was sent, and corrected the open month.
   "ops.billing.usage_totals_mismatch": ["businessId", "deploymentMode", "provider", "kind"],
+  // The totals check's balance credit is in the catalog's currency and the customer is billed in another, so it won't reach them.
+  "ops.billing.usage_credit_unapplied": ["businessId", "deploymentMode", "provider", "kind"],
   "ops.outbox.backlog_sample": ["deploymentMode", "backlogBucket"],
   "ops.outbox.flush_failed": ["deploymentMode"],
   "ops.service.health_check": [

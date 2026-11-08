@@ -161,6 +161,18 @@ export class StripeBilling implements BillingProvider {
     await creditStripeBalance(this.api, input);
   }
 
+  /**
+   * The customer's currency, which Stripe sets from its first subscription:
+   * under merchant of record, Adaptive Pricing bills a customer abroad in
+   * their own, and a balance credit in another currency never reaches their
+   * invoices. Null for a customer that's gone or not billed yet.
+   */
+  async customerCurrency(customerId: string): Promise<string | null> {
+    const customer = await this.api.customers.retrieve(customerId);
+    if ("deleted" in customer && customer.deleted) return null;
+    return (customer as Stripe.Customer).currency ?? null;
+  }
+
   /** Stripe's billing portal for the business's customer, with the deployment's configuration once a link recorded one, in the business's language when Stripe has it. */
   async createPortalSession(input: { customer: CustomerRef; returnUrl: string; locale: string | null }): Promise<{ url: string }> {
     if (!input.customer.id) throw new BillingProviderError("stripe", "not_found", "The business has no Stripe customer yet, so there's no billing portal to open.");

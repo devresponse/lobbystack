@@ -131,6 +131,28 @@ export function scenarioKeyProblem(key: string | undefined): string | null {
   return null;
 }
 
+/**
+ * Why the sandbox can't be the scenarios' own, or null. A run makes customers
+ * and payments, and archives the prices the other selling mode sold, so it
+ * never runs where a deployment bills. pnpm billing apply gives a deployment's
+ * sandbox a webhook endpoint and an event destination, and the scenarios make
+ * neither, so any endpoint or destination at all is taken as a deployment's.
+ */
+export function scenarioSandboxProblem(snapshot: { webhooks: ReadonlyArray<{ url: string }>; eventDestinations: ReadonlyArray<{ url: string | null; type: string }> }): string | null {
+  const targets = [...snapshot.webhooks.map((endpoint) => endpoint.url), ...snapshot.eventDestinations.map((destination) => destination.url ?? destination.type)];
+  if (!targets.length) return null;
+  const where = [...new Set(targets.map(hostOf))].join(", ");
+  return `This sandbox sends events to ${where}, so it isn't the scenarios' own: a run makes customers and payments in it and archives prices a deployment may sell. Run them in a sandbox of their own, or delete this one's webhook endpoints and event destinations if nothing uses them.`;
+}
+
+function hostOf(target: string): string {
+  try {
+    return new URL(target).host;
+  } catch {
+    return target;
+  }
+}
+
 /** A text with every Stripe key in it, whole or in part as Stripe's errors show one, replaced. */
 export function redactKeys(text: string): string {
   return text.replace(/\b(?:sk|rk|pk)_(?:test|live)_[A-Za-z0-9*]+/g, "‹key›");

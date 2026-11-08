@@ -190,7 +190,8 @@ export const billingProfileSchema = billingProfileShape.superRefine(checkBilling
  * checkout, overage is invoiced with the plan each month, so a Stripe
  * deployment leaves out every yearly price, as merchant of record needs, and
  * doesn't sell a plan that has only a yearly one (C9 of the Stripe plan). The
- * brand's Polar deployments sell the file as it is.
+ * brand's Polar deployments sell the file as it is. What it returns is cast to
+ * the file's type, so billingProfile.test.ts checks it still passes the schema.
  */
 export function billingProfileForProvider<T extends Pick<z.output<typeof billingProfileShape>, "stripe" | "plans">>(profile: T, provider: BillingProvider): T {
   if (provider !== "stripe" || profile.stripe?.overage !== "checkout") return profile;

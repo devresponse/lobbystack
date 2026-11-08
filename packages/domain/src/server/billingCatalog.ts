@@ -549,6 +549,15 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
     // The provider's block says how it sells: proration, the portal and, on Stripe, tax.
     const own = deploymentProvider(deployment);
     if (!profile[own.id]) refusals.push({ code: "provider_block_missing", message: `This deployment bills through ${billingProviderNames[own.id]}, and the file has no ${own.id} block. Add one in a pull request.`, path: `billing_file.${own.id}` });
+    // A linked Stripe deployment keeps how it sells: its customers' subscriptions were made that way, and switching
+    // would put the overage prices on new plan subscriptions while older ones keep an overage subscription of
+    // their own, so Stripe's meters, which count by customer, would bill the same usage twice.
+    const sold = (current.latest?.profile as { stripe?: Partial<Record<"overage" | "managedPayments", unknown>> } | null | undefined)?.stripe;
+    if (own.id === "stripe" && current.latestLink && sold && profile.stripe) {
+      for (const field of ["overage", "managedPayments"] as const) {
+        if (sold[field] !== undefined && sold[field] !== profile.stripe[field]) refusals.push({ code: "selling_mode_changed", message: `This deployment sells with stripe.${field} ${JSON.stringify(sold[field])}, and it stays with it: its customers' subscriptions were made that way. Another way of selling gets a deployment of its own.`, path: `billing_file.stripe.${field}` });
+      }
+    }
     if (codeHash !== hash && !allowUndeployed) {
       refusals.push({ code: "file_not_deployed", message: codeHash === null ? `The running code has no billing.json for ${body.brand}. Deploy it first, or send allow_undeployed: true to try the file on a sandbox.` : `This file isn't the one the running code was built with (${codeHash.slice(0, 12)}). Deploy the merged file first, or send allow_undeployed: true to try it on a sandbox.`, path: "billing_file" });
     }
@@ -931,14 +940,12 @@ const prorations = ["invoice", "prorate", "next_period", "reset"] as const;
 export type PlanChangeProration = (typeof prorations)[number];
 
 /**
- * How a plan change asks Polar to charge: billing.json's polar.upgradeProration
- * for an upgrade and downgradeProration for a downgrade, from the latest apply.
- * Before the first apply, the values the brand files ship with: an upgrade is
- * invoiced at once and a downgrade waits for the next period.
+ * How the last applied billing.json charges plan changes on the deployment's
+ * provider: the polar block's upgradeProration and downgradeProration, or the
+ * stripe block's upgrade and downgrade. Before the first apply, the values the
+ * brand files ship with: an upgrade is invoiced at once and a downgrade waits
+ * for the next period.
  */
-/** The hours Stripe waits before finalizing a metered invoice, as the last applied billing.json's stripe block says, else Stripe's default of 1. */
-
-/** How the last applied billing.json charges plan changes on the deployment's provider: Polar's proration words, or the stripe block's upgrade and downgrade. */
 export async function loadPlanChangeProration(context: DomainContext, provider: BillingProviderId = "polar"): Promise<{ upgrade: PlanChangeProration; downgrade: PlanChangeProration }> {
   const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
   const profile = latest?.profile as { polar?: Record<string, unknown>; stripe?: Record<string, unknown> } | null | undefined;

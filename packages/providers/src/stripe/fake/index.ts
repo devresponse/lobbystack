@@ -29,7 +29,7 @@ export type FakeStripe = StripeApi & StripeCatalogApi & {
   state: FakeStripeState;
   requests: FakeStripeRequest[];
   clock: FakeClock;
-  addCustomer(input: { id: string; businessId?: string; deleted?: boolean; email?: string }): void;
+  addCustomer(input: { id: string; businessId?: string; deleted?: boolean; email?: string; currency?: string }): void;
   addSubscription(input: FakeSubscriptionInput): void;
   addSchedule(input: { id: string; subscription: string; phases: Array<{ start: number; end: number | null; price: string }> }): void;
   addInvoice(input: { id: string; customer: string; subscription: string | null; hostedInvoiceUrl?: string | null }): void;

@@ -156,7 +156,7 @@ Related files: `apps/admin/src/components/agent-shell.tsx`, `apps/admin/src/comp
 
 Wraps the settings pages under `apps/admin/app/(dashboard)/settings/` in a settings header and a row of tab links. `/settings/account` sits in the `(account)` route group instead, so this layout does not wrap it.
 
-- The pages under `/settings`: Renders `SettingsShell` (`apps/admin/src/components/settings-shell.tsx`), a client component: a `PageHeader` and a scrollable pill navigation with 11 links, in English Usage, Plan (`/settings/plan`), Team (`/settings/team`), Phone Number, Preferences (`/settings/appearance`), Notifications, API keys, Connected apps, Website widget, Public profile (`/settings/profile`) and QR code (`/settings/qrcode`). A link is active when the path equals it or starts with it plus `/`. The page goes inside `NestedPageSurfaceProvider`, which hides each page's own `PageSurface` header. It checks nothing and loads no data.
+- The pages under `/settings`: Renders `SettingsShell` (`apps/admin/src/components/settings-shell.tsx`), a client component: a `PageHeader` and a scrollable pill navigation with 11 links, in English Usage, Plan (`/settings/plan`), Team (`/settings/team`), Phone Number, Preferences (`/settings/appearance`), Notifications, Public profile (`/settings/profile`), Website widget, QR code (`/settings/qrcode`), Connected apps and API keys. A link is active when the path equals it or starts with it plus `/`. The page goes inside `NestedPageSurfaceProvider`, which hides each page's own `PageSurface` header. It checks nothing and loads no data.
 
 Related files: `apps/admin/src/components/settings-shell.tsx`, `apps/admin/src/components/page-surface.tsx`.
 

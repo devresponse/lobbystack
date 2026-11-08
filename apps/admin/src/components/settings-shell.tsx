@@ -18,11 +18,11 @@ export function SettingsShell({ children }: { children: React.ReactNode }) {
     { label: t("sections.phoneNumber"), href: "/settings/phone-number" },
     { label: t("sections.appearance"), href: "/settings/appearance" },
     { label: t("sections.notifications"), href: "/settings/notifications" },
-    { label: t("sections.apiKeys"), href: "/settings/api-keys" },
-    { label: t("sections.connectedApps"), href: "/settings/connected-apps" },
-    { label: t("sections.widget"), href: "/settings/widget" },
     { label: t("sections.publicPage"), href: "/settings/profile" },
+    { label: t("sections.widget"), href: "/settings/widget" },
     { label: t("sections.qrCode"), href: "/settings/qrcode" },
+    { label: t("sections.connectedApps"), href: "/settings/connected-apps" },
+    { label: t("sections.apiKeys"), href: "/settings/api-keys" },
   ];
   return (
     <section className="flex flex-1 flex-col gap-6">

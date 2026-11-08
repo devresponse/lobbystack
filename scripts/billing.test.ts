@@ -13,12 +13,13 @@ import { runBilling } from "./billing";
 // pnpm billing end to end, against the Polar stand-in and a stand-in instance
 // that keeps its tables in memory with the API's own diff and link rules.
 
-const repositoryFile = new URL("../brands/alloplace/billing.json", import.meta.url);
+const brandFile = (brand: string) => new URL(`../brands/${brand}/billing.json`, import.meta.url);
 const instanceUrl = "https://demo.alloplace.com";
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const hashOf = (profile: BillingProfile) => sha256(canonicalBillingProfileJson(profile));
 
 type Instance = {
+  brand: string;
   plans: StoredBillingPlan[];
   prices: StoredBillingPrice[];
   catalogRuns: ApiBillingCatalogRun[];
@@ -53,7 +54,7 @@ function write(instance: Instance, writes: ReturnType<typeof diffBillingCatalog>
 function catalogOf(instance: Instance): ApiBillingCatalog {
   const latest = instance.catalogRuns.at(-1) ?? null;
   return {
-    brand: "alloplace",
+    brand: instance.brand,
     code_hash: instance.codeHash,
     hash: latest?.hash ?? null,
     matches_code: latest?.hash === instance.codeHash,
@@ -112,18 +113,20 @@ afterEach(async () => {
 });
 
 /** A checkout with the brand's file, changed as a test needs, and an instance whose code was built with the repository's file. */
-async function setUp(options: { change?: (file: Record<string, any>) => void; seeded?: boolean } = {}) {
+async function setUp(options: { brand?: string; change?: (file: Record<string, any>) => void; seeded?: boolean } = {}) {
+  const brand = options.brand ?? "alloplace";
   root = await mkdtemp(join(tmpdir(), "billing-"));
-  const text = await readFile(repositoryFile, "utf8");
+  const text = await readFile(brandFile(brand), "utf8");
   const file = JSON.parse(text) as Record<string, any>;
   options.change?.(file);
-  await mkdir(join(root, "brands", "alloplace"), { recursive: true });
-  await writeFile(join(root, "brands", "alloplace", "billing.json"), JSON.stringify(file, null, 2));
+  await mkdir(join(root, "brands", brand), { recursive: true });
+  await writeFile(join(root, "brands", brand, "billing.json"), JSON.stringify(file, null, 2));
   const deployed = billingProfileSchema.parse(JSON.parse(text));
   const fake = createFakePolar();
   if (options.seeded !== false) await seedPolarSetup(fake);
   const productId = (name: string) => fake.state.products.find((product) => product.name === name)?.id ?? null;
   const instance: Instance = {
+    brand,
     plans: [],
     prices: [],
     catalogRuns: [],
@@ -365,5 +368,28 @@ describe("pnpm billing", () => {
     const unreadable = await billing(["verify", ...sandbox], context);
     expect(unreadable.code).toBe(2);
     expect(unreadable.out).toContain("Result: failed (exit 2).");
+  });
+});
+
+// What pnpm billing printed before its calls went through the catalog seam
+// (Stripe plan, step 4), for both brands: that step must leave it unchanged.
+describe("pnpm billing's output", () => {
+  const stable = (output: string) => output.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>").replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, "<time>");
+  for (const brand of ["alloplace", "realinfobot"]) {
+    const flags = ["--brand", brand, "--polar", "sandbox"];
+    it(`plans ${brand} on an empty organization`, async () => {
+      const result = await billing(["plan", ...flags, "--json"], await setUp({ brand, seeded: false }));
+      expect({ code: result.code, out: JSON.parse(result.out), err: stable(result.err) }).toMatchSnapshot();
+    });
+    it(`plans ${brand} on the objects polar-setup.mjs made`, async () => {
+      const result = await billing(["plan", ...flags, "--json", "--adopt", "--allow-replace"], await setUp({ brand }));
+      expect({ code: result.code, out: JSON.parse(result.out), err: stable(result.err) }).toMatchSnapshot();
+    });
+  }
+  it("applies alloplace, then verifies it", async () => {
+    const context = await setUp();
+    const applied = await billing(["apply", ...sandbox, "--adopt", "--allow-replace", "--yes"], context);
+    const verified = await billing(["verify", ...sandbox, "--json"], context);
+    expect({ applied: { code: applied.code, out: stable(applied.out), err: stable(applied.err) }, verified: { code: verified.code, out: JSON.parse(verified.out) } }).toMatchSnapshot();
   });
 });

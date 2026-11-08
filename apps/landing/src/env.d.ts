@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly INDEXNOW_KEY?: string
   readonly GOOGLE_SITE_VERIFICATION?: string
   readonly BING_SITE_VERIFICATION?: string
+  /** The deployment's billing provider, polar or stripe, which the legal pages name. */
+  readonly BILLING_PROVIDER?: string
 }
 
 interface ImportMeta {

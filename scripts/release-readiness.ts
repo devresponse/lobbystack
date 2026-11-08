@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
+import { billingProviderOf, stripeKeyMode } from "@lobbystack/shared";
+
 import { writePrivateJson } from "./lib/private-artifact";
 import { urlIsLocal } from "./performance/soak-certification";
 
@@ -43,6 +45,7 @@ export type ReleaseEvidence = {
     releaseCertified: false;
     targetIdentity: string;
     resendWebhooks: "not-applicable" | "unverified" | "enabled" | "disabled";
+    billingProvider: "not-applicable" | "polar" | "stripe";
     outstandingExternalGates: string[];
   };
   gates: GateEvidence[];
@@ -92,7 +95,7 @@ const stagingRequired = [
   "RELEASE_CERTIFICATION_TARGET", "ADMIN_BASE_URL", "WORKER_BASE_URL", "DATABASE_URL",
   "REPLACEMENT_MIGRATOR_DATABASE_URL", "REPLACEMENT_APP_DATABASE_URL", "REPLACEMENT_WORKER_DATABASE_URL",
   "REDIS_URL", "REPLACEMENT_REDIS_HOST", "REDIS_PORT", "REPLACEMENT_S3_ENDPOINT", "S3_BUCKET",
-  "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "POLAR_WEBHOOK_SECRET", "TWILIO_AUTH_TOKEN",
+  "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "TWILIO_AUTH_TOKEN",
   "INTERNAL_SERVICE_SECRET", "REPLACEMENT_TEST_BUSINESS_SLUG", "RESEND_WEBHOOKS_ENABLED",
 ] as const;
 
@@ -150,8 +153,16 @@ function targetIdentity(mode: ReleaseMode, environment: NodeJS.ProcessEnv, e2e: 
   return `isolated-staging:${createHash("sha256").update(source).digest("hex").slice(0, 16)}`;
 }
 
+/** The billing provider's own secrets, which the webhook gate signs its deliveries with: Polar's, or Stripe's and its key. */
+export function billingProviderRequired(environment: NodeJS.ProcessEnv): readonly string[] {
+  return billingProviderOf(environment) === "stripe" ? ["STRIPE_WEBHOOK_SECRET", "STRIPE_API_KEY"] : ["POLAR_WEBHOOK_SECRET"];
+}
+
 export function stagingConfigurationProblems(environment: NodeJS.ProcessEnv): string[] {
-  const problems = missingRequiredEnvironment(environment, stagingRequired);
+  const problems = missingRequiredEnvironment(environment, [...stagingRequired, ...billingProviderRequired(environment)]);
+  if (environment.BILLING_PROVIDER?.trim() && !["polar", "stripe"].includes(environment.BILLING_PROVIDER.trim().toLowerCase())) problems.push("BILLING_PROVIDER (must be polar or stripe)");
+  // A certification run never touches live money: Stripe's key must be a test one.
+  if (billingProviderOf(environment) === "stripe" && environment.STRIPE_API_KEY?.trim() && stripeKeyMode(environment.STRIPE_API_KEY) !== "sandbox") problems.push("STRIPE_API_KEY (must be a Stripe test key, sk_test_ or rk_test_)");
   if (environment.RELEASE_CERTIFICATION_TARGET !== "isolated-staging") problems.push("RELEASE_CERTIFICATION_TARGET (must be isolated-staging)");
   for (const name of ["ADMIN_BASE_URL", "WORKER_BASE_URL", "REDIS_URL", "REPLACEMENT_S3_ENDPOINT"]) {
     if (environment[name] && urlIsLocal(environment[name])) problems.push(`${name} (must not be local)`);
@@ -255,6 +266,7 @@ function evidence(mode: ReleaseMode, e2e: boolean, runId: string, gitSha: string
       releaseCertified: false,
       targetIdentity: targetIdentity(mode, environment, e2e),
       resendWebhooks: mode === "staging" ? environment.RESEND_WEBHOOKS_ENABLED === "true" ? "enabled" : environment.RESEND_WEBHOOKS_ENABLED === "false" ? "disabled" : "unverified" : "not-applicable",
+      billingProvider: mode === "staging" ? billingProviderOf(environment) : "not-applicable",
       outstandingExternalGates: [
         "provider-specific durable ingress handling",
         "isolated database and object-storage restore and traffic rollback drill",

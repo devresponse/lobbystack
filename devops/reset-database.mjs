@@ -14,7 +14,8 @@
 //   --redis-prefix <name>  the deployment's REDIS_PREFIX, when it isn't lobbystack
 //   --confirm <database>   answer the question below with this database name, for a run where
 //                          nobody can type
-//   --allow-live-payments  reset a database linked to Polar's live organization anyway
+//   --allow-live-payments  reset a database linked to a billing provider's live account anyway:
+//                          Polar's live organization, or Stripe's live mode
 //   --protect              mark the database so this script refuses to reset it, and stop
 //   --unprotect            take that mark off, and stop
 //
@@ -24,13 +25,19 @@
 // migrated: the first sign-up picks the deployment's name and logo again, and the plans wait for
 // a `pnpm billing apply`. The tables, functions, policies and grants stay, the database's roles
 // and their passwords too, and so does everything outside the database: numbers bought in
-// Twilio, subscriptions in Polar, files in the storage bucket, and Redis unless --redis is given.
-// scripts/reset-database.integration.test.ts checks the result against a fresh migration in CI.
+// Twilio, subscriptions in Polar or Stripe, files in the storage bucket, and Redis unless --redis
+// is given. scripts/reset-database.integration.test.ts checks the result against a fresh
+// migration in CI.
+//
+// On a deployment billed through Stripe, set STRIPE_READ_KEY to a key of its account that may
+// read subscriptions, and the script lists the subscriptions Stripe still bills its customers
+// for, overage subscriptions included, so you can cancel them first. It only reads them, and
+// never prints the key.
 //
 // It refuses a database without LobbyStack's migration history, a user that isn't a superuser
 // (or BYPASSRLS: row level security would hide rows from what it shows), a database marked with
-// --protect, and one linked to Polar's live organization, unless --allow-live-payments. Before
-// it deletes anything it shows what the database holds and asks for the database's name.
+// --protect, and one linked to a billing provider's live account, unless --allow-live-payments.
+// Before it deletes anything it shows what the database holds and asks for the database's name.
 
 import { createRequire } from "node:module";
 import readline from "node:readline";
@@ -43,6 +50,12 @@ const APP_SCHEMAS = ["public", "app", "drizzle"];
 const PROTECTION_SETTING = "lobbystack.reset_protection";
 // packages/shared/src/billing.ts, liveSubscriptionStates.
 const LIVE_SUBSCRIPTION_STATES = ["active", "trialing", "past_due"];
+// Stripe's subscription statuses that end billing for good; every other one may still charge.
+const STRIPE_ENDED_STATUSES = ["canceled", "incomplete_expired"];
+// Stripe's API, or a stand-in for tests.
+const STRIPE_API_URL = process.env.RESET_STRIPE_API_URL ?? "https://api.stripe.com/v1";
+// The most customers the script asks Stripe about, one request each: a test deployment has a few.
+const STRIPE_CUSTOMER_LIMIT = 100;
 // The lock packages/db/src/cli.ts holds while it migrates.
 const MIGRATION_LOCK = "lobbystack:migrations";
 const ASK = Symbol("ask");
@@ -246,7 +259,7 @@ async function describe(client, { tables, counts, live, redis, redisKeys }) {
   console.log(`  ${plural(count("users"), "user")}`);
   const largest = [...filled].sort((a, b) => counts.get(b.label) - counts.get(a.label)).slice(0, 4);
   console.log(`  ${plural(rows, "row")} in ${filled.length} of ${plural(tables.emptied.length, "table")}${largest.length ? `, most in ${largest.map((table) => `${table.name} (${number(counts.get(table.label))})`).join(", ")}` : ""}`);
-  if (live) console.log("  a link to Polar's live organization (--allow-live-payments was given)");
+  if (live) console.log("  a link to a billing provider's live account (--allow-live-payments was given)");
   if (redis) console.log(`  ${plural(redisKeys.length, "Redis key")} under ${options.redisPrefix}: on ${redis.options.host}:${redis.options.port}`);
 
   const outside = [];
@@ -257,11 +270,15 @@ async function describe(client, { tables, counts, live, redis, redisKeys }) {
     const shown = numbers.slice(0, 8).map((row) => row.e164).join(", ");
     outside.push(`${plural(numbers.length, "phone number")} bought in Twilio: ${shown}${numbers.length > 8 ? ` and ${numbers.length - 8} more` : ""}. ${one ? "It keeps" : "They keep"} costing money and ringing this deployment, which won't know ${one ? "it" : "them"}: release ${one ? "it" : "them"} first with pnpm lobbystack numbers release (deployment guide, 7.21), or in Twilio's console after the reset.`);
   }
-  const subscriptions = await queryOrNull(client, "select count(*)::int as n from public.billing_accounts where subscription_id is not null and subscription_state = any ($1)", [LIVE_SUBSCRIPTION_STATES]);
-  if (subscriptions?.[0]?.n > 0) {
-    const n = subscriptions[0].n;
+  // By provider: an account's source, read through to_jsonb, is polar on a database from before it was recorded.
+  const subscriptions = await queryOrNull(client, "select coalesce(to_jsonb(a)->>'source', 'polar') as source, count(*)::int as n from public.billing_accounts a where subscription_id is not null and subscription_state = any ($1) group by 1", [LIVE_SUBSCRIPTION_STATES]);
+  const liveOf = (source) => subscriptions?.find((row) => row.source === source)?.n ?? 0;
+  if (liveOf("polar") > 0) {
+    const n = liveOf("polar");
     outside.push(`${plural(n, "live Polar subscription")}. Cancel ${n === 1 ? "it" : "them"} in Polar's dashboard, or Polar keeps billing ${n === 1 ? "it" : "them"} (on the sandbox, with test cards).`);
   }
+  const stripeCustomers = (await queryOrNull(client, "select distinct customer_id from public.billing_accounts a where to_jsonb(a)->>'source' = 'stripe' and customer_id is not null order by customer_id"))?.map((row) => row.customer_id) ?? [];
+  outside.push(...(await stripeSubscriptionLines(stripeCustomers, liveOf("stripe"))));
   if (count("storage_objects") > 0) {
     const one = count("storage_objects") === 1;
     outside.push(`${plural(count("storage_objects"), "file")} in the storage bucket: recordings, documents and uploads. Nothing will refer to ${one ? "it" : "them"}; empty the bucket to remove ${one ? "it" : "them"}.`);
@@ -279,6 +296,56 @@ async function describe(client, { tables, counts, live, redis, redisKeys }) {
 
   console.log("");
   console.log(wrap(`The reset empties ${tables.emptied.length === 1 ? "that table" : `those ${tables.emptied.length} tables`}. It keeps the tables themselves, the database's roles and the migration history, so the database looks freshly migrated: no accounts, no businesses, no settings, no plans.`, "", ""));
+}
+
+/**
+ * What the reset leaves at Stripe: the subscriptions Stripe still bills the deployment's customers for, read with
+ * STRIPE_READ_KEY when it's set, else the live plan subscriptions the database records. A business on a paid plan
+ * also has an overage subscription beside its plan's, which only Stripe's list shows.
+ */
+async function stripeSubscriptionLines(customers, recorded) {
+  const fallback = recorded > 0
+    ? [`${plural(recorded, "live Stripe subscription")} by this database's records, each with the business's overage subscription beside it. Cancel them in Stripe's Dashboard, or Stripe keeps billing them (in a sandbox, with test cards). Set STRIPE_READ_KEY to a key that reads subscriptions, and the script lists them.`]
+    : [];
+  const key = process.env.STRIPE_READ_KEY?.trim();
+  if (!key || !customers.length) return fallback;
+  const asked = customers.slice(0, STRIPE_CUSTOMER_LIMIT);
+  const billed = [];
+  try {
+    for (const customer of asked) {
+      for (const subscription of await stripeSubscriptions(key, customer)) {
+        if (!STRIPE_ENDED_STATUSES.includes(subscription.status)) billed.push(`${subscription.id} (${customer}, ${subscription.status})`);
+      }
+    }
+  } catch (error) {
+    return [`Stripe couldn't be read with STRIPE_READ_KEY: ${error.message}`, ...fallback];
+  }
+  const more = customers.length > asked.length ? ` Only the first ${asked.length} of the ${customers.length} customers were asked about.` : "";
+  if (!billed.length) return more ? [`Stripe bills none of the first ${asked.length} customers.${more}`] : [];
+  const one = billed.length === 1;
+  return [`${plural(billed.length, "subscription")} Stripe still bills: ${billed.slice(0, 8).join(", ")}${billed.length > 8 ? ` and ${billed.length - 8} more` : ""}. Cancel ${one ? "it" : "them"} in Stripe's Dashboard first, or Stripe keeps billing ${one ? "it" : "them"} (in a sandbox, with test cards).${more}`];
+}
+
+/** A customer's subscriptions in every status, from Stripe's API; none for a customer Stripe no longer has. */
+async function stripeSubscriptions(key, customer) {
+  const subscriptions = [];
+  let after = null;
+  for (let page = 0; page < 10; page += 1) {
+    const query = new URLSearchParams({ customer, status: "all", limit: "100", ...(after ? { starting_after: after } : {}) });
+    let response;
+    try {
+      response = await fetch(`${STRIPE_API_URL}/subscriptions?${query}`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
+    } catch (error) {
+      throw new Error(`Stripe didn't answer (${error.cause?.code ?? error.message}).`);
+    }
+    const body = await response.json().catch(() => null);
+    if (body?.error?.code === "resource_missing" && /customer/i.test(body.error.param ?? body.error.message ?? "")) return [];
+    if (!response.ok) throw new Error(`${body?.error?.message ?? `HTTP ${response.status}`}.`);
+    subscriptions.push(...(body?.data ?? []));
+    if (!body?.has_more || !body.data?.length) break;
+    after = body.data.at(-1).id;
+  }
+  return subscriptions;
 }
 
 async function emptyTables(client, tables) {
@@ -323,7 +390,7 @@ function printNextSteps(redisCleared) {
     "Redeploy the admin and the worker, so neither keeps anything from before in memory.",
     ...(redisCleared ? [] : ["Sign out in every browser that was signed in, or run the script again with --redis: Redis still holds the old sign-ins."]),
     "Sign up. The first account to finish onboarding picks the deployment's name and logo.",
-    "Only if the deployment sells plans: sign up with the operator key's email and enter the emailed code, then run `pnpm billing apply --brand <brand> --polar sandbox` again, which finds Polar's products by their tags.",
+    "Only if the deployment sells plans: sign up with the operator key's email and enter the emailed code, then run `pnpm billing apply --brand <brand>` again with the deployment's provider, `--polar sandbox` or `--stripe sandbox`. It finds the provider's products by their tags and links them again.",
   ];
   console.log("\nNext");
   steps.forEach((step, index) => console.log(wrap(`${index + 1}. ${step}`, "  ", "     ")));

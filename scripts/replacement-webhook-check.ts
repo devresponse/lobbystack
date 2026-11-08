@@ -5,6 +5,9 @@ import { Webhook } from "standardwebhooks";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { businesses, createDatabaseClient, messages, outboxMessages, phoneNumbers, providerEvents } from "@lobbystack/db";
+import { billingProviderOf, stripeKeyMode } from "@lobbystack/shared";
+
+import { certificationInvoicePaid, stripeSignatureHeader } from "./lib/stripe-webhook-delivery";
 
 const postgresPort = process.env.POSTGRES_PORT ?? "15433";
 const postgresPassword = process.env.POSTGRES_PASSWORD ?? "replace-with-a-long-local-password";
@@ -12,7 +15,11 @@ const migrator = createDatabaseClient("lobbystack_migrator", {
   DATABASE_URL: process.env.REPLACEMENT_MIGRATOR_DATABASE_URL ?? `postgres://postgres:${postgresPassword}@127.0.0.1:${postgresPort}/lobbystack`,
 });
 const adminBaseUrl = process.env.ADMIN_BASE_URL ?? "http://127.0.0.1:13000";
+// The deployment bills through one provider: its webhook takes the provider's deliveries, and the other's route answers 404.
+const billingProvider = billingProviderOf(process.env);
 const polarSecret = process.env.POLAR_WEBHOOK_SECRET ?? "replace-with-polar-webhook-secret";
+// During a rotation STRIPE_WEBHOOK_SECRET holds two secrets, and either signs.
+const stripeSecret = (process.env.STRIPE_WEBHOOK_SECRET ?? "replace-with-stripe-webhook-secret").split(",")[0]!.trim();
 const twilioToken = process.env.TWILIO_AUTH_TOKEN ?? "replace-with-twilio-auth-token";
 const resendSecret = process.env.RESEND_WEBHOOK_SECRET;
 
@@ -36,6 +43,19 @@ function resendHeaders(body: string, eventId: string): Record<string, string> {
   return { "content-type": "application/json", "svix-id": eventId, "svix-timestamp": timestamp, "svix-signature": `v1,${signature}` };
 }
 
+/** Sends one billing delivery three times: tampered, which must be refused, then twice, the second a duplicate. */
+async function checkBillingDelivery(provider: string, url: string, body: string, headers: () => Record<string, string>, tampered: Record<string, string>): Promise<void> {
+  const invalid = await fetch(url, { method: "POST", headers: { ...headers(), ...tampered }, body });
+  if (invalid.status !== 401) throw new Error(`Tampered ${provider} webhook returned ${invalid.status} instead of 401.`);
+  const first = await fetch(url, { method: "POST", headers: headers(), body });
+  const second = await fetch(url, { method: "POST", headers: headers(), body });
+  const firstResult = await first.json() as { duplicate?: boolean };
+  const secondResult = await second.json() as { duplicate?: boolean };
+  if (!first.ok || firstResult.duplicate !== false || !second.ok || secondResult.duplicate !== true) {
+    throw new Error(`${provider} duplicate delivery was not handled idempotently.`);
+  }
+}
+
 async function postTwilio(url: string, params: Record<string, string>): Promise<Response> {
   const signature = twilio.getExpectedTwilioSignature(twilioToken, url, params);
   return await fetch(url, {
@@ -49,6 +69,8 @@ async function main(): Promise<void> {
   const suffix = randomUUID();
   const businessId = randomUUID();
   const polarEventId = `polar-${suffix}`;
+  const stripeDelivery = certificationInvoicePaid({ businessId, suffix, livemode: stripeKeyMode(process.env.STRIPE_API_KEY ?? "") === "live" });
+  const billingEventId = billingProvider === "stripe" ? stripeDelivery.eventId : polarEventId;
   const resendEventId = `resend-${suffix}`;
   const messageSid = `SM${suffix.replaceAll("-", "")}`;
   const businessPhone = "+15555550101";
@@ -57,17 +79,18 @@ async function main(): Promise<void> {
     await migrator.db.insert(businesses).values({ id: businessId, slug: `webhook-${suffix}`, name: "Webhook Check", timezone: "UTC", businessType: "service_company" });
     await migrator.db.insert(phoneNumbers).values({ businessId, e164: businessPhone, providerPhoneId: `PN${suffix.replaceAll("-", "")}` });
 
-    const polarUrl = `${adminBaseUrl}/api/webhooks/polar`;
-    const polarBody = JSON.stringify({ id: polarEventId, type: "order.created", timestamp: new Date().toISOString(), data: { businessId, id: `order-${suffix}` } });
-    const invalidPolar = await fetch(polarUrl, { method: "POST", headers: { ...polarHeaders(polarBody, polarEventId), "webhook-signature": "v1,invalid" }, body: polarBody });
-    if (invalidPolar.status !== 401) throw new Error(`Tampered Polar webhook returned ${invalidPolar.status} instead of 401.`);
-    const firstPolar = await fetch(polarUrl, { method: "POST", headers: polarHeaders(polarBody, polarEventId), body: polarBody });
-    const secondPolar = await fetch(polarUrl, { method: "POST", headers: polarHeaders(polarBody, polarEventId), body: polarBody });
-    const firstPolarResult = await firstPolar.json() as { duplicate?: boolean };
-    const secondPolarResult = await secondPolar.json() as { duplicate?: boolean };
-    if (!firstPolar.ok || firstPolarResult.duplicate !== false || !secondPolar.ok || secondPolarResult.duplicate !== true) {
-      throw new Error("Polar duplicate delivery was not handled idempotently.");
+    if (billingProvider === "stripe") {
+      // A paid invoice of the business, as Stripe sends it to /api/webhooks/stripe.
+      const stripeHeaders = () => ({ "content-type": "application/json", "stripe-signature": stripeSignatureHeader(stripeDelivery.body, stripeSecret) });
+      await checkBillingDelivery("Stripe", `${adminBaseUrl}/api/webhooks/stripe`, stripeDelivery.body, stripeHeaders, { "stripe-signature": `t=${Math.floor(Date.now() / 1000)},v1=invalid` });
+    } else {
+      const polarBody = JSON.stringify({ id: polarEventId, type: "order.created", timestamp: new Date().toISOString(), data: { businessId, id: `order-${suffix}` } });
+      await checkBillingDelivery("Polar", `${adminBaseUrl}/api/webhooks/polar`, polarBody, () => polarHeaders(polarBody, polarEventId), { "webhook-signature": "v1,invalid" });
     }
+    // An endpoint left at the other provider is answered 404, and never stored.
+    const otherRoute = `${adminBaseUrl}/api/webhooks/${billingProvider === "stripe" ? "polar" : "stripe"}`;
+    const other = await fetch(otherRoute, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    if (other.status !== 404) throw new Error(`${otherRoute} answered ${other.status} on a deployment billed through ${billingProvider}, instead of 404.`);
 
     if (resendSecret) {
       const resendUrl = `${adminBaseUrl}/api/webhooks/resend`;
@@ -95,7 +118,7 @@ async function main(): Promise<void> {
     const secondStatus = await postTwilio(statusUrl, statusParams);
     if (!firstStatus.ok || !secondStatus.ok) throw new Error(`Twilio status delivery failed with statuses ${firstStatus.status}/${secondStatus.status}.`);
 
-    const eventIds = [polarEventId, messageSid, ...(resendSecret ? [resendEventId] : [])];
+    const eventIds = [billingEventId, messageSid, ...(resendSecret ? [resendEventId] : [])];
     const storedEvents = await migrator.db.select({ provider: providerEvents.provider, providerEventId: providerEvents.providerEventId })
       .from(providerEvents)
       .where(inArray(providerEvents.providerEventId, eventIds));
@@ -107,12 +130,13 @@ async function main(): Promise<void> {
     }
 
     console.log("webhook-signatures: ok");
-    console.log("webhook-polar-idempotency: ok");
+    console.log(`webhook-${billingProvider}-idempotency: ok`);
+    console.log("webhook-other-billing-provider-refused: ok");
     if (resendSecret) console.log("webhook-resend-idempotency: ok");
     console.log("webhook-twilio-idempotency: ok");
   } finally {
     await migrator.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId)).catch(() => undefined);
-    await migrator.db.delete(providerEvents).where(inArray(providerEvents.providerEventId, [polarEventId, messageSid, ...(resendSecret ? [resendEventId] : [])])).catch(() => undefined);
+    await migrator.db.delete(providerEvents).where(inArray(providerEvents.providerEventId, [billingEventId, messageSid, ...(resendSecret ? [resendEventId] : [])])).catch(() => undefined);
     await migrator.db.delete(businesses).where(eq(businesses.id, businessId)).catch(() => undefined);
     await migrator.pool.end();
   }

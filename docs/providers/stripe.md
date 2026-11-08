@@ -1,0 +1,109 @@
+---
+meta:
+  title: Configure Stripe billing
+  navLabel: Stripe Billing
+  contentType: How-to
+  category: Providers
+---
+
+<!-- Content plan: Help operators set up a deployment that bills through Stripe instead of Polar. Cover the account, the keys and their permissions, the variables, pnpm billing --stripe, the webhook endpoints, the Dashboard settings and the checks. Goal: a sandbox deployment that sells, bills overage and checks itself. Open questions: Stripe's own names for each restricted key permission, confirmed by the first sandbox run. -->
+
+# Configure Stripe billing
+
+Use this page to bill a new deployment's businesses through Stripe instead of Polar. A deployment bills through one provider, chosen with `BILLING_PROVIDER` when it's set up, and stays with it ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)). With Stripe the operator is the seller: Stripe runs the checkout page, the billing portal, the subscriptions and the invoices, and Stripe Tax works out the taxes, which the operator registers for and files.
+
+**Status:** a preview, built on `feature/receptionists` ([Stripe billing](../roadmap/stripe-billing.md)). A deployment bills through Stripe only with `BILLING_PROVIDER=stripe` and `BILLING_STRIPE_PREVIEW=true`, and only with Stripe test keys, until step 18 of that plan has run its sandbox scenarios and switched Stripe on. Nothing here has been tried against a real Stripe sandbox yet. Written on 2026-11-08 from the code of step 17.
+
+## Know what Stripe does here
+
+| What | How |
+| --- | --- |
+| Selling a plan | A Stripe Checkout page in subscription mode, on the business's own Stripe customer, with Stripe Tax and the billing address |
+| Overage | A second subscription per business, monthly and anchored to the 1st (UTC), with three metered prices that bill dollars: the worker sends each usage's price to a money meter |
+| Upgrades | **Settings > Plan**, changed at once once Stripe has the payment; a payment the bank wants confirmed shows **Complete payment** |
+| Downgrades, cancelling, resuming | **Settings > Plan**, at the renewal; Stripe's billing portal keeps cards, invoices and billing details, with its plan switches and cancelling off |
+| Promo plans | A coupon on the plan's own product, and a schedule that ends the promo at the renewal |
+| Refunds and disputes | Done in Stripe's Dashboard; the webhook records them on the business's payments |
+| Checks | A daily comparison of `billing.json`, the tables and Stripe, and a daily comparison of what was sent with what Stripe's meters hold |
+
+## Set up a Stripe deployment
+
+1. **An account.** A Stripe account for each live deployment, grouped in a Stripe Organization when there are several, and a sandbox for each test deployment (decision 6 of [Stripe billing](../roadmap/stripe-billing.md#know-what-was-decided)). A deployment stays with the account it's first linked to: `pnpm billing` refuses another account or the other mode. Fill in the account's business details, payouts, and Stripe Tax's origin address and registrations, as an accountant advises.
+2. **The brand's `stripe` block.** The brand's `billing.json` needs a `stripe` block, added in a pull request and deployed, or `pnpm billing --stripe` refuses the file ([`brands/README.md`](../../brands/README.md#billingjson)). It says how plan changes charge (`upgrade`, `downgrade`), whether the portal may switch plans or cancel (`portalPlanChanges`, `portalCancel`, both false by decision 4), the tax behavior and product tax code (`tax`), the hours Stripe waits before finalizing an invoice with usage (`usageGraceHours`), how overage is sold (`overage`: `separate`) and `managedPayments` (false). Adding the block changes the file's hash, so every deployment of the brand then runs `pnpm billing apply` once, Polar ones too.
+3. **Two restricted keys.** In the account, **Developers > API keys > Create restricted key** *(name not confirmed)*, make one key for the admin and one for the worker, each with only its permissions (see [the keys](#know-the-keys)). Copy each into your password manager. A secret key (`sk_`) works, but can do anything in the account.
+4. **The variables** of [the table below](#know-the-variables) on the admin and the worker. `devops/bootstrap.mjs` does steps 3 and 4 for a deployment whose settings say `BILLING_PROVIDER=stripe`: it asks for the two keys (`STRIPE_ADMIN_KEY` and `STRIPE_WORKER_KEY` in its secrets file), checks that each is of the deployment's mode and that both belong to one account, and writes that account as `STRIPE_ACCOUNT_ID` ([`devops/bootstrap.md`](../../devops/bootstrap.md)).
+5. **After the deploy: an operator key and a setup key.** `pnpm billing` reaches the deployment with a platform key, as on Polar ([Selling plans (Stripe)](../deployment/guide/part-3-outside-services.md#selling-plans-stripe), step 5). Make a third restricted key, the setup key, with write access to the catalog objects, and give it to `pnpm billing` as `STRIPE_SETUP_KEY`, or type it when asked.
+6. **Set Stripe up from the file:**
+
+   ```sh
+   pnpm billing plan  --brand <brand> --stripe sandbox
+   pnpm billing apply --brand <brand> --stripe sandbox --railway-file .env.stripe
+   ```
+
+   `apply` makes the products, prices, coupons, the three meters with their overage prices, the billing portal's configuration, the webhook endpoint and the meter error destination, then links them in the catalog. `--railway-file` saves `STRIPE_ACCOUNT_ID` for the admin and the worker, and the two signing secrets Stripe shows only once, `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET`, for the admin. Set them with `node devops/railway-vars.mjs .env.stripe`, then delete the file.
+7. **What Stripe's API can't set,** which `plan` and `verify` list, in the Dashboard: the tax registrations and origin address, the grace period of `usageGraceHours` before an invoice with usage is finalized, the retries after a failed payment and what follows the last one, and the branding, support email and statement descriptor that checkout, invoices and the portal show.
+8. **Check:** `pnpm billing verify --brand <brand> --stripe sandbox` should end `Result: in sync (exit 0)`. It reads with `STRIPE_READ_KEY`, else the setup key.
+
+## Know the keys
+
+Stripe's names for each permission are confirmed by the first sandbox run, so this table names the resources each key uses. None of these keys is a webhook secret, and none of them goes in `billing.json`.
+
+| Key | Where | Needs | Used for |
+| --- | --- | --- | --- |
+| The admin's `STRIPE_API_KEY` | Railway, on the admin | Write on billing portal sessions, read on customers | **Manage subscription** in **Settings > Plan**, which opens Stripe's billing portal, and finding the business of a charge's customer when a refund or dispute arrives |
+| The worker's `STRIPE_API_KEY` | Railway, on the worker | Write on customers (with their balance transactions), Checkout Sessions, subscriptions, subscription schedules, invoices and meter events; read on invoice payments, meters and their event summaries, products, prices, coupons, the billing portal's configurations, and Stripe Tax's settings and registrations | Checkout, the overage subscription, plan changes, cancelling, usage, deletion, the daily checks, and its startup check of the key's account |
+| `STRIPE_SETUP_KEY` | The operator's computer, for `pnpm billing apply` | Write on products, prices, coupons, meters, the billing portal's configurations, webhook endpoints and event destinations; read on Stripe Tax | Setting Stripe up from `billing.json` |
+| `STRIPE_READ_KEY` | The operator's computer, for `pnpm billing plan` and `verify` | Read on the same, and on subscriptions for `devops/reset-database.mjs` | Checking; never on a service |
+
+The setup and read keys never go on Railway. Make them for the run and delete them afterwards, as with Polar's setup token.
+
+## Know the variables
+
+| Variable | Service | Value |
+| --- | --- | --- |
+| `BILLING_PROVIDER` | admin and worker | `stripe`. Empty means `polar`; any other value stops the service at startup |
+| `BILLING_STRIPE_PREVIEW` | admin and worker | `true`, until step 18 of the plan switches Stripe on; without it `BILLING_PROVIDER=stripe` stops the service |
+| `STRIPE_API_KEY` | admin and worker, each its own | A restricted key, `rk_test_` in a sandbox. The preview takes test keys only |
+| `STRIPE_ACCOUNT_ID` | admin and worker | The keys' account, `acct_...`. The worker checks its key against it at startup, and `pnpm billing` against the setup key |
+| `STRIPE_WEBHOOK_SECRET` | admin | The webhook endpoint's signing secret, `whsec_...`; two, comma-separated, while you roll it |
+| `STRIPE_METER_WEBHOOK_SECRET` | admin | The meter error destination's signing secret |
+
+A Polar deployment needs none of them, and a Stripe deployment none of `POLAR_*`. On a server, Docker Compose gives the admin and the worker the same `STRIPE_API_KEY` line from `.env`, so there one key holds both sets of permissions. The landing site's build takes `BILLING_PROVIDER` too, so its terms and privacy pages name Stripe as the payment processor.
+
+## Understand the billing flow
+
+1. An owner picks a plan. The worker finds or makes the business's Stripe customer and makes a Checkout page for the plan's price, keyed so a retry within the minute gets the same page.
+2. The owner pays. Stripe's events reach `/api/webhooks/stripe`; the admin stores each once, and the worker reads the subscription back before it applies it, so events applied in any order end on Stripe's latest state.
+3. Once the plan is live, `billing.ensureOverage` makes the overage subscription. Until it exists, usage stops at the allowance.
+4. Usage past the allowance goes to the money meters as its price in dollars, dated by when it happened while its month's invoice can still take it. Stripe invoices the month's overage on the 1st, after the grace period.
+5. Each day `billing.checkUsageTotals` compares what was confirmed sent with what the meters hold, and corrects a gap of half a cent or more in the open month, crediting the balance with what the month can't take.
+6. A deleted business's plan and overage subscriptions end at once, each with its last invoice.
+
+[Stripe billing](../roadmap/stripe-billing.md) describes each step as it was built, with its tests.
+
+## Know the webhook endpoints
+
+| Endpoint | Signed with | Events |
+| --- | --- | --- |
+| `/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` | `checkout.session.completed` and `expired`; `customer.subscription.created`, `updated`, `deleted`, `paused`, `resumed`, `pending_update_applied` and `pending_update_expired`; `invoice.paid`, `payment_failed` and `finalized`; `charge.refunded` and `charge.dispute.created` (`STRIPE_WEBHOOK_EVENTS`) |
+| `/api/webhooks/stripe/meter-errors` | `STRIPE_METER_WEBHOOK_SECRET` | The meter error destination's thin events, `v1.billing.meter.error_report_triggered` and `v1.billing.meter.no_meter_found` |
+
+A delivery more than 300 seconds old, or of the other mode, is refused. `/api/webhooks/polar` answers 404 on a Stripe deployment, and logs `ops.billing.webhook_wrong_provider` at most once a minute.
+
+## Check it
+
+- `billing.verifyCatalog` checks the file, the tables and Stripe every day, with the worker's key, and reports drift as `ops.billing.profile_drift` with `provider` `stripe`.
+- `billing.checkUsageTotals` reports each gap it corrects as `ops.billing.usage_totals_mismatch`.
+- The worker's startup reports `ops.billing.provider_mismatch` when its key belongs to another account than `STRIPE_ACCOUNT_ID`, and then runs without billing.
+- The other signals are in [billing's table](../billing/README.md#watch-billing).
+- Certification: `pnpm replacement:webhooks` sends a signed Stripe event to a Stripe deployment, and `pnpm replacement:billing` runs the usage checks on Stripe accounts, with `BILLING_PROVIDER=stripe`, `STRIPE_WEBHOOK_SECRET` and a test `STRIPE_API_KEY` in its environment.
+
+## Reset a test deployment
+
+`devops/reset-database.mjs` refuses a database linked to Stripe's live mode unless given `--allow-live-payments`. With `STRIPE_READ_KEY` set, it lists the subscriptions Stripe still bills the deployment's customers for, overage subscriptions included, so you can cancel them in the Dashboard first.
+
+## Know what's left
+
+- The sandbox scenarios of step 18, which run every flow above against a real sandbox, and the checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed.
+- Stripe's names for each key's permissions, from that run.
+- The legal pages: with Stripe the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments.

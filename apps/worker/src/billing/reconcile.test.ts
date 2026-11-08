@@ -75,6 +75,22 @@ describe("billing jobs: reconcile and the sweep", () => {
     expect(result).toEqual({ status: "skipped", entityId: providerEventId });
   });
 
+  it("says which provider holds a subscription the catalog doesn't link", async () => {
+    vi.mocked(reconcileBillingProviderEvent).mockResolvedValue("held");
+    vi.mocked(loadBillingEventSubject).mockResolvedValue(null);
+    const logged = [vi.spyOn(console, "error").mockImplementation(() => undefined), vi.spyOn(console, "warn").mockImplementation(() => undefined), vi.spyOn(console, "log").mockImplementation(() => undefined)];
+    const run = async (billing?: BillingProvider) => await handleJob({ jobId: randomUUID(), type: "billing.reconcile", queue: "default", businessId: randomUUID(), payload: { providerEventId: randomUUID() }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false }, { domain: { db: undefined as never }, ...(billing ? { billing } : {}) });
+    const text = () => logged.flatMap((spy) => spy.mock.calls.map((call) => call.join(" "))).join("\n");
+    try {
+      await run({ id: "stripe", can: { readBack: true } } as unknown as BillingProvider);
+      expect(text()).toContain("A live Stripe subscription is for a price no plan maps to");
+      await run();
+      expect(text()).toContain("A live Polar subscription is for a product no plan maps to");
+    } finally {
+      for (const spy of logged) spy.mockRestore();
+    }
+  });
+
   describe("the billing sweep", () => {
     const job: JobEnvelope = { jobId: randomUUID(), type: "billing.sweep", queue: "maintenance", businessId: null, payload: {}, trace: {}, idempotencyKey: "billing-sweep", scheduled: true };
     const counts = (values: Partial<Record<"provider_event" | "usage_event" | "checkout_request", number>> = {}) => ({ provider_event: 0, usage_event: 0, checkout_request: 0, ...values });

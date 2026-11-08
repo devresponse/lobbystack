@@ -12,7 +12,7 @@ meta:
 
 Use this page to bill a new deployment's businesses through Stripe instead of Polar. A deployment bills through one provider, chosen with `BILLING_PROVIDER` when it's set up, and stays with it ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)). With Stripe the operator is the seller: Stripe runs the checkout page, the billing portal, the subscriptions and the invoices, and Stripe Tax works out the taxes, which the operator registers for and files.
 
-**Status:** built on `feature/receptionists` ([Stripe billing](../roadmap/stripe-billing.md)), and switched on on 2026-11-08, once its sandbox scenarios had passed twice in a row with Stripe as the merchant of record. A deployment bills through Stripe with `BILLING_PROVIDER=stripe`: in a sandbox with test keys, and for real with live ones.
+**Status:** built on `feature/receptionists` ([Stripe billing](../billing/stripe-history.md)), and switched on on 2026-11-08, once its sandbox scenarios had passed twice in a row with Stripe as the merchant of record. A deployment bills through Stripe with `BILLING_PROVIDER=stripe`: in a sandbox with test keys, and for real with live ones.
 
 ## Know what Stripe does here
 
@@ -42,11 +42,11 @@ With `managedPayments: true` and `overage: checkout` in the brand's `stripe` blo
 | Cards | The portal | The portal or Link; the API can't set a subscription's card |
 | Currency | The catalog's | The customer's own abroad: Stripe's Adaptive Pricing can't be turned off, so a transaction can be in another currency than the plans |
 
-A sandbox showed each of these on a paid test subscription ([Stripe billing](../roadmap/stripe-billing.md#merchant-of-record-as-a-second-mode)). A Stripe subscription with Managed Payments starts only from a Checkout page, so its tests start from test checkouts a person pays. Before the first live sale, the brand's website names Link as the seller in its payment terms.
+A sandbox showed each of these on a paid test subscription ([Stripe billing](../billing/stripe-history.md#merchant-of-record-as-a-second-mode)). A Stripe subscription with Managed Payments starts only from a Checkout page, so its tests start from test checkouts a person pays. Before the first live sale, the brand's website names Link as the seller in its payment terms.
 
 ## Set up a Stripe deployment
 
-1. **An account.** A Stripe account for each live deployment, grouped in a Stripe Organization when there are several, and a sandbox for each test deployment (decision 6 of [Stripe billing](../roadmap/stripe-billing.md#know-what-was-decided)). A deployment stays with the account it's first linked to: `pnpm billing` refuses another account or the other mode. Fill in the account's business details, payouts, and Stripe Tax's origin address and registrations, as an accountant advises.
+1. **An account.** A Stripe account for each live deployment, grouped in a Stripe Organization when there are several, and a sandbox for each test deployment (decision 6 of [Stripe billing](../billing/stripe-history.md#know-what-was-decided)). A deployment stays with the account it's first linked to: `pnpm billing` refuses another account or the other mode. Fill in the account's business details, payouts, and Stripe Tax's origin address and registrations, as an accountant advises.
 2. **The brand's `stripe` block.** The brand's `billing.json` needs a `stripe` block, added in a pull request and deployed, or `pnpm billing --stripe` refuses the file ([`brands/README.md`](../../brands/README.md#billingjson)). It says how plan changes charge (`upgrade`, `downgrade`), whether the portal may switch plans or cancel (`portalPlanChanges`, `portalCancel`, both false by decision 4), the tax behavior and product tax code (`tax`), the hours Stripe waits before finalizing an invoice with usage (`usageGraceHours`), how overage is sold (`overage`) and who the seller is (`managedPayments`). AlloPlace's and RealInfoBot's files have theirs, with Stripe as the merchant of record: `overage: checkout` and `managedPayments: true`. A change to the block changes the file's hash, so every deployment of the brand then runs `pnpm billing apply` once, Polar ones too.
 3. **Two restricted keys.** In the account, **Developers > API keys > Create restricted key** *(name not confirmed)*, make one key for the admin and one for the worker, each with only its permissions (see [the keys](#know-the-keys)). Copy each into your password manager. A secret key (`sk_`) works, but can do anything in the account.
 4. **The variables** of [the table below](#know-the-variables) on the admin and the worker. `devops/bootstrap.mjs` does steps 3 and 4 for a deployment whose settings say `BILLING_PROVIDER=stripe`: it asks for the two keys (`STRIPE_ADMIN_KEY` and `STRIPE_WORKER_KEY` in its secrets file), checks that each is of the deployment's mode and that both belong to one account, and writes that account as `STRIPE_ACCOUNT_ID` ([`devops/bootstrap.md`](../../devops/bootstrap.md)).
@@ -96,7 +96,7 @@ A Polar deployment needs none of them, and a Stripe deployment none of `POLAR_*`
 5. Each day `billing.checkUsageTotals` compares what was confirmed sent with what the meters hold, and corrects a gap of half a cent or more in the open month, crediting the balance with what the month can't take.
 6. A deleted business's plan and overage subscriptions end at once, each with its last invoice.
 
-[Stripe billing](../roadmap/stripe-billing.md) describes each step as it was built, with its tests.
+[Stripe billing](../billing/stripe-history.md) describes each step as it was built, with its tests.
 
 ## Know the webhook endpoints
 

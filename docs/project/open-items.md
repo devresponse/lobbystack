@@ -70,6 +70,8 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 
 ## Build these when they're needed
 
+**Stripe billing's technical debt** ([the list](../billing/stripe-history.md#technical-debt)): a promo plan bought as an upgrade that waits for 3-D Secure loses its coupon on Stripe directly, affiliate payouts pay only US dollar commissions while both brands bill in Canadian dollars, and smaller clean-ups.
+
 **Protect the widget and the deployment.** None of these is started ([widget scalability](../reviews/widget-scalability-2026-10-15.md#do-these-in-order), [roadmap](../roadmap/protect-the-deployment.md)):
 
 - Cloudflare in front of the dashboard's domain with a rate-limit rule, as the only way in, then `TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip` on the admin, which turns on the per-IP limits.

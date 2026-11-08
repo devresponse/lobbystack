@@ -1,6 +1,6 @@
 # Bill businesses for plans and usage
 
-A business on a cloud deployment pays a monthly or yearly price for Starter or Pro, plus a small charge for each minute, text or call transfer past what its plan includes. The deployment's payment provider, Polar or Stripe, collects the money; LobbyStack tells it what each business used. This page says who pays, what the plans are, how the money moves, how an operator runs billing, and what to watch. Checked against `main` at `da1f548`, and made provider-neutral on 2026-11-08 for step 17 of [Stripe billing](../roadmap/stripe-billing.md), on `feature/receptionists`.
+A business on a cloud deployment pays a monthly or yearly price for Starter or Pro, plus a small charge for each minute, text or call transfer past what its plan includes. The deployment's payment provider, Polar or Stripe, collects the money; LobbyStack tells it what each business used. This page says who pays, what the plans are, how the money moves, how an operator runs billing, and what to watch. Checked against `main` at `da1f548`, and made provider-neutral on 2026-11-08 for step 17 of [Stripe billing](stripe-history.md), on `feature/receptionists`.
 
 The other billing pages:
 
@@ -9,6 +9,7 @@ The other billing pages:
 - [`brands/README.md`](../../brands/README.md#billingjson): how to write a brand's `billing.json`, its promo plans and its codes.
 - [Data model](data-model.md): the billing tables, columns and migrations.
 - [Design history](design-history.md): the options weighed, the ten steps, the two reviews and the decisions.
+- [Stripe billing's history](stripe-history.md): the nineteen steps that added Stripe beside Polar, merchant of record as a second mode, the review and the technical debt left.
 - [Selling plans (Polar)](../deployment/guide/part-3-outside-services.md#selling-plans-polar) and [Selling plans (Stripe)](../deployment/guide/part-3-outside-services.md#selling-plans-stripe) in the deployment guide: setting a provider up for a new instance, step by step.
 
 ## Know who pays
@@ -229,7 +230,7 @@ Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set (
 ## Know the known problems
 
 - **Changing a sold plan's terms** makes the usage screens and the cap disagree with the provider's invoices. Add a new plan instead.
-- **Stripe billing hasn't run against Stripe.** Every Stripe flow has run only against the in-memory Stripe; step 18 of [Stripe billing](../roadmap/stripe-billing.md) runs them on a sandbox before Stripe is switched on.
+- **Stripe billing hasn't run against Stripe.** Every Stripe flow has run only against the in-memory Stripe; step 18 of [Stripe billing](stripe-history.md) runs them on a sandbox before Stripe is switched on.
 - **Nothing has been tried against Polar since fork PR #59.** Upgrades, per-business customers, promo codes, promo endings and the monthly invoicing of yearly plans have been tested only against a stand-in built from Polar's code. Try a checkout, an upgrade, a code and the portal on the sandbox, and compare Polar's invoices with **Settings > Usage**.
 - **Before the first apply** the dashboard shows the brand's file as the build carries it, so an edit to `billing.json` shows only after `pnpm brands:build` and a new build. A phone number claim still counts the code's numbers until then (none on Free, one on Starter and Pro), which AlloPlace's file matches, and a `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variable's product charges whatever Polar has for it, whatever the screens say.
 - **Yearly products made before fork PR #73** invoice their overage once a year until `pnpm billing apply` runs once with `--allow-replace`, and the daily check reports them as drift until then. Their current subscribers stay on them.

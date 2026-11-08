@@ -58,7 +58,6 @@ Each feature has a status:
 
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
-| [Bill new deployments through Stripe](stripe-billing.md) | One billing provider per deployment, with Polar moved behind the same interfaces first, so a new deployment can sell through Stripe while existing ones stay on Polar | 19 steps, about 40 to 46 days; steps 1 to 8 help even if Stripe waits | Being built on `feature/receptionists` | 2026-11-05, outside the repository |
 
 ## Know the smaller items
 

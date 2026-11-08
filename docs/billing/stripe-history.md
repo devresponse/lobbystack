@@ -1,8 +1,8 @@
-# Bill new deployments through Stripe
+# Read how Stripe billing was built
 
-Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
+This was the roadmap page of Stripe billing, kept as its build history now that it's built: [Stripe billing](../providers/stripe.md) says how it works. Billing ran through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 17 and 19 are done. Step 18's scenarios are written and wait for a sandbox run.
+- **Status:** built on `feature/receptionists` on 2026-11-08, one step at a time; nothing goes to `main`. Every step is done, with Stripe as the merchant of record as a second mode, and Stripe was switched on once its sandbox scenarios had passed twice in a row in that mode.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones.
 
@@ -38,7 +38,7 @@ Each decision was taken as the study recommended, on 2026-11-08:
 
 ## Merchant of record as a second mode
 
-Proposed on 2026-11-08 and under way: Stripe as the merchant of record (Managed Payments) becomes a second Stripe mode beside Stripe directly, chosen per brand by `stripe.managedPayments` in its `billing.json`, with both brands on it. Decision 1 above stays the other mode, and both stay built and tested.
+Built on 2026-11-08: Stripe as the merchant of record (Managed Payments) is a second Stripe mode beside Stripe directly, chosen per brand by `stripe.managedPayments` in its `billing.json`, and both brands use it. Decision 1 above stays the other mode, and both stay built and tested.
 
 | | Stripe directly (`managedPayments: false`) | Merchant of record (`managedPayments: true`) |
 | --- | --- | --- |
@@ -305,13 +305,13 @@ The check for this step: `node devops/bootstrap.mjs up <settings> --dry-run` for
 
 ## Step 18: sandbox scenarios, and Stripe switched on
 
-Under way: the scenarios are written, and wait for their first run on a sandbox.
+Done on 2026-11-08.
 
 - **The scenarios** (`scripts/billing-scenarios.ts`, `pnpm billing:scenarios`): the first tab's list, run against a Stripe sandbox through the Stripe adapter, each scenario on a test clock of its own: checkout of a monthly and a yearly plan with the overage subscription on the 1st; a month's usage, a resend and a negative correction, held by the meters and invoiced on the 1st to the cent; upgrades paid, declined and with 3-D Secure; a downgrade at the renewal with **Keep my plan**; cancel and resume, and the overage subscription ending with its month; both promo endings and a discount taken off; a deletion; a refund led back to its invoice; a lost usage event corrected, and a balance credit; and every real event of those normalized to its business. [Stripe billing](../providers/stripe.md#run-the-sandbox-scenarios) says how to run them.
 - **How it runs:** it sets the sandbox up from a brand's `billing.json` through `stripePlanner`, as `pnpm billing apply` does, without the webhook endpoint and with the recommended `stripe` block while the file has none; it makes each plan subscription through the API with Stripe's test cards, and checks with Stripe's own reads; and it deletes its test clocks and coupons at the end. It refuses a live key and never prints one. Its command line, key check, dates, money and redaction are tested in `scripts/lib/billing-scenarios-core.test.ts`.
 - **The workflow** (`.github/workflows/billing-scenarios.yml`) runs it by hand, with the sandbox key in a repository secret. GitHub lists a manual workflow only from the default branch, and this work stays off `main`, so runs go from a computer for now.
 - **Unlike the plan:** deliveries twice and out of order stay with step 12's PostgreSQL tests, since the run has no deployment to deliver to; the run checks instead that every real event of the scenarios normalizes to its business. The list's entries that need a deployment or the Dashboard (a failed renewal through `past_due` to Free, the receptionist pause after a downgrade, a managed plan's takeover, two sandboxes, a key without a permission, and the finance export after a refund) wait for the sandbox deployment's run.
-- **Still to do in this step:** run the scenarios on a sandbox twice in a row and fix what they find, and the checks by hand. Then take the `BILLING_STRIPE_PREVIEW` gate away (the factory, `devops/bootstrap.mjs`'s refusal of `STRIPE=live`, the docs), add the `stripe` block to the `billing.json` of the brand that gets the first Stripe deployment, after which each deployment of that brand runs `pnpm billing apply` once, and make this page the feature page.
+- **Switched on:** with Stripe as the merchant of record, the run passed twice in a row against a sandbox on 2026-11-08, each subscription from a checkout paid with a test card. Then `BILLING_STRIPE_PREVIEW` went: the factory takes `BILLING_PROVIDER=stripe` alone and live keys, `devops/bootstrap.mjs` takes `STRIPE=live` and stops writing the switch, and `.env.example`, Compose, the Railway layout, the drift check and the docs drop it. Both brands' `billing.json` got their `stripe` block, with Stripe as the merchant of record, and the brand files' hash moved with it, so each deployment of either brand runs `pnpm billing apply` once. The checks by hand stay with [Stripe billing](../providers/stripe.md#know-whats-left).
 
 ## Step 19: the contract (`0147`)
 

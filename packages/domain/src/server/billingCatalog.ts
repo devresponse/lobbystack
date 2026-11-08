@@ -381,10 +381,9 @@ function runResource(row: Row): ApiBillingCatalogRun {
 
 type CatalogState = { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; latest: Row | null; latestLink: Row | null };
 
-/** The latest run of a kind; link means a link to any provider, whether its row says polar or link. */
+/** The latest run of a kind; link means a link to any provider. */
 async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "link" | "verify"): Promise<Row | null> {
-  const kinds = kind === "link" ? ["polar", "link"] : [kind];
-  const [row] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind in (${sql.join(kinds.map((entry) => sql`${entry}`), sql`, `)}) order by started_at desc, id desc limit 1`)).rows;
+  const [row] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind = ${kind} order by started_at desc, id desc limit 1`)).rows;
   return row ?? null;
 }
 
@@ -819,7 +818,8 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
     if (refusals.length) throw new PublicApiError(409, "conflict", `${link.provider === "polar" ? "Polar's products" : `${name}'s objects`} can't be linked: ${[...new Set(refusals.map((refusal) => refusal.code))].join(", ")}. details lists each reason.`, refusals.map((refusal) => ({ path: refusal.path, message: refusal.message, code: refusal.code })));
 
     const [run] = await tx.insert(billingRuns).values({
-      kind: base.kind,
+      // Stored as link for every provider; runResource shows Polar's as polar.
+      kind: "link",
       startedAt: runStart(latestLink),
       status: changes.length ? "applied" : "unchanged",
       brand: link.brand,
@@ -960,9 +960,8 @@ export async function listBillingCatalogRunsForApi(context: DomainContext, input
   if (input.kind !== undefined && !(runKinds as readonly string[]).includes(input.kind)) throw invalidRequest("kind must be catalog, polar, link or verify.", [{ path: "kind", message: "One of catalog, polar, link or verify." }]);
   // Run times are stored to the millisecond, as the cursor carries them, so the comparison is exact.
   const conditions: SQL[] = [];
-  // polar: Polar's links, whether the row says polar or link. link: every provider's links.
-  if (input.kind === "polar") conditions.push(sql`(kind = 'polar' or (kind = 'link' and provider = 'polar'))`);
-  else if (input.kind === "link") conditions.push(sql`kind in ('polar', 'link')`);
+  // polar: Polar's links, as the API has named them. link: every provider's links.
+  if (input.kind === "polar") conditions.push(sql`kind = 'link' and provider = 'polar'`);
   else if (input.kind !== undefined) conditions.push(sql`kind = ${input.kind}`);
   if (cursor) conditions.push(sql`(started_at, id) < (${cursor.at.toISOString()}::timestamptz, ${cursor.id}::uuid)`);
   const where = conditions.length ? sql`where ${sql.join(conditions, sql` and `)}` : sql``;

@@ -5,9 +5,10 @@ import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { businesses, createDatabaseClient, type DatabaseTransaction } from "@lobbystack/db";
 
-// Migration 0146: billing storage that names its provider (ADR 0010). The
-// expand half: new columns beside Polar's, filled from them, and triggers that
-// keep each pair equal whichever release writes the row.
+// Billing storage that names its provider (ADR 0010): migration 0146 added
+// provider-neutral columns beside Polar's, and 0147, the contract, dropped
+// Polar's. The database here is at 0147; the contract's own test rebuilds the
+// state 0146 left inside a transaction it rolls back.
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -51,9 +52,31 @@ async function failure(tx: DatabaseTransaction, statement: ReturnType<typeof sql
   throw new Error("The statement went through.");
 }
 
-const migration = readFileSync(new URL("../../../db/migrations/0146_billing_provider.sql", import.meta.url), "utf8");
-/** The migration's backfills: the UPDATEs that fill the new columns of rows from before it. */
-const backfills = migration.match(/^UPDATE public\.[\s\S]*?;$/gm) ?? [];
+const migrationText = (name: string) => readFileSync(new URL(`../../../db/migrations/${name}`, import.meta.url), "utf8");
+const expand = migrationText("0146_billing_provider.sql");
+const contract = migrationText("0147_billing_provider_contract.sql");
+
+/**
+ * The schema as 0146 left it, inside the test's transaction: the Polar
+ * columns and indexes back, without the view and the function that 0147 made
+ * again, then 0146 itself, which makes its triggers, checks, view and function.
+ */
+async function as0146Left(tx: DatabaseTransaction): Promise<void> {
+  await tx.execute(sql.raw(`
+    DROP FUNCTION app.billing_code_offers(text);
+    DROP VIEW public.billing_offers;
+    ALTER TABLE public.billing_runs ADD COLUMN polar_env varchar(10) CHECK (polar_env IN ('sandbox', 'production')), ADD COLUMN polar_org text;
+    ALTER TABLE public.billing_prices ADD COLUMN polar_id text;
+    CREATE UNIQUE INDEX billing_prices_polar_unique ON public.billing_prices (polar_id) WHERE polar_id IS NOT NULL;
+    ALTER TABLE public.billing_plans ADD COLUMN polar_disc text;
+    CREATE UNIQUE INDEX billing_plans_polar_disc_unique ON public.billing_plans (polar_disc) WHERE polar_disc IS NOT NULL;
+    ALTER TABLE public.billing_transactions ADD COLUMN polar_customer_id text;
+    CREATE INDEX provider_events_polar_received_idx ON public.provider_events (created_at) WHERE status = 'received' AND provider = 'polar';
+    ALTER TABLE public.billing_accounts DROP CONSTRAINT billing_accounts_source_check;
+    ALTER TABLE public.billing_usage_events DROP CONSTRAINT billing_usage_events_rate_cents_check;
+  `));
+  await tx.execute(sql.raw(expand));
+}
 
 const hash = "a".repeat(64);
 const names = JSON.stringify({ en: "Storage test", fr: "Storage test", es: "Storage test", sr: "Storage test" });
@@ -74,119 +97,59 @@ function planInsert(code: string, discount: { polar_disc?: string; provider_disc
 }
 
 const planCode = () => `storage-${randomUUID().slice(0, 8)}`;
+const keys = () => sql`${randomUUID()}::uuid, 'test', ${randomUUID()}, ${hash}`;
 
-describe.skipIf(!client)("billing storage that names its provider (migration 0146)", () => {
-  it("has a backfill for each table whose Polar column has a twin", () => {
-    expect(backfills.map((statement) => statement.match(/^UPDATE (public\.\w+)/)![1])).toEqual(["public.billing_runs", "public.billing_prices", "public.billing_plans", "public.billing_transactions"]);
-  });
-
-  it("fills the new columns of rows written before it from the Polar ones, and a second run changes nothing", async () => {
+describe.skipIf(!client)("billing storage that names its provider (migrations 0146 and 0147)", () => {
+  it("drops the Polar columns of a database at 0146 that holds rows of both providers, and keeps what their twins hold", async () => {
     await rollbackTest(async (tx) => {
+      await as0146Left(tx);
       const businessId = await business(tx);
-      const code = planCode();
-      const [disc, product, customer, order, liveOrg, sandboxOrg] = ["disc", "prod", "cus", "order", "org", "org"].map(unique);
-      // Rows as the release before wrote them: Polar's columns only, with no trigger yet to fill the rest.
-      await tx.execute(sql`set local session_replication_role = replica`);
-      await tx.execute(planInsert(code, { polar_disc: disc! }));
-      await tx.execute(sql`insert into public.billing_prices (plan, period, currency, cents, polar_id) values (${code}, 'monthly', 'cad', 5000, ${product})`);
-      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'storage-test', 1, ${hash}, '{}', 'production', ${liveOrg}), ('verify', 'drift', 'storage-test', 1, ${hash}, '{}', 'sandbox', ${sandboxOrg})`);
-      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, key_id, partner, idem_key, req_hash) values ('catalog', 'applied', 'storage-test', 1, ${hash}, '{}', ${randomUUID()}::uuid, 'test', ${randomUUID()}, ${hash})`);
-      await tx.execute(sql`insert into public.billing_transactions (business_id, kind, source_id, status, amount_cents, currency, occurred_at, polar_customer_id) values (${businessId}::uuid, 'order', ${order}, 'paid', 4900, 'cad', now(), ${customer})`);
-      await tx.execute(sql`set local session_replication_role = origin`);
+      const [polarPlan, stripePlan] = [planCode(), planCode()];
+      const [disc, coupon, product, price, customer, stripeCustomer, org, account] = ["disc", "coupon", "prod", "price", "cus", "cus", "org", "acct"].map(unique);
+      // Polar's rows as the release before 0146 wrote them, which 0146's triggers fill the twins of; Stripe's as the code writes them now.
+      await tx.execute(planInsert(polarPlan, { polar_disc: disc! }));
+      await tx.execute(planInsert(stripePlan, { provider_disc: coupon! }));
+      await tx.execute(sql`insert into public.billing_prices (plan, period, currency, cents, polar_id) values (${polarPlan}, 'monthly', 'cad', 5000, ${product})`);
+      await tx.execute(sql`insert into public.billing_prices (plan, period, currency, cents, provider_ref) values (${stripePlan}, 'monthly', 'cad', 5000, ${price})`);
+      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org, key_id, partner, idem_key, req_hash) values ('polar', 'applied', 'storage-test', 1, ${hash}, '{}', 'production', ${org}, ${keys()})`);
+      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'storage-test', 1, ${hash}, '{}', 'sandbox', ${org})`);
+      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account, key_id, partner, idem_key, req_hash) values ('link', 'applied', 'storage-test', 1, ${hash}, '{}', 'stripe', 'sandbox', ${account}, ${keys()})`);
+      await tx.execute(sql`insert into public.billing_transactions (business_id, kind, source_id, status, amount_cents, currency, occurred_at, polar_customer_id) values (${businessId}::uuid, 'order', ${unique("order")}, 'paid', 4900, 'cad', now(), ${customer})`);
+      await tx.execute(sql`insert into public.billing_transactions (business_id, kind, source_id, status, amount_cents, currency, occurred_at, provider_customer_id) values (${businessId}::uuid, 'order', ${unique("in")}, 'paid', 4900, 'cad', now(), ${stripeCustomer})`);
 
-      const read = async () => ({
-        plan: (await rows(tx, sql`select polar_disc, provider_disc from public.billing_plans where code = ${code}`))[0],
-        price: (await rows(tx, sql`select polar_id, provider_ref from public.billing_prices where plan = ${code}`))[0],
-        runs: await rows(tx, sql`select kind, polar_env, polar_org, provider, provider_env, provider_account from public.billing_runs where brand = 'storage-test' order by kind, status`),
-        transaction: (await rows(tx, sql`select polar_customer_id, provider_customer_id from public.billing_transactions where source_id = ${order}`))[0],
-      });
-      expect(await read()).toEqual({
-        plan: { polar_disc: disc, provider_disc: null },
-        price: { polar_id: product, provider_ref: null },
-        runs: [
-          { kind: "catalog", polar_env: null, polar_org: null, provider: null, provider_env: null, provider_account: null },
-          { kind: "verify", polar_env: "sandbox", polar_org: sandboxOrg, provider: null, provider_env: null, provider_account: null },
-          { kind: "verify", polar_env: "production", polar_org: liveOrg, provider: null, provider_env: null, provider_account: null },
-        ],
-        transaction: { polar_customer_id: customer, provider_customer_id: null },
-      });
+      await tx.execute(sql.raw(contract));
 
-      for (const backfill of backfills) await tx.execute(sql.raw(backfill));
-      const filled = {
-        plan: { polar_disc: disc, provider_disc: disc },
-        price: { polar_id: product, provider_ref: product },
-        runs: [
-          // A catalog run names no provider.
-          { kind: "catalog", polar_env: null, polar_org: null, provider: null, provider_env: null, provider_account: null },
-          { kind: "verify", polar_env: "sandbox", polar_org: sandboxOrg, provider: "polar", provider_env: "sandbox", provider_account: sandboxOrg },
-          { kind: "verify", polar_env: "production", polar_org: liveOrg, provider: "polar", provider_env: "live", provider_account: liveOrg },
-        ],
-        transaction: { polar_customer_id: customer, provider_customer_id: customer },
-      };
-      expect(await read()).toEqual(filled);
-      for (const backfill of backfills) await tx.execute(sql.raw(backfill));
-      expect(await read()).toEqual(filled);
-    });
-  });
-
-  it("keeps each new column and its Polar twin equal, whichever release writes the row", async () => {
-    await rollbackTest(async (tx) => {
-      const businessId = await business(tx);
-      const [oldPlan, newPlan] = [planCode(), planCode()];
-      const [oldDisc, newDisc, otherDisc, oldProduct, newProduct, otherProduct, oldCustomer, newCustomer, otherCustomer] = ["disc", "disc", "disc", "prod", "prod", "prod", "cus", "cus", "cus"].map(unique);
-
-      // Plans: the previous release writes polar_disc, this one provider_disc.
-      await tx.execute(planInsert(oldPlan, { polar_disc: oldDisc! }));
-      await tx.execute(planInsert(newPlan, { provider_disc: newDisc! }));
-      const discounts = async () => await rows(tx, sql`select code, polar_disc, provider_disc from public.billing_plans where code in (${oldPlan}, ${newPlan}) order by code = ${oldPlan} desc`);
-      expect(await discounts()).toEqual([{ code: oldPlan, polar_disc: oldDisc, provider_disc: oldDisc }, { code: newPlan, polar_disc: newDisc, provider_disc: newDisc }]);
-      await tx.execute(sql`update public.billing_plans set provider_disc = ${otherDisc} where code = ${oldPlan}`);
-      await tx.execute(sql`update public.billing_plans set polar_disc = null where code = ${newPlan}`);
-      expect(await discounts()).toEqual([{ code: oldPlan, polar_disc: otherDisc, provider_disc: otherDisc }, { code: newPlan, polar_disc: null, provider_disc: null }]);
-      // An update that touches neither leaves both.
-      await tx.execute(sql`update public.billing_plans set sort = 7 where code = ${oldPlan}`);
-      expect((await discounts())[0]).toEqual({ code: oldPlan, polar_disc: otherDisc, provider_disc: otherDisc });
-
-      // Prices.
-      await tx.execute(sql`insert into public.billing_prices (plan, period, currency, cents, polar_id) values (${oldPlan}, 'monthly', 'cad', 5000, ${oldProduct})`);
-      await tx.execute(sql`insert into public.billing_prices (plan, period, currency, cents, provider_ref) values (${newPlan}, 'monthly', 'cad', 5000, ${newProduct})`);
-      const products = async () => await rows(tx, sql`select plan, polar_id, provider_ref from public.billing_prices where plan in (${oldPlan}, ${newPlan}) order by plan = ${oldPlan} desc`);
-      expect(await products()).toEqual([{ plan: oldPlan, polar_id: oldProduct, provider_ref: oldProduct }, { plan: newPlan, polar_id: newProduct, provider_ref: newProduct }]);
-      await tx.execute(sql`update public.billing_prices set polar_id = ${otherProduct} where plan = ${oldPlan}`);
-      await tx.execute(sql`update public.billing_prices set provider_ref = null where plan = ${newPlan}`);
-      expect(await products()).toEqual([{ plan: oldPlan, polar_id: otherProduct, provider_ref: otherProduct }, { plan: newPlan, polar_id: null, provider_ref: null }]);
-      // One product sells one price, by either name.
-      expect(await failure(tx, sql`update public.billing_prices set provider_ref = ${otherProduct} where plan = ${newPlan}`)).toMatchObject({ code: "23505" });
-
-      // Transactions.
-      const [first, second] = [unique("order"), unique("order")];
-      await tx.execute(sql`insert into public.billing_transactions (business_id, kind, source_id, status, amount_cents, currency, occurred_at, polar_customer_id) values (${businessId}::uuid, 'order', ${first}, 'paid', 4900, 'cad', now(), ${oldCustomer})`);
-      await tx.execute(sql`insert into public.billing_transactions (business_id, kind, source_id, status, amount_cents, currency, occurred_at, provider_customer_id) values (${businessId}::uuid, 'order', ${second}, 'paid', 4900, 'cad', now(), ${newCustomer})`);
-      const customers = async () => await rows(tx, sql`select polar_customer_id, provider_customer_id from public.billing_transactions where source_id in (${first}, ${second}) order by source_id = ${first} desc`);
-      expect(await customers()).toEqual([{ polar_customer_id: oldCustomer, provider_customer_id: oldCustomer }, { polar_customer_id: newCustomer, provider_customer_id: newCustomer }]);
-      await tx.execute(sql`update public.billing_transactions set provider_customer_id = ${otherCustomer} where source_id = ${first}`);
-      expect((await customers())[0]).toEqual({ polar_customer_id: otherCustomer, provider_customer_id: otherCustomer });
-
-      // Runs: Polar's environment names map both ways; a Stripe run has no Polar columns.
-      const [oldOrg, newOrg, account] = [unique("org"), unique("org"), unique("acct")];
-      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'storage-test', 1, ${hash}, '{}', 'production', ${oldOrg})`);
-      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'drift', 'storage-test', 1, ${hash}, '{}', 'polar', 'sandbox', ${newOrg})`);
-      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'failed', 'storage-test', 1, ${hash}, '{}', 'stripe', 'live', ${account})`);
-      expect(await rows(tx, sql`select status, polar_env, polar_org, provider, provider_env, provider_account from public.billing_runs where brand = 'storage-test' order by status`)).toEqual([
-        { status: "drift", polar_env: "sandbox", polar_org: newOrg, provider: "polar", provider_env: "sandbox", provider_account: newOrg },
-        { status: "failed", polar_env: null, polar_org: null, provider: "stripe", provider_env: "live", provider_account: account },
-        { status: "passed", polar_env: "production", polar_org: oldOrg, provider: "polar", provider_env: "live", provider_account: oldOrg },
+      // Only the provider-neutral columns are left, holding what both providers' rows had.
+      const polarColumns = await rows(tx, sql`select table_name, column_name from information_schema.columns where table_schema = 'public' and column_name in ('polar_env', 'polar_org', 'polar_id', 'polar_disc', 'polar_customer_id') order by table_name, column_name`);
+      expect(polarColumns).toEqual([]);
+      expect(await rows(tx, sql`select code, provider_disc from public.billing_plans where code in (${polarPlan}, ${stripePlan}) order by code = ${polarPlan} desc`)).toEqual([{ code: polarPlan, provider_disc: disc }, { code: stripePlan, provider_disc: coupon }]);
+      expect(await rows(tx, sql`select plan, provider_ref from public.billing_prices where plan in (${polarPlan}, ${stripePlan}) order by plan = ${polarPlan} desc`)).toEqual([{ plan: polarPlan, provider_ref: product }, { plan: stripePlan, provider_ref: price }]);
+      expect(await rows(tx, sql`select provider_customer_id from public.billing_transactions where business_id = ${businessId}::uuid order by provider_customer_id = ${customer} desc`)).toEqual([{ provider_customer_id: customer }, { provider_customer_id: stripeCustomer }]);
+      // Polar's link is a link run now, and every run keeps its provider.
+      expect(await rows(tx, sql`select kind, provider, provider_env, provider_account from public.billing_runs where brand = 'storage-test' order by kind, provider`)).toEqual([
+        { kind: "link", provider: "polar", provider_env: "live", provider_account: org },
+        { kind: "link", provider: "stripe", provider_env: "sandbox", provider_account: account },
+        { kind: "verify", provider: "polar", provider_env: "sandbox", provider_account: org },
       ]);
+      // The triggers, their functions and the Polar indexes are gone, and the checks 0146 left unchecked are checked.
+      expect(await rows(tx, sql`select tgname from pg_trigger where tgname like 'billing_%_sync'`)).toEqual([]);
+      expect(await rows(tx, sql`select proname from pg_proc where proname like 'billing_%_sync'`)).toEqual([]);
+      expect(await rows(tx, sql`select indexname from pg_indexes where indexname in ('billing_prices_polar_unique', 'billing_plans_polar_disc_unique', 'provider_events_polar_received_idx')`)).toEqual([]);
+      expect(await rows(tx, sql`select conname, convalidated from pg_constraint where conname in ('billing_accounts_source_check', 'billing_usage_events_rate_cents_check') order by conname`)).toEqual([
+        { conname: "billing_accounts_source_check", convalidated: true },
+        { conname: "billing_usage_events_rate_cents_check", convalidated: true },
+      ]);
+      expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account, key_id, partner, idem_key, req_hash) values ('polar', 'applied', 'storage-test', 1, ${hash}, '{}', 'polar', 'sandbox', ${org}, ${keys()})`)).toEqual({ code: "23514", constraint: "billing_runs_kind_check" });
     });
   });
 
-  it("takes the rows the release before inserts, and refuses values no release writes", async () => {
+  it("refuses the values no release writes", async () => {
     await rollbackTest(async (tx) => {
       const [polarBusiness, stripeBusiness, badBusiness] = [await business(tx), await business(tx), await business(tx)];
       // The plan a waiting change moves a business to.
       const nextPlan = planCode();
       await tx.execute(planInsert(nextPlan, { provider_disc: unique("disc") }));
-      // An account inserted without a source pays through Polar, as before.
+      // An account inserted without a source pays through Polar: reconcile's upsert leaves it out for one that exists.
       await tx.execute(sql`insert into public.billing_accounts (business_id, billing_key) values (${polarBusiness}::uuid, ${`business:${polarBusiness}`})`);
       await tx.execute(sql`insert into public.billing_accounts (business_id, billing_key, source, overage_subscription_id) values (${stripeBusiness}::uuid, ${`business:${stripeBusiness}`}, 'stripe', 'sub_overage')`);
       expect(await rows(tx, sql`select source from public.billing_accounts where business_id in (${polarBusiness}::uuid, ${stripeBusiness}::uuid) order by source`)).toEqual([{ source: "polar" }, { source: "stripe" }]);
@@ -200,25 +163,24 @@ describe.skipIf(!client)("billing storage that names its provider (migration 014
       // Usage priced as money never goes below zero.
       expect(await failure(tx, sql`insert into public.billing_usage_events (business_id, period_key, source_key, usage_kind, quantity, rate_cents) values (${polarBusiness}::uuid, '2001-03', ${unique("voice")}, 'voice_seconds', 60, -1)`)).toEqual({ code: "23514", constraint: "billing_usage_events_rate_cents_check" });
 
-      // A link may be named link, and a link or verify run names its account one way or the other.
-      const keys = sql`${randomUUID()}::uuid, 'test', ${randomUUID()}, ${hash}`;
-      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account, key_id, partner, idem_key, req_hash) values ('link', 'applied', 'storage-test', 1, ${hash}, '{}', 'stripe', 'sandbox', 'acct_test', ${keys})`);
+      // A link or verify run names its provider, environment and account.
+      await tx.execute(sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account, key_id, partner, idem_key, req_hash) values ('link', 'applied', 'storage-test', 1, ${hash}, '{}', 'stripe', 'sandbox', 'acct_test', ${keys()})`);
       expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile) values ('verify', 'passed', 'storage-test', 1, ${hash}, '{}')`)).toEqual({ code: "23514", constraint: "billing_runs_provider" });
       expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'passed', 'storage-test', 1, ${hash}, '{}', 'paypal', 'live', 'acct_test')`)).toEqual({ code: "23514", constraint: "billing_runs_provider_values" });
       expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'passed', 'storage-test', 1, ${hash}, '{}', 'stripe', 'prod', 'acct_test')`)).toEqual({ code: "23514", constraint: "billing_runs_provider_values" });
     });
   });
 
-  it("offers each plan with its provider's objects, beside Polar's names", async () => {
+  it("offers each plan with its provider's objects", async () => {
     await rollbackTest(async (tx) => {
       const code = planCode();
       const [disc, product] = [unique("disc"), unique("prod")];
       await tx.execute(planInsert(code, { provider_disc: disc }));
       await tx.execute(sql`insert into public.billing_prices (plan, period, currency, cents, provider_ref) values (${code}, 'monthly', 'cad', 5000, ${product})`);
-      expect(await rows(tx, sql`select polar_disc, provider_disc, polar_id, provider_ref from public.billing_offers where code = ${code}`)).toEqual([{ polar_disc: disc, provider_disc: disc, polar_id: product, provider_ref: product }]);
-      // The promo code reader returns them last, so the release before reads it unchanged.
+      expect(await rows(tx, sql`select provider_disc, provider_ref from public.billing_offers where code = ${code}`)).toEqual([{ provider_disc: disc, provider_ref: product }]);
       const [result] = await rows(tx, sql`select pg_get_function_result('app.billing_code_offers(text)'::regprocedure) as result`);
-      expect(String(result!.result)).toMatch(/polar_id text, receptionists smallint, provider_disc text, provider_ref text\)$/);
+      expect(String(result!.result)).toMatch(/per_month integer, receptionists smallint, provider_disc text, provider_ref text\)$/);
+      expect(String(result!.result)).not.toMatch(/polar/);
     });
   });
 });

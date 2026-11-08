@@ -185,12 +185,12 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
       const [before] = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
-      await byHand(tx, sql`update public.billing_prices set polar_id = 'prod_pro_m' where id = ${before!.id}`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = 'prod_pro_m' where id = ${before!.id}`);
       const changed = await apply(tx, file((value) => { value.plans.pro.prices.monthlyCents = 11000; }));
       expect(actions(changed.run)).toEqual(["update pro", "update pro/monthly/cad"]);
       expect(changed.run.changes[1]).toMatchObject({ raises_price: true, fields: { cents: { from: 8700, to: 11000 } } });
       const after = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
-      expect(after).toEqual([expect.objectContaining({ id: before!.id, cents: 11000, polar_id: "prod_pro_m", run_id: changed.run.id, retired_at: null })]);
+      expect(after).toEqual([expect.objectContaining({ id: before!.id, cents: 11000, provider_ref: "prod_pro_m", run_id: changed.run.id, retired_at: null })]);
     });
   });
 
@@ -198,14 +198,14 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
       const [annual] = await prices(tx, "starter");
-      await byHand(tx, sql`update public.billing_prices set polar_id = 'prod_starter_a' where id = ${annual!.id}`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = 'prod_starter_a' where id = ${annual!.id}`);
       const removed = await apply(tx, file((value) => { delete value.plans.starter.prices.annualCents; }));
       expect(actions(removed.run)).toEqual(["update starter", "retire starter/annual/cad"]);
       expect((await prices(tx, "starter")).find((row) => row.id === annual!.id)!.retired_at).not.toBeNull();
       const restored = await apply(tx, file((value) => { value.plans.starter.prices.annualCents = 30000; }));
       expect(actions(restored.run)).toEqual(["update starter", "restore starter/annual/cad"]);
       const rowsNow = (await prices(tx, "starter")).filter((row) => row.period === "annual");
-      expect(rowsNow).toEqual([expect.objectContaining({ id: annual!.id, cents: 30000, polar_id: "prod_starter_a", retired_at: null })]);
+      expect(rowsNow).toEqual([expect.objectContaining({ id: annual!.id, cents: 30000, provider_ref: "prod_starter_a", retired_at: null })]);
     });
   });
 
@@ -289,10 +289,10 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
   it("refuses a currency change while Polar sells a live price, and otherwise retires the old prices and inserts new ones", async () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
-      await byHand(tx, sql`update public.billing_prices set polar_id = 'prod_pro_m' where plan = 'pro' and period = 'monthly'`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = 'prod_pro_m' where plan = 'pro' and period = 'monthly'`);
       const usd = file((value) => { value.currency = "usd"; });
       expect((await refusal(apply(tx, usd))).details).toEqual([expect.objectContaining({ code: "currency_locked", path: "billing_file.currency" })]);
-      await byHand(tx, sql`update public.billing_prices set polar_id = null`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = null`);
       const changed = await apply(tx, usd);
       expect(actions(changed.run).filter((action) => action.includes("/"))).toEqual(["retire pro/annual/cad", "insert pro/annual/usd", "retire pro/monthly/cad", "insert pro/monthly/usd", "retire starter/annual/cad", "insert starter/annual/usd", "retire starter/monthly/cad", "insert starter/monthly/usd"]);
       expect((await rows(tx, sql`select currency from public.billing_prices where retired_at is null group by currency`)).map((row) => row.currency)).toEqual(["usd"]);
@@ -451,7 +451,7 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       expect(preview.run.blocked_by.map((item) => item.code)).toEqual(["polar_org_mismatch"]);
       expect(preview.run.changes).toHaveLength(6);
       expect(await count(tx, "billing_runs")).toBe(1);
-      expect((await rows(tx, sql`select count(*) as n from public.billing_prices where polar_id is not null`))[0]!.n).toBe("0");
+      expect((await rows(tx, sql`select count(*) as n from public.billing_prices where provider_ref is not null`))[0]!.n).toBe("0");
     });
   });
 
@@ -463,12 +463,10 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       expect(first).toMatchObject({ status: 201, replayed: false, run: { kind: "polar", status: "applied", hash: deployedHash, prev_hash: null, polar_env: "sandbox", polar_org: "org_test", key_id: caller.platformKeyId, problems: [] } });
       expect(actions(first.run)).toEqual(["update pro", "update starter", "update pro/annual/cad", "update pro/monthly/cad", "update starter/annual/cad", "update starter/monthly/cad"]);
       expect(Object.fromEntries((await rows(tx, sql`select code, status from public.billing_plans`)).map((row) => [row.code, row.status]))).toEqual({ free_cloud: "active", starter: "active", pro: "active", enterprise: "active" });
-      const linkedRows = await rows(tx, sql`select provider_ref, polar_id from public.billing_prices order by provider_ref`);
+      const linkedRows = await rows(tx, sql`select provider_ref from public.billing_prices order by provider_ref`);
       expect(linkedRows.map((row) => row.provider_ref)).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.provider_ref)).sort());
-      // The release before reads polar_id, which a trigger keeps equal (migration 0146).
-      expect(linkedRows.every((row) => row.polar_id === row.provider_ref)).toBe(true);
-      // The link run names its provider, environment and account.
-      expect(await rows(tx, sql`select kind, provider, provider_env, provider_account, polar_env, polar_org from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ kind: "polar", provider: "polar", provider_env: "sandbox", provider_account: "org_test", polar_env: "sandbox", polar_org: "org_test" }]);
+      // The link run is stored as link, which the API shows as polar, and names its provider, environment and account.
+      expect(await rows(tx, sql`select kind, provider, provider_env, provider_account from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ kind: "link", provider: "polar", provider_env: "sandbox", provider_account: "org_test" }]);
       // The rows a link changes carry its run; the rest keep the apply's.
       expect((await rows(tx, sql`select distinct run_id from public.billing_prices`)).map((row) => row.run_id)).toEqual([first.run.id]);
       expect((await plan(tx, "free_cloud")).run_id).toBe(applied.run.id);
@@ -498,7 +496,7 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       const replaced = await link(tx, { hash: deployedHash, plans: swapped, replace_ids: true });
       expect(actions(replaced.run)).toEqual(["retire pro/monthly/cad", "insert pro/monthly/cad"]);
       const after = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
-      expect(after.map((row) => [row.cents, row.polar_id, row.retired_at === null])).toEqual([[8700, "product_new", true], [8700, before!.polar_id, false]]);
+      expect(after.map((row) => [row.cents, row.provider_ref, row.retired_at === null])).toEqual([[8700, "product_new", true], [8700, before!.provider_ref, false]]);
       expect(after[1]!.id).toBe(before!.id);
       // The old product can't be linked again: it stays with its retired row.
       expect((await refusal(link(tx, { hash: deployedHash, plans, replace_ids: true }))).details).toEqual([expect.objectContaining({ code: "id_taken", message: expect.stringContaining("a retired price") })]);
@@ -791,8 +789,8 @@ describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
       // The build's file has no stripe block, so the code's hash is another file's: a warning, not a drift.
       const codes = (outcome: Awaited<ReturnType<typeof runDailyBillingVerify>>) => (outcome.status === "skipped" ? [] : outcome.problems.map((problem) => `${problem.pair} ${problem.code} ${problem.level}`));
       expect(codes(passed)).toEqual(["file_postgres code_hash warn"]);
-      const [stored] = await rows(tx, sql`select kind, status, provider, provider_env, provider_account, polar_env, polar_org from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);
-      expect(stored).toEqual({ kind: "verify", status: "passed", provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", polar_env: null, polar_org: null });
+      const [stored] = await rows(tx, sql`select kind, status, provider, provider_env, provider_account from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);
+      expect(stored).toEqual({ kind: "verify", status: "passed", provider: "stripe", provider_env: "sandbox", provider_account: "acct_test" });
 
       const drifted = structuredClone(snapshot);
       drifted.prices.find((price) => price.metadata.lobbystack_plan === "pro" && price.recurring?.interval === "month")!.active = false;
@@ -825,7 +823,7 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
       const passed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
       expect(passed).toMatchObject({ status: "passed", previousStatus: null, problems: [], polarEnv: "sandbox" });
       const [stored] = await rows(tx, sql`select * from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);
-      expect(stored).toMatchObject({ kind: "verify", status: "passed", hash: deployedHash, code_hash: deployedHash, key_id: null, idem_key: null, partner: null, polar_env: "sandbox", polar_org: "org_test", profile: {} });
+      expect(stored).toMatchObject({ kind: "verify", status: "passed", hash: deployedHash, code_hash: deployedHash, key_id: null, idem_key: null, partner: null, provider: "polar", provider_env: "sandbox", provider_account: "org_test", profile: {} });
 
       fake.state.products.find((product) => product.name === "Pro monthly")!.prices.find((price) => price.amount_type === "fixed")!.price_amount = 12000;
       const drift = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
@@ -849,10 +847,10 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
       expect(second.previousStatus).toBe("drift");
       // The run names its provider, and Polar's columns follow for the release before.
       expect(first.run).toMatchObject({ polar_env: "sandbox", polar_org: "org_test" });
-      expect(await rows(tx, sql`select provider, provider_env, provider_account, polar_env, polar_org from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ provider: "polar", provider_env: "sandbox", provider_account: "org_test", polar_env: "sandbox", polar_org: "org_test" }]);
+      expect(await rows(tx, sql`select provider, provider_env, provider_account from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ provider: "polar", provider_env: "sandbox", provider_account: "org_test" }]);
       expect(second.run.started_at > first.run.started_at).toBe(true);
       await as(tx, "lobbystack_app");
-      expect((await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'alloplace', 1, ${deployedHash}, '{}', 'sandbox', 'org_test')`)).code).toBe("42501");
+      expect((await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'passed', 'alloplace', 1, ${deployedHash}, '{}', 'polar', 'sandbox', 'org_test')`)).code).toBe("42501");
     });
   });
 });
@@ -887,7 +885,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
         await savepoint.execute(sql`insert into public.billing_prices (plan, period, currency, cents) values ('starter', 'monthly', 'usd', 2200)`);
       });
       expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, key_id, partner, idem_key, req_hash, started_at) values ('catalog', 'applied', 'alloplace', 1, ${"a".repeat(64)}, '{}', ${randomUUID()}, 'p', 'k', ${"a".repeat(64)}, '2026-10-21 08:00:00.123456+00')`)).toMatchObject({ code: "23514" });
-      expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org, key_id, partner, idem_key, req_hash) values ('polar', 'applied', 'alloplace', 1, ${"a".repeat(64)}, '{}', 'sandbox', 'org', ${caller.platformKeyId}, 'lobbystack', 'seed-1', ${"b".repeat(64)})`)).toEqual({ code: "23505", constraint: "billing_runs_idem_unique" });
+      expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account, key_id, partner, idem_key, req_hash) values ('link', 'applied', 'alloplace', 1, ${"a".repeat(64)}, '{}', 'polar', 'sandbox', 'org', ${caller.platformKeyId}, 'lobbystack', 'seed-1', ${"b".repeat(64)})`)).toEqual({ code: "23505", constraint: "billing_runs_idem_unique" });
       expect(await rows(tx, sql`select started_at = date_trunc('milliseconds', started_at) as whole from public.billing_runs where id = ${seeded.run.id}`)).toEqual([{ whole: true }]);
     });
   });
@@ -943,7 +941,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
         value.plans["winter-2025"] = { tier: "starter", access: "code", names: names("Winter"), sold: true, prices: { monthlyCents: 2000 }, offerEndsAt: "2025-12-31T23:59:59-05:00" };
       };
       await apply(tx, file((value) => { fixture(value); value.plans["summer-2026"] = { tier: "starter", access: "code", names: names("Summer"), sold: true, prices: { monthlyCents: 2500 } }; }));
-      await byHand(tx, sql`update public.billing_prices set polar_id = case when plan = 'pro-launch' then 'prod_launch_m' when plan = 'summer-2026' then 'prod_summer_m' else 'prod_' || plan || '_' || period end where plan <> 'pro-plus'`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = case when plan = 'pro-launch' then 'prod_launch_m' when plan = 'summer-2026' then 'prod_summer_m' else 'prod_' || plan || '_' || period end where plan <> 'pro-plus'`);
       await byHand(tx, sql`update public.billing_plans set status = 'active' where code <> 'pro-plus'`);
       const last = await apply(tx, file(fixture), { key: "fixture" });
       expect(actions(last.run)).toEqual(["retire summer-2026", "retire summer-2026/monthly/cad"]);
@@ -952,13 +950,13 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
       const q1 = sql`SELECT code, tier, names, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, period, currency, cents, per_month FROM billing_offers ORDER BY sort, code, period`;
       await as(tx, "lobbystack_app");
       expect((await rows(tx, q1)).map((row) => [row.code, row.period, row.cents, row.per_month])).toEqual([["free_cloud", null, null, null], ["starter", "annual", 37000, 3100], ["starter", "monthly", 3700, 3700], ["pro", "annual", 87000, 7300], ["pro", "monthly", 8700, 8700]]);
-      const q3 = sql`SELECT polar_id, polar_disc, months, ends FROM billing_offers WHERE code = ${"pro-launch"} AND period = ${"monthly"}`;
+      const q3 = sql`SELECT provider_ref, provider_disc, months, ends FROM billing_offers WHERE code = ${"pro-launch"} AND period = ${"monthly"}`;
       expect(await rows(tx, q3)).toEqual([]);
 
       await as(tx, "lobbystack_worker");
       expect((await rows(tx, q1)).map((row) => `${String(row.code)} ${String(row.period)}`)).toEqual(["free_cloud null", "starter annual", "starter monthly", "pro annual", "pro monthly", "enterprise null", "pro-launch monthly", "salons-half-off monthly"]);
-      expect(await rows(tx, q3)).toEqual([{ polar_id: "prod_launch_m", polar_disc: null, months: 6, ends: "tier" }]);
-      const q4 = sql`SELECT r.plan, r.period, p.tier FROM billing_prices r JOIN billing_plans p ON p.code = r.plan WHERE r.polar_id = ${"prod_summer_m"}`;
+      expect(await rows(tx, q3)).toEqual([{ provider_ref: "prod_launch_m", provider_disc: null, months: 6, ends: "tier" }]);
+      const q4 = sql`SELECT r.plan, r.period, p.tier FROM billing_prices r JOIN billing_plans p ON p.code = r.plan WHERE r.provider_ref = ${"prod_summer_m"}`;
       expect(await rows(tx, q4)).toEqual([{ plan: "summer-2026", period: "monthly", tier: "starter" }]);
       const q5 = sql`SELECT tier, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, overage, voice_rate, sms_rate, call_rate FROM billing_plans WHERE code = ${"pro-launch"}`;
       expect(await rows(tx, q5)).toEqual([{ tier: "pro", voice_sec: 36000, sms_seg: 200, calls_out: 100, chat_units: 200, kb_bytes: String(20 * 1024 * 1024), numbers: 1, overage: true, voice_rate: 18, sms_rate: 2, call_rate: 2 }]);
@@ -975,7 +973,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
       const q9 = await rows(tx, sql`SELECT * FROM billing_prices ORDER BY plan, period, retired_at NULLS FIRST`);
       expect(q9).toHaveLength(10);
       expect(q9.filter((row) => row.retired_at !== null).map((row) => row.plan)).toEqual(["summer-2026"]);
-      const q10 = sql`SELECT plan, period FROM billing_prices WHERE retired_at IS NULL AND polar_id IS NULL ORDER BY period`;
+      const q10 = sql`SELECT plan, period FROM billing_prices WHERE retired_at IS NULL AND provider_ref IS NULL ORDER BY period`;
       expect(await rows(tx, q10)).toEqual([{ plan: "pro-plus", period: "annual" }, { plan: "pro-plus", period: "monthly" }]);
     });
   });

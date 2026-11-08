@@ -2,9 +2,9 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 17 are done: phases 1 to 3, and step 17 of phase 4. Step 18's scenarios are written and wait for a sandbox run.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 17 and 19 are done. Step 18's scenarios are written and wait for a sandbox run.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
-- **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
+- **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones.
 
 ## Know what it would give
 
@@ -62,6 +62,7 @@ A review of every change the Stripe work made, with three findings checked again
 | Helpers written again in each Stripe module | `idOf` is defined in six files under `packages/providers/src/stripe/`, and `events.ts` has readers of its own. | Low |
 | Repeated reads | `usageTotals` lists the meters on each call, twice per daily totals check, and the webhook route reads the catalog for every delivery before it knows whether it uses the event. | Low |
 | Polar names on Stripe paths | `readPolarProductLinks`, `polarProductLinks` and `billingCodes`' `polarId` read Stripe's prices too, and the API keeps its `polar_*` aliases. | With the next API version |
+| Step 19's deviations | `billing_accounts.source` keeps its `polar` default, reconcile still reads an event's kind from its name for old fixtures, and `devops/reset-database.mjs` reads `polar_env` through `to_jsonb`. | Once no database from before `0146` is left |
 | Not yet checked against Stripe | The scenarios haven't run on a sandbox; a negative meter event, which the totals check sends to take usage back, and the restricted keys' permission names are unconfirmed. | Step 18 |
 | The scenarios workflow | GitHub lists a manual workflow only from the default branch, so it runs from a computer while this work stays off `main`. | When the branch merges |
 
@@ -275,3 +276,11 @@ Under way: the scenarios are written, and wait for their first run on a sandbox.
 - **The workflow** (`.github/workflows/billing-scenarios.yml`) runs it by hand, with the sandbox key in a repository secret. GitHub lists a manual workflow only from the default branch, and this work stays off `main`, so runs go from a computer for now.
 - **Unlike the plan:** deliveries twice and out of order stay with step 12's PostgreSQL tests, since the run has no deployment to deliver to; the run checks instead that every real event of the scenarios normalizes to its business. The list's entries that need a deployment or the Dashboard (a failed renewal through `past_due` to Free, the receptionist pause after a downgrade, a managed plan's takeover, two sandboxes, a key without a permission, and the finance export after a refund) wait for the sandbox deployment's run.
 - **Still to do in this step:** run the scenarios on a sandbox twice in a row and fix what they find, and the checks by hand. Then take the `BILLING_STRIPE_PREVIEW` gate away (the factory, `devops/bootstrap.mjs`'s refusal of `STRIPE=live`, the docs), add the `stripe` block to the `billing.json` of the brand that gets the first Stripe deployment, after which each deployment of that brand runs `pnpm billing apply` once, and make this page the feature page.
+
+## Step 19: the contract (`0147`)
+
+- **The migration** (`packages/db/migrations/0147_billing_provider_contract.sql`): drops `0146`'s four sync triggers and their functions, and the Polar columns they kept equal (`billing_runs.polar_env` and `polar_org`, `billing_prices.polar_id`, `billing_plans.polar_disc`, `billing_transactions.polar_customer_id`) with their unique indexes; renames `polar` link runs to `link`, and lets runs be only `catalog`, `link` or `verify`, a link or verify naming its provider; checks `0146`'s source and rate checks against every row; drops `0114`'s Polar-only sweep index; and makes `billing_offers` and `app.billing_code_offers` again without the Polar columns. The Drizzle schema loses them too.
+- **Where it runs:** every deployment but one starts from a fresh install, which runs `0146` and `0147` on empty tables. The one with data, the RealInfoBot test deployment on this branch, runs the four read-only checks in [the data model](../billing/data-model.md#before-0147-on-a-database-with-data) first.
+- **The code:** a Polar link is stored as `link` and still shown as `polar` by the API and the CLI, and the run queries stop looking for `polar` rows. The API's Polar names, the finance export's `polarCustomerId` and the CLI read the provider columns, as they have since step 5.
+- **Unlike the plan:** `billing_accounts.source` keeps its `polar` default, since reconcile's upsert leaves the source out for an account that exists, and PostgreSQL checks NOT NULL on the row it would insert before it finds the conflict. Reconcile keeps reading an event's kind from its name when its payload has none: many test fixtures store Polar events that way, and dropping it changes nothing a deployment does. `devops/reset-database.mjs` keeps reading `polar_env` through `to_jsonb`, since it may meet a database from before `0146`.
+- **Tests:** `0147` on a database rebuilt as `0146` left it, inside a rolled-back transaction, holding rows of both providers: only the provider columns are left, with what both held; Polar's link is a link run; the triggers, functions and Polar indexes are gone; the checks are validated; and a `polar` run is refused. The constraint and offers tests run on the contracted schema, and the catalog, codes and reset tests read the provider columns. `db:check` and `db:verify-rls` pass, and a second migrate changes nothing.

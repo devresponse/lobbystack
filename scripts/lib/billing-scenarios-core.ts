@@ -31,22 +31,64 @@ export type ScenarioOptions = {
   keep: boolean;
   /** How many scenarios run at once: most of each one's time is a test clock advancing. */
   parallel: number;
+  /** Stripe as the merchant of record: each subscription starts from a checkout a person pays. */
+  merchantOfRecord: boolean;
 };
 
 export class ScenarioUsage extends Error {}
 
 export const SCENARIO_USAGE = [
-  "Usage: STRIPE_SCENARIOS_KEY=sk_test_... pnpm billing:scenarios [--only <name>[,<name>...]] [--brand <brand>] [--parallel <n>] [--keep]",
+  "Usage: STRIPE_SCENARIOS_KEY=sk_test_... pnpm billing:scenarios [--only <name>[,<name>...]] [--brand <brand>] [--parallel <n>] [--keep] [--merchant-of-record]",
   "       pnpm billing:scenarios --list",
   "",
   "Runs the Stripe plan's sandbox scenarios against a Stripe sandbox, each on its own test clock, through",
   "LobbyStack's Stripe adapter. Use a sandbox of its own: the run adds the brand's catalog to it, and",
-  "customers and subscriptions on test clocks it deletes at the end. docs/providers/stripe.md says more.",
+  "customers and subscriptions on test clocks it deletes at the end. With --merchant-of-record, or a brand",
+  "whose stripe block sets managedPayments, Stripe is the merchant of record: each subscription starts from",
+  "a checkout page the run prints for you to pay with a test card, one scenario at a time.",
+  "docs/providers/stripe.md says more.",
 ].join("\n");
+
+/**
+ * The scenarios a merchant of record run makes when none are named: those
+ * whose Stripe calls differ from Stripe directly, one checkout to pay each,
+ * and the events check. The others run when named, but for those that can't.
+ */
+export const MERCHANT_OF_RECORD_SCENARIOS: readonly ScenarioName[] = ["usage", "upgrade-paid", "downgrade", "cancel-resume", "totals", "events"];
+
+/** Why a scenario can't run with Stripe as the merchant of record. */
+export const MERCHANT_OF_RECORD_CANT: Partial<Record<ScenarioName, string>> = {
+  "upgrade-declined": "Stripe lets no API call give a merchant of record subscription a declining card, and a declining card can't pay its checkout.",
+};
+
+/**
+ * The scenarios a run makes, the events check apart since it reads what the
+ * others made, and how many at once: one at a time under merchant of record,
+ * where a person pays each checkout. A ScenarioUsage error names a scenario
+ * that can't run.
+ */
+export function scenarioRun(options: Pick<ScenarioOptions, "only" | "parallel">, merchantOfRecord: boolean): { scenarios: Array<Exclude<ScenarioName, "events">>; events: boolean; parallel: number } {
+  const named = options.only ?? (merchantOfRecord ? MERCHANT_OF_RECORD_SCENARIOS : SCENARIOS.map((scenario) => scenario.name));
+  if (merchantOfRecord) {
+    const cant = named.filter((name) => MERCHANT_OF_RECORD_CANT[name]);
+    if (cant.length) throw new ScenarioUsage(cant.map((name) => `${name} can't run with Stripe as the merchant of record: ${MERCHANT_OF_RECORD_CANT[name]}`).join(" "));
+  }
+  return {
+    scenarios: named.filter((name): name is Exclude<ScenarioName, "events"> => name !== "events"),
+    events: named.includes("events"),
+    parallel: merchantOfRecord ? 1 : options.parallel,
+  };
+}
+
+/** What the run asks of the person paying a merchant of record checkout. */
+export function checkoutRequest(input: { scenario: string; url: string; card: "good" | "3ds" }): string {
+  const card = input.card === "3ds" ? "test card 4000 0027 6000 3184, and approve on the bank's test page" : "test card 4242 4242 4242 4242";
+  return `Pay the ${input.scenario} checkout with ${card}, any future date, any CVC and any address, within 20 minutes: ${input.url}`;
+}
 
 /** The command line, or a ScenarioUsage error that says what's wrong. */
 export function parseScenarioArgs(argv: readonly string[]): ScenarioOptions {
-  const options: ScenarioOptions = { list: false, help: false, brand: "realinfobot", only: null, keep: false, parallel: 4 };
+  const options: ScenarioOptions = { list: false, help: false, brand: "realinfobot", only: null, keep: false, parallel: 4, merchantOfRecord: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]!;
     const [flag, inline] = arg.startsWith("--") && arg.includes("=") ? [arg.slice(0, arg.indexOf("=")), arg.slice(arg.indexOf("=") + 1)] : [arg, undefined];
@@ -58,6 +100,7 @@ export function parseScenarioArgs(argv: readonly string[]): ScenarioOptions {
     if (flag === "--list") options.list = true;
     else if (flag === "--help" || flag === "-h") options.help = true;
     else if (flag === "--keep") options.keep = true;
+    else if (flag === "--merchant-of-record") options.merchantOfRecord = true;
     else if (flag === "--brand") {
       options.brand = value();
       if (!/^[a-z0-9][a-z0-9-]*$/.test(options.brand)) throw new ScenarioUsage("--brand names a folder under brands/, such as realinfobot.");
@@ -136,6 +179,9 @@ export const SCENARIO_STRIPE_BLOCK = {
   overage: "separate",
   managedPayments: false,
 } as const;
+
+/** The settings a merchant of record run gives the stripe block: Managed Payments, and overage on the plan's checkout. */
+export const MERCHANT_OF_RECORD_BLOCK = { managedPayments: true, overage: "checkout" } as const;
 
 /** Runs work over items, at most `limit` at once, keeping their order in the answer. */
 export async function inPool<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {

@@ -148,12 +148,20 @@ The `Billing scenarios` workflow (`.github/workflows/billing-scenarios.yml`) run
 
 Two limits: the plan subscription is made through the API with Stripe's test cards, not through the Checkout page, which Stripe asks integrations not to script, so the page itself is a check by hand; and deliveries twice and out of order are checked against PostgreSQL in CI (`billing.reconcile`'s order tests), since the run has no deployment to deliver to.
 
+### With Stripe as the merchant of record
+
+`pnpm billing:scenarios --merchant-of-record` runs the scenarios as a brand with `managedPayments` sells, and so does a brand whose `stripe` block sets it. Stripe starts such a subscription only from a Checkout page, so for each one the run makes the checkout through the adapter, prints a line such as `Pay the usage checkout with test card 4242 4242 4242 4242, any future date, any CVC and any address, within 20 minutes: https://checkout.stripe.com/...`, and waits until it's paid. The scenarios run one at a time.
+
+- **Which scenarios:** without `--only`, those whose Stripe calls differ from Stripe directly: `usage` (the plan's renewal invoices the month's usage with the plan's price), `upgrade-paid`, `downgrade` (the renewal keeps the overage prices), `cancel-resume`, `totals` and `events`. That's five checkouts to pay. The others run when named, and `upgrade-3ds` asks for the 3-D Secure test card, 4000 0027 6000 3184. `upgrade-declined` can't run: no API call gives a merchant of record subscription a declining card.
+- **Setup:** the sandbox needs no Stripe Tax origin address, since Stripe works out the tax, and yearly prices aren't made. Without the yearly prices the plans' terms differ, so their prices do too: a run in one mode archives the prices the other mode sold in the scenarios' sandbox, and a run in that mode brings them back.
+- **Where:** from a computer, with someone to pay the checkouts; the workflow would wait 20 minutes for each.
+
 ## Reset a test deployment
 
 `devops/reset-database.mjs` refuses a database linked to Stripe's live mode unless given `--allow-live-payments`. With `STRIPE_READ_KEY` set, it lists the subscriptions Stripe still bills the deployment's customers for, overage subscriptions included, so you can cancel them in the Dashboard first.
 
 ## Know what's left
 
-- [The sandbox scenarios](#run-the-sandbox-scenarios), passing twice in a row against a real sandbox, and the checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. Then step 18 of the plan takes away `BILLING_STRIPE_PREVIEW` and adds the `stripe` block to the brand of the first Stripe deployment.
+- [The sandbox scenarios](#run-the-sandbox-scenarios), passing twice in a row against a real sandbox, in the mode the brands use, and the checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. Then step 18 of the plan takes away `BILLING_STRIPE_PREVIEW` and adds the `stripe` block to the brand of the first Stripe deployment.
 - Stripe's names for each key's permissions, from that run.
 - The legal pages: with Stripe directly the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments; with Stripe as the merchant of record, the payment terms name Link as the seller. The landing's legal pages, which this fork doesn't publish, name only Polar or Stripe.

@@ -3,7 +3,7 @@
 // sandbox through LobbyStack's own Stripe adapter, each on a test clock of its
 // own so it lives through renewals and the 1st's overage invoices in minutes.
 //
-//   STRIPE_SCENARIOS_KEY=sk_test_... pnpm billing:scenarios [--only usage,refund] [--brand realinfobot] [--parallel 4] [--keep]
+//   STRIPE_SCENARIOS_KEY=sk_test_... pnpm billing:scenarios [--only usage,refund] [--brand realinfobot] [--parallel 4] [--keep] [--merchant-of-record]
 //   pnpm billing:scenarios --list
 //
 // First it sets the sandbox up from the brand's billing.json, as pnpm billing
@@ -15,6 +15,12 @@
 // test clock, which the run deletes at the end unless --keep. Coupons it made
 // are deleted too. It never prints the key. Exit codes: 0 every scenario
 // passed, 1 one failed, 2 the run couldn't start.
+//
+// With Stripe as the merchant of record (--merchant-of-record, or a brand
+// whose stripe block sets managedPayments), Stripe starts a subscription only
+// from a Checkout page: the run makes each one through the adapter, prints it
+// for a person to pay with a test card, and waits, one scenario at a time.
+// Overage is then on the plan subscription, and yearly plans aren't sold.
 
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -32,9 +38,11 @@ import { StripeWebhook } from "../packages/providers/src/stripe/events";
 import { BRANDS } from "../packages/shared/src/brands/generated";
 import { billingProfileForProvider, billingProfileSchema, priceUsage, STRIPE_WEBHOOK_EVENTS, type BillingProfile, type PricedUsageKind } from "../packages/shared/src/index";
 import {
+  checkoutRequest,
   expectedOverageCents,
   firstOfMonth,
   inPool,
+  MERCHANT_OF_RECORD_BLOCK,
   nextFirstOfMonth,
   parseScenarioArgs,
   redactingOutput,
@@ -43,6 +51,7 @@ import {
   SCENARIO_USAGE,
   SCENARIOS,
   scenarioKeyProblem,
+  scenarioRun,
   ScenarioUsage,
   type ScenarioName,
 } from "./lib/billing-scenarios-core";
@@ -56,7 +65,7 @@ export type ScenarioIo = { env: NodeJS.ProcessEnv; out(text: string): void; err(
 /** A test clock: the scenario's own time, which only moves when it's advanced. */
 type Clock = { id: string; time: Date; advance(to: Date): Promise<void> };
 
-/** A business that bought a plan: its customer on a test clock, the plan subscription and the overage one. */
+/** A business that bought a plan: its customer on a test clock, the plan subscription and the one that bills overage, the plan's own under merchant of record. */
 type Business = { scenario: ScenarioName; businessId: string; billingKey: string; customerId: string; planId: string; overageId: string; clock: Clock };
 
 class ScenarioFailure extends Error {}
@@ -83,9 +92,16 @@ type Context = {
   graceHours: number;
   /** Starter's overage rates in cents, from the brand's file. */
   rates: Record<OverageKind, number>;
+  /** Stripe as the merchant of record: subscriptions start from paid checkouts, and overage is on the plan subscription. */
+  merchantOfRecord: boolean;
   price(tier: Tier, interval: Interval): PriceRef;
+  /** A plan price's amount in cents, before tax. */
+  priceCents(tier: Tier, interval: Interval): number;
   clock(label: string): Promise<Clock>;
-  start(input: { scenario: ScenarioName; clock: Clock; tier: Tier; interval: Interval; coupon?: string }): Promise<Business>;
+  /** card: the test card a merchant of record checkout is paid with; directly, setCard sets it. */
+  start(input: { scenario: ScenarioName; clock: Clock; tier: Tier; interval: Interval; coupon?: string; card?: "good" | "3ds" }): Promise<Business>;
+  /** The subscription that bills the business's overage, found or made as billing.ensureOverage does. */
+  ensureOverage(business: Business): Promise<string>;
   setCard(customerId: string, card: string): Promise<void>;
   coupon(): Promise<string>;
   log(line: string): void;
@@ -110,18 +126,26 @@ const DAY_MS = 24 * 60 * 60_000;
 const scenarios: Record<Exclude<ScenarioName, "events">, (ctx: Context) => Promise<void>> = {
   async checkout(ctx) {
     const clock = await ctx.clock("checkout");
-    for (const [tier, interval] of [["starter", "monthly"], ["pro", "annual"]] as const) {
+    // Under merchant of record yearly plans aren't sold.
+    const plans = ctx.merchantOfRecord ? [["starter", "monthly"]] as const : [["starter", "monthly"], ["pro", "annual"]] as const;
+    for (const [tier, interval] of plans) {
       const business = await ctx.start({ scenario: "checkout", clock, tier, interval });
       const plan = await ctx.billing.getSubscription(business.planId);
       expectThat(plan?.state === "active", `${tier} ${interval} is ${plan?.state ?? "missing"}, not active`);
       expectThat(plan.priceRef === ctx.price(tier, interval).ref, `${tier} ${interval} sells ${plan.priceRef}, not the catalog's price`);
+      const again = await ctx.ensureOverage(business);
+      expectThat(again === business.overageId, "a second ensureOverage named another subscription");
+      if (ctx.merchantOfRecord) {
+        // The plan subscription holds the three overage prices its checkout sold.
+        const raw = await ctx.stripe.subscriptions.retrieve(business.planId);
+        const metered = raw.items.data.filter((item) => item.price.recurring?.usage_type === "metered").length;
+        expectThat(metered === 3, `the plan subscription has ${metered} overage prices, not 3`);
+        continue;
+      }
       const overage = await ctx.stripe.subscriptions.retrieve(business.overageId);
       expectThat(overage.status === "active", `the overage subscription of ${tier} ${interval} is ${overage.status}`);
       expectThat(overage.items.data.length === 3, `the overage subscription has ${overage.items.data.length} prices, not 3`);
       expectThat(overage.billing_cycle_anchor === seconds(nextFirstOfMonth(clock.time)), `the overage subscription is anchored on ${new Date(overage.billing_cycle_anchor * 1000).toISOString()}, not the next 1st at 00:00 UTC`);
-      // A second try finds the same overage subscription.
-      const again = await ctx.billing.ensureOverage({ customerId: business.customerId, planSubscriptionId: business.planId, businessId: business.businessId, currency: ctx.currency });
-      expectThat("subscriptionId" in again && again.subscriptionId === business.overageId, "a second ensureOverage made another overage subscription");
     }
   },
 
@@ -154,6 +178,18 @@ const scenarios: Record<Exclude<ScenarioName, "events">, (ctx: Context) => Promi
       held = totals.voice + totals.alert_sms + totals.transfer;
       return sameCents(held, expected);
     }, `the meters hold ${held} cents, and ${expected} were sent`);
+    if (ctx.merchantOfRecord) {
+      // The plan renews, and its invoice takes the month's usage with the plan's price, after the grace.
+      const plan = await ctx.billing.getSubscription(business.planId);
+      expectThat(plan?.periodEnd, "the plan has no period end");
+      await clock.advance(new Date(plan.periodEnd.getTime() + (ctx.graceHours + 1) * 60 * 60_000));
+      const invoices = await ctx.stripe.invoices.list({ subscription: business.planId, limit: 10 });
+      const cycle = invoices.data.find((invoice) => invoice.billing_reason === "subscription_cycle");
+      expectThat(cycle, "the plan has no renewal invoice");
+      const usage = cycle.subtotal - ctx.priceCents("starter", "monthly");
+      expectThat(usage === expectedOverageCents(sent), `the renewal invoice's usage is ${usage} cents before tax, and the usage sent comes to ${expectedOverageCents(sent)}`);
+      return;
+    }
     // On the 1st the overage subscription renews, and its invoice takes the month after the grace.
     await clock.advance(new Date(nextFirstOfMonth(clock.time).getTime() + (ctx.graceHours + 1) * 60 * 60_000));
     const invoices = await ctx.stripe.invoices.list({ subscription: business.overageId, limit: 10 });
@@ -190,8 +226,9 @@ const scenarios: Record<Exclude<ScenarioName, "events">, (ctx: Context) => Promi
 
   async "upgrade-3ds"(ctx) {
     const clock = await ctx.clock("upgrade-3ds");
-    const business = await ctx.start({ scenario: "upgrade-3ds", clock, tier: "starter", interval: "monthly" });
-    await ctx.setCard(business.customerId, THREE_D_SECURE_CARD);
+    const business = await ctx.start({ scenario: "upgrade-3ds", clock, tier: "starter", interval: "monthly", card: "3ds" });
+    // Under merchant of record the checkout was paid with the card already.
+    if (!ctx.merchantOfRecord) await ctx.setCard(business.customerId, THREE_D_SECURE_CARD);
     const result = await ctx.billing.changePlan({ subscriptionId: business.planId, to: ctx.price("pro", "monthly"), discount: "remove", when: "now", proration: "invoice_now", requestId: requestId() });
     expectThat(result.status === "needs_action", `an upgrade needing 3-D Secure came back ${result.status}`);
     expectThat(/^https:\/\//.test(result.url), "the upgrade gave no page to confirm the payment on");
@@ -218,6 +255,12 @@ const scenarios: Record<Exclude<ScenarioName, "events">, (ctx: Context) => Promi
     await clock.advance(new Date(plan.periodEnd.getTime() + DAY_MS));
     plan = await ctx.billing.getSubscription(business.planId);
     expectThat(plan?.priceRef === starter.ref && plan.state === "active", `after the renewal the plan is ${plan?.state} on ${plan?.priceRef}, not active on Starter`);
+    if (ctx.merchantOfRecord) {
+      // The renewal's phase kept the overage prices on the plan subscription.
+      const raw = await ctx.stripe.subscriptions.retrieve(business.planId);
+      const metered = raw.items.data.filter((item) => item.price.recurring?.usage_type === "metered").length;
+      expectThat(metered === 3, `after the renewal the plan subscription has ${metered} overage prices, not 3`);
+    }
   },
 
   async "cancel-resume"(ctx) {
@@ -227,14 +270,15 @@ const scenarios: Record<Exclude<ScenarioName, "events">, (ctx: Context) => Promi
     expectThat(plan?.cancelAt && plan.periodEnd && plan.cancelAt.getTime() === plan.periodEnd.getTime(), "a cancelled plan doesn't end at its renewal");
     plan = await ctx.billing.resume({ subscriptionId: business.planId, requestId: requestId() });
     expectThat(plan.cancelAt === null, "a resumed plan still ends");
-    const again = await ctx.billing.ensureOverage({ customerId: business.customerId, planSubscriptionId: business.planId, businessId: business.businessId, currency: ctx.currency });
-    expectThat("subscriptionId" in again && again.subscriptionId === business.overageId, "the overage subscription didn't stay with the resumed plan");
+    expectThat(await ctx.ensureOverage(business) === business.overageId, "the overage subscription didn't stay with the resumed plan");
     // Cancelled for good: the plan ends at its renewal, and the worker ends the overage subscription with its month.
     plan = await ctx.billing.cancel({ subscriptionId: business.planId, when: "renewal", requestId: requestId() });
     expectThat(plan?.periodEnd, "the plan has no period end");
     await clock.advance(new Date(plan.periodEnd.getTime() + DAY_MS));
     plan = await ctx.billing.getSubscription(business.planId);
     expectThat(plan?.state === "canceled" || plan?.state === "ended", `after its renewal a cancelled plan is ${plan?.state}`);
+    // Under merchant of record the plan's end ended its overage too.
+    if (ctx.merchantOfRecord) return;
     await ctx.billing.endOverage({ subscriptionId: business.overageId, when: "period_end" });
     const overage = await ctx.stripe.subscriptions.retrieve(business.overageId);
     expectThat(overage.cancel_at_period_end || overage.cancel_at !== null, "the overage subscription doesn't end with its month");
@@ -358,7 +402,7 @@ async function checkEvents(ctx: Context, businesses: readonly Business[], since:
 
 // ---------------------------------------------------------------- setting up
 
-type Setup = { snapshot: StripeSnapshot; prices: Map<string, string>; currency: string; graceHours: number; rates: Record<OverageKind, number>; planFor: (ref: string | null | undefined) => { plan: string; code: string; interval: Interval } | null };
+type Setup = { snapshot: StripeSnapshot; prices: Map<string, string>; cents: Map<string, number>; currency: string; graceHours: number; rates: Record<OverageKind, number>; merchantOfRecord: boolean; planFor: (ref: string | null | undefined) => { plan: string; code: string; interval: Interval } | null };
 
 async function readProfile(brand: string): Promise<{ profile: BillingProfile; withBlock: boolean }> {
   const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -374,18 +418,26 @@ async function readProfile(brand: string): Promise<{ profile: BillingProfile; wi
   return { profile: { ...parsed.data, stripe: structuredClone(SCENARIO_STRIPE_BLOCK) } as BillingProfile, withBlock: false };
 }
 
-/** The brand's catalog in the sandbox, as pnpm billing apply makes it, without the webhook endpoint. */
-async function setUp(key: string, brand: string, io: ScenarioIo): Promise<Setup> {
-  const { profile, withBlock } = await readProfile(brand);
-  if (!withBlock) io.out(`brands/${brand}/billing.json has no stripe block yet, so the run uses Stripe billing's recommended one.`);
-  const plans = desiredBillingPlans(billingProfileForProvider(profile, "stripe"));
+/**
+ * The brand's catalog in the sandbox, as pnpm billing apply makes it, without
+ * the webhook endpoint; with merchantOfRecord, as the brand's block would be
+ * with Managed Payments and overage on the plan's checkout.
+ */
+async function setUp(key: string, brand: string, io: ScenarioIo, merchantOfRecord: boolean): Promise<Setup> {
+  const read = await readProfile(brand);
+  if (!read.withBlock) io.out(`brands/${brand}/billing.json has no stripe block yet, so the run uses Stripe billing's recommended one.`);
+  const mor = merchantOfRecord || read.profile.stripe?.managedPayments === true;
+  const profile = mor ? { ...read.profile, stripe: { ...read.profile.stripe!, ...MERCHANT_OF_RECORD_BLOCK } } as BillingProfile : read.profile;
+  if (mor) io.out("Stripe is the merchant of record in this run: each scenario's subscription starts from a checkout you pay.");  const plans = desiredBillingPlans(billingProfileForProvider(profile, "stripe"));
   const links = BRANDS[brand]?.links;
   const desired = stripePlanner.desired({ brand, profile, plans, webhookUrl: null, links: { termsUrl: links?.termsUrl ?? null, privacyUrl: links?.privacyUrl ?? null } });
   const catalog = createStripeCatalogClient(key);
   let snapshot = await catalog.readSnapshot({ webhooks: false });
   if (snapshot.mode !== "sandbox") throw new ScenarioUsage("The key isn't a sandbox's.");
-  if (!snapshot.tax?.headOffice) throw new ScenarioUsage("Stripe Tax has no origin address in this sandbox, and every subscription here uses automatic tax. Set it in the Dashboard (Settings > Tax), then run again.");
-  const plan = stripePlanner.plan({ desired, snapshot, options: { adopt: false, allowReplace: false, allowArchive: false } });
+  // Stripe as the merchant of record works out the tax itself.
+  if (!mor && !snapshot.tax?.headOffice) throw new ScenarioUsage("Stripe Tax has no origin address in this sandbox, and every subscription here uses automatic tax. Set it in the Dashboard (Settings > Tax), then run again.");
+  // The sandbox is the scenarios' own: a run in one mode archives the prices the other mode sold, and a run in that mode brings them back.
+  const plan = stripePlanner.plan({ desired, snapshot, options: { adopt: false, allowReplace: false, allowArchive: true } });
   if (plan.refusals.length) throw new ScenarioUsage(`The sandbox's catalog can't be set up as it is: ${plan.refusals.map((refusal) => refusal.message).join("; ")}`);
   if (plan.steps.length) {
     io.out(`Setting the sandbox up from brands/${brand}/billing.json: ${plan.steps.length} ${plan.steps.length === 1 ? "call" : "calls"}.`);
@@ -393,9 +445,11 @@ async function setUp(key: string, brand: string, io: ScenarioIo): Promise<Setup>
     snapshot = await catalog.readSnapshot({ webhooks: false });
   }
   const prices = new Map<string, string>();
+  const cents = new Map<string, number>();
   for (const price of desired.prices) {
     const found = snapshot.prices.find((entry) => entry.active && entry.lookup_key === price.lookupKey);
     if (found) prices.set(`${price.plan}/${price.period}`, found.id);
+    cents.set(`${price.plan}/${price.period}`, price.cents);
   }
   const byId = new Map([...prices].map(([key, id]) => [id, key]));
   const planFor = (ref: string | null | undefined) => {
@@ -409,9 +463,11 @@ async function setUp(key: string, brand: string, io: ScenarioIo): Promise<Setup>
   return {
     snapshot,
     prices,
+    cents,
     currency: desired.currency,
     graceHours: desired.usageGraceHours,
     rates: { voice: starter.voiceMinute, alert_sms: starter.alertSmsSegment, transfer: starter.outboundCallAttempt },
+    merchantOfRecord: mor,
     planFor,
   };
 }
@@ -446,9 +502,16 @@ export async function runScenarios(argv: string[], io: ScenarioIo): Promise<numb
   const started = new Date();
   let setup: Setup;
   try {
-    setup = await setUp(key, options.brand, io);
+    setup = await setUp(key, options.brand, io, options.merchantOfRecord);
   } catch (error) {
     io.err(`The sandbox couldn't be set up: ${(error as Error).message}`);
+    return 2;
+  }
+  let run: ReturnType<typeof scenarioRun>;
+  try {
+    run = scenarioRun(options, setup.merchantOfRecord);
+  } catch (error) {
+    io.err((error as Error).message);
     return 2;
   }
   const stripe = createStripeClient(key);
@@ -462,10 +525,16 @@ export async function runScenarios(argv: string[], io: ScenarioIo): Promise<numb
     currency: setup.currency,
     graceHours: setup.graceHours,
     rates: setup.rates,
+    merchantOfRecord: setup.merchantOfRecord,
     price(tier, interval) {
       const ref = setup.prices.get(`${tier}/${interval}`);
       if (!ref) throw new ScenarioFailure(`The catalog sells no ${tier} ${interval} price.`);
       return { ref, discountRef: null };
+    },
+    priceCents(tier, interval) {
+      const cents = setup.cents.get(`${tier}/${interval}`);
+      if (cents === undefined) throw new ScenarioFailure(`The catalog sells no ${tier} ${interval} price.`);
+      return cents;
     },
     async clock(label) {
       const made = await stripe.testHelpers.testClocks.create({ frozen_time: Math.floor(Date.now() / 1000), name: `LobbyStack scenario ${label}` });
@@ -486,7 +555,7 @@ export async function runScenarios(argv: string[], io: ScenarioIo): Promise<numb
       };
       return clock;
     },
-    async start({ scenario, clock, tier, interval, coupon }) {
+    async start({ scenario, clock, tier, interval, coupon, card }) {
       const businessId = randomUUID();
       const billingKey = `business:${businessId}`;
       const customer = await stripe.customers.create({
@@ -496,6 +565,22 @@ export async function runScenarios(argv: string[], io: ScenarioIo): Promise<numb
         address: SCENARIO_ADDRESS,
         metadata: { lobbystack_business: businessId, lobbystack_billing_key: billingKey, lobbystack_deployment: "billing-scenarios" },
       });
+      if (setup.merchantOfRecord) {
+        // Stripe starts a merchant of record subscription only from a checkout, which a person pays.
+        const checkout = await billing.createCheckout({ customer: { id: customer.id, billingKey }, email: customer.email ?? "", price: { ref: ctx.price(tier, interval).ref, discountRef: coupon ?? null }, businessId, requestId: `scenario-${businessId}`, metadata: { lobbystack_business: businessId }, successUrl: "https://example.com/paid", cancelUrl: "https://example.com/back", locale: null, overageOnCheckout: { currency: setup.currency }, merchantOfRecord: true });
+        io.out(checkoutRequest({ scenario, url: checkout.url, card: card ?? "good" }));
+        let planId: string | null = null;
+        await eventually(async () => {
+          const session = await stripe.checkout.sessions.retrieve(checkout.id);
+          if (session.status === "expired") throw new ScenarioFailure(`the ${scenario} checkout expired before it was paid`);
+          planId = session.status === "complete" ? (typeof session.subscription === "string" ? session.subscription : session.subscription?.id ?? null) : null;
+          return planId !== null;
+        }, `nobody paid the ${scenario} checkout within 20 minutes`, 20 * 60_000);
+        const paid: Business = { scenario, businessId, billingKey, customerId: customer.id, planId: planId!, overageId: planId!, clock };
+        expectThat(await ctx.ensureOverage(paid) === paid.planId, `the ${tier} ${interval} plan subscription doesn't bill its overage`);
+        businesses.push(paid);
+        return paid;
+      }
       await ctx.setCard(customer.id, GOOD_CARD);
       const metadata = { lobbystack_business: businessId, lobbystack_checkout: `scenario-${businessId}`, lobbystack_role: "plan" };
       const plan = await stripe.subscriptions.create({
@@ -512,6 +597,11 @@ export async function runScenarios(argv: string[], io: ScenarioIo): Promise<numb
       businesses.push(business);
       return business;
     },
+    async ensureOverage(business) {
+      const found = await billing.ensureOverage({ customerId: business.customerId, planSubscriptionId: business.planId, businessId: business.businessId, currency: setup.currency, ...(setup.merchantOfRecord ? { onPlan: true } : {}) });
+      expectThat("subscriptionId" in found, `the overage subscription ${"unpaidSubscriptionId" in found ? found.unpaidSubscriptionId : ""} is unpaid`);
+      return found.subscriptionId;
+    },
     async setCard(customerId, card) {
       const method = await stripe.paymentMethods.attach(card, { customer: customerId });
       await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: method.id } });
@@ -524,11 +614,10 @@ export async function runScenarios(argv: string[], io: ScenarioIo): Promise<numb
     log: (line) => io.out(line),
   };
 
-  const chosen = (options.only ?? SCENARIOS.map((scenario) => scenario.name)).filter((name) => name !== "events") as Exclude<ScenarioName, "events">[];
-  const wantEvents = options.only === null || options.only.includes("events");
-  io.out(`Running ${chosen.length + (wantEvents ? 1 : 0)} ${chosen.length + (wantEvents ? 1 : 0) === 1 ? "scenario" : "scenarios"} in Stripe sandbox ${setup.snapshot.account.id}, ${options.parallel} at once.`);
-  const outcomes = await inPool(chosen, options.parallel, async (name) => await attempt(name, () => scenarios[name](ctx), io));
-  if (wantEvents) outcomes.push(await attempt("events", () => checkEvents(ctx, businesses, started, setup.planFor), io));
+  const count = run.scenarios.length + (run.events ? 1 : 0);
+  io.out(`Running ${count} ${count === 1 ? "scenario" : "scenarios"} in Stripe sandbox ${setup.snapshot.account.id}, ${run.parallel} at once.`);
+  const outcomes = await inPool(run.scenarios, run.parallel, async (name) => await attempt(name, () => scenarios[name](ctx), io));
+  if (run.events) outcomes.push(await attempt("events", () => checkEvents(ctx, businesses, started, setup.planFor), io));
 
   if (!options.keep) {
     for (const id of clocks) await stripe.testHelpers.testClocks.del(id).catch((error: Error) => io.err(`Couldn't delete test clock ${id}: ${error.message}`));

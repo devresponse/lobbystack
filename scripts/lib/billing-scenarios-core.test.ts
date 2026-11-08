@@ -1,15 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { expectedOverageCents, firstOfMonth, inPool, nextFirstOfMonth, parseScenarioArgs, redactingOutput, redactKeys, SCENARIOS, scenarioKeyProblem, ScenarioUsage } from "./billing-scenarios-core";
+import { checkoutRequest, expectedOverageCents, firstOfMonth, inPool, MERCHANT_OF_RECORD_SCENARIOS, nextFirstOfMonth, parseScenarioArgs, redactingOutput, redactKeys, scenarioRun, SCENARIOS, scenarioKeyProblem, ScenarioUsage } from "./billing-scenarios-core";
 
 describe("the sandbox scenarios' command line", () => {
   it("runs every scenario on RealInfoBot's file, four at once, by default", () => {
-    expect(parseScenarioArgs([])).toEqual({ list: false, help: false, brand: "realinfobot", only: null, keep: false, parallel: 4 });
+    expect(parseScenarioArgs([])).toEqual({ list: false, help: false, brand: "realinfobot", only: null, keep: false, parallel: 4, merchantOfRecord: false });
   });
 
   it("takes a list of scenarios, a brand, how many at once, and whether to keep the clocks", () => {
-    expect(parseScenarioArgs(["--only", "usage,refund", "--brand=alloplace", "--parallel", "2", "--keep"])).toEqual({ list: false, help: false, brand: "alloplace", only: ["usage", "refund"], keep: true, parallel: 2 });
+    expect(parseScenarioArgs(["--only", "usage,refund", "--brand=alloplace", "--parallel", "2", "--keep"])).toEqual({ list: false, help: false, brand: "alloplace", only: ["usage", "refund"], keep: true, parallel: 2, merchantOfRecord: false });
     expect(parseScenarioArgs(["--list"]).list).toBe(true);
+    expect(parseScenarioArgs(["--merchant-of-record"]).merchantOfRecord).toBe(true);
+  });
+
+  it("runs every scenario directly, and under merchant of record only those whose calls differ, one at a time, refusing one that can't run", () => {
+    const all = scenarioRun({ only: null, parallel: 4 }, false);
+    expect(all).toEqual({ scenarios: SCENARIOS.map((scenario) => scenario.name).filter((name) => name !== "events"), events: true, parallel: 4 });
+    expect(scenarioRun({ only: null, parallel: 4 }, true)).toEqual({ scenarios: MERCHANT_OF_RECORD_SCENARIOS.filter((name) => name !== "events"), events: true, parallel: 1 });
+    expect(scenarioRun({ only: ["refund"], parallel: 4 }, true)).toEqual({ scenarios: ["refund"], events: false, parallel: 1 });
+    expect(() => scenarioRun({ only: ["upgrade-declined", "usage"], parallel: 4 }, true)).toThrow("upgrade-declined can't run with Stripe as the merchant of record");
+    expect(scenarioRun({ only: ["upgrade-declined"], parallel: 2 }, false)).toEqual({ scenarios: ["upgrade-declined"], events: false, parallel: 2 });
+  });
+
+  it("tells the person paying a checkout which test card to use", () => {
+    expect(checkoutRequest({ scenario: "usage", url: "https://checkout.stripe.com/c/pay/cs_test_1", card: "good" })).toBe("Pay the usage checkout with test card 4242 4242 4242 4242, any future date, any CVC and any address, within 20 minutes: https://checkout.stripe.com/c/pay/cs_test_1");
+    expect(checkoutRequest({ scenario: "upgrade-3ds", url: "https://checkout.stripe.com/c/pay/cs_test_2", card: "3ds" })).toContain("4000 0027 6000 3184, and approve on the bank's test page");
   });
 
   it("refuses an unknown scenario or option, and a value that's missing or out of range", () => {

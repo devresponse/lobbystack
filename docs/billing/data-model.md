@@ -94,7 +94,7 @@ The columns the fork added to them:
 | `billing_usage_events.plan_code_at_record_time` | `0110` | The promo plan the use counted under, so a month that moves onto or off one prices each event on its own terms |
 | `billing_usage_events.synced_quantity`, `sync_seq`, `sending_quantity` | `0116` | What Polar has, the number of the next event to send (`source_key`, then `source_key:<n>`), and the difference being sent |
 | `billing_accounts.source` check | `0146`, `0147` | `polar`, `stripe` or `managed`; `0147` checked the rows from before. The `polar` default stays: reconcile's upsert leaves the source out for an account that exists, and PostgreSQL checks NOT NULL before it finds the conflict |
-| `billing_accounts.overage_subscription_id`, `cancel_at` | `0146` | Stripe's monthly overage subscription, and when the subscription ends unless resumed |
+| `billing_accounts.overage_subscription_id`, `cancel_at` | `0146` | Stripe's monthly overage subscription, or the plan subscription itself when overage is on the plan's checkout (merchant of record), and when the subscription ends unless resumed |
 | `billing_accounts.next_plan_code`, `next_interval`, `next_change_at` | `0146` | A plan change waiting for the renewal, all three or none |
 | `billing_usage_events.rate_cents`, `sync_sent_at` | `0146` | The overage rate a row was priced at, where the provider meters money (Stripe), and when its event last went out |
 | `billing_usage_months.provider_overage_cents`, `provider_checked_at`, `fix_seq` | `0146` | What the provider held at the last daily totals check, when, and the number of its next correction |

@@ -115,7 +115,7 @@ describe("original billing overview behavior", () => {
   it("cancels a Stripe plan at its renewal once confirmed, following the request until Stripe shows it", async () => {
     const billingFetch = setup({ provider: "stripe", planActions: true });
     // The billing summary as before; the change request and its status as Stripe made it.
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => url === "/api/billing/subscription" ? Response.json({ requestId: "change-1" }, { status: 202 }) : url.includes("/checkout?") ? Response.json({ status: "changed", synced: true, refusal: null }) : await billingFetch(url));
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => url === "/api/billing/subscription" ? Response.json({ requestId: "change-1" }, { status: 202 }) : url.includes("/checkout?") ? Response.json({ status: "changed", synced: true, refusal: null }) : await billingFetch(url));
     vi.stubGlobal("fetch", fetchMock);
     await userEvent.click(screen.getByRole("button", { name: "billing.actions.cancelPlan" }));
     expect(translate).toHaveBeenCalledWith("billing.cancelDialog.description", { date: expect.any(String) });

@@ -19,7 +19,10 @@ const round = (cents: number) => Math.round(cents * 10_000) / 10_000;
  * Stripe never had, or one it counted twice. The open period is the month,
  * or the plan's since its renewal when overage bills on the plan
  * subscription. A correction that would take the open period below zero,
- * which Stripe bills as nothing, goes to the customer's balance for the rest. Corrections are keyed by the open month's
+ * which Stripe bills as nothing, goes to the customer's balance for the rest.
+ * A customer billed in another currency, as merchant of record bills one
+ * abroad, can't use that credit: it still settles the comparison, and
+ * ops.billing.usage_credit_unapplied asks the operator to refund it by hand. Corrections are keyed by the open month's
  * fix number, so a retried check sends each once. While an event is in
  * flight, or one went out within the hour, the check waits an hour.
  */
@@ -35,6 +38,8 @@ export async function checkBillingUsageTotals(job: JobEnvelope, dependencies: Wo
   const openMonth = await billing.usageTotals({ customerId: work.customerId, from: work.openSince, to: now });
   const credits = await billing.usageCredits({ customerId: work.customerId });
   let fixSeq = work.fixSeq;
+  // Read once, only when a credit goes out.
+  let billed: Promise<string | null> | undefined;
   let openHeld = 0;
   for (const kind of kinds) {
     // A credit stands for usage taken back.
@@ -47,6 +52,9 @@ export async function checkBillingUsageTotals(job: JobEnvelope, dependencies: Wo
       if (credit >= USAGE_GAP_CENTS) {
         if (!work.currency) throw new Error("The billing catalog has no live price, so a usage credit has no currency.");
         await billing.creditBalance({ customerId: work.customerId, kind, cents: credit, currency: work.currency, identifier: `credit:${businessId}:${work.periodKey}:${kind}:${fixSeq}` });
+        billed ??= billing.customerCurrency?.(work.customerId) ?? Promise.resolve(null);
+        const customerCurrency = await billed;
+        if (customerCurrency && customerCurrency !== work.currency) await reportUsageCreditUnapplied(dependencies, { businessId, provider: billing.id, kind, cents: credit, currency: work.currency, customerCurrency, periodKey: work.periodKey });
       }
       fixSeq += 1;
       open = round(open + meterFix);
@@ -56,6 +64,22 @@ export async function checkBillingUsageTotals(job: JobEnvelope, dependencies: Wo
   }
   await recordUsageTotalsCheck(dependencies.domain, { businessId, periodKey: work.periodKey, providerOverageCents: openHeld, fixSeq, checkedAt: now });
   return { status: "completed", entityId: businessId };
+}
+
+/** ops.billing.usage_credit_unapplied: a credit the customer's invoices won't take, for the operator to refund in the customer's currency. */
+async function reportUsageCreditUnapplied(dependencies: WorkerDependencies, input: { businessId: string; provider: string; kind: UsageTotalsKind; cents: number; currency: string; customerCurrency: string; periodKey: string }): Promise<void> {
+  logEvent("warn", "ops.billing.usage_credit_unapplied", input);
+  try {
+    await recordProductEvent(dependencies.domain, {
+      name: "ops.billing.usage_credit_unapplied",
+      businessId: input.businessId,
+      distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+      actorType: "worker",
+      properties: { provider: input.provider, kind: input.kind, cents: input.cents, currency: input.currency, customerCurrency: input.customerCurrency, periodKey: input.periodKey },
+    });
+  } catch {
+    // The credit went out either way.
+  }
 }
 
 /** ops.billing.usage_totals_mismatch: in the logs, and to PostHog where it's set up, for the operator's alert. */

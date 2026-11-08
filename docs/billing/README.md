@@ -204,6 +204,7 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `ops.billing.provider_mismatch` | PostHog event from the worker, and an error log line, at startup | `STRIPE_API_KEY` belongs to another account than `STRIPE_ACCOUNT_ID`, so the worker runs without billing | Any |
 | `ops.billing.account_unchecked` | Warning log line from the worker, at startup | Stripe couldn't be reached to check the key's account; the worker bills on | None |
 | `ops.billing.usage_totals_mismatch` | PostHog event from the worker, and a warning log line | The daily totals check found Stripe's meters off what was sent, by `kind` and `gapCents`, and corrected the open month | Any in a day |
+| `ops.billing.usage_credit_unapplied` | PostHog event from the worker, and a warning log line | The daily totals check credited `cents` in the catalog's `currency` to a customer billed in their own (`customerCurrency`), as merchant of record bills customers abroad: the credit won't reach their invoices, so refund them that much in their currency in Stripe's Dashboard | Any |
 | `ops.billing.plan_change_expired` | Warning log line from the worker | A Stripe upgrade waited a day for a payment the bank wanted confirmed, and Stripe dropped it; the business sees the change fail | None |
 | `ops.billing.sweep` | Log line from the worker | What each sweep that found work queued again | None |
 

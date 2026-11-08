@@ -110,7 +110,7 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
 ## Check it
 
 - `billing.verifyCatalog` checks the file, the tables and Stripe every day, with the worker's key, and reports drift as `ops.billing.profile_drift` with `provider` `stripe`.
-- `billing.checkUsageTotals` reports each gap it corrects as `ops.billing.usage_totals_mismatch`.
+- `billing.checkUsageTotals` reports each gap it corrects as `ops.billing.usage_totals_mismatch`, and a balance credit a customer billed in another currency can't use as `ops.billing.usage_credit_unapplied`, for a refund by hand.
 - The worker's startup reports `ops.billing.provider_mismatch` when its key belongs to another account than `STRIPE_ACCOUNT_ID`, and then runs without billing.
 - The other signals are in [billing's table](../billing/README.md#watch-billing).
 - Certification: `pnpm replacement:webhooks` sends a signed Stripe event to a Stripe deployment, and `pnpm replacement:billing` runs the usage checks on Stripe accounts, with `BILLING_PROVIDER=stripe`, `STRIPE_WEBHOOK_SECRET` and a test `STRIPE_API_KEY` in its environment.

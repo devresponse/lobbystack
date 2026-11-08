@@ -154,6 +154,31 @@ describe("billing.checkUsageTotals", () => {
     expect(stripe.state.balanceTransactions).toHaveLength(1);
   });
 
+  it("reports a credit that can't reach a customer billed in another currency, as merchant of record bills one abroad", async () => {
+    const { stripe, billing } = withMeters();
+    // Adaptive Pricing billed this customer in US dollars.
+    stripe.addCustomer({ id: "cus_1", businessId: "b1", currency: "usd" });
+    const businessId = randomUUID();
+    await send(billing, "transfer", 100, new Date(monthStart().getTime() - 24 * 60 * 60_000));
+    await send(billing, "transfer", 100, new Date(monthStart().getTime() - 24 * 60 * 60_000));
+    await send(billing, "transfer", 10);
+    vi.mocked(loadUsageTotalsWork).mockResolvedValue(work({ confirmed: { voice: 0, alert_sms: 0, transfer: 110 } }));
+    await handleJob(job("billing.checkUsageTotals", businessId), { domain, billing });
+    // The credit still settles the comparison, so the next day's check doesn't send it again.
+    expect(stripe.state.balanceTransactions).toMatchObject([{ amount: -90, currency: "cad" }]);
+    expect(recordProductEvent).toHaveBeenCalledWith(domain, expect.objectContaining({ name: "ops.billing.usage_credit_unapplied", businessId, properties: { provider: "stripe", kind: "transfer", cents: 90, currency: "cad", customerCurrency: "usd", periodKey: work({}).periodKey } }));
+    // A customer billed in the catalog's currency uses the credit: nothing to report.
+    vi.mocked(recordProductEvent).mockClear();
+    const same = withMeters();
+    same.stripe.addCustomer({ id: "cus_1", businessId: "b1", currency: "cad" });
+    await send(same.billing, "transfer", 100, new Date(monthStart().getTime() - 24 * 60 * 60_000));
+    await send(same.billing, "transfer", 100, new Date(monthStart().getTime() - 24 * 60 * 60_000));
+    await send(same.billing, "transfer", 10);
+    await handleJob(job("billing.checkUsageTotals", businessId), { domain, billing: same.billing });
+    expect(same.stripe.state.balanceTransactions).toMatchObject([{ amount: -90, currency: "cad" }]);
+    expect(vi.mocked(recordProductEvent).mock.calls.map(([, event]) => event.name)).not.toContain("ops.billing.usage_credit_unapplied");
+  });
+
   it("takes the open period from the plan's renewal when overage bills on the plan subscription", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-20T12:00:00Z") });
     const { stripe, billing } = withMeters();

@@ -54,6 +54,12 @@ Each feature has a status:
 | [Publish the n8n and Zapier integrations](n8n-and-zapier.md) | A dedicated n8n node, and the brands' private Zapier integration (fork PR #94) listed in Zapier's directory. The Make app (fork PR #95) is shared by invite link | 3 to 5 days for the node; 1.5 to 2.5 days for the listing | Ready when needed | 2026-10-13, in [integrations](../features/api-cli-integrations.md#connect-n8n) |
 | [Offer a QR place guide](qr-place-guide.md) | A no-login guide at a place, paid for by the place's owner | A pilot with no code; a minimum product in 16 to 23 days at the time | Waiting on a decision | [2026-10-10](../research/qr-place-guide-market.md) |
 
+**Billing**
+
+| Feature | What it gives | Effort | Status | Study |
+| --- | --- | --- | --- | --- |
+| [Bill new deployments through Stripe](stripe-billing.md) | One billing provider per deployment, with Polar moved behind the same interfaces first, so a new deployment can sell through Stripe while existing ones stay on Polar | 19 steps, about 40 to 46 days; steps 1 to 8 help even if Stripe waits | Being built on `feature/receptionists` | 2026-11-05, outside the repository |
+
 ## Know the smaller items
 
 These are tracked only in [open items](../project/open-items.md), since each is a pull request or a choice rather than a project:

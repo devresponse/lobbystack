@@ -63,7 +63,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 - [Platform architecture](architecture/overview.md), [the voice runtime](voice/runtime.md) and [knowledge](knowledge/architecture.md).
 - [Telemetry](telemetry/architecture.md): its [events](telemetry/event-taxonomy.md), [KPIs](telemetry/kpi-spec.md) and [data quality checks](telemetry/data-quality-checklist.md).
 - [Test a voice change](voice/testing.md) with `pnpm voice:eval` and `pnpm voice:call`.
-- The architecture decisions, [ADR 0001](adr/0001-monorepo.md) to [ADR 0009](adr/0009-ai-conversation-traces.md), listed in [decisions](project/decisions.md#read-the-architecture-decisions).
+- The architecture decisions, [ADR 0001](adr/0001-monorepo.md) to [ADR 0010](adr/0010-billing-provider-per-deployment.md), listed in [decisions](project/decisions.md#read-the-architecture-decisions).
 
 ## Look things up
 

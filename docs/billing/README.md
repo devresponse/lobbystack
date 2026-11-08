@@ -201,7 +201,7 @@ Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set (
 | Promo codes and endings | `packages/domain/src/server/billingCodes.ts`, `billingPromoEnd.ts`, `packages/shared/src/billingCodes.ts` |
 | The sweep | `packages/domain/src/server/billingSweep.ts` |
 | Dashboard routes | `apps/admin/app/api/billing/` (plan, `checkout`, `portal`, `promo`), `apps/admin/app/api/webhooks/polar/route.ts`, `apps/admin/src/lib/billing-limit.ts` |
-| Worker jobs and schedules | `apps/worker/src/handlers.ts`, `apps/worker/src/scheduler.ts` |
+| Worker jobs and schedules | `apps/worker/src/billing/`, one file per flow, and `apps/worker/src/scheduler.ts` |
 | Tables | Migrations `0108` to `0116` in `packages/db/migrations/` ([data model](data-model.md)) |
 
 ## Know the known problems

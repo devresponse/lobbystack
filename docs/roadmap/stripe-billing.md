@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 7 are done.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 8 are done: phases 1 and 2.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -102,3 +102,14 @@ Sentences name the deployment's billing provider, so a Polar deployment reads ex
 - **Other messages:** the cancellation emails name the provider the business paid through; the integrations list's billing row, the operator-key 403 and the promo checkout's 409 name the deployment's provider; the CLI's `onboard` and its waits, its docs in three languages and the API's checkout and billing descriptions say the billing provider, with Polar's one customer per email kept as Polar's. `billingProviderOf` in `packages/shared` reads `BILLING_PROVIDER` for these names; the services check its value when they start.
 
 A search of the locale files finds Polar only in the billing email strings.
+
+## Step 8: plan end and change dates in Settings > Plan
+
+Reconcile stores when a plan ends and what it changes to, for Polar too, so **Settings > Plan** can say it.
+
+- **Polar's events:** the normalizer reads a subscription's `cancel_at_period_end` with its `current_period_end`, and `pending_update`'s product, which the catalog's links turn into a plan and interval. A subscription event stores `cancelAt` and `nextChange`, null when there's none; an order says nothing about them.
+- **Reconcile** writes `billing_accounts.cancel_at`, and `next_plan_code`, `next_interval` and `next_change_at` all three or none, and clears them when the subscription drops them. An event stored before this step leaves them as they are.
+- **The answers:** the v1 `GET /billing` adds `cancels_at`, for a live subscription only, and `next_change` (plan, interval and when). The dashboard's billing answer carries the same, with the waiting plan's tier and names when the business can read them.
+- **Settings > Plan** says "Your plan ends on DATE" or "Your plan changes to PLAN on DATE" under the plan, with step 7's strings; a promo plan's own end keeps its wording, and **Manage subscription** still opens Polar's portal.
+
+On the demo, a sandbox subscription canceled in Polar's portal should then show its end date: the check for this step once it's deployed.

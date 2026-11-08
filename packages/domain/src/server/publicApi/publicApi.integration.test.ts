@@ -946,6 +946,14 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       // A Starter plan that lapsed left a cap behind. The managed plan clears it, or calls would have nothing to reserve.
       await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "starter", subscriptionState: "canceled", billingInterval: "monthly", overageSpendingCapCents: 500 });
       expect(await getBillingForApi(context, caller)).toMatchObject({ plan: "free_cloud", billing_interval: null, spending_cap_cents: null });
+      // A live plan set to end says when; an ended one doesn't (the Stripe plan's step 8).
+      await admin!.db.update(billingAccounts).set({ subscriptionState: "active", cancelAt: new Date("2026-12-01T00:00:00.000Z") }).where(eq(billingAccounts.businessId, businessId));
+      const ending = await getBillingForApi(context, caller);
+      expect(ending).toMatchObject({ cancels_at: "2026-12-01T00:00:00.000Z", next_change: null, provider: "polar", provider_name: "Polar" });
+      expect(apiBillingSchema.safeParse(ending).success).toBe(true);
+      await admin!.db.update(billingAccounts).set({ subscriptionState: "canceled" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await getBillingForApi(context, caller)).toMatchObject({ cancels_at: null });
+      await admin!.db.update(billingAccounts).set({ cancelAt: null }).where(eq(billingAccounts.businessId, businessId));
       // A checkout queued before the managed plan stops, so Polar never sells a plan the operator bills.
       const queued = await createCheckoutForApi(context, caller, { plan: "starter", interval: "monthly" }, { available: true });
       const managed = await setManagedPlanForApi(context, operator);

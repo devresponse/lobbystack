@@ -140,7 +140,7 @@ export type NormalizedBillingEvent = {
     billingKey?: string; customerId?: string; subscriptionId?: string; priceRef?: string;
     plan?: string; planCode?: string; billingInterval?: BillingInterval; subscriptionState?: string;
     discountRef?: string | null; subscriptionModifiedAt?: string; periodStart?: string; periodEnd?: string;
-    cancelAt?: string | null; checkoutRequestId?: string; checkoutOutcome?: "completed" | "expired";
+    cancelAt?: string | null; nextChange?: { planCode: string; billingInterval: BillingInterval; at: string } | null; checkoutRequestId?: string; checkoutOutcome?: "completed" | "expired";
     payment?: { id: string; status: string; amountCents: number; refundedCents: number; currency: string; invoiceUrl: string | null; subscriptionId: string | null; description: string | null; occurredAt: string };
   };
   /**

@@ -198,6 +198,12 @@ export const apiBillingSchema = z.object({
   subscription_state: z.string().nullable().describe("The subscription's state, such as active, trialing, past_due or canceled. Null without a subscription."),
   billing_interval: z.enum(billingIntervals).nullable().describe("Null unless the plan is Starter or Pro."),
   current_period_end: nullableTimestamp.describe("When the paid period ends. Null unless the plan is Starter or Pro."),
+  cancels_at: nullableTimestamp.describe("When a live subscription ends unless it's resumed, as the billing provider last said. Null when it renews."),
+  next_change: z.object({
+    plan: z.string().describe("The plan's code: a standard plan, or a promo plan's own."),
+    interval: z.enum(billingIntervals),
+    at: timestamp.describe("When the change takes effect, at the renewal."),
+  }).nullable().describe("A plan change waiting for the renewal, such as a downgrade. Null when none waits."),
   spending_cap_cents: z.number().int().nullable().describe("The most a Starter or Pro plan spends on usage over its allowance each month. Null means no cap, and is always null on other plans."),
   overage_spend_cents: z.number().int().describe("Usage over the allowance this month."),
   spending_cap_reached: z.boolean().describe("true once this month's overage reached the cap, which stops further billable usage."),

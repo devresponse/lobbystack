@@ -125,6 +125,34 @@ describe("the billing key", () => {
   });
 });
 
+describe("a subscription's coming end and waiting change", () => {
+  const account = { billingKey: "business:biz_1", customerId: "cust_1", subscriptionId: "sub_1", plan: "pro", subscriptionState: "active", billingInterval: "monthly", source: "polar" };
+  const event = { billingKey: "business:biz_1", subscriptionId: "sub_1", plan: "pro", status: "active" };
+  const schedule = ["cancelAt", "nextPlanCode", "nextInterval", "nextChangeAt"];
+
+  it("stores when the plan ends unless resumed, and clears it once resumed", async () => {
+    const ending = await reconcile("subscription.updated", { ...event, cancelAt: "2026-12-01T00:00:00.000Z", nextChange: null }, account);
+    expect(ending.account?.set).toMatchObject({ cancelAt: new Date("2026-12-01T00:00:00.000Z"), nextPlanCode: null, nextInterval: null, nextChangeAt: null });
+    const resumed = await reconcile("subscription.updated", { ...event, cancelAt: null, nextChange: null }, account);
+    expect(resumed.account?.set).toMatchObject({ cancelAt: null, nextPlanCode: null });
+  });
+
+  it("stores a downgrade waiting for the renewal, all three columns at once, and clears it once kept", async () => {
+    const waiting = await reconcile("subscription.updated", { ...event, cancelAt: null, nextChange: { planCode: "starter", billingInterval: "annual", at: "2026-12-01T00:00:00.000Z" } }, account);
+    expect(waiting.account?.set).toMatchObject({ cancelAt: null, nextPlanCode: "starter", nextInterval: "annual", nextChangeAt: new Date("2026-12-01T00:00:00.000Z") });
+    // A change missing its time is none.
+    const partial = await reconcile("subscription.updated", { ...event, nextChange: { planCode: "starter", billingInterval: "annual" } }, account);
+    expect(partial.account?.set).toMatchObject({ nextPlanCode: null, nextInterval: null, nextChangeAt: null });
+    const kept = await reconcile("subscription.updated", { ...event, cancelAt: null, nextChange: null }, account);
+    expect(kept.account?.set).toMatchObject({ nextPlanCode: null, nextInterval: null, nextChangeAt: null });
+  });
+
+  it("leaves both alone for an event that says nothing about them, such as one stored before them", async () => {
+    const before = await reconcile("subscription.updated", event, account);
+    for (const key of schedule) expect(before.account?.set).not.toHaveProperty(key);
+  });
+});
+
 describe("reconciling Polar events for a managed plan", () => {
   const managed = { billingKey: "business:biz_1", customerId: null, subscriptionId: null, plan: "enterprise", subscriptionState: "active", billingInterval: null, source: "managed" };
 

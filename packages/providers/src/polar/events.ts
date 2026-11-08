@@ -19,6 +19,13 @@ export function polarEventKind(type: string): BillingEventKind {
 }
 
 /** Polar's webhook: its Standard Webhooks signature with POLAR_WEBHOOK_SECRET, and its events in LobbyStack's terms. */
+/** A time Polar sent, as an ISO string; null when it's missing or not a time. */
+function isoTime(value: string | undefined): string | null {
+  if (!value) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.valueOf()) ? null : at.toISOString();
+}
+
 export class PolarWebhook implements BillingWebhook {
   readonly provider = "polar" as const;
 
@@ -89,6 +96,12 @@ export class PolarWebhook implements BillingWebhook {
     const modifiedAt = new Date(text(subscription.modified_at) ?? text(subscription.created_at) ?? Number.NaN);
     const subscriptionModifiedAt = Number.isNaN(modifiedAt.valueOf()) ? undefined : modifiedAt.toISOString();
     const kind = polarEventKind(type);
+    // A subscription event says when the plan ends unless resumed, and a change waiting for the renewal, which
+    // Polar applies at the period's end: null when there's none. Other events say nothing, so reconcile leaves them.
+    const periodEnd = isoTime(text(subscription.current_period_end));
+    const pending = links.planFor(text(record(subscription.pending_update).product_id));
+    const cancelAt = kind === "subscription" ? (subscription.cancel_at_period_end === true ? periodEnd : null) : undefined;
+    const nextChange = kind === "subscription" ? (pending && periodEnd ? { planCode: pending.code, billingInterval: pending.interval, at: periodEnd } : null) : undefined;
     return {
       kind,
       businessId: businessId ?? null,
@@ -104,6 +117,8 @@ export class PolarWebhook implements BillingWebhook {
         ...(subscriptionState ? { subscriptionState } : {}),
         ...(discountId ? { discountRef: discountId } : {}),
         ...(subscriptionModifiedAt ? { subscriptionModifiedAt } : {}),
+        ...(cancelAt !== undefined ? { cancelAt } : {}),
+        ...(nextChange !== undefined ? { nextChange } : {}),
       },
       // Today's fields under their Polar names, which a reconcile of the release before reads, then kind and priceRef.
       payload: {
@@ -117,6 +132,8 @@ export class PolarWebhook implements BillingWebhook {
         ...(subscriptionState ? { subscriptionState } : {}),
         ...(discountId ? { discountId } : {}),
         ...(subscriptionModifiedAt ? { subscriptionModifiedAt } : {}),
+        ...(cancelAt !== undefined ? { cancelAt } : {}),
+        ...(nextChange !== undefined ? { nextChange } : {}),
         kind,
         ...(productId ? { priceRef: productId } : {}),
       },

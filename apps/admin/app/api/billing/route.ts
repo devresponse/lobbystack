@@ -2,8 +2,8 @@ import { billingIntervals, billingPlanPrice, billingProviderNames, billingProvid
 import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 
-import { billingAccounts, billingTransactions, billingUsageEvents } from "@lobbystack/db";
-import { billingAccess, billingPlanList, deploymentBrandCatalog, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, loadBusinessPromoPlan, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
+import { billingAccounts, billingPlans, billingTransactions, billingUsageEvents } from "@lobbystack/db";
+import { billingAccess, billingPlanList, isLiveSubscriptionState, deploymentBrandCatalog, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, loadBusinessPromoPlan, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     return NextResponse.json(await withOperatorTransaction(request, async ({ session, businessId, tx }) => {
       const membership = await requireBusinessMembership(tx, { userId: session.user.id, businessId });
       const periodKey = new Date().toISOString().slice(0, 7);
-      const account = await tx.select({ source: billingAccounts.source, customerId: billingAccounts.customerId, subscriptionId: billingAccounts.subscriptionId, plan: billingAccounts.plan, billingKey: billingAccounts.billingKey, billingInterval: billingAccounts.billingInterval, subscriptionState: billingAccounts.subscriptionState, currentPeriodStart: billingAccounts.currentPeriodStart, currentPeriodEnd: billingAccounts.currentPeriodEnd, overageSpendingCapCents: billingAccounts.overageSpendingCapCents }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+      const account = await tx.select({ source: billingAccounts.source, customerId: billingAccounts.customerId, subscriptionId: billingAccounts.subscriptionId, plan: billingAccounts.plan, billingKey: billingAccounts.billingKey, billingInterval: billingAccounts.billingInterval, subscriptionState: billingAccounts.subscriptionState, currentPeriodStart: billingAccounts.currentPeriodStart, currentPeriodEnd: billingAccounts.currentPeriodEnd, overageSpendingCapCents: billingAccounts.overageSpendingCapCents, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
       const usage = await tx.select({ periodKey: billingUsageEvents.periodKey, usageKind: billingUsageEvents.usageKind, quantity: billingUsageEvents.quantity, isFinal: billingUsageEvents.isFinal, syncStatus: billingUsageEvents.syncStatus }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, businessId), eq(billingUsageEvents.periodKey, periodKey))).orderBy(desc(billingUsageEvents.createdAt)).limit(100);
       // Counted now from the month's usage and the limits in force, so an upgrade or a new rate shows at once.
       const usageStatus = await readUsageStatusInTransaction(tx, { businessId, periodKey });
@@ -35,9 +35,15 @@ export async function GET(request: Request) {
       const availableCheckoutPlans = hostedCheckoutPlanSlugs.filter(plan => availableCheckoutIntervals[plan].length > 0);
       // A promo plan the business took with a code, shown by its own name and price.
       const promoPlan = await loadBusinessPromoPlan(tx, businessId);
+      // When a live plan ends unless resumed, or a change waiting for its renewal, with the plan's names; a
+      // plan this business can't read, such as another's promo plan, shows its code.
+      const own = account[0];
+      const cancelsAt = own?.cancelAt && isLiveSubscriptionState(own.subscriptionState) ? own.cancelAt : null;
+      const [nextPlan] = own?.nextPlanCode ? await tx.select({ tier: billingPlans.tier, names: billingPlans.names }).from(billingPlans).where(eq(billingPlans.code, own.nextPlanCode)).limit(1) : [];
+      const nextChange = own?.nextPlanCode && own.nextInterval && own.nextChangeAt ? { plan: own.nextPlanCode, tier: nextPlan?.tier ?? null, names: nextPlan?.names ?? null, interval: own.nextInterval, at: own.nextChangeAt } : null;
       // The deployment's billing provider, which the plan screens name.
       const provider = billingProviderOf(process.env);
-      return { provider, providerName: billingProviderNames[provider], availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
+      return { provider, providerName: billingProviderNames[provider], cancelsAt, nextChange, availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
     }));
   } catch (error) {
     return asApiResponse(error);

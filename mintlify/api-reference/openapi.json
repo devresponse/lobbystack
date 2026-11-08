@@ -15597,6 +15597,54 @@
             ],
             "description": "When the paid period ends. Null unless the plan is Starter or Pro."
           },
+          "cancels_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a live subscription ends unless it's resumed, as the billing provider last said. Null when it renews."
+          },
+          "next_change": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "description": "The plan's code: a standard plan, or a promo plan's own."
+                  },
+                  "interval": {
+                    "type": "string",
+                    "enum": [
+                      "monthly",
+                      "annual"
+                    ]
+                  },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "When the change takes effect, at the renewal."
+                  }
+                },
+                "required": [
+                  "plan",
+                  "interval",
+                  "at"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A plan change waiting for the renewal, such as a downgrade. Null when none waits."
+          },
           "spending_cap_cents": {
             "anyOf": [
               {
@@ -15642,6 +15690,8 @@
           "subscription_state",
           "billing_interval",
           "current_period_end",
+          "cancels_at",
+          "next_change",
           "spending_cap_cents",
           "overage_spend_cents",
           "spending_cap_reached",

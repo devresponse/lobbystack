@@ -102,7 +102,7 @@ import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } f
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
-import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
+import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
 import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
@@ -339,7 +339,7 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 /** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
 async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   // A promo plan's end, and what its renewal does; a plan that keeps going has neither.
   const [promo] = planCode ? await tx.select({ ends: billingPlans.ends }).from(billingPlans).where(eq(billingPlans.code, planCode)).limit(1) : [];
   const planEndsWith = planCode && account?.planEnds ? promoPlanEnding(account.endWith, promo?.ends) : null;
@@ -358,6 +358,8 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
     subscription_state: account?.subscriptionState ?? null,
     billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
     current_period_end: paid && account?.currentPeriodEnd ? account.currentPeriodEnd.toISOString() : null,
+    cancels_at: account?.cancelAt && isLiveSubscriptionState(account.subscriptionState) ? account.cancelAt.toISOString() : null,
+    next_change: account?.nextPlanCode && (account.nextInterval === "monthly" || account.nextInterval === "annual") && account.nextChangeAt ? { plan: account.nextPlanCode, interval: account.nextInterval, at: account.nextChangeAt.toISOString() } : null,
     spending_cap_cents: cap,
     overage_spend_cents: spend,
     spending_cap_reached: cap !== null && spend > 0 && spend >= cap,

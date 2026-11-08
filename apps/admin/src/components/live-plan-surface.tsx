@@ -26,6 +26,10 @@ import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
 type Billing = {
   /** The deployment's billing provider, by name. */
   providerName: string;
+  /** When the live plan ends unless resumed; null when it renews. */
+  cancelsAt: string | null;
+  /** A change waiting for the renewal: the plan's code, and its tier and names when the business can read them. */
+  nextChange: { plan: string; tier: string | null; names: Record<string, string> | null; interval: string; at: string } | null;
   availableCheckoutPlans: Array<"starter" | "pro">;
   availableCheckoutIntervals: { starter: string[]; pro: string[] };
   plans: BillingPlanList;
@@ -39,6 +43,12 @@ type Billing = {
   transactions: Array<{ kind: string; sourceId: string; status: string; amountCents: number; refundedAmountCents: number; currency: string; description: string | null; invoiceUrl: string | null; occurredAt: string }>;
   usageStatus: { usageComplete: boolean; voiceBlocked: boolean; alertSmsBlocked: boolean; outboundCallAttemptsBlocked: boolean; overageSpendingCapReached: boolean; overageSpendCents: number; overageSpendingCapCents: number | null } | null;
 };
+
+/** The plan a waiting change moves to: its own name, its tier's, or its code when the business can't read it. */
+function nextPlanName(next: NonNullable<Billing["nextChange"]>, locale: string, t: Translate): string {
+  const tierKey = next.tier === "free_cloud" ? "freeCloud" : next.tier === "starter" || next.tier === "pro" || next.tier === "enterprise" ? next.tier : null;
+  return (next.names ? billingPlanName(next.names, locale) : null) ?? (tierKey ? t(`billing.planLabels.${tierKey}`) : next.plan);
+}
 
 function formatBillingDate(value: string | null, locale = "en"): string { return value ? formatDateTime(value, locale, { month: "short", day: "numeric", year: "numeric" }) : "—"; }
 
@@ -143,6 +153,14 @@ export function LivePlanSurface() {
                 {promoPlan?.ends ? (
                   <span className="text-sm text-muted-foreground">
                     {t(promoPlan.endsWith === "cancel" ? "billing.promo.endsCancel" : "billing.promo.endsTier", { date: formatBillingDate(promoPlan.ends, i18n.language), tier: t(`billing.planLabels.${promoPlan.tier}`) })}
+                  </span>
+                ) : billing.data.cancelsAt ? (
+                  <span className="text-sm text-muted-foreground">
+                    {t("billing.currentPlan.planEndsOn", { date: formatBillingDate(billing.data.cancelsAt, i18n.language) })}
+                  </span>
+                ) : billing.data.nextChange ? (
+                  <span className="text-sm text-muted-foreground">
+                    {t("billing.currentPlan.planChangesOn", { plan: nextPlanName(billing.data.nextChange, i18n.language, t), date: formatBillingDate(billing.data.nextChange.at, i18n.language) })}
                   </span>
                 ) : null}
               </div>

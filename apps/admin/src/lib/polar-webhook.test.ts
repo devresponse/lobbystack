@@ -115,6 +115,24 @@ describe("Polar payload normalization", () => {
     expect(event("prod_starter")).toMatchObject({ plan: "starter", planCode: "starter" });
   });
 
+  it("says when a subscription ends unless resumed, and a change waiting for its renewal, and when there are none", () => {
+    const price = (plan: string, tier: string, period: "monthly" | "annual", ref: string) => ({ plan, tier, status: "active", period, currency: "cad", cents: 1, per_month: 1, provider_ref: ref, retired: false });
+    const links = polarProductLinks({ plans: [], prices: [price("pro", "pro", "monthly", "prod_pro"), price("starter", "starter", "annual", "prod_starter_year")] }, {});
+    const customer = { external_id: `business:${businessId}` };
+    const event = (data: Record<string, unknown>) => normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", product_id: "prod_pro", current_period_end: "2026-12-01T00:00:00Z", customer, ...data }, links);
+    const ending = event({ cancel_at_period_end: true });
+    expect(ending.payload).toMatchObject({ cancelAt: "2026-12-01T00:00:00.000Z", nextChange: null });
+    expect(ending.fields).toMatchObject({ cancelAt: "2026-12-01T00:00:00.000Z", nextChange: null });
+    // A downgrade Polar applies at the renewal.
+    expect(event({ pending_update: { product_id: "prod_starter_year" } }).payload).toMatchObject({ cancelAt: null, nextChange: { planCode: "starter", billingInterval: "annual", at: "2026-12-01T00:00:00.000Z" } });
+    // A product no plan maps to is no change the screen can name.
+    expect(event({ pending_update: { product_id: "prod_unknown" } }).payload).toMatchObject({ cancelAt: null, nextChange: null });
+    // An order says nothing about either, so reconcile leaves them as they are.
+    const order = normalizePolarEvent("order.paid", { id: "order_1", customer, subscription: { id: "sub_1", status: "active", cancel_at_period_end: true, current_period_end: "2026-12-01T00:00:00Z" } }, links);
+    expect(order.payload).not.toHaveProperty("cancelAt");
+    expect(order.payload).not.toHaveProperty("nextChange");
+  });
+
   it("names the subscription's discount, from a subscription or an order's", () => {
     const customer = { external_id: `business:${businessId}` };
     expect(normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", discount_id: "disc_1", customer }).payload).toMatchObject({ discountId: "disc_1" });

@@ -715,6 +715,28 @@ export async function confirmBillingUsageSync(
   });
 }
 
+/**
+ * A subscription event's coming end and waiting change as account columns:
+ * set from the event, cleared when it says there's none, and untouched by an
+ * event that says nothing about them, such as one stored before step 8 of the
+ * Stripe plan. The waiting change takes its three columns together.
+ */
+function subscriptionScheduleFields(payload: Record<string, unknown>): { cancelAt?: Date | null; nextPlanCode?: string | null; nextInterval?: string | null; nextChangeAt?: Date | null } {
+  const time = (value: unknown) => {
+    const at = typeof value === "string" ? new Date(value) : null;
+    return at && !Number.isNaN(at.valueOf()) ? at : null;
+  };
+  const fields: { cancelAt?: Date | null; nextPlanCode?: string | null; nextInterval?: string | null; nextChangeAt?: Date | null } = {};
+  if (Object.hasOwn(payload, "cancelAt")) fields.cancelAt = time(payload.cancelAt);
+  if (Object.hasOwn(payload, "nextChange")) {
+    const next = recordObject(payload.nextChange);
+    const at = time(next.at);
+    const complete = typeof next.planCode === "string" && (next.billingInterval === "monthly" || next.billingInterval === "annual") && at !== null;
+    Object.assign(fields, complete ? { nextPlanCode: next.planCode, nextInterval: next.billingInterval, nextChangeAt: at } : { nextPlanCode: null, nextInterval: null, nextChangeAt: null });
+  }
+  return fields;
+}
+
 function recordObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
 }
@@ -985,6 +1007,7 @@ export async function reconcileBillingProviderEvent(
         ...(subscriptionState ? { subscriptionState } : {}),
         ...(currentPeriodStart ? { currentPeriodStart } : {}),
         ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
+        ...subscriptionScheduleFields(payload),
       };
       const live = isLiveSubscriptionState(subscriptionState ?? existing?.subscriptionState);
       const subscriptionFields = {

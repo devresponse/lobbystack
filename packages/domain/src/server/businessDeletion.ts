@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, isNull, min, ne, or, sql } from "drizzle-orm";
 
-import { billingAccounts, billingCheckoutRequests, businessMemberships, businesses, calls, enqueueOutbox, feedbackSubmissions, onboardingNumberClaimEvents, outboxMessages, phoneNumbers, productEvents, providerEvents, rlsContextStatement, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, businessMemberships, businesses, calls, enqueueOutbox, feedbackSubmissions, onboardingNumberClaimEvents, outboxMessages, phoneNumbers, productEvents, providerEvents, rlsContextStatement, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { isManagedBillingAccount, lockBillingAccount, MANAGED_BILLING_SOURCE } from "./billing";
 import type { DomainContext } from "./context";
@@ -154,9 +154,9 @@ export async function deleteBusiness(context: DomainContext, input: { userId: st
 
 /**
  * What's under way on a business that deleting or canceling it would cut
- * off: a phone number being bought, a call, or a plan checkout someone could
- * still pay. A number bought afterwards would belong to no open business and
- * keep costing; a payment would buy a plan for it.
+ * off: a phone number being bought, a call, or a plan or pack checkout
+ * someone could still pay. A number bought afterwards would belong to no open
+ * business and keep costing; a payment would buy a plan or a pack for it.
  */
 export async function workUnderWay(tx: DatabaseTransaction, businessId: string): Promise<"number_in_progress" | "call_in_progress" | "checkout_open" | null> {
   const [claiming] = await tx.select({ id: onboardingNumberClaimEvents.id }).from(onboardingNumberClaimEvents).where(and(
@@ -175,7 +175,14 @@ export async function workUnderWay(tx: DatabaseTransaction, businessId: string):
     inArray(billingCheckoutRequests.status, ["pending", "processing", "ready"]),
     gt(billingCheckoutRequests.updatedAt, new Date(Date.now() - OPEN_CHECKOUT_MS)),
   )).limit(1);
-  return checkout ? "checkout_open" : null;
+  if (checkout) return "checkout_open";
+  // A prepaid pack's checkout stays open until its page expires, which its row says.
+  const [packCheckout] = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts).where(and(
+    eq(billingPackCheckouts.businessId, businessId),
+    inArray(billingPackCheckouts.status, ["pending", "processing", "ready"]),
+    gt(billingPackCheckouts.expiresAt, sql`now()`),
+  )).limit(1);
+  return packCheckout ? "checkout_open" : null;
 }
 
 /** The Polar subscription a business still pays through, which deleting or canceling it ends: none for an ended one, or a plan the operator bills outside Polar. */

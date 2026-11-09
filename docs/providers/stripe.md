@@ -142,6 +142,7 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
 | `deletion` | A deleted business's two subscriptions end at once, each with its last invoice, and a retried revoke counts as ended |
 | `refund` | A refund of the plan's first payment leads back to its invoice |
 | `totals` | A usage event Stripe never got shows as a gap, a numbered correction sent twice closes it once, and a balance credit counts once |
+| `pack-plan-end` | A monthly plan a [prepaid pack](../features/prepaid-packs.md) replaced ends at once with nothing credited. With Stripe as the merchant of record, its last invoice bills the usage on its meters, to the cent before tax; directly, its overage subscription ends with its month, and the 1st's last invoice bills the usage |
 | `events` | Every webhook event of the scenarios' customers normalizes, each to its own business |
 
 1. **A sandbox of its own,** not a deployment's: the run adds the brand's catalog to it, without the webhook endpoint, and archives prices the other selling mode sold. It refuses a sandbox with any webhook endpoint or event destination, which a deployment's apply makes. In it, set Stripe Tax's origin address (**Settings > Tax**) *(name not confirmed)*: every subscription uses automatic tax, and the run stops without it.
@@ -153,7 +154,7 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
    pnpm billing:scenarios --only usage,refund
    ```
 
-   It sets the sandbox up from `brands/realinfobot/billing.json`, or the brand `--brand` names, with the recommended `stripe` block while the file has none. Four scenarios run at once (`--parallel`), most of their time a test clock advancing; the whole run takes about 15 minutes *(estimated)*. It ends `All 12 scenarios passed.` (exit 0), or with a `FAIL` line for each that didn't (exit 1); exit 2 means it couldn't start. Each scenario's test clock is deleted at the end, with its customers and subscriptions, unless `--keep`.
+   It sets the sandbox up from `brands/realinfobot/billing.json`, or the brand `--brand` names, with the recommended `stripe` block while the file has none. Four scenarios run at once (`--parallel`), most of their time a test clock advancing; the whole run takes about 15 minutes *(estimated)*. It ends `All 13 scenarios passed.` (exit 0), or with a `FAIL` line for each that didn't (exit 1); exit 2 means it couldn't start. Each scenario's test clock is deleted at the end, with its customers and subscriptions, unless `--keep`.
 
 The `Billing scenarios` workflow (`.github/workflows/billing-scenarios.yml`) runs the same by hand from GitHub, with the key in the repository secret `STRIPE_SCENARIOS_KEY`, once its file is on the default branch: GitHub lists a manual workflow only from there.
 
@@ -163,7 +164,7 @@ Two limits: the plan subscription is made through the API with Stripe's test car
 
 `pnpm billing:scenarios --merchant-of-record` runs the scenarios as a brand with `managedPayments` sells, and so does a brand whose `stripe` block sets it. Stripe starts such a subscription only from a Checkout page, so for each one the run makes the checkout through the adapter, prints a line such as `Pay the usage checkout with test card 4242 4242 4242 4242, any future date, any CVC and any address, within 20 minutes: https://checkout.stripe.com/...`, and waits until it's paid. The scenarios run one at a time.
 
-- **Which scenarios:** without `--only`, those whose Stripe calls differ from Stripe directly: `usage` (the plan's renewal invoices the month's usage with the plan's price), `upgrade-paid`, `downgrade` (the renewal keeps the overage prices), `cancel-resume`, `totals` and `events`. That's five checkouts to pay. The others run when named, and `upgrade-3ds` asks for the 3-D Secure test card, 4000 0027 6000 3184. `upgrade-declined` can't run: no API call gives a merchant of record subscription a declining card.
+- **Which scenarios:** without `--only`, those whose Stripe calls differ from Stripe directly: `usage` (the plan's renewal invoices the month's usage with the plan's price), `upgrade-paid`, `downgrade` (the renewal keeps the overage prices), `cancel-resume`, `totals`, `pack-plan-end` (ending the plan with `invoice_now` bills the usage on its own meters, the prepaid pack design's open question) and `events`. That's six checkouts to pay. The others run when named, and `upgrade-3ds` asks for the 3-D Secure test card, 4000 0027 6000 3184. `upgrade-declined` can't run: no API call gives a merchant of record subscription a declining card.
 - **Setup:** the sandbox needs no Stripe Tax origin address, since Stripe works out the tax, and yearly prices aren't made. Without the yearly prices the plans' terms differ, so their prices do too: a run in one mode archives the prices the other mode sold in the scenarios' sandbox, and a run in that mode brings them back.
 - **Where:** from a computer, with someone to pay the checkouts; the workflow would wait 20 minutes for each.
 

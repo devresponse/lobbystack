@@ -370,6 +370,59 @@ const scenarios: Record<Exclude<ScenarioName, "events">, (ctx: Context) => Promi
     const credits = await ctx.billing.usageCredits({ customerId: business.customerId });
     expectThat(credits.voice === 25, `the balance holds ${credits.voice} cents of voice credit, not 25`);
   },
+  async "pack-plan-end"(ctx) {
+    const clock = await ctx.clock("pack-plan-end");
+    const business = await ctx.start({ scenario: "pack-plan-end", clock, tier: "starter", interval: "monthly" });
+    const customer = { id: business.customerId, billingKey: business.billingKey };
+    // Usage past the allowance before the pack's payment, which the plan's last invoice must still bill.
+    const sent: number[] = [];
+    for (const [kind, units] of [["voice", 90], ["alert_sms", 3], ["transfer", 1]] as const) {
+      const amountCents = priceUsage(usageKindOf[kind], units, ctx.rates[kind]);
+      const result = await ctx.billing.reportUsage({ customer, businessId: business.businessId, kind, units, amountCents, occurredAt: clock.time, identifier: `${kind}:${business.businessId}:pack` });
+      expectThat(result === "sent", `a ${kind} event came back ${result}`);
+      sent.push(amountCents);
+    }
+    const expected = sent.reduce((sum, cents) => sum + cents, 0);
+    const window = { customerId: business.customerId, from: firstOfMonth(clock.time), to: new Date(Math.ceil(Date.now() / 60_000) * 60_000 + 60_000) };
+    let held = 0;
+    await eventually(async () => {
+      const totals = await ctx.billing.usageTotals(window);
+      held = totals.voice + totals.alert_sms + totals.transfer;
+      return sameCents(held, expected);
+    }, `the meters hold ${held} cents, and ${expected} were sent`);
+    const earlier = async (subscription: string) => new Set((await ctx.stripe.invoices.list({ subscription, limit: 20 })).data.map((invoice) => invoice.id));
+    const newer = async (subscription: string, seen: Set<string>) => (await ctx.stripe.invoices.list({ subscription, limit: 20 })).data.filter((invoice) => !seen.has(invoice.id));
+    const planInvoices = await earlier(business.planId);
+    const overageInvoices = await earlier(business.overageId);
+    // A pack's payment replaced the plan, and billing.endPlanForPack ends it now.
+    const ended = await ctx.billing.endForPack({ subscriptionId: business.planId, overageSubscriptionId: business.overageId, endsAt: clock.time, requestId: requestId() });
+    expectThat(ended === null, "ending the plan for a pack left it live");
+    const plan = await ctx.stripe.subscriptions.retrieve(business.planId);
+    expectThat(plan.status === "canceled", `the plan a pack replaced is ${plan.status}, not canceled`);
+    if (ctx.merchantOfRecord) {
+      // The design's open question: invoice_now bills the usage on the plan's own meters, and prorate=false credits nothing.
+      let last: Awaited<ReturnType<typeof newer>> = [];
+      await eventually(async () => {
+        last = await newer(business.planId, planInvoices);
+        return last.length > 0;
+      }, "the plan ended without a last invoice");
+      const credited = last.flatMap((invoice) => invoice.lines.data).filter((line) => line.amount < 0);
+      expectThat(credited.length === 0, `ending the plan credited ${credited.map((line) => line.amount).join(", ")} cents`);
+      const billed = last.reduce((sum, invoice) => sum + invoice.subtotal, 0);
+      expectThat(billed === expectedOverageCents(sent), `the plan's last invoice is ${billed} cents before tax, and the usage sent comes to ${expectedOverageCents(sent)}`);
+      return;
+    }
+    // Directly, the plan ends alone with nothing credited, and its overage subscription ends with its month.
+    const credited = (await newer(business.planId, planInvoices)).flatMap((invoice) => invoice.lines.data).filter((line) => line.amount < 0);
+    expectThat(credited.length === 0, `ending the plan credited ${credited.map((line) => line.amount).join(", ")} cents`);
+    const overage = await ctx.stripe.subscriptions.retrieve(business.overageId);
+    expectThat(overage.cancel_at_period_end || overage.cancel_at !== null, "the overage subscription doesn't end with its month");
+    // On the 1st the overage subscription ends, and its last invoice takes the month after the grace.
+    await clock.advance(new Date(nextFirstOfMonth(clock.time).getTime() + (ctx.graceHours + 1) * 60 * 60_000));
+    const last = await newer(business.overageId, overageInvoices);
+    const billed = last.reduce((sum, invoice) => sum + invoice.subtotal, 0);
+    expectThat(billed === expectedOverageCents(sent), `the overage subscription's last invoice is ${billed} cents before tax, and the usage sent comes to ${expectedOverageCents(sent)}`);
+  },
 };
 
 /** Every event of the scenarios' customers that Stripe's webhook would send, in LobbyStack's terms. */

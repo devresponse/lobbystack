@@ -24,7 +24,10 @@ import {
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
   changeReceptionistForApi,
+  answerUnansweredQuestionForApi,
   changeKnowledgeAudienceForApi,
+  dismissUnansweredQuestionForApi,
+  listUnansweredQuestionsForApi,
   createQrLinkForApi,
   createWebsiteRuleForApi,
   deleteWebsiteRuleForApi,
@@ -165,6 +168,7 @@ import {
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
   apiKnowledgeAudienceChangeSchema,
+  apiUnansweredQuestionAnswerSchema,
   apiQrLinkCreateSchema,
   apiWebsiteRuleCreateSchema,
   apiQrLinkUpdateSchema,
@@ -549,6 +553,16 @@ export const v1 = {
     return { body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema), { receptionistId })) };
   }),
   changeKnowledgeAudience: (request: Request) => handleApiRequest(request, "changeKnowledgeAudience", async ({ context, caller }) => ({ body: data(await changeKnowledgeAudienceForApi(context, caller, await readApiBody(request, apiKnowledgeAudienceChangeSchema))) })),
+  listUnansweredQuestions: (request: Request) => handleApiRequest(request, "listUnansweredQuestions", async ({ context, caller }) => ({ body: await listUnansweredQuestionsForApi(context, caller, { ...pageQuery(request), receptionistId: receptionistQuery(request) }) })),
+  answerUnansweredQuestion: (request: Request, { params }: Params<"question_id">) => handleApiRequest(request, "answerUnansweredQuestion", async ({ context, caller }) => {
+    const questionId = uuidParam((await params).question_id, "question_id");
+    return { body: data(await answerUnansweredQuestionForApi(context, caller, questionId, await readApiBody(request, apiUnansweredQuestionAnswerSchema))) };
+  }),
+  dismissUnansweredQuestion: (request: Request, { params }: Params<"question_id">) => handleApiRequest(request, "dismissUnansweredQuestion", async ({ context, caller }) => {
+    const questionId = uuidParam((await params).question_id, "question_id");
+    await dismissUnansweredQuestionForApi(context, caller, questionId);
+    return { body: data({ id: questionId, dismissed: true as const }) };
+  }),
   listWebsiteRules: (request: Request) => handleApiRequest(request, "listWebsiteRules", async ({ context, caller }) => ({ body: { data: await listWebsiteRulesForApi(context, caller), next_cursor: null, has_more: false } })),
   createWebsiteRule: (request: Request) => handleApiRequest(request, "createWebsiteRule", async ({ context, caller }) => ({ body: data(await createWebsiteRuleForApi(context, caller, await readApiBody(request, apiWebsiteRuleCreateSchema))) })),
   deleteWebsiteRule: (request: Request, { params }: Params<"rule_id">) => handleApiRequest(request, "deleteWebsiteRule", async ({ context, caller }) => {

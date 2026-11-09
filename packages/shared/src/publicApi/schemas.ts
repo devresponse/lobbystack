@@ -1322,6 +1322,35 @@ export const apiKnowledgeAudienceChangeResultSchema = z.object({
   sources: z.number().int().describe("The sources it covered: those named that the business has."),
 }).describe("How many entries and sources the change covered.");
 
+export const apiUnansweredQuestionSchema = z.object({
+  id,
+  question: z.string().describe("What a caller or visitor asked that the receptionist found nothing to answer from, as first asked, up to 300 characters."),
+  times_asked: z.number().int().describe("How many times it was asked: case, punctuation and spacing don't make it another question."),
+  first_asked_at: timestamp,
+  last_asked_at: timestamp,
+  last_channel: z.enum(["voice", "web_voice", "web_chat"]).describe("Where it was last asked. voice: a phone call. web_voice: a call from the website. web_chat: the website chat."),
+  last_call_id: id.nullable().describe("The call it was last asked on, for GET /calls/{call_id}, while the business keeps it."),
+  last_conversation_id: id.nullable().describe("The chat it was last asked in, while the business keeps it."),
+  asked_of: z.array(z.object({
+    receptionist_id: id,
+    name: z.string().describe("The receptionist's name."),
+    archived: z.boolean().describe("Archived since it heard the question."),
+    times_asked: z.number().int(),
+    last_asked_at: timestamp,
+  })).describe("The receptionists that heard it, most often first. A chain hears one question at many stores; it stays one question."),
+}).describe("A question the receptionist couldn't answer from what it knows, still open. Answering it adds a text entry; dismissing it takes it off the list.");
+
+export const apiUnansweredQuestionAnswerSchema = z.strictObject({
+  answer: z.string().trim().min(1).max(5_000).describe("The answer, saved as a text entry titled with the question."),
+  audience: z.enum(["everyone", "asked", "chosen"]).optional().describe("Who uses the answer. everyone, the default: every receptionist. asked: only the receptionists that heard the question and aren't archived, so a chain's other stores don't give one store's answer. chosen: the receptionists in receptionist_ids."),
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).optional().describe("With audience chosen: the receptionists, none archived."),
+});
+
+export const apiUnansweredQuestionDismissedSchema = z.object({
+  id,
+  dismissed: z.literal(true),
+}).describe("A question taken off the list. Asked again, it stays off.");
+
 export const apiWebsiteRuleSchema = z.object({
   id,
   source_id: id.describe("The website it applies to, from GET /knowledge/sources."),
@@ -1602,6 +1631,9 @@ export type ApiKnowledgeUploadComplete = z.infer<typeof apiKnowledgeUploadComple
 export type ApiKnowledgeAudienceChange = z.infer<typeof apiKnowledgeAudienceChangeSchema>;
 export type ApiKnowledgeAudienceChangeResult = z.infer<typeof apiKnowledgeAudienceChangeResultSchema>;
 export type ApiWebsiteRule = z.infer<typeof apiWebsiteRuleSchema>;
+export type ApiUnansweredQuestion = z.infer<typeof apiUnansweredQuestionSchema>;
+export type ApiUnansweredQuestionAnswer = z.infer<typeof apiUnansweredQuestionAnswerSchema>;
+export type ApiUnansweredQuestionDismissed = z.infer<typeof apiUnansweredQuestionDismissedSchema>;
 export type ApiWebsiteRuleCreate = z.infer<typeof apiWebsiteRuleCreateSchema>;
 export type ApiKnowledgeSearch = z.infer<typeof apiKnowledgeSearchSchema>;
 export type ApiKnowledgeSearchResult = z.infer<typeof apiKnowledgeSearchResultSchema>;

@@ -438,7 +438,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     remove: { operation: "deleteRule" },
     reorder: { operation: "reorderRules", args: ["...rule_ids"], columns: columns("id", "title", "active") },
   }),
-  group("knowledge", "What the receptionist answers from: text, FAQs, websites and documents.", {
+  group("knowledge", "What the receptionists answer from: text, FAQs, websites and documents, who each is for, and the questions they couldn't answer.", {
     list: { operation: "listKnowledgeEntries", columns: columns("id", "type", "title", "active", "audience", "updated_at") },
     get: { operation: "getKnowledgeEntry" },
     "add-text": { operation: "createKnowledgeEntry", summary: "Add text the receptionist can answer from.", fixed: { type: "text" }, files: ["content"] },
@@ -456,6 +456,9 @@ export const groups: Record<string, Group> = Object.fromEntries([
     cancel: { operation: "cancelKnowledgeSource" },
     search: knowledgeSearch,
     audience: { operation: "changeKnowledgeAudience", show: (data) => `Changed ${String(data.entries)} entries and ${String(data.sources)} sources.` },
+    questions: { operation: "listUnansweredQuestions", columns: columns("id", "question", "times_asked", "last_asked_at") },
+    answer: { operation: "answerUnansweredQuestion", files: ["answer"], show: (data) => `Saved the answer as text entry ${String(data.id)}.` },
+    dismiss: { operation: "dismissUnansweredQuestion", show: (data) => `Dismissed question ${String(data.id)}.` },
     rules: { operation: "listWebsiteRules", columns: columns("id", "site_url", "path_prefix", "receptionist_id", "pages") },
     "add-rule": { operation: "createWebsiteRule" },
     "remove-rule": { operation: "deleteWebsiteRule" },

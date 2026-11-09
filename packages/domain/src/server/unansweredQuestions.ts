@@ -191,39 +191,51 @@ async function countOpenByReceptionist(tx: DatabaseTransaction, businessId: stri
 export async function listOpenUnansweredQuestions(
   context: DomainContext,
   input: { userId: string; businessId: string; receptionistId?: string | null | undefined; limit?: number | undefined; offset?: number | undefined },
-): Promise<{ questions: OpenUnansweredQuestion[]; openCount: number; openByReceptionist: Record<string, number> }> {
+): Promise<UnansweredQuestionsPage> {
   const { userId, businessId } = input;
-  const limit = Number.isFinite(input.limit) ? Math.min(Math.max(Math.trunc(input.limit!), 1), OPEN_QUESTIONS_LIMIT) : OPEN_QUESTIONS_LIMIT;
-  const offset = Number.isFinite(input.offset) ? Math.max(Math.trunc(input.offset!), 0) : 0;
   if (input.receptionistId && !isUuid(input.receptionistId)) throw failure("receptionist must be a receptionist id.", 400, "invalid_receptionist");
   return await withBusinessTransaction(context.db, { userId, businessId, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, { userId, businessId });
-    const open = and(
-      eq(unansweredQuestions.businessId, businessId),
-      eq(unansweredQuestions.status, "open"),
-      input.receptionistId ? askedOfReceptionist(businessId, input.receptionistId) : undefined,
-    );
-    const rows = await tx.select({
-      id: unansweredQuestions.id,
-      question: unansweredQuestions.question,
-      timesAsked: unansweredQuestions.timesAsked,
-      firstAskedAt: unansweredQuestions.firstAskedAt,
-      lastAskedAt: unansweredQuestions.lastAskedAt,
-      lastChannel: unansweredQuestions.lastChannel,
-      lastCallId: unansweredQuestions.lastCallId,
-      lastConversationId: unansweredQuestions.lastConversationId,
-    }).from(unansweredQuestions).where(open)
-      .orderBy(desc(unansweredQuestions.timesAsked), desc(unansweredQuestions.lastAskedAt), desc(unansweredQuestions.id))
-      .limit(limit)
-      .offset(offset);
-    const [count] = await tx.select({ value: sql<number>`count(*)::int` }).from(unansweredQuestions).where(open);
-    const askers = await loadAskers(tx, businessId, rows.map((row) => row.id));
-    return {
-      questions: rows.map((row) => ({ ...row, askedOf: askers.get(row.id) ?? [] })),
-      openCount: count?.value ?? 0,
-      openByReceptionist: await countOpenByReceptionist(tx, businessId),
-    };
+    return await listOpenUnansweredQuestionsInTransaction(tx, input);
   });
+}
+
+export type UnansweredQuestionsPage = { questions: OpenUnansweredQuestion[]; openCount: number; openByReceptionist: Record<string, number> };
+
+/** listOpenUnansweredQuestions in a transaction whose caller may read the business: the dashboard's members, or an API key. */
+export async function listOpenUnansweredQuestionsInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; receptionistId?: string | null | undefined; limit?: number | undefined; offset?: number | undefined },
+): Promise<UnansweredQuestionsPage> {
+  const { businessId } = input;
+  const limit = Number.isFinite(input.limit) ? Math.min(Math.max(Math.trunc(input.limit!), 1), OPEN_QUESTIONS_LIMIT) : OPEN_QUESTIONS_LIMIT;
+  const offset = Number.isFinite(input.offset) ? Math.max(Math.trunc(input.offset!), 0) : 0;
+  if (input.receptionistId && !isUuid(input.receptionistId)) throw failure("receptionist must be a receptionist id.", 400, "invalid_receptionist");
+  const open = and(
+    eq(unansweredQuestions.businessId, businessId),
+    eq(unansweredQuestions.status, "open"),
+    input.receptionistId ? askedOfReceptionist(businessId, input.receptionistId) : undefined,
+  );
+  const rows = await tx.select({
+    id: unansweredQuestions.id,
+    question: unansweredQuestions.question,
+    timesAsked: unansweredQuestions.timesAsked,
+    firstAskedAt: unansweredQuestions.firstAskedAt,
+    lastAskedAt: unansweredQuestions.lastAskedAt,
+    lastChannel: unansweredQuestions.lastChannel,
+    lastCallId: unansweredQuestions.lastCallId,
+    lastConversationId: unansweredQuestions.lastConversationId,
+  }).from(unansweredQuestions).where(open)
+    .orderBy(desc(unansweredQuestions.timesAsked), desc(unansweredQuestions.lastAskedAt), desc(unansweredQuestions.id))
+    .limit(limit)
+    .offset(offset);
+  const [count] = await tx.select({ value: sql<number>`count(*)::int` }).from(unansweredQuestions).where(open);
+  const askers = await loadAskers(tx, businessId, rows.map((row) => row.id));
+  return {
+    questions: rows.map((row) => ({ ...row, askedOf: askers.get(row.id) ?? [] })),
+    openCount: count?.value ?? 0,
+    openByReceptionist: await countOpenByReceptionist(tx, businessId),
+  };
 }
 
 /**
@@ -267,29 +279,46 @@ async function lockOpenQuestion(tx: DatabaseTransaction, input: { businessId: st
 export async function answerUnansweredQuestion(
   context: DomainContext,
   input: { userId: string; businessId: string; questionId: string; answer: string; audience?: UnansweredAnswerAudience | undefined },
-): Promise<{ snippetId: string; audience: "everyone" | "chosen"; receptionistIds: string[] }> {
-  const answer = input.answer.trim();
-  if (!answer) throw failure("Write an answer first.", 400, "answer_required");
-  if (answer.length > MAX_UNANSWERED_ANSWER_LENGTH) throw failure(`Answers can be up to ${MAX_UNANSWERED_ANSWER_LENGTH} characters.`, 400, "answer_too_long");
+): Promise<UnansweredQuestionAnswered> {
+  readAnswer(input.answer);
   return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const question = await lockOpenQuestion(tx, input);
-    let choice: KnowledgeAudienceChoice = input.audience?.audience === "chosen" ? input.audience : { audience: "everyone" };
-    if (input.audience?.audience === "asked") {
-      const receptionistIds = await liveAskers(tx, input.businessId, question.id);
-      if (!receptionistIds.length) throw failure("No receptionist that asked is left to answer. Choose who the answer is for.", 409, "no_receptionists_asked");
-      choice = { audience: "chosen", receptionistIds };
-    }
-    const snippet = await createKnowledgeSnippetInTransaction(tx, { businessId: input.businessId, title: question.question, content: answer });
-    if (choice.audience === "chosen") {
-      await setKnowledgeArticleAudienceInTransaction(tx, { businessId: input.businessId, actorUserId: input.userId, kind: "snippet", articleId: snippet.id, choice });
-    }
-    const now = new Date();
-    await tx.update(unansweredQuestions)
-      .set({ status: "answered", answeredAt: now, knowledgeSnippetId: snippet.id, resolvedByUserId: input.userId, updatedAt: now })
-      .where(and(eq(unansweredQuestions.id, question.id), eq(unansweredQuestions.businessId, input.businessId)));
-    return { snippetId: snippet.id, audience: choice.audience, receptionistIds: choice.audience === "chosen" ? choice.receptionistIds : [] };
+    return await answerUnansweredQuestionInTransaction(tx, { businessId: input.businessId, actorUserId: input.userId, questionId: input.questionId, answer: input.answer, audience: input.audience });
   });
+}
+
+export type UnansweredQuestionAnswered = { snippetId: string; audience: "everyone" | "chosen"; receptionistIds: string[] };
+
+/** An answer as it's saved: trimmed, and refused when it's empty or too long. */
+function readAnswer(value: string): string {
+  const answer = value.trim();
+  if (!answer) throw failure("Write an answer first.", 400, "answer_required");
+  if (answer.length > MAX_UNANSWERED_ANSWER_LENGTH) throw failure(`Answers can be up to ${MAX_UNANSWERED_ANSWER_LENGTH} characters.`, 400, "answer_too_long");
+  return answer;
+}
+
+/** answerUnansweredQuestion in a transaction whose caller may change the business's knowledge. actorUserId resolves it, when a person did. */
+export async function answerUnansweredQuestionInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; actorUserId: string | null; questionId: string; answer: string; audience?: UnansweredAnswerAudience | undefined },
+): Promise<UnansweredQuestionAnswered> {
+  const answer = readAnswer(input.answer);
+  const question = await lockOpenQuestion(tx, input);
+  let choice: KnowledgeAudienceChoice = input.audience?.audience === "chosen" ? input.audience : { audience: "everyone" };
+  if (input.audience?.audience === "asked") {
+    const receptionistIds = await liveAskers(tx, input.businessId, question.id);
+    if (!receptionistIds.length) throw failure("No receptionist that asked is left to answer. Choose who the answer is for.", 409, "no_receptionists_asked");
+    choice = { audience: "chosen", receptionistIds };
+  }
+  const snippet = await createKnowledgeSnippetInTransaction(tx, { businessId: input.businessId, title: question.question, content: answer });
+  if (choice.audience === "chosen") {
+    await setKnowledgeArticleAudienceInTransaction(tx, { businessId: input.businessId, actorUserId: input.actorUserId, kind: "snippet", articleId: snippet.id, choice });
+  }
+  const now = new Date();
+  await tx.update(unansweredQuestions)
+    .set({ status: "answered", answeredAt: now, knowledgeSnippetId: snippet.id, resolvedByUserId: input.actorUserId, updatedAt: now })
+    .where(and(eq(unansweredQuestions.id, question.id), eq(unansweredQuestions.businessId, input.businessId)));
+  return { snippetId: snippet.id, audience: choice.audience, receptionistIds: choice.audience === "chosen" ? choice.receptionistIds : [] };
 }
 
 /** Takes an open question off the list. Asked again, it counts on its dismissed row and stays off until it expires with other caller content. Owners and admins dismiss. */
@@ -299,10 +328,15 @@ export async function dismissUnansweredQuestion(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const question = await lockOpenQuestion(tx, input);
-    const now = new Date();
-    await tx.update(unansweredQuestions)
-      .set({ status: "dismissed", dismissedAt: now, resolvedByUserId: input.userId, updatedAt: now })
-      .where(and(eq(unansweredQuestions.id, question.id), eq(unansweredQuestions.businessId, input.businessId)));
+    await dismissUnansweredQuestionInTransaction(tx, { businessId: input.businessId, actorUserId: input.userId, questionId: input.questionId });
   });
+}
+
+/** dismissUnansweredQuestion in a transaction whose caller may change the business's knowledge. */
+export async function dismissUnansweredQuestionInTransaction(tx: DatabaseTransaction, input: { businessId: string; actorUserId: string | null; questionId: string }): Promise<void> {
+  const question = await lockOpenQuestion(tx, input);
+  const now = new Date();
+  await tx.update(unansweredQuestions)
+    .set({ status: "dismissed", dismissedAt: now, resolvedByUserId: input.actorUserId, updatedAt: now })
+    .where(and(eq(unansweredQuestions.id, question.id), eq(unansweredQuestions.businessId, input.businessId)));
 }

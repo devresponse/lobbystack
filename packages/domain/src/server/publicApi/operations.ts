@@ -54,6 +54,8 @@ import {
   normalizeWebsiteRulePath,
   type ApiKnowledgeAudienceChange,
   type ApiKnowledgeAudienceChangeResult,
+  type ApiUnansweredQuestion,
+  type ApiUnansweredQuestionAnswer,
   type ApiWebsiteRule,
   type ApiWebsiteRuleCreate,
   type ApiKnowledgeEntry,
@@ -133,6 +135,7 @@ import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { changeKnowledgeAudienceInTransaction, createWebsiteRuleInTransaction, deleteWebsiteRuleInTransaction, listWebsiteRulesInTransaction, setKnowledgeArticleAudienceInTransaction, type KnowledgeArticleKind, type KnowledgeAudienceChoice, type WebsiteRule } from "../knowledgeAudience";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
+import { answerUnansweredQuestionInTransaction, dismissUnansweredQuestionInTransaction, listOpenUnansweredQuestionsInTransaction, type OpenUnansweredQuestion, type UnansweredAnswerAudience } from "../unansweredQuestions";
 import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
 import { normalizeOnboardingStage, resolveOnboardingStageForPlan, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
@@ -1702,6 +1705,80 @@ export async function changeKnowledgeAudienceForApi(context: DomainContext, call
     const covered = await asApiErrors(() => changeKnowledgeAudienceInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, change }));
     await audit(tx, caller, { eventType: "api.knowledge.audience_changed", entityType: "knowledge", payload: { audience: change.audience, ...(change.audience === "chosen" ? { mode: change.mode } : {}), entries: covered.snippets, sources: covered.documents } });
     return { entries: covered.snippets, sources: covered.documents };
+  });
+}
+
+// Unanswered questions
+
+const QUESTIONS_PAGE_MAX = 50;
+
+// The Questions page orders questions by how often they're asked, which
+// changes as they're asked, so a page's cursor is where the next one starts.
+function encodeQuestionsCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset })).toString("base64url");
+}
+
+function decodeQuestionsCursor(cursor: string | undefined): number {
+  if (!cursor) return 0;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { o?: unknown };
+    if (typeof parsed.o === "number" && Number.isSafeInteger(parsed.o) && parsed.o >= 0) return parsed.o;
+  } catch {
+    // Falls through to the error.
+  }
+  throw invalidRequest("cursor is invalid. Pass the next_cursor value from the previous page.");
+}
+
+function serializeUnansweredQuestion(question: OpenUnansweredQuestion): ApiUnansweredQuestion {
+  return {
+    id: question.id,
+    question: question.question,
+    times_asked: question.timesAsked,
+    first_asked_at: question.firstAskedAt.toISOString(),
+    last_asked_at: question.lastAskedAt.toISOString(),
+    last_channel: question.lastChannel as ApiUnansweredQuestion["last_channel"],
+    last_call_id: question.lastCallId,
+    last_conversation_id: question.lastConversationId,
+    asked_of: question.askedOf.map((asker) => ({ receptionist_id: asker.receptionistId, name: asker.name, archived: asker.archived, times_asked: asker.timesAsked, last_asked_at: asker.lastAskedAt.toISOString() })),
+  };
+}
+
+/** The open questions, most asked first, a page at a time, with the Questions page's own query. */
+export async function listUnansweredQuestionsForApi(context: DomainContext, caller: ApiCaller, request: PageRequest & { receptionistId?: string | undefined }): Promise<Page<ApiUnansweredQuestion>> {
+  const limit = pageSize(request.limit);
+  if (limit > QUESTIONS_PAGE_MAX) throw invalidRequest(`limit must be an integer from 1 to ${QUESTIONS_PAGE_MAX}.`);
+  const offset = decodeQuestionsCursor(request.cursor);
+  return await inBusiness(context, caller, async (tx) => {
+    const page = await asApiErrors(() => listOpenUnansweredQuestionsInTransaction(tx, { businessId: caller.businessId, receptionistId: request.receptionistId?.toLowerCase() ?? null, limit, offset }));
+    const next = offset + page.questions.length;
+    const hasMore = page.questions.length > 0 && next < page.openCount;
+    return { data: page.questions.map(serializeUnansweredQuestion), next_cursor: hasMore ? encodeQuestionsCursor(next) : null, has_more: hasMore };
+  });
+}
+
+/** Who an answer is for: everyone unless audience says asked, or chosen with receptionist_ids. */
+function answerAudience(input: ApiUnansweredQuestionAnswer): UnansweredAnswerAudience {
+  if (input.audience === "asked") {
+    if (input.receptionist_ids !== undefined) throw invalidRequest("receptionist_ids goes with audience chosen.", [{ path: "receptionist_ids", message: "Leave it out when audience is asked." }]);
+    return { audience: "asked" };
+  }
+  return audienceChoice({ audience: input.audience, receptionist_ids: input.receptionist_ids }) ?? { audience: "everyone" };
+}
+
+/** Answers a question as the Questions page does, and returns the text entry the answer became. */
+export async function answerUnansweredQuestionForApi(context: DomainContext, caller: ApiCaller, questionId: string, input: ApiUnansweredQuestionAnswer): Promise<ApiKnowledgeEntry> {
+  const audience = answerAudience(input);
+  return await inBusiness(context, caller, async (tx) => {
+    const answered = await asApiErrors(() => answerUnansweredQuestionInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, questionId: questionId.toLowerCase(), answer: input.answer, audience }));
+    await audit(tx, caller, { eventType: "api.unanswered_question.answered", entityType: "unanswered_question", entityId: questionId.toLowerCase(), payload: { knowledgeSnippetId: answered.snippetId, audience: answered.audience } });
+    return await requireKnowledgeEntry(tx, caller.businessId, answered.snippetId);
+  });
+}
+
+export async function dismissUnansweredQuestionForApi(context: DomainContext, caller: ApiCaller, questionId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    await asApiErrors(() => dismissUnansweredQuestionInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, questionId: questionId.toLowerCase() }));
+    await audit(tx, caller, { eventType: "api.unanswered_question.dismissed", entityType: "unanswered_question", entityId: questionId.toLowerCase() });
   });
 }
 

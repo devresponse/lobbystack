@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, entryLinkDailyScans, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiQrLinkDetailSchema, apiQrLinkSchema, apiReceptionistSchema, apiWebsiteRuleSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, entryLinkDailyScans, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, unansweredQuestions, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiQrLinkDetailSchema, apiQrLinkSchema, apiReceptionistSchema, apiUnansweredQuestionSchema, apiWebsiteRuleSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
@@ -13,11 +13,12 @@ import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT, searchKnowledgeEvid
 import { defaultOperatorNotificationEventPreferences, getNotificationPreferences, setNotificationPreferences } from "../notifications";
 import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNumbers";
 import { acceptInvitation } from "../tenancy";
+import { recordUnansweredQuestion } from "../unansweredQuestions";
 import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
 import { searchKnowledgeForApi } from "./knowledgeSearch";
-import { cancelAppointmentForApi, changeKnowledgeAudienceForApi, createWebsiteRuleForApi, deleteWebsiteRuleForApi, listWebsiteRulesForApi, createQrLinkForApi, getQrLinkForApi, listQrLinksForApi, updateQrLinkForApi, listCallsForApi, updatePhoneNumberForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, answerUnansweredQuestionForApi, dismissUnansweredQuestionForApi, listUnansweredQuestionsForApi, changeKnowledgeAudienceForApi, createWebsiteRuleForApi, deleteWebsiteRuleForApi, listWebsiteRulesForApi, createQrLinkForApi, getQrLinkForApi, listQrLinksForApi, updateQrLinkForApi, listCallsForApi, updatePhoneNumberForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -902,6 +903,67 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(await listWebsiteRulesForApi(context, caller)).toEqual([]);
       await expectApiError(deleteWebsiteRuleForApi(context, caller, rule.id), 404, "not_found");
       expect(await listWebsiteRulesForApi(context, b.caller)).toEqual([]);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
+    }
+  });
+
+  it("lists, answers and dismisses unanswered questions as the Questions page does, a page at a time", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("questions");
+    const { caller } = fixture;
+    try {
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic" });
+      const valet = await createReceptionistForApi(context, caller, { name: "Valet" });
+      const now = Date.now();
+      // Gift cards asked at two stores, however it's written; parking at one; wifi of the valet.
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "Do you sell gift cards?", channel: "voice", receptionistId: kits.id, now: new Date(now - 60_000) });
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "do you sell GIFT cards", channel: "web_chat", now: new Date(now - 30_000) });
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "Is there parking?", channel: "voice", receptionistId: kits.id, now: new Date(now - 20_000) });
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "Do you have wifi?", channel: "web_voice", receptionistId: valet.id, now: new Date(now - 10_000) });
+
+      // Most asked first, then the latest, a page at a time.
+      const first = await listUnansweredQuestionsForApi(context, caller, { limit: 2 });
+      expect(first.data.map((question) => question.question)).toEqual(["Do you sell gift cards?", "Do you have wifi?"]);
+      expect(first.data[0]).toMatchObject({ times_asked: 2, last_channel: "web_chat", last_call_id: null, last_conversation_id: null });
+      expect(first.data[0]!.asked_of.map((asker) => [asker.receptionist_id, asker.archived, asker.times_asked])).toEqual([[front!.id, false, 1], [kits.id, false, 1]]);
+      expect(apiUnansweredQuestionSchema.safeParse(first.data[0]).success).toBe(true);
+      expect(first.has_more).toBe(true);
+      const second = await listUnansweredQuestionsForApi(context, caller, { limit: 2, cursor: first.next_cursor! });
+      expect(second).toMatchObject({ has_more: false, next_cursor: null });
+      expect(second.data.map((question) => question.question)).toEqual(["Is there parking?"]);
+      expect((await listUnansweredQuestionsForApi(context, caller, { receptionistId: kits.id })).data.map((question) => question.question)).toEqual(["Do you sell gift cards?", "Is there parking?"]);
+      expect((await listUnansweredQuestionsForApi(context, b.caller, {})).data).toEqual([]);
+      await expectApiError(listUnansweredQuestionsForApi(context, caller, { limit: 51 }), 400, "invalid_request");
+      await expectApiError(listUnansweredQuestionsForApi(context, caller, { cursor: "nope" }), 400, "invalid_request");
+
+      // An answer becomes a text entry titled with the question; asked keeps it to the receptionists that heard it.
+      const [gift, wifi] = first.data;
+      const parking = second.data[0]!;
+      const entry = await answerUnansweredQuestionForApi(context, caller, gift!.id, { answer: "  Yes, at the front desk.  ", audience: "asked" });
+      expect(entry).toMatchObject({ type: "text", title: "Do you sell gift cards?", content: "Yes, at the front desk.", audience: "chosen" });
+      expect(entry.receptionist_ids.sort()).toEqual([front!.id, kits.id].sort());
+      expect(apiKnowledgeEntrySchema.safeParse(entry).success).toBe(true);
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, gift!.id, { answer: "Again" }), 409, "conflict");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes", audience: "asked", receptionist_ids: [kits.id] }), 400, "invalid_request");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes", audience: "chosen" }), 400, "invalid_request");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "   " }), 400, "invalid_request");
+      // Asked only of a receptionist since archived, asked has no one left to answer for.
+      await changeReceptionistForApi(context, caller, valet.id, "archive");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes", audience: "asked" }), 409, "conflict");
+      expect(await answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes, ask for the code.", audience: "chosen", receptionist_ids: [kits.id] })).toMatchObject({ audience: "chosen", receptionist_ids: [kits.id] });
+
+      // Dismissed, a question leaves the list; another business's key can't reach it.
+      await expectApiError(dismissUnansweredQuestionForApi(context, b.caller, parking.id), 404, "not_found");
+      expect(await dismissUnansweredQuestionForApi(context, caller, parking.id)).toBeUndefined();
+      await expectApiError(dismissUnansweredQuestionForApi(context, caller, parking.id), 409, "conflict");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, randomUUID(), { answer: "Yes" }), 404, "not_found");
+      expect((await listUnansweredQuestionsForApi(context, caller, {})).data).toEqual([]);
+      const statuses = await admin!.db.select({ status: unansweredQuestions.status }).from(unansweredQuestions).where(eq(unansweredQuestions.businessId, fixture.businessId));
+      expect(statuses.map((row) => row.status).sort()).toEqual(["answered", "answered", "dismissed"]);
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));

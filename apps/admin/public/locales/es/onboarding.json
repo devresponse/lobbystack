@@ -406,7 +406,18 @@
     "retry": "Reintentar",
     "current": {
       "title": "Este negocio ya tiene el plan {{plan}}.",
-      "description": "Su plan ya está listo, así que puede pasar a su número de teléfono."
+      "description": "Su plan ya está listo, así que puede pasar a su número de teléfono.",
+      "prepaidTitle": "Este negocio ya tiene minutos prepagados.",
+      "prepaidDescription": "Sus minutos ya están listos, así que puede pasar a su número de teléfono."
+    },
+    "packs": {
+      "title": "¿Prefiere minutos prepagados?",
+      "description": "Compre minutos una sola vez, sin factura mensual. Duran hasta que se agotan o termina el paquete.",
+      "cta": "Comprar paquete de minutos",
+      "waiting": "Agregando sus minutos...",
+      "processing": "Su pago aún se está procesando. Vuelva a comprobarlo en unos minutos.",
+      "checkAgain": "Comprobar de nuevo",
+      "failed": "Su pago no se completó. Elija de nuevo un plan o un paquete de minutos."
     }
   }
 }

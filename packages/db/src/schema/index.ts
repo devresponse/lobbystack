@@ -1803,6 +1803,8 @@ export const billingPacks = pgTable(
     endedAt: timestamp("ended_at", { withTimezone: true }),
     /** The seconds left when it ended, for the accounts. */
     unusedSeconds: integer("unused_seconds"),
+    /** The reminder emails already sent about the pack: low, empty, ends_30 and ends_7. */
+    notices: text("notices").array().default(sql`'{}'::text[]`).notNull(),
     ...timestamps,
   },
   (table) => [

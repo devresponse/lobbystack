@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS public.billing_packs (
   refunded_cents integer NOT NULL DEFAULT 0 CHECK (refunded_cents >= 0),
   ended_at timestamptz,
   unused_seconds integer CHECK (unused_seconds >= 0),
+  notices text[] NOT NULL DEFAULT '{}' CHECK (notices <@ ARRAY['low', 'empty', 'ends_30', 'ends_7']::text[]),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT billing_packs_used CHECK (seconds_used <= seconds_total),
@@ -217,6 +218,7 @@ COMMENT ON COLUMN public.billing_packs.status IS 'active, expired, replaced (a s
 COMMENT ON COLUMN public.billing_packs.refunded_cents IS 'Refunds so far, from the provider''s events; a partial refund takes its share of the seconds off the pack.';
 COMMENT ON COLUMN public.billing_packs.ended_at IS 'When it ended.';
 COMMENT ON COLUMN public.billing_packs.unused_seconds IS 'The seconds left when it ended, for the accounts.';
+COMMENT ON COLUMN public.billing_packs.notices IS 'The reminder emails already sent about the pack: low (a fifth of the balance left), empty, ends_30 and ends_7 (days before its end). The outbox forgets a sent message after 14 days; this does not.';
 
 COMMENT ON TABLE public.billing_pack_draws IS 'Which pack paid for each call, by the call''s usage key.';
 COMMENT ON COLUMN public.billing_pack_draws.source_key IS 'The usage row''s source_key, such as voice:<call id>.';

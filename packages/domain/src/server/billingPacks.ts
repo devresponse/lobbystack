@@ -1,7 +1,9 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
-import { billingPackDraws, billingPackPlans, billingPacks, type DatabaseTransaction } from "@lobbystack/db";
+import { billingPackDraws, billingPackPlans, billingPacks, enqueueOutbox, phoneNumbers, type DatabaseTransaction } from "@lobbystack/db";
 import { packCapacitySeconds, packEndsAt, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
+
+import { isSharedSmsSender } from "./smsSender";
 
 // The prepaid pack ledger (migration 0148, docs/features/prepaid-packs.md). A
 // business pays its billing provider once for a pack; the provider's part ends
@@ -184,7 +186,39 @@ export async function setPackDraw(tx: DatabaseTransaction, input: { businessId: 
     need -= take;
   }
   const after = packBalance(await readLivePacks(tx, input.businessId, { now }));
+  const crossed = packBalanceCrossing(before, after);
+  if (crossed && after) await queuePackNoticeRun(tx, input.businessId, after, crossed);
   return { drawn: target - need, before, after };
+}
+
+/** The share of the live balance left at or below which the owners hear the balance is low. */
+export const PACK_LOW_BALANCE_SHARE = 0.2;
+
+/** A balance reminder: low at a fifth of the balance left, empty at none. */
+export type PackBalanceNotice = "low" | "empty";
+
+/** The balance reminder a draw crossed into, if any: empty when it took the last second, low when it took the balance to a fifth. */
+export function packBalanceCrossing(before: PackBalance | null, after: PackBalance | null): PackBalanceNotice | null {
+  if (!before || !after) return null;
+  if (before.secondsLeft > 0 && after.secondsLeft <= 0) return "empty";
+  const low = (balance: PackBalance) => balance.secondsLeft <= PACK_LOW_BALANCE_SHARE * balance.secondsTotal;
+  return !low(before) && low(after) ? "low" : null;
+}
+
+/** The live pack bought last, which a balance reminder is recorded on, so each purchase can remind again. */
+export function newestLivePack(balance: PackBalance): LivePack {
+  return balance.packs.reduce((newest, pack) => pack.paidAt > newest.paidAt || (pack.paidAt.getTime() === newest.paidAt.getTime() && pack.id > newest.id) ? pack : newest);
+}
+
+/**
+ * Runs billing.expirePacks for the business now, rather than at its daily
+ * run, when a call took its balance to low or empty: that job sends the
+ * reminders due. The call's transaction may not read the owners, so it only
+ * queues the run, once per newest pack and reminder.
+ */
+async function queuePackNoticeRun(tx: DatabaseTransaction, businessId: string, balance: PackBalance, notice: PackBalanceNotice): Promise<void> {
+  const newest = newestLivePack(balance);
+  await enqueueOutbox(tx, { topic: "billing.expirePacks", businessId, aggregateType: "billing_pack", aggregateId: newest.id, dedupeKey: `billing-pack:${newest.id}:${notice}:run`, payload: { reason: notice } });
 }
 
 async function giveBack(tx: DatabaseTransaction, businessId: string, sourceKey: string, draws: Array<{ packId: string; seconds: number }>, seconds: number): Promise<void> {
@@ -390,4 +424,37 @@ export async function replaceLivePacksInTransaction(tx: DatabaseTransaction, inp
     await tx.update(billingPacks).set(endedColumns(pack, "replaced", input.at, pack.refundedCents)).where(eq(billingPacks.id, pack.id));
   }
   return packs.map((pack) => pack.id);
+}
+
+/** Why a business's number goes back to Twilio once its last pack ended, as phone_numbers.reclaim_reason. */
+export const PACK_RECLAIM_REASON = "pack_ended";
+
+/**
+ * Sets the business's numbers to go back to Twilio at releaseAt, once its last
+ * live pack ended: its active numbers not already set to go, and never the
+ * shared sender, as a cancellation does. A number set to go answers no call
+ * (app.resolve_business_by_phone). Returns the release time, or null when no
+ * number was set.
+ */
+export async function schedulePackNumberReleaseInTransaction(tx: DatabaseTransaction, input: { businessId: string; releaseAt: Date }): Promise<Date | null> {
+  const numbers = (await tx.select({ id: phoneNumbers.id, e164: phoneNumbers.e164 }).from(phoneNumbers)
+    .where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"), isNull(phoneNumbers.reclaimScheduledAt))))
+    .filter((number) => !isSharedSmsSender(number.e164));
+  if (!numbers.length) return null;
+  await tx.update(phoneNumbers).set({ reclaimScheduledAt: input.releaseAt, reclaimReason: PACK_RECLAIM_REASON, updatedAt: new Date() })
+    .where(and(eq(phoneNumbers.businessId, input.businessId), inArray(phoneNumbers.id, numbers.map((number) => number.id))));
+  return input.releaseAt;
+}
+
+/**
+ * Takes back the release a pack's end set, when a new pack or a subscription
+ * brings the number back into the business's plan. Releases set for any other
+ * reason keep their date, and a number Twilio is already taking back can't be
+ * kept. Returns how many numbers it kept.
+ */
+export async function clearPackNumberReleaseInTransaction(tx: DatabaseTransaction, businessId: string): Promise<number> {
+  const kept = await tx.update(phoneNumbers).set({ reclaimScheduledAt: null, reclaimReason: null, updatedAt: new Date() })
+    .where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.reclaimReason, PACK_RECLAIM_REASON)))
+    .returning({ id: phoneNumbers.id });
+  return kept.length;
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingCheckoutRequests, billingUsageEvents, businesses, createDatabaseClient, outboxMessages, providerEvents, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, billingPackPlans, billingPackPrices, billingUsageEvents, businesses, createDatabaseClient, outboxMessages, providerEvents, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, claimBillingCheckoutRequest, releaseBillingCheckoutRequest } from "./billing";
 import { storeBillingWebhookEvent, sweepBillingWork } from "./billingSweep";
@@ -64,6 +64,16 @@ async function checkout(tx: DatabaseTransaction, businessId: string, input: { us
   return row!.id;
 }
 
+/** A pack on sale, and a checkout for it as the dashboard leaves one for its job. */
+async function packCheckout(tx: DatabaseTransaction, businessId: string, input: { userId: string; created: number; updated?: number; status?: string }) {
+  const code = `pk_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  await tx.insert(billingPackPlans).values({ code, status: "active", names: { en: "Sweep pack", fr: "Sweep pack", es: "Sweep pack", sr: "Sweep pack" }, voiceSec: 30_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, termsHash: "0".repeat(64) });
+  const [price] = await tx.insert(billingPackPrices).values({ pack: code, currency: "cad", cents: 9900, providerRef: `price_${randomUUID()}` }).returning({ id: billingPackPrices.id });
+  const page = input.status === "ready" ? { checkoutId: `cs_${randomUUID()}`, checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test" } : {};
+  const [row] = await tx.insert(billingPackCheckouts).values({ businessId, requestedByUserId: input.userId, pack: code, priceId: price!.id, status: input.status ?? "pending", ...page, expiresAt: ago(input.created - 15), createdAt: ago(input.created), updatedAt: ago(input.updated ?? input.created) }).returning({ id: billingPackCheckouts.id });
+  return row!.id;
+}
+
 /** The jobs the sweep queued for these rows, by aggregate id. */
 async function sweepJobs(tx: DatabaseTransaction, ids: string[]) {
   const rows = await tx.select({ topic: outboxMessages.topic, aggregateId: outboxMessages.aggregateId, dedupeKey: outboxMessages.dedupeKey, payload: outboxMessages.payload }).from(outboxMessages).where(and(inArray(outboxMessages.aggregateId, ids), like(outboxMessages.dedupeKey, "billing-sweep:%")));
@@ -122,7 +132,7 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
 
       const outcome = await asWorkerLogin(tx, (context) => sweepBillingWork(context, now));
 
-      expect(outcome).toEqual({ queued: { provider_event: 3, usage_event: 2, checkout_request: 2 }, overdue: { provider_event: 1, usage_event: 1, checkout_request: 1 }, failed: 0 });
+      expect(outcome).toEqual({ queued: { provider_event: 3, usage_event: 2, checkout_request: 2, pack_checkout: 0 }, overdue: { provider_event: 1, usage_event: 1, checkout_request: 1, pack_checkout: 0 }, failed: 0 });
       const hour = Math.floor(now.getTime() / 3_600_000);
       expect(await sweepJobs(tx, [lostEvent, oldEvent, stripeEvent, lostUsage, oldUsage, lostCheckout, diedCheckout, abandoned, ...waiting])).toEqual([
         { topic: "billing.createCheckout", aggregateId: lostCheckout, dedupeKey: `billing-sweep:checkout_request:${lostCheckout}:${hour}`, payload: { requestId: lostCheckout } },
@@ -152,9 +162,9 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
       const lostUsage = await usage(tx, businessId, { minutes: 30 });
       const lostCheckout = await checkout(tx, businessId, { userId, created: 8 });
 
-      const none = { provider_event: 0, usage_event: 0, checkout_request: 0 };
+      const none = { provider_event: 0, usage_event: 0, checkout_request: 0, pack_checkout: 0 };
       const first = await asWorkerLogin(tx, (context) => sweepBillingWork(context, now));
-      expect(first.queued).toEqual({ provider_event: 1, usage_event: 1, checkout_request: 1 });
+      expect(first.queued).toEqual({ provider_event: 1, usage_event: 1, checkout_request: 1, pack_checkout: 0 });
       // A few minutes later the same hour's jobs stand.
       const again = await asWorkerLogin(tx, (context) => sweepBillingWork(context, new Date(now.getTime() + 5 * 60_000)));
       expect(again).toEqual({ queued: none, overdue: none, failed: 0 });
@@ -171,6 +181,62 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
         const [, kind, , queuedHour] = job.dedupeKey.split(":");
         return `${kind}:${queuedHour}`;
       })).toEqual([`checkout_request:${hour}`, `provider_event:${hour}`, `provider_event:${next}`, `usage_event:${hour}`, `usage_event:${next}`]);
+    });
+  });
+
+  it("queues the pack checkouts no job finished, in each business's scope, and expires one that waited too long", async () => {
+    await rollbackTest(async (tx) => {
+      const paying = await business(tx);
+      const other = await business(tx);
+      const userId = await owner(tx);
+      const lost = await packCheckout(tx, paying, { userId, created: 8 });
+      const died = await packCheckout(tx, other, { userId, created: 9, updated: 6, status: "processing" });
+      const abandoned = await packCheckout(tx, paying, { userId, created: 20 });
+      const waiting = [
+        // Too new for the sweep, a run that still holds its checkout, and checkouts past their job.
+        await packCheckout(tx, paying, { userId, created: 2 }),
+        await packCheckout(tx, paying, { userId, created: 9, updated: 2, status: "processing" }),
+        await packCheckout(tx, paying, { userId, created: 9, status: "ready" }),
+        await packCheckout(tx, paying, { userId, created: 30, status: "paid" }),
+        await packCheckout(tx, paying, { userId, created: 30, status: "failed" }),
+        await packCheckout(tx, paying, { userId, created: 30, status: "expired" }),
+      ];
+
+      const outcome = await asWorkerLogin(tx, (context) => sweepBillingWork(context, now));
+
+      const none = { provider_event: 0, usage_event: 0, checkout_request: 0, pack_checkout: 0 };
+      expect(outcome).toEqual({ queued: { ...none, pack_checkout: 2 }, overdue: { ...none, pack_checkout: 1 }, failed: 0 });
+      const hour = Math.floor(now.getTime() / 3_600_000);
+      expect(await sweepJobs(tx, [lost, died, abandoned, ...waiting])).toEqual([
+        { topic: "billing.createPackCheckout", aggregateId: lost, dedupeKey: `billing-sweep:pack_checkout:${lost}:${hour}`, payload: { checkoutId: lost } },
+        { topic: "billing.createPackCheckout", aggregateId: died, dedupeKey: `billing-sweep:pack_checkout:${died}:${hour}`, payload: { checkoutId: died } },
+      ].sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey)));
+      const scopes = await tx.select({ aggregateId: outboxMessages.aggregateId, businessId: outboxMessages.businessId, aggregateType: outboxMessages.aggregateType }).from(outboxMessages).where(inArray(outboxMessages.aggregateId, [lost, died]));
+      expect(new Map(scopes.map((row) => [row.aggregateId, [row.businessId, row.aggregateType]]))).toEqual(new Map([[lost, [paying, "billing_pack_checkout"]], [died, [other, "billing_pack_checkout"]]]));
+
+      // A checkout nobody could still be waiting on expires, and its page hears so.
+      const [closed] = await tx.select({ status: billingPackCheckouts.status, error: billingPackCheckouts.error }).from(billingPackCheckouts).where(eq(billingPackCheckouts.id, abandoned));
+      expect(closed).toEqual({ status: "expired", error: "This request waited too long to run." });
+      expect(await tx.select({ topic: outboxMessages.topic, dedupeKey: outboxMessages.dedupeKey }).from(outboxMessages).where(eq(outboxMessages.aggregateId, abandoned))).toEqual([{ topic: "realtime.publish", dedupeKey: `billing-pack-checkout:${abandoned}:expired` }]);
+      // The rest stay as they were.
+      expect((await tx.select({ status: billingPackCheckouts.status }).from(billingPackCheckouts).where(inArray(billingPackCheckouts.id, waiting))).map((row) => row.status).sort()).toEqual(["expired", "failed", "paid", "pending", "processing", "ready"]);
+    });
+  });
+
+  it("queues a pack checkout at most once an hour, and expires it within the hour once it has waited too long", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      const userId = await owner(tx);
+      const lost = await packCheckout(tx, businessId, { userId, created: 8 });
+
+      const none = { provider_event: 0, usage_event: 0, checkout_request: 0, pack_checkout: 0 };
+      expect(await asWorkerLogin(tx, (context) => sweepBillingWork(context, now))).toEqual({ queued: { ...none, pack_checkout: 1 }, overdue: none, failed: 0 });
+      expect(await asWorkerLogin(tx, (context) => sweepBillingWork(context, new Date(now.getTime() + 5 * 60_000)))).toEqual({ queued: none, overdue: none, failed: 0 });
+      expect(await asWorkerLogin(tx, (context) => sweepBillingWork(context, new Date(now.getTime() + 10 * 60_000)))).toEqual({ queued: none, overdue: { ...none, pack_checkout: 1 }, failed: 0 });
+      expect((await tx.select({ status: billingPackCheckouts.status }).from(billingPackCheckouts).where(eq(billingPackCheckouts.id, lost)))[0]!.status).toBe("expired");
+      // An expired checkout is done: the next hour queues nothing for it.
+      expect(await asWorkerLogin(tx, (context) => sweepBillingWork(context, new Date(now.getTime() + 60 * 60_000)))).toEqual({ queued: none, overdue: none, failed: 0 });
+      expect((await sweepJobs(tx, [lost])).map((job) => job.dedupeKey)).toEqual([`billing-sweep:pack_checkout:${lost}:${Math.floor(now.getTime() / 3_600_000)}`]);
     });
   });
 

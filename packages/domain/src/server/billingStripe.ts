@@ -1,6 +1,6 @@
 import type { OverageKind } from "@lobbystack/providers/billing/types";
 import type { StripeCatalogMeter, StripeCatalogPrice, StripeCatalogProduct, StripeCatalogStep, StripeMetadata, StripePortalConfiguration, StripeRef, StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
-import { STRIPE_API_VERSION, STRIPE_METER_ERROR_EVENTS, STRIPE_WEBHOOK_EVENTS, stripeOverageMeterEvents, trimTrailingSlashes, type ApiBillingCatalog, type BillingCatalogLinkRequest, type BillingCheckCode, type BillingInterval, type BillingProfile, type BillingProviderEnv, type ResolvedBillingDiscount } from "@lobbystack/shared";
+import { STRIPE_API_VERSION, STRIPE_METER_ERROR_EVENTS, STRIPE_PACK_WEBHOOK_EVENTS, STRIPE_WEBHOOK_EVENTS, stripeOverageMeterEvents, trimTrailingSlashes, type ApiBillingCatalog, type BillingCatalogLinkRequest, type BillingCheckCode, type BillingInterval, type BillingProfile, type BillingProviderEnv, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
 import type { DesiredBillingPack, DesiredBillingPlan } from "./billingCatalog";
 import { billingPlanLabel } from "./billingPolar";
@@ -157,7 +157,8 @@ export function desiredStripeCatalog(input: CatalogDesiredInput): DesiredStripeC
       downgrade: block.downgrade,
       plans: portalPlans,
     },
-    webhook: webhookUrl ? { url: webhookUrl, events: [...STRIPE_WEBHOOK_EVENTS] } : null,
+    // A file with packs adds the events only a pack needs, so a file without packs asks for the endpoint it had before packs.
+    webhook: webhookUrl ? { url: webhookUrl, events: [...STRIPE_WEBHOOK_EVENTS, ...(input.packs?.length ? STRIPE_PACK_WEBHOOK_EVENTS : [])] } : null,
     meterErrors: webhookUrl ? { url: `${webhookUrl}${STRIPE_METER_ERRORS_SUFFIX}`, events: [...STRIPE_METER_ERROR_EVENTS] } : null,
   };
 }
@@ -615,8 +616,9 @@ export function planStripeChanges(input: { catalog: DesiredStripeCatalog; snapsh
   }
 
   // The packs, after everything else, so the calls before them are the ones a
-  // file without packs gets: a product each, found by its pack tag, and its
-  // one-time price. The product's key can't be a plan's, since a plan code has no colon.
+  // file without packs gets, but for the webhook endpoint's pack events: a
+  // product each, found by its pack tag, and its one-time price. The product's
+  // key can't be a plan's, since a plan code has no colon.
   for (const desired of catalog.packs) {
     const product = planProduct({ object: "product", name: desired.name, candidates: snapshot.products.filter((entry) => ours(entry.metadata) && entry.metadata[stripeTags.pack] === desired.pack), tags: { ...brandTag, [stripeTags.pack]: desired.pack }, produces: `pack-product:${desired.pack}`, key: `pack:${desired.pack}` });
     if (product === null) continue;

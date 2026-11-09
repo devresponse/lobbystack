@@ -65,7 +65,7 @@ A sandbox showed each of these on a paid test subscription ([Stripe billing](../
 
 ## Know what apply makes for packs
 
-For each of the file's [prepaid packs](../../brands/README.md#prepaid-packs), `pnpm billing apply` makes a product of its own and one price on it, after every other object, so a file without packs gets exactly the calls it got before packs existed.
+For each of the file's [prepaid packs](../../brands/README.md#prepaid-packs), `pnpm billing apply` makes a product of its own and one price on it, after every other object, and a file with packs adds the packs' three events to the webhook endpoint ([below](#know-the-webhook-endpoints)), so a file without packs gets exactly the calls it got before packs existed. Apply only adds events, so an endpoint keeps the packs' events after a file drops its packs, and verify doesn't count them as drift.
 
 | Object | What it is |
 | --- | --- |
@@ -80,7 +80,7 @@ Stripe's names for each permission are confirmed by the first sandbox run, so th
 
 | Key | Where | Needs | Used for |
 | --- | --- | --- | --- |
-| The admin's `STRIPE_API_KEY` | Railway, on the admin | Write on billing portal sessions, read on customers | **Manage subscription** in **Settings > Plan**, which opens Stripe's billing portal, and finding the business of a charge's customer when a refund or dispute arrives |
+| The admin's `STRIPE_API_KEY` | Railway, on the admin | Write on billing portal sessions, read on customers and PaymentIntents | **Manage subscription** in **Settings > Plan**, which opens Stripe's billing portal, finding the business of a charge's customer when a refund or dispute arrives, and finding the business of a disputed [prepaid pack](../features/prepaid-packs.md) payment by its PaymentIntent. Without the PaymentIntents permission such a dispute stays unattributed, freezes no pack and logs a warning |
 | The worker's `STRIPE_API_KEY` | Railway, on the worker | Write on customers (with their balance transactions), Checkout Sessions, subscriptions, subscription schedules, invoices and meter events; read on invoice payments, meters and their event summaries, products, prices, coupons, the billing portal's configurations, and Stripe Tax's settings and registrations | Checkout, the overage subscription, plan changes, cancelling, usage, deletion, the daily checks, and its startup check of the key's account |
 | `STRIPE_SETUP_KEY` | The operator's computer, for `pnpm billing apply` | Write on products, prices, coupons, meters, the billing portal's configurations, webhook endpoints and event destinations; read on Stripe Tax | Setting Stripe up from `billing.json` |
 | `STRIPE_READ_KEY` | The operator's computer, for `pnpm billing plan` and `verify` | Read on the same, and on subscriptions for `devops/reset-database.mjs` | Checking; never on a service |
@@ -114,7 +114,7 @@ A Polar deployment needs none of them, and a Stripe deployment none of `POLAR_*`
 
 | Endpoint | Signed with | Events |
 | --- | --- | --- |
-| `/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` | `checkout.session.completed` and `expired`; `customer.subscription.created`, `updated`, `deleted`, `paused`, `resumed`, `pending_update_applied` and `pending_update_expired`; `invoice.paid`, `payment_failed`, `finalized`, `voided` and `marked_uncollectible`; `charge.refunded` and `charge.dispute.created` (`STRIPE_WEBHOOK_EVENTS`) |
+| `/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` | `checkout.session.completed` and `expired`; `customer.subscription.created`, `updated`, `deleted`, `paused`, `resumed`, `pending_update_applied` and `pending_update_expired`; `invoice.paid`, `payment_failed`, `finalized`, `voided` and `marked_uncollectible`; `charge.refunded` and `charge.dispute.created` (`STRIPE_WEBHOOK_EVENTS`). For a file with [packs](#know-what-apply-makes-for-packs), also `checkout.session.async_payment_succeeded` and `async_payment_failed`, and `charge.dispute.closed` (`STRIPE_PACK_WEBHOOK_EVENTS`) |
 | `/api/webhooks/stripe/meter-errors` | `STRIPE_METER_WEBHOOK_SECRET` | The meter error destination's thin events, `v1.billing.meter.error_report_triggered` and `v1.billing.meter.no_meter_found` |
 
 A delivery more than 300 seconds old, or of the other mode, is refused. `/api/webhooks/polar` answers 404 on a Stripe deployment, and logs `ops.billing.webhook_wrong_provider` at most once a minute.

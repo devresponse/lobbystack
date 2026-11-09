@@ -77,6 +77,15 @@ function applyWithPacks(snapshot: StripeSnapshot, file: BillingProfile, options:
   return { first, ...result };
 }
 
+// The events of an endpoint made before packs, and the three a file with packs adds.
+const eventsBeforePacks = [
+  "checkout.session.completed", "checkout.session.expired",
+  "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed", "customer.subscription.pending_update_applied", "customer.subscription.pending_update_expired",
+  "invoice.paid", "invoice.payment_failed", "invoice.finalized", "invoice.voided", "invoice.marked_uncollectible",
+  "charge.refunded", "charge.dispute.created",
+];
+const packEvents = ["checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "charge.dispute.closed"];
+
 const livePackPrice = (snapshot: StripeSnapshot, pack: string) => snapshot.prices.find((price) => price.metadata.lobbystack_pack === pack && price.active)!;
 const packProduct = (snapshot: StripeSnapshot, pack: string) => snapshot.products.find((product) => product.metadata.lobbystack_pack === pack)!;
 
@@ -99,8 +108,8 @@ describe("desiredStripeCatalog", () => {
     ]);
     expect(catalog.coupons).toEqual([]);
     expect(catalog.portal).toEqual({ returnUrl: `https://dev1.${brand}.com/settings/plan`, ...links, planChanges: true, cancel: false, upgrade: "invoice", downgrade: "next_period", plans: ["starter", "pro"] });
-    expect(catalog.webhook).toEqual({ url: webhookUrl(brand), events: expect.arrayContaining(["checkout.session.completed", "customer.subscription.updated", "invoice.paid", "charge.dispute.created"]) });
-    expect(catalog.webhook!.events).toHaveLength(19);
+    // Without packs, the events the endpoint had before them.
+    expect(catalog.webhook).toEqual({ url: webhookUrl(brand), events: eventsBeforePacks });
     expect(catalog.meterErrors).toEqual({ url: `${webhookUrl(brand)}/meter-errors`, events: ["v1.billing.meter.error_report_triggered", "v1.billing.meter.no_meter_found"] });
     expect(catalog).toMatchObject({ currency: "cad", taxCode: "txcd_10103001", managedPayments: false, overageMode: "separate", usageGraceHours: 1 });
   });
@@ -363,21 +372,26 @@ describe("stripeLinkBody", () => {
 });
 
 describe("Stripe packs", () => {
-  it("gives each pack a product and a one-time price under an lsp_ lookup key, and leaves the rest as a file without packs has it", () => {
+  it("gives each pack a product and a one-time price under an lsp_ lookup key, adds the packs' webhook events, and leaves the rest as a file without packs has it", () => {
     const file = profile();
     const catalog = catalogWithPacks(file);
     const packs = desiredBillingPacks(file);
     expect(catalog.packs.map((pack) => [pack.pack, pack.name, pack.lookupKey, pack.cents, pack.currency, pack.terms])).toEqual(packs.map((pack) => [pack.code, pack.names.en, `lsp_realinfobot_${pack.code}_cad_${pack.terms_hash.slice(0, 8)}`, pack.price.cents, "cad", pack.terms_hash]));
     expect(catalog.packs.slice(0, 2).map((pack) => [pack.name, pack.cents])).toEqual([["250 minutes, 90 days", 5500], ["250 minutes, 180 days", 5900]]);
     expect(stripePackLookupKey("realinfobot", "pack_250_90", "cad", packs[0]!.terms_hash)).toBe(catalog.packs[0]!.lookupKey);
-    expect({ ...catalog, packs: [] }).toEqual(catalogFor(file));
+    expect(catalog.webhook).toEqual({ url: webhookUrl("realinfobot"), events: [...eventsBeforePacks, ...packEvents] });
+    expect({ ...catalog, packs: [], webhook: { ...catalog.webhook!, events: eventsBeforePacks } }).toEqual(catalogFor(file));
   });
 
   it("makes the packs' products and one-time prices after every call a file without packs gets, keeps them out of the portal, and makes nothing on a second run", () => {
     const file = profile();
     const plain = plan(emptyStripeSnapshot(), file);
     const { first, snapshot } = applyWithPacks(emptyStripeSnapshot(), file);
-    expect(first.steps.slice(0, plain.steps.length)).toEqual(plain.steps);
+    // The same calls, but for the webhook endpoint, which a file with packs makes with their events too.
+    const endpoint = (steps: readonly StripeStep[]) => steps.find((step) => step.call === "webhookEndpoints.create")!;
+    expect(first.steps.slice(0, plain.steps.length).map((step) => (step.object === "webhook" ? null : step))).toEqual(plain.steps.map((step) => (step.object === "webhook" ? null : step)));
+    expect(endpoint(first.steps)).toEqual({ ...endpoint(plain.steps), changes: [`19 events, API version ${STRIPE_API_VERSION}`], params: { ...endpoint(plain.steps).params, enabled_events: [...eventsBeforePacks, ...packEvents] } });
+    expect(snapshot.webhooks[0]!.enabled_events).toEqual([...eventsBeforePacks, ...packEvents]);
     const packSteps = first.steps.slice(plain.steps.length);
     expect(summary(packSteps)).toEqual(Array(9).fill(["create product", "create price"]).flat());
     const smallest = catalogWithPacks(file).packs[0]!;
@@ -391,11 +405,25 @@ describe("Stripe packs", () => {
     expect((snapshot.portalConfigurations[0]!.features.subscription_update.products ?? []).filter((entry) => packProducts.has(entry.product))).toEqual([]);
   });
 
-  it("adds only the packs to an account that already sells the file's plans", () => {
+  it("adds only the packs and their three webhook events to an account that already sells the file's plans", () => {
     const file = profile();
     const { snapshot } = apply(emptyStripeSnapshot(), file);
     const { first } = applyWithPacks(snapshot, file);
-    expect(summary(first.steps)).toEqual(Array(9).fill(["create product", "create price"]).flat());
+    expect(summary(first.steps)).toEqual(["update webhook", ...Array(9).fill(["create product", "create price"]).flat()]);
+    expect(first.steps[0]).toMatchObject({ changes: [`add ${packEvents.join(", ")}`], call: "webhookEndpoints.update", target: snapshot.webhooks[0]!.id, params: { enabled_events: [...eventsBeforePacks, ...packEvents] } });
+  });
+
+  it("leaves an endpoint made before packs alone for a file without packs, and never takes the packs' events off one", () => {
+    const file = profile();
+    const { snapshot } = apply(emptyStripeSnapshot(), file);
+    const before = structuredClone(snapshot);
+    before.webhooks[0]!.enabled_events = [...eventsBeforePacks];
+    expect(plan(before, file)).toEqual({ steps: [], refusals: [] });
+    // An apply only adds events, so a file that drops its packs leaves theirs on the endpoint.
+    const { snapshot: after } = applyWithPacks(before, file);
+    expect(after.webhooks[0]!.enabled_events).toEqual([...eventsBeforePacks, ...packEvents]);
+    const dropped = plan(after, file, { allowArchive: true });
+    expect([...dropped.steps, ...dropped.refusals].filter((entry) => entry.object === "webhook")).toEqual([]);
   });
 
   it("makes a new one-time price on the pack's product for new terms, and archives the old one only with --allow-archive", () => {
@@ -602,6 +630,16 @@ describe("verifyStripeCatalog", () => {
     const unreadable = verify(instance, { stripe: { env: "sandbox", error: "Stripe answered 401: Invalid API Key provided." } });
     expect(unreadable.status).toBe("failed");
     expect(problems(unreadable)).toEqual(["file_provider unreadable drift: Stripe answered 401: Invalid API Key provided."]);
+  });
+
+  it("finds no webhook drift for a file without packs whose endpoint has the packs' events too", () => {
+    const instance = syncedInstance();
+    expect(instance.snapshot.webhooks[0]!.enabled_events).toEqual(eventsBeforePacks);
+    const snapshot = structuredClone(instance.snapshot);
+    snapshot.webhooks[0]!.enabled_events.push(...packEvents);
+    const result = verify({ ...instance, snapshot });
+    expect(problems(result)).toEqual([]);
+    expect(result.checks.find((check) => check.code === "webhook")).toMatchObject({ level: "ok", message: `webhook ${webhookUrl("realinfobot")}, 16 events, API version ${STRIPE_API_VERSION}, and the meter error destination` });
   });
 
   it("leaves the webhook and its secret out without the instance's address, as the worker's daily check does", () => {

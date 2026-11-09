@@ -40,6 +40,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     releaseBillingCheckoutRequest: vi.fn(),
     loadPromoEndWork: vi.fn(),
     recordPromoEnd: vi.fn(),
+    expireBusinessPacks: vi.fn(),
     loadAppointmentChangeOtpTarget: vi.fn(),
     loadBillingCheckoutRequest: vi.fn(),
     loadBillingUsageEvent: vi.fn(),
@@ -164,6 +165,12 @@ describe("worker handlers", () => {
     expect(sendTemplate).toHaveBeenLastCalledWith(expect.objectContaining({ template: "invitation", subject: "Invitation à rejoindre Maple Dental sur AlloPlace", variables: named.variables }));
     await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: { template: "operator_alert", to: "owner@example.test", message: "Hi" }, trace: {}, idempotencyKey: "alert:x", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
     expect(sendTemplate).toHaveBeenLastCalledWith(expect.objectContaining({ subject: "AlloPlace notification", appName: "AlloPlace" }));
+  });
+  it("sends a pack reminder as its own email, with its subject in the owner's language", async () => {
+    const sendTemplate = vi.fn().mockResolvedValue({ messageId: "provider-id" });
+    const variables = { locale: "fr", businessName: "Maple Dental", packName: "500 minutes, 180 jours", reminder: "ends_7", minutesLeft: "120", date: "2026-12-01T03:30:00.000Z", timeZone: "America/Toronto", url: "https://app.example.test/settings/plan" };
+    await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: { template: "pack_reminder", to: "owner@example.test", variables }, trace: {}, idempotencyKey: "billing-pack:p:ends_7:u", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
+    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ template: "pack_reminder", to: "owner@example.test", subject: "Votre pack de minutes (500 minutes, 180 jours) se termine le 30 novembre 2026", variables }));
   });
   it("drains a retired phone verification send without contacting the provider", async () => {
     const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never };

@@ -1,6 +1,6 @@
 import { billingProviderNames, intlLocale, normalizeInterfaceLocale, withoutCardAndIdNumbers, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
 
-export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending" | "call_transcript" | "cancellation_confirm" | "cancellation_request" | "cancellation_completed";
+export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending" | "pack_reminder" | "call_transcript" | "cancellation_confirm" | "cancellation_request" | "cancellation_completed";
 
 type Link = { label: string; url: string };
 
@@ -65,6 +65,8 @@ function emailContent(input: RenderEmailInput): EmailContent {
       return invitation(context, variables);
     case "promo_ending":
       return promoEnding(context, variables);
+    case "pack_reminder":
+      return packReminder(context, variables);
     case "cancellation_confirm":
       return cancellationConfirm(context, variables);
     case "cancellation_request":
@@ -522,6 +524,93 @@ function promoEnding({ app, locale }: Context, variables: Record<string, string>
       { kind: "paragraph", text: copy.intro },
       { kind: "paragraph", text: copy.next },
       { kind: "button", label: copy.button, url: variables.url ?? "" },
+    ],
+    reason: { text: copy.reason },
+  };
+}
+
+/** A count of minutes in the reader's language, with the plural the language needs ("1 minut", "3 minuta" in Serbian). */
+function formatMinutes(value: string | undefined, locale: InterfaceLocale): string {
+  const minutes = Number(value);
+  return new Intl.NumberFormat(intlLocale(locale), { style: "unit", unit: "minute", unitDisplay: "long" }).format(Number.isFinite(minutes) ? Math.max(0, Math.round(minutes)) : 0);
+}
+
+/** What a pack reminder is about: the balance at a fifth left, the balance at none, or a pack's end, 30 or 7 days ahead. */
+function packReminderKind(variables: Record<string, string>): "low" | "empty" | "ends" {
+  return variables.reminder === "low" || variables.reminder === "empty" ? variables.reminder : "ends";
+}
+
+/** The subject of a prepaid pack reminder, which the worker sets as it sends it. */
+export function packReminderSubject(variables: Record<string, string>): string {
+  const locale = normalizeInterfaceLocale(variables.locale) ?? "en";
+  const minutes = formatMinutes(variables.minutesLeft, locale);
+  const pack = variables.packName ?? "";
+  const date = formatDay(variables.date, locale, variables.timeZone);
+  const one = Number(variables.minutesLeft) === 1;
+  return {
+    en: { low: `You have about ${minutes} left`, empty: "You have no minutes left", ends: `Your pack (${pack}) ends on ${date}` },
+    fr: { low: `Il vous reste environ ${minutes}`, empty: "Il ne vous reste plus de minutes", ends: `Votre pack de minutes (${pack}) se termine le ${date}` },
+    es: { low: `Le ${one ? "queda" : "quedan"} alrededor de ${minutes}`, empty: "No le quedan minutos", ends: `Su paquete de minutos (${pack}) termina el ${date}` },
+    sr: { low: `Imate još približno ${minutes}`, empty: "Nemate više minuta", ends: `Vaša dopuna minuta (${pack}) ističe ${date}` },
+  }[locale][packReminderKind(variables)];
+}
+
+/**
+ * To a business's owners about the prepaid packs it bought: at a fifth of its
+ * minutes left, at none, when calls get a busy signal, and 30 and 7 days
+ * before a pack ends, when its unused minutes are lost and, for the last pack,
+ * the number stops answering and is released 30 days later. The pack is a
+ * "pack de minutes" in French and a "dopuna minuta" in Serbian, since the
+ * dashboard calls a plan a "forfait" and a "paket" there.
+ */
+function packReminder({ app, locale }: Context, variables: Record<string, string>): EmailContent {
+  const business = variables.businessName?.trim() ?? "";
+  const pack = variables.packName ?? "";
+  const kind = packReminderKind(variables);
+  const minutes = formatMinutes(variables.minutesLeft, locale);
+  const date = formatDay(variables.date, locale, variables.timeZone);
+  const one = Number(variables.minutesLeft) === 1;
+  const copy = {
+    en: {
+      low: [`${business} has about ${minutes} left in its packs. Once none are left, calls get a busy signal.`],
+      empty: [`${business} has no minutes left, so calls get a busy signal until you buy another pack.`],
+      ends: [`Your pack (${pack}) for ${business} ends on ${date}. Minutes still unused then are lost.`, "Once your last pack ends, your business number stops answering calls and is released 30 days later, unless you buy another pack or a plan."],
+      buy: "Buy more minutes",
+      plan: "Open Settings > Plan",
+      reason: `You're receiving this email because you own ${business} on ${app}.`,
+    },
+    fr: {
+      low: [`Il reste environ ${minutes} dans les packs de minutes de ${business}. Quand il n'en restera plus, les appelants entendront un signal occupé.`],
+      empty: [`Il ne reste plus de minutes à ${business}, alors les appelants entendent un signal occupé jusqu'à ce que vous achetiez un autre pack de minutes.`],
+      ends: [`Votre pack de minutes (${pack}) pour ${business} se termine le ${date}. Les minutes encore inutilisées à cette date seront perdues.`, "Quand votre dernier pack de minutes se termine, votre numéro dédié ne répond plus aux appels et il est libéré 30 jours plus tard, sauf si vous achetez un autre pack de minutes ou un forfait."],
+      buy: "Acheter des minutes",
+      plan: "Ouvrir Réglages > Forfait",
+      reason: `Vous recevez ce courriel parce que vous êtes propriétaire de ${business} sur ${app}.`,
+    },
+    es: {
+      low: [`A ${business} le ${one ? "queda" : "quedan"} alrededor de ${minutes} en sus paquetes de minutos. Cuando no le quede ninguno, quienes llamen oirán la señal de ocupado.`],
+      empty: [`A ${business} no le quedan minutos, así que quienes llamen oyen la señal de ocupado hasta que compre otro paquete de minutos.`],
+      ends: [`Su paquete de minutos (${pack}) para ${business} termina el ${date}. Los minutos que no haya usado para entonces se pierden.`, "Cuando termine su último paquete de minutos, su número dedicado dejará de atender llamadas y se liberará 30 días después, salvo que compre otro paquete de minutos o un plan."],
+      buy: "Comprar más minutos",
+      plan: "Abrir Configuración > Plan",
+      reason: `Recibe este correo porque es propietario de ${business} en ${app}.`,
+    },
+    sr: {
+      low: [`Firma ${business} ima još približno ${minutes} za pozive. Kada ih više ne bude, pozivaoci će čuti signal zauzeća.`],
+      empty: [`Firma ${business} nema više minuta, pa pozivaoci čuju signal zauzeća dok ne kupite novu dopunu minuta.`],
+      ends: [`Dana ${date} ističe Vaša dopuna minuta (${pack}) za firmu ${business}. Minuti koje do tada ne iskoristite propadaju.`, "Kada istekne i poslednja dopuna minuta, Vaš namenski broj prestaje da prima pozive i oslobađa se 30 dana kasnije, osim ako ne kupite novu dopunu minuta ili paket."],
+      buy: "Kupi još minuta",
+      plan: "Otvori Podešavanja > Paket",
+      reason: `Ovaj imejl ste dobili jer ste vlasnik firme ${business} na servisu ${app}.`,
+    },
+  }[locale];
+  return {
+    locale,
+    eyebrow: business || undefined,
+    heading: packReminderSubject(variables),
+    blocks: [
+      ...copy[kind].map((text): Block => ({ kind: "paragraph", text })),
+      { kind: "button", label: kind === "ends" ? copy.plan : copy.buy, url: variables.url ?? "" },
     ],
     reason: { text: copy.reason },
   };

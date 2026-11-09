@@ -22,6 +22,9 @@ const tenantSchedules: Array<{ queue: JobQueue; name: string; type: JobType; eve
   { queue: "maintenance", name: "api-retention", type: "api.retention", every: 60 * 60_000, housekeeping: true },
   // A promo plan's ending is told to Polar and its owners a week ahead, so once a day is enough.
   { queue: "default", name: "promo-plan-end", type: "billing.endPromoPlan", every: 24 * 60 * 60_000 },
+  // A pack's end and the reminders before it are days apart, so once a day is
+  // enough; a dormant business still has its pack, and a canceled one gets no reminder.
+  { queue: "default", name: "pack-expiry", type: "billing.expirePacks", every: 24 * 60 * 60_000 },
   // What Stripe's money meters hold, against what was sent, once a day (Stripe plan, step 16); it skips at once elsewhere.
   { queue: "maintenance", name: "usage-totals-check", type: "billing.checkUsageTotals", every: 24 * 60 * 60_000 },
 ];

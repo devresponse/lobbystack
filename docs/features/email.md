@@ -12,7 +12,7 @@ Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USERNAME`, `SMTP_PASSWORD` an
 
 ## Know the templates
 
-`TemplateName` lists them: `existing_account`, `account_setup`, `verify_email`, `password_reset`, `invitation`, `operator_alert`, `call_transcript`, `feedback_submission`, `onboarding_followup`, `promo_ending`, and since fork PR #102 `cancellation_confirm`, `cancellation_request` and `cancellation_completed` ([cancel an account](account-cancellation.md#know-whos-told)). Each is laid out once, as headings, paragraphs, a button, a code or a quote, and rendered as HTML and as plain text:
+`TemplateName` lists them: `existing_account`, `account_setup`, `verify_email`, `password_reset`, `invitation`, `operator_alert`, `call_transcript`, `feedback_submission`, `onboarding_followup`, `promo_ending`, since fork PR #102 `cancellation_confirm`, `cancellation_request` and `cancellation_completed` ([cancel an account](account-cancellation.md#know-whos-told)), and `pack_reminder`, which tells the owners when a fifth of their prepaid minutes is left, when none is, and 30 and 7 days before a pack ends (`billing.expirePacks` in [billing](../billing/README.md#know-what-runs-on-its-own)). Each is laid out once, as headings, paragraphs, a button, a code or a quote, and rendered as HTML and as plain text:
 
 - In plain text, parts are separated by a blank line and each link sits on its own line after its label.
 - Every email ends with why it was sent ("You're receiving this email because…").
@@ -25,6 +25,7 @@ Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USERNAME`, `SMTP_PASSWORD` an
 | Account emails: sign-up, verification, password reset, email change | The account's preferred language |
 | Invitations | The inviter's language |
 | Promo plan endings | The language of each owner who gets it |
+| Prepaid pack reminders (`pack_reminder`) | The language of each owner who gets it, English if they have none |
 | The email after each call | The dashboard language of each person who gets it, English if they have none |
 | Alerts and feedback | English. An alert's subject and body are written when it's queued and shared with its text message. |
 | The founder check-in (`onboarding_followup`) | English, text only |

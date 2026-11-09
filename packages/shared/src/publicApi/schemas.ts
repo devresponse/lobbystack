@@ -1266,6 +1266,7 @@ export const apiKnowledgeUploadCompleteSchema = z.strictObject({
 // characters, and the unit the search ranks.
 export const apiKnowledgeSearchSchema = z.strictObject({
   query: z.string().trim().min(1).max(2_000).describe("What to search for, as the receptionist's model would write it: it searches with a self-contained query of its own, such as parking fees, which a call's or chat's AI trace shows in its searchKnowledge tool call."),
+  receptionist_id: id.optional().describe("Search as this receptionist, with the knowledge it may use, as its calls and chats do. One that's paused, archived or unknown searches as the default receptionist, as its calls would. Defaults to the default receptionist.")
 });
 
 const knowledgeSearchStageError = z.enum(["embedding_unavailable", "embedding_timeout", "invalid_embedding", "embedding_failed", "statement_timeout", "failed"]).nullable()
@@ -1336,6 +1337,7 @@ export const apiKnowledgeSearchTraceSchema = z.object({
 });
 
 export const apiKnowledgeSearchResultSchema = z.object({
+  receptionist_id: id.nullable().describe("The receptionist the search ran as: receptionist_id when it answers, else the default receptionist. null before the business's snapshot names its receptionists."),
   query: z.string().describe("The query as searched: trimmed, and cut to 2,000 characters."),
   outcome: z.enum(["found", "empty", "unavailable"]).describe("found: evidence has passages. empty: the search worked and found nothing. unavailable: both searches failed, or the revision check did."),
   mode: z.enum(["hybrid", "keyword"]).describe("hybrid: the semantic search worked and its results were fused with the keyword search's. keyword: the keyword search's alone."),

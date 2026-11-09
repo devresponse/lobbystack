@@ -25049,6 +25049,11 @@
             "minLength": 1,
             "maxLength": 2000,
             "description": "What to search for, as the receptionist's model would write it: it searches with a self-contained query of its own, such as parking fees, which a call's or chat's AI trace shows in its searchKnowledge tool call."
+          },
+          "receptionist_id": {
+            "description": "Search as this receptionist, with the knowledge it may use, as its calls and chats do. One that's paused, archived or unknown searches as the default receptionist, as its calls would. Defaults to the default receptionist.",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -25059,6 +25064,19 @@
       "KnowledgeSearchResult": {
         "type": "object",
         "properties": {
+          "receptionist_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The receptionist the search ran as: receptionist_id when it answers, else the default receptionist. null before the business's snapshot names its receptionists."
+          },
           "query": {
             "type": "string",
             "description": "The query as searched: trimmed, and cut to 2,000 characters."
@@ -25721,6 +25739,7 @@
           }
         },
         "required": [
+          "receptionist_id",
           "query",
           "outcome",
           "mode",

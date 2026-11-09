@@ -208,7 +208,7 @@ describe("phone numbers", () => {
   });
 
   it("names the worker's reclaim steps for what they do", () => {
-    const row = { id: businessId, e164: "+14165550123", reclaimScheduledAt: null, createdAt: now, updatedAt: now };
+    const row = { id: businessId, e164: "+14165550123", receptionistId: null, reclaimScheduledAt: null, createdAt: now, updatedAt: now };
     const active = serializePhoneNumber({ ...row, status: "active" });
     expect(apiPhoneNumberSchema.parse(active)).toEqual(active);
     expect(serializePhoneNumber({ ...row, status: "reclaiming", reclaimScheduledAt: now })).toMatchObject({ status: "releasing", release_scheduled_at: now.toISOString() });
@@ -268,7 +268,7 @@ describe("calendar connections", () => {
 describe("widget keys", () => {
   const now = new Date("2026-10-11T12:00:00.000Z");
   const origin = "https://app.example.com";
-  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", label: null, status: "active", allowedOrigins: ["https://example.com/", "shop.example.com "], keyValue: null, lastUsedAt: null, createdAt: now };
+  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", label: null, status: "active", allowedOrigins: ["https://example.com/", "shop.example.com "], keyValue: null, receptionistId: null, lastUsedAt: null, createdAt: now };
 
   it("shows the dashboard's configuration in snake_case, with the defaults the widget falls back to", () => {
     const plain = serializeWidgetKey({ ...row, config: {} }, origin);

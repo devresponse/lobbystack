@@ -470,7 +470,8 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "code-revoke": { operation: "revokeBillingCode" },
   }),
   group("numbers", "Find, claim, replace and release phone numbers.", {
-    list: { operation: "listPhoneNumbers", columns: columns("id", "phone_number", "status", "release_scheduled_at") },
+    list: { operation: "listPhoneNumbers", columns: columns("id", "phone_number", "status", "receptionist_id", "release_scheduled_at") },
+    update: { operation: "updatePhoneNumber" },
     search: { operation: "searchPhoneNumbers", columns: columns("phone_number", "locality", "region", "kind", "expires_at", "offer_token") },
     claim: { operation: "createPhoneNumberClaim", args: ["offer_token"], wait: claimWait },
     "claim-status": { operation: "getPhoneNumberClaim" },

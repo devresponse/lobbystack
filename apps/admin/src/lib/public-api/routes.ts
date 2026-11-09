@@ -79,6 +79,7 @@ import {
   listKnowledgeSourcesForApi,
   listMessagesForApi,
   listPhoneNumbersForApi,
+  updatePhoneNumberForApi,
   listRulesForApi,
   listServicesForApi,
   listStaffForApi,
@@ -141,6 +142,7 @@ import {
   apiOnboardingUpdateSchema,
   apiPhoneNumberClaimCreateSchema,
   apiPhoneNumberSearchSchema,
+  apiPhoneNumberUpdateSchema,
   apiPublicProfileUpdateSchema,
   apiBusinessUpdateSchema,
   apiContactCreateSchema,
@@ -453,6 +455,10 @@ export const v1 = {
     return { body: data(await claimPhoneNumberForApi(context, caller, { offerToken: body.offer_token }, { userId, claimTokenSecret: getNumberClaimTokenSecret() })) };
   }),
   getPhoneNumberClaim: (request: Request, { params }: Params<"claim_id">) => handleApiRequest(request, "getPhoneNumberClaim", async ({ context, caller }) => ({ body: data(await getPhoneNumberClaimForApi(context, caller, uuidParam((await params).claim_id, "claim_id"))) })),
+  updatePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "updatePhoneNumber", async ({ context, caller }) => {
+    const phoneNumberId = uuidParam((await params).phone_number_id, "phone_number_id");
+    return { body: data(await updatePhoneNumberForApi(context, caller, phoneNumberId, await readApiBody(request, apiPhoneNumberUpdateSchema))) };
+  }),
   releasePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "releasePhoneNumber", async ({ context, caller }) => ({ body: data(await releasePhoneNumberForApi(context, caller, uuidParam((await params).phone_number_id, "phone_number_id"))) })),
   replacePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "replacePhoneNumber", async ({ context, caller }) => {
     const phoneNumberId = uuidParam((await params).phone_number_id, "phone_number_id");

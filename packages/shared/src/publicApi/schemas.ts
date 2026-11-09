@@ -618,11 +618,16 @@ const phoneNumberKinds = ["local", "toll_free"] as const;
 export const apiPhoneNumberSchema = z.object({
   id,
   phone_number: e164,
+  receptionist_id: id.nullable().describe("The receptionist that answers its calls and texts; null, the default receptionist. A paused or archived one's go to the default receptionist."),
   status: z.enum(["active", "releasing", "released"]).describe("active: calls and texts to the number reach the receptionist, even while a release is scheduled. releasing: the number is being given back to the carrier. released: the business no longer has it."),
   release_scheduled_at: nullableTimestamp.describe("When an active number is released: when DELETE asked for it, or 30 days after a replacement went live. Null when no release is planned."),
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A phone number the business has or had.");
+
+export const apiPhoneNumberUpdateSchema = z.strictObject({
+  receptionist_id: id.describe("The receptionist that answers it from the next call or text on: any that isn't archived. A paused one's calls go to the default receptionist until it resumes."),
+});
 
 export const apiPhoneNumberSearchSchema = z.strictObject({
   country: z.enum(phoneNumberCountries).optional().describe("Defaults to the country of the business's time zone, or US."),
@@ -688,6 +693,7 @@ export const apiWidgetKeySchema = z.object({
   status: z.enum(widgetKeyStatuses).describe("active: the widget works. disabled: it stops until it's turned back on. revoked: it stops for good."),
   allowed_origins: z.array(z.string()).describe("The websites the widget runs on, such as https://example.com."),
   config: apiWidgetConfigSchema,
+  receptionist_id: id.nullable().describe("The receptionist that answers its chats; null, the default receptionist. A paused or archived one's go to the default receptionist."),
   key: z.string().nullable().describe("The key itself, which the widget's script tag carries. null for a revoked key, and for a key created before keys were stored, which only its creator saw."),
   embed_snippet: z.string().nullable().describe("The script tag to paste into the website's HTML. null when key is null."),
   last_used_at: nullableTimestamp,
@@ -703,6 +709,7 @@ export const apiWidgetKeyCreateSchema = z.strictObject({
   label: z.string().trim().min(1).max(120).optional(),
   allowed_origins: widgetOrigins.describe("The websites the widget may run on, as full http or https URLs. Only each one's origin is kept."),
   config: apiWidgetConfigSchema.optional(),
+  receptionist_id: id.optional().describe("The receptionist that answers its chats: any that isn't archived. Defaults to the default receptionist."),
 });
 
 export const apiWidgetKeyUpdateSchema = z.strictObject({
@@ -710,6 +717,7 @@ export const apiWidgetKeyUpdateSchema = z.strictObject({
   allowed_origins: widgetOrigins.optional().describe("Replaces the list."),
   config: apiWidgetConfigSchema.optional().describe("Replaces the whole configuration."),
   status: z.enum(widgetKeyStatuses).optional().describe("A revoked key can't be turned back on."),
+  receptionist_id: id.optional().describe("The receptionist that answers its chats from the next one on: any that isn't archived."),
 });
 
 // The public profile page checks its text as the dashboard does: whitespace
@@ -1473,6 +1481,7 @@ export type ApiOnboardingItem = ApiOnboarding["missing"][number];
 export type ApiOnboardingUpdate = z.infer<typeof apiOnboardingUpdateSchema>;
 export type ApiOnboardingComplete = z.infer<typeof apiOnboardingCompleteSchema>;
 export type ApiPhoneNumber = z.infer<typeof apiPhoneNumberSchema>;
+export type ApiPhoneNumberUpdate = z.infer<typeof apiPhoneNumberUpdateSchema>;
 export type ApiPhoneNumberSearch = z.infer<typeof apiPhoneNumberSearchSchema>;
 export type ApiPhoneNumberOffer = z.infer<typeof apiPhoneNumberOfferSchema>;
 export type ApiPhoneNumberClaimCreate = z.infer<typeof apiPhoneNumberClaimCreateSchema>;

@@ -5900,6 +5900,139 @@
       }
     },
     "/phone-numbers/{phone_number_id}": {
+      "patch": {
+        "operationId": "updatePhoneNumber",
+        "summary": "Choose who answers a number",
+        "description": "Points one of the business's numbers that isn't released at a receptionist that isn't archived: its calls and texts go to it from the next one on. Sending the receptionist it has changes nothing. A 409 for an archived receptionist.",
+        "tags": [
+          "Phone numbers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "phone_numbers:manage",
+        "parameters": [
+          {
+            "name": "phone_number_id",
+            "in": "path",
+            "required": true,
+            "description": "The phone number id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneNumberUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PhoneNumber"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "operationId": "releasePhoneNumber",
         "summary": "Release a number",
@@ -21634,6 +21767,19 @@
             "additionalProperties": false,
             "description": "How the widget looks and behaves."
           },
+          "receptionist_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The receptionist that answers its chats; null, the default receptionist. A paused or archived one's go to the default receptionist."
+          },
           "key": {
             "description": "The key itself, which the widget's script tag carries. null for a revoked key, and for a key created before keys were stored, which only its creator saw.",
             "type": [
@@ -21672,6 +21818,7 @@
           "status",
           "allowed_origins",
           "config",
+          "receptionist_id",
           "key",
           "embed_snippet",
           "last_used_at",
@@ -21786,6 +21933,19 @@
             "additionalProperties": false,
             "description": "How the widget looks and behaves."
           },
+          "receptionist_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The receptionist that answers its chats; null, the default receptionist. A paused or archived one's go to the default receptionist."
+          },
           "key": {
             "type": "string",
             "description": "The key itself, which the widget's script tag carries."
@@ -21818,6 +21978,7 @@
           "status",
           "allowed_origins",
           "config",
+          "receptionist_id",
           "key",
           "embed_snippet",
           "last_used_at",
@@ -21919,6 +22080,11 @@
             },
             "additionalProperties": false,
             "description": "How the widget looks and behaves."
+          },
+          "receptionist_id": {
+            "description": "The receptionist that answers its chats: any that isn't archived. Defaults to the default receptionist.",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -22036,6 +22202,11 @@
               "disabled",
               "revoked"
             ]
+          },
+          "receptionist_id": {
+            "description": "The receptionist that answers its chats from the next one on: any that isn't archived.",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "additionalProperties": false
@@ -23460,6 +23631,19 @@
             "pattern": "^\\+[1-9]\\d{6,14}$",
             "description": "Phone number in E.164 format."
           },
+          "receptionist_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The receptionist that answers its calls and texts; null, the default receptionist. A paused or archived one's go to the default receptionist."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -23496,6 +23680,7 @@
         "required": [
           "id",
           "phone_number",
+          "receptionist_id",
           "status",
           "release_scheduled_at",
           "created_at",
@@ -23557,6 +23742,20 @@
             "format": "uuid"
           }
         },
+        "additionalProperties": false
+      },
+      "PhoneNumberUpdate": {
+        "type": "object",
+        "properties": {
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist that answers it from the next call or text on: any that isn't archived. A paused one's calls go to the default receptionist until it resumes."
+          }
+        },
+        "required": [
+          "receptionist_id"
+        ],
         "additionalProperties": false
       },
       "PhoneNumberOffer": {

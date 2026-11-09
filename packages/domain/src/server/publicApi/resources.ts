@@ -568,11 +568,11 @@ export async function listKnowledgeSourceResources(tx: DatabaseTransaction, busi
 // Other statuses stay out.
 
 const phoneNumberStatuses: Record<string, ApiPhoneNumber["status"]> = { active: "active", reclaiming: "releasing", reclaimed: "released", released: "released" };
-const phoneNumberColumns = { id: phoneNumbers.id, e164: phoneNumbers.e164, status: phoneNumbers.status, reclaimScheduledAt: phoneNumbers.reclaimScheduledAt, createdAt: phoneNumbers.createdAt, updatedAt: phoneNumbers.updatedAt };
-type PhoneNumberRow = { id: string; e164: string; status: string; reclaimScheduledAt: Date | null; createdAt: Date; updatedAt: Date };
+const phoneNumberColumns = { id: phoneNumbers.id, e164: phoneNumbers.e164, receptionistId: phoneNumbers.receptionistId, status: phoneNumbers.status, reclaimScheduledAt: phoneNumbers.reclaimScheduledAt, createdAt: phoneNumbers.createdAt, updatedAt: phoneNumbers.updatedAt };
+type PhoneNumberRow = { id: string; e164: string; receptionistId: string | null; status: string; reclaimScheduledAt: Date | null; createdAt: Date; updatedAt: Date };
 
 export function serializePhoneNumber(row: PhoneNumberRow): ApiPhoneNumber {
-  return { id: row.id, phone_number: row.e164, status: phoneNumberStatuses[row.status] ?? "released", release_scheduled_at: isoOrNull(row.reclaimScheduledAt), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+  return { id: row.id, phone_number: row.e164, receptionist_id: row.receptionistId, status: phoneNumberStatuses[row.status] ?? "released", release_scheduled_at: isoOrNull(row.reclaimScheduledAt), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 export async function listPhoneNumberResources(tx: DatabaseTransaction, businessId: string): Promise<ApiPhoneNumber[]> {
@@ -614,7 +614,7 @@ export async function loadPhoneNumberClaimResource(tx: DatabaseTransaction, busi
 // dashboard shows it, until it's revoked. Keys created before it was stored
 // kept only their hash.
 
-export function serializeWidgetKey(row: { id: string; label: string | null; status: string; allowedOrigins: unknown; config: unknown; keyValue: string | null; lastUsedAt: Date | null; createdAt: Date }, appOrigin: string): ApiWidgetKey {
+export function serializeWidgetKey(row: { id: string; label: string | null; status: string; allowedOrigins: unknown; config: unknown; keyValue: string | null; receptionistId: string | null; lastUsedAt: Date | null; createdAt: Date }, appOrigin: string): ApiWidgetKey {
   const parsed = widgetConfigSchema.safeParse(row.config ?? {});
   const config = { ...defaultWidgetConfig, ...(parsed.success ? parsed.data : {}) };
   const status = row.status === "disabled" || row.status === "revoked" ? row.status : "active";
@@ -634,6 +634,7 @@ export function serializeWidgetKey(row: { id: string; label: string | null; stat
       ...(config.leadForm !== undefined ? { lead_form: { enabled: config.leadForm.enabled, require_phone: config.leadForm.requirePhone ?? false, require_email: config.leadForm.requireEmail ?? false, show_before_chat: config.leadForm.showBeforeChat ?? false } } : {}),
       ...(config.liveChat !== undefined ? { live_chat: { enabled: config.liveChat.enabled } } : {}),
     },
+    receptionist_id: row.receptionistId,
     key,
     embed_snippet: key ? widgetEmbedSnippet(appOrigin, key) : null,
     last_used_at: isoOrNull(row.lastUsedAt),

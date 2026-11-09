@@ -68,6 +68,7 @@ import {
   type ApiOnboardingItem,
   type ApiOnboardingUpdate,
   type ApiPhoneNumber,
+  type ApiPhoneNumberUpdate,
   type ApiPhoneNumberClaim,
   type ApiPhoneNumberOffer,
   type ApiPhoneNumberSearch,
@@ -130,6 +131,7 @@ import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "
 import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
+import { setPhoneNumberReceptionistInTransaction, setWidgetKeyReceptionistInTransaction } from "../receptionistEntryPoints";
 import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "../receptionistInput";
 import { loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch, type ReceptionistView } from "../receptionistProfile";
 import {
@@ -620,6 +622,19 @@ export async function listPhoneNumbersForApi(context: DomainContext, caller: Api
   return await inBusiness(context, caller, async (tx) => await listPhoneNumberResources(tx, caller.businessId));
 }
 
+/** Points a number at a receptionist, as the dashboard's Phone Number settings do. */
+export async function updatePhoneNumberForApi(context: DomainContext, caller: ApiCaller, phoneNumberId: string, input: ApiPhoneNumberUpdate): Promise<ApiPhoneNumber> {
+  return await inBusiness(context, caller, async (tx) => {
+    const number = await loadPhoneNumberResource(tx, caller.businessId, phoneNumberId);
+    if (!number || number.status === "released") throw notFound("Phone number");
+    const receptionistId = input.receptionist_id.toLowerCase();
+    if (number.receptionist_id === receptionistId) return number;
+    await asApiErrors(() => setPhoneNumberReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, phoneNumberId: number.id, receptionistId }));
+    await audit(tx, caller, { eventType: "api.phone_number.receptionist_changed", entityType: "phone_number", entityId: number.id, payload: { receptionistId } });
+    return (await loadPhoneNumberResource(tx, caller.businessId, number.id)) ?? number;
+  });
+}
+
 /**
  * Finds numbers the business can claim, as offers signed for the account the
  * caller acts as. `replaces` asks for replacement offers instead.
@@ -982,7 +997,12 @@ export async function listWidgetKeysForApi(context: DomainContext, caller: ApiCa
 /** Creates a widget key and the script tag for it, served from the dashboard's own origin. */
 export async function createWidgetKeyForApi(context: DomainContext, caller: ApiCaller, input: ApiWidgetKeyCreate, options: { appOrigin: string }): Promise<ApiWidgetKeyCreated> {
   return await inBusiness(context, caller, async (tx) => {
-    const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
+    const inserted = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
+    const { key } = inserted;
+    // A new key names the default receptionist unless the request names another.
+    const row = input.receptionist_id
+      ? { ...inserted.row, receptionistId: (await asApiErrors(() => setWidgetKeyReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, widgetKeyId: inserted.row.id, receptionistId: input.receptionist_id!.toLowerCase() }))).receptionistId }
+      : inserted.row;
     await audit(tx, caller, { eventType: "api.widget_key.created", entityType: "widget_key", entityId: row.id });
     return { ...serializeWidgetKey(row, options.appOrigin), key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key) };
   });
@@ -1008,10 +1028,17 @@ export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiC
       if (sortedJson(serializeWidgetKey({ ...current, config }, options.appOrigin).config) !== sortedJson(before.config)) patch.config = config;
     }
     if (input.status !== undefined && input.status !== before.status) patch.status = input.status;
-    if (Object.keys(patch).length === 0) return before;
-    const row = await updateWidgetKeyInTransaction(tx, { businessId: caller.businessId, widgetKeyId, patch });
-    if (!row) throw notFound("Widget key");
-    await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: Object.keys(patch) } });
+    const receptionistId = input.receptionist_id?.toLowerCase();
+    const newReceptionist = receptionistId !== undefined && receptionistId !== before.receptionist_id;
+    if (Object.keys(patch).length === 0 && !newReceptionist) return before;
+    let row = current;
+    if (Object.keys(patch).length) {
+      const updated = await updateWidgetKeyInTransaction(tx, { businessId: caller.businessId, widgetKeyId, patch });
+      if (!updated) throw notFound("Widget key");
+      row = updated;
+    }
+    if (newReceptionist) row = { ...row, receptionistId: (await asApiErrors(() => setWidgetKeyReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, widgetKeyId, receptionistId: receptionistId! }))).receptionistId };
+    await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: [...Object.keys(patch), ...(newReceptionist ? ["receptionist_id"] : [])] } });
     return serializeWidgetKey(row, options.appOrigin);
   });
 }
@@ -1332,6 +1359,23 @@ export async function reorderRulesForApi(context: DomainContext, caller: ApiCall
   });
 }
 
+/**
+ * The dashboard's refusals as the v1 API words them: a 409, such as the
+ * plan's limit or an archived receptionist, is a conflict, a 404 not_found
+ * and a 400 invalid_request, with the dashboard's own message.
+ */
+async function asApiErrors<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    const status = error instanceof Error ? (error as { status?: unknown }).status : undefined;
+    if (status === 409) throw conflict((error as Error).message);
+    if (status === 404) throw new PublicApiError(404, "not_found", (error as Error).message);
+    if (status === 400) throw invalidRequest((error as Error).message);
+    throw error;
+  }
+}
+
 // Receptionist settings
 
 const RECEPTIONIST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1452,15 +1496,6 @@ async function listReceptionistProfiles(tx: DatabaseTransaction, businessId: str
   return rows.map(serializeReceptionistProfile);
 }
 
-/** The dashboard's refusals, such as the plan's limit, as the v1 API words a conflict. */
-async function asApiConflict<T>(work: () => Promise<T>): Promise<T> {
-  try {
-    return await work();
-  } catch (error) {
-    if (error instanceof Error && (error as { status?: unknown }).status === 409) throw conflict(error.message);
-    throw error;
-  }
-}
 
 /** The receptionists that aren't archived, or the archived ones, the default first, then in the business's order. */
 export async function listReceptionistsForApi(context: DomainContext, caller: ApiCaller, options: { archived?: boolean | undefined } = {}): Promise<ApiReceptionistProfile[]> {
@@ -1483,7 +1518,7 @@ export async function createReceptionistForApi(context: DomainContext, caller: A
       ...(input.listed !== undefined ? { listed: input.listed } : {}),
       ...(input.copy_from_id ? { copyFromId: input.copy_from_id.toLowerCase() } : {}),
     };
-    const created = await asApiConflict(() => createReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionist }));
+    const created = await asApiErrors(() => createReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionist }));
     await audit(tx, caller, { eventType: "api.receptionist_profile.created", entityType: "receptionist_profile", entityId: created.id });
     return await loadReceptionistProfile(tx, caller.businessId, created.id);
   });
@@ -1503,7 +1538,7 @@ export async function updateReceptionistProfileForApi(context: DomainContext, ca
     if (input.knowledge_scope !== undefined && input.knowledge_scope !== current.knowledge_scope) patch.knowledgeScope = input.knowledge_scope;
     if (input.listed !== undefined && input.listed !== current.listed) patch.listed = input.listed;
     if (!Object.keys(patch).length) return current;
-    await asApiConflict(() => updateReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionistId: current.id, patch }));
+    await asApiErrors(() => updateReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionistId: current.id, patch }));
     await audit(tx, caller, { eventType: "api.receptionist_profile.updated", entityType: "receptionist_profile", entityId: current.id, payload: { fields: Object.keys(patch).sort() } });
     return await loadReceptionistProfile(tx, caller.businessId, current.id);
   });
@@ -1527,7 +1562,7 @@ export async function changeReceptionistForApi(context: DomainContext, caller: A
           : current.archived_at === null && current.status === (action === "pause" ? "paused" : "active");
     if (already) return current;
     if (current.archived_at && action !== "restore") throw conflict("Restore the receptionist first.");
-    await asApiConflict(async () => {
+    await asApiErrors(async () => {
       if (action === "pause" || action === "resume") await setReceptionistStatusInTransaction(tx, { businessId, actorUserId, receptionistId: current.id, status: action === "pause" ? "paused" : "active" });
       else if (action === "archive") await archiveReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });
       else if (action === "restore") await restoreReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });

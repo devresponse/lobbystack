@@ -11,6 +11,7 @@ export * from "./billingCodes";
 export * from "./billingPackCheckout";
 export * from "./billingPacks";
 export * from "./billingPackExpiry";
+export * from "./billingPackView";
 export * from "./billingPlanEndForPack";
 export * from "./billingPlans";
 export * from "./billingPolar";

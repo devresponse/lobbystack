@@ -13,7 +13,8 @@ vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string, values?: { commit?: string }) => values?.commit ? `${key} ${values.commit}` : key }) }));
 vi.mock("./live-upgrade-plan-provider", () => ({ LiveUpgradePlanProvider: ({ children }: { children: ReactNode }) => <UpgradePlanDialogProvider onOpen={vi.fn()}>{children}</UpgradePlanDialogProvider> }));
 vi.mock("./dashboard-utility-bar", () => ({ DashboardUtilityBar: () => null }));
-vi.mock("./nav-user", () => ({ NavUser: () => null }));
+const navUser = vi.hoisted(() => ({ showUpgradeToPro: undefined as boolean | undefined }));
+vi.mock("./nav-user", () => ({ NavUser: ({ showUpgradeToPro }: { showUpgradeToPro?: boolean }) => { navUser.showUpgradeToPro = showUpgradeToPro; return null; } }));
 const clients: QueryClient[] = [];
 beforeEach(() => {
   route.pathname = "/"; window.innerWidth = 1440;
@@ -21,10 +22,10 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", vi.fn(query => ({ get matches() { return query === "(max-width: 767px)" && window.innerWidth < 768; }, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
-function setup(role = "business_owner") {
+function setup(role = "business_owner", billing: Record<string, unknown> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Tenant name", active: true, role }] });
-  client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: null, permissions: { hasCheckoutAccess: false }, availableCheckoutPlans: [], availableCheckoutIntervals: { starter: [], pro: [] } });
+  client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: null, permissions: { hasCheckoutAccess: false }, availableCheckoutPlans: [], availableCheckoutIntervals: { starter: [], pro: [] }, ...billing });
   client.setQueryData(["phone-numbers", "business"], { phoneNumbers: [] });
   client.setQueryData(["setup", "business"], { steps: [] });
   const content = () => <QueryClientProvider client={client}><DashboardShell user={{ email: "operator@example.invalid", name: "Operator" }}><p>Page content</p></DashboardShell></QueryClientProvider>;
@@ -98,5 +99,19 @@ describe("build version", () => {
     vi.stubEnv("NEXT_PUBLIC_DISPLAY_VERSION", "");
     setup();
     expect(screen.queryByText(/sidebar\.version/)).toBeNull();
+  });
+});
+
+describe("the user menu's upgrade", () => {
+  const sellsPro = { permissions: { hasCheckoutAccess: true }, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly"] } };
+
+  it("is offered on a pack, even beside the subscription the pack replaced", () => {
+    setup("business_owner", { ...sellsPro, effectivePlan: "prepaid", account: { plan: "pro" } });
+    expect(navUser.showUpgradeToPro).toBe(true);
+  });
+
+  it("isn't offered on a live Pro plan, as before packs", () => {
+    setup("business_owner", { ...sellsPro, effectivePlan: "pro", account: { plan: "pro" } });
+    expect(navUser.showUpgradeToPro).toBe(false);
   });
 });

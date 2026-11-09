@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,8 @@ type ConfirmActionDialogProps = {
   description: string;
   /** For example "ph-mask" when the description names a customer. */
   descriptionClassName?: string;
+  /** More of what the action does, such as a list, under the description. */
+  details?: ReactNode;
   onConfirm: () => Promise<void> | void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -33,6 +35,7 @@ export function ConfirmActionDialog({
   confirmVariant = "default",
   description,
   descriptionClassName,
+  details,
   onConfirm,
   onOpenChange,
   open,
@@ -54,6 +57,7 @@ export function ConfirmActionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription className={descriptionClassName}>{description}</AlertDialogDescription>
+          {details}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogClose

@@ -406,7 +406,18 @@
     "retry": "Pokušaj ponovo",
     "current": {
       "title": "Ova firma već ima paket {{plan}}.",
-      "description": "Paket je već podešen, pa možete da pređete na broj telefona."
+      "description": "Paket je već podešen, pa možete da pređete na broj telefona.",
+      "prepaidTitle": "Ova firma već ima dopunu minuta.",
+      "prepaidDescription": "Minuti su spremni, pa možete da pređete na broj telefona."
+    },
+    "packs": {
+      "title": "Više volite dopunu minuta?",
+      "description": "Kupite minute jednom, bez mesečnog računa. Traju dok ih ne potrošite ili dok dopuna ne istekne.",
+      "cta": "Kupi dopunu minuta",
+      "waiting": "Dodavanje minuta...",
+      "processing": "Plaćanje se još obrađuje. Proverite ponovo za nekoliko minuta.",
+      "checkAgain": "Proveri ponovo",
+      "failed": "Plaćanje nije prošlo. Ponovo izaberite paket ili dopunu minuta."
     }
   }
 }

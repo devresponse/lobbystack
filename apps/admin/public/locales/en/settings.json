@@ -381,7 +381,8 @@
       "pro": "Pro",
       "proCard": "Pro Plan",
       "enterprise": "Enterprise",
-      "enterpriseCard": "Enterprise Plan"
+      "enterpriseCard": "Enterprise Plan",
+      "prepaidCard": "Prepaid"
     },
     "subscriptionStates": {
       "active": "Active",
@@ -457,13 +458,19 @@
       "includedReceptionistsCustom": "Custom receptionist allowance",
       "includedSmsCustom": "Custom SMS allowance",
       "includedOutboundCustom": "Custom transfer allowance",
-      "includedStorage": "{{amount}} {{unit}} storage"
+      "includedStorage": "{{amount}} {{unit}} storage",
+      "prepaidMinutesLeft_one": "minute left",
+      "prepaidMinutesLeft_other": "minutes left",
+      "prepaidUntil": "Until {{date}}",
+      "prepaidNeverEnds": "Never ends"
     },
     "upgradeDialog": {
       "title": "Upgrade plan",
       "description": "Choose the plan that works best for your team.",
       "changesSubscription": "You already have a subscription, so this changes it instead of opening a checkout. Any difference is charged to your saved payment method.",
       "leavesPromo": "Changing your plan ends {{plan}} and its discount.",
+      "endsPacks_one": "Starting a plan ends your packs and the {{minutes}} minute left on them.",
+      "endsPacks_other": "Starting a plan ends your packs and the {{minutes}} minutes left on them.",
       "enterpriseSubject": "Enterprise plan",
       "billingIntervalLabel": "Billing interval",
       "annualDiscount": "Save {{percent}}%",
@@ -573,6 +580,8 @@
       "unlimited": "Unlimited",
       "blocked": "Limit reached",
       "blockedDescription": "Limit reached — usage paused until next period.",
+      "packDescription": "Your minutes come from your packs and last until each one ends.",
+      "packBlockedDescription": "No minutes left. Calls get a busy signal until you buy another pack.",
       "overageCount": "{{count}} over limit",
       "overageCost": "≈ {{amount}} in overages",
       "noOverages": "No overages — usage hard-capped at the included pool.",
@@ -607,6 +616,52 @@
       "invalidAmount": "Enter a non-negative {{currency}} amount with no more than two decimal places.",
       "saveFailed": "Unable to save the monthly overage cap.",
       "removeFailed": "Unable to remove the monthly overage cap."
+    },
+    "packs": {
+      "title": "Prepaid minutes",
+      "description": "Buy minutes up front, with no monthly bill. Calls use them until they run out or the pack ends.",
+      "minutesLabel": "Minutes",
+      "lengthLabel": "Lasts",
+      "minutesOption_one": "{{minutes}} minute",
+      "minutesOption_other": "{{minutes}} minutes",
+      "daysOption_one": "{{count}} day",
+      "daysOption_other": "{{count}} days",
+      "neverEndsOption": "No end date",
+      "priceSuffix": "paid once",
+      "left_one": "{{left}} minute left of {{total}}",
+      "left_other": "{{left}} minutes left of {{total}}",
+      "endsOn": "Ends on {{date}}",
+      "neverEnds": "Never ends",
+      "frozen": "On hold while a payment dispute is open",
+      "buy": "Buy pack",
+      "buyMore": "Buy more",
+      "unavailable": "Packs can't be bought here right now.",
+      "refusals": {
+        "managed_plan": "Your plan is managed for you, so packs can't be bought here.",
+        "pack_not_sold_on_plan": "Packs aren't sold with your plan.",
+        "pack_yearly_plan": "You're on a yearly plan. Set it to end at renewal, then buy a pack once it ends.",
+        "pack_past_due": "A payment for your plan is past due. Settle it under Manage subscription, then buy a pack.",
+        "plan_change_payment_waiting": "Your bank still needs you to confirm a payment for your plan. Complete it first.",
+        "pack_not_on_sale": "This pack isn't on sale right now.",
+        "plan_change_pending": "Another purchase for this business is still in progress. Try again in a minute."
+      },
+      "endsPlanDialog": {
+        "title": "End your {{plan}} plan?",
+        "planEnds": "Paying for this pack ends your {{plan}} plan right away.",
+        "noRefund": "The rest of its month, until {{date}}, isn't refunded. Usage so far is still billed.",
+        "noRefundUndated": "The rest of its month isn't refunded. Usage so far is still billed.",
+        "promoLost": "Your promo code is lost for good. It can't be used again.",
+        "receptionistsPaused": "All your receptionists but one are paused.",
+        "packStarts": "The pack's minutes and allowances start right away.",
+        "confirm": "End plan and buy"
+      },
+      "toast": {
+        "added": "Your pack was added.",
+        "failed": "Your payment didn't go through, so no pack was added.",
+        "processing": "Your payment is processing. Your pack shows here once it arrives.",
+        "checkoutFailed": "Unable to open the payment page. Try again.",
+        "checkoutExpired": "The payment page expired. Try again."
+      }
     },
     "transactions": {
       "title": "Transaction history",
@@ -701,7 +756,10 @@
     "reclaim": {
       "title": "This number will be released on {{date}}",
       "description": "Free plans do not include a dedicated business number. Upgrade to Starter or Pro before then to keep {{number}}.",
-      "upgradeCta": "Upgrade to keep this number"
+      "upgradeCta": "Upgrade to keep this number",
+      "packDescription": "Your last pack ended. Buy a pack or choose a plan before then to keep {{number}}.",
+      "buyPackCta": "Buy a pack",
+      "choosePlanCta": "Choose a plan"
     },
     "requiresPaidPlan": {
       "title": "Dedicated numbers are on paid plans",

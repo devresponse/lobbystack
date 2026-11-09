@@ -288,3 +288,34 @@ describe("telling the dashboard an upgrade is under way", () => {
     expect(isUpgradeInProgress()).toBe(false);
   });
 });
+
+describe("starting a plan from a prepaid pack", () => {
+  async function openPlansOnPack(account: Record<string, unknown> | null) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account, effectivePlan: "prepaid", usageStatus: { pack: { secondsTotal: 60_000, secondsUsed: 30_000, secondsLeft: 30_030, nextEndsAt: null, lastEndsAt: null } }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST" ? Response.json({ requestId: "request" }) : Response.json({ status: "pending", checkoutUrl: null, error: null, synced: false, refusal: null }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    return fetchMock;
+  }
+
+  it("marks no card current and warns that the packs and their minutes end", async () => {
+    await openPlansOnPack({ plan: "free_cloud", billingInterval: null, subscriptionState: null });
+    expect(screen.queryByRole("button", { name: "billing.upgradeDialog.actions.currentPlan" })).toBeNull();
+    expect(screen.getByText("billing.upgradeDialog.endsPacks")).toBeTruthy();
+    expect(screen.queryByText("billing.upgradeDialog.changesSubscription")).toBeNull();
+  });
+
+  it("opens a checkout rather than changing the subscription a pack replaced, which the provider still reports live", async () => {
+    const fetchMock = await openPlansOnPack({ plan: "pro", billingInterval: "monthly", subscriptionState: "active" });
+    expect(screen.queryByText("billing.upgradeDialog.changesSubscription")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/billing/checkout", expect.objectContaining({ method: "POST" })));
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/billing/checkout")!;
+    expect(JSON.parse(String(init!.body))).toEqual({ businessId: "business", target: "pro", billingInterval: "annual" });
+    expect(screen.queryByText("billing.actions.changingPlan")).toBeNull();
+  });
+});

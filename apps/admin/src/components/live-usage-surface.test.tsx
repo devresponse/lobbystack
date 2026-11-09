@@ -49,3 +49,35 @@ describe("original dedicated billing usage page", () => {
     expect(screen.getByText("billing.usage.blockedDescription")).toBeTruthy();
   });
 });
+
+describe("the usage page on prepaid packs", () => {
+  function setupPack(pack: { secondsTotal: number; secondsUsed: number; secondsLeft: number }) {
+    language.value = "en";
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    client.setQueryData(["billing", "business"], {
+      effectivePlan: "prepaid",
+      limits: builtInBillingPlanLimits.prepaid,
+      account: null,
+      usageStatus: { voiceSecondsUsed: 90, outboundCallAttemptsUsed: 1, alertSmsSegmentsUsed: 0, voiceBlocked: pack.secondsLeft <= 0, pack: { ...pack, nextEndsAt: "2027-01-30T00:00:00.000Z", lastEndsAt: "2027-03-30T00:00:00.000Z" } },
+      knowledgeStorageBytesUsed: 0,
+    });
+    render(<QueryClientProvider client={client}><LiveUsageSurface /></QueryClientProvider>);
+  }
+
+  it("meters voice against the minutes the live packs hold, with no monthly reset", () => {
+    setupPack({ secondsTotal: 60_000, secondsUsed: 15_030, secondsLeft: 44_970 });
+    expect(screen.getByText((text) => text.startsWith("250.5 /") && text.includes("1,000"))).toBeTruthy();
+    expect(screen.queryByText("billing.usage.customAllowance")).toBeNull();
+    expect(screen.getByText("billing.usage.packDescription")).toBeTruthy();
+    expect(screen.queryByText((text) => text.startsWith("billing.usage.description"))).toBeNull();
+    expect(screen.queryByText("billing.usage.packBlockedDescription")).toBeNull();
+  });
+
+  it("says calls get a busy signal once the packs have no minutes left", () => {
+    setupPack({ secondsTotal: 30_000, secondsUsed: 30_000, secondsLeft: 0 });
+    expect(screen.getByText("billing.usage.packBlockedDescription")).toBeTruthy();
+    expect(screen.queryByText("billing.usage.blockedDescription")).toBeNull();
+  });
+});

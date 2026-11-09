@@ -262,7 +262,7 @@ const nullableCount = z.number().int().nullable();
 // The first six stop an apply, catalog_changed and brand_mismatch a link too, and the rest only a link.
 // A Polar deployment answers polar_org_mismatch and polar_org_changed; any other provider
 // billing_account_mismatch and billing_account_changed.
-export const billingCatalogRefusalCodes = ["brand_mismatch", "file_not_deployed", "catalog_changed", "plan_frozen", "currency_locked", "code_taken", "polar_org_mismatch", "polar_org_changed", "links_incomplete", "unknown_price", "terms_changed", "discount_mismatch", "id_taken", "id_changed", "billing_account_mismatch", "billing_account_changed", "billing_provider_changed", "provider_mismatch", "provider_block_missing"] as const;
+export const billingCatalogRefusalCodes = ["brand_mismatch", "file_not_deployed", "catalog_changed", "plan_frozen", "currency_locked", "code_taken", "polar_org_mismatch", "polar_org_changed", "links_incomplete", "unknown_price", "terms_changed", "discount_mismatch", "id_taken", "id_changed", "billing_account_mismatch", "billing_account_changed", "billing_provider_changed", "provider_mismatch", "provider_block_missing", "selling_mode_changed"] as const;
 export type BillingCatalogRefusalCode = (typeof billingCatalogRefusalCodes)[number];
 
 export const apiBillingCatalogApplySchema = z.strictObject({

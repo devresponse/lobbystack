@@ -50,8 +50,8 @@ export function fakeCustomers(fake: FakeStripeContext): StripeApi["customers"] {
 }
 
 /** A customer already at Stripe: deleted, or naming a business in its metadata. */
-export function addFakeCustomer(fake: FakeStripeContext, input: { id: string; businessId?: string; deleted?: boolean; email?: string }): void {
+export function addFakeCustomer(fake: FakeStripeContext, input: { id: string; businessId?: string; deleted?: boolean; email?: string; currency?: string }): void {
   fake.state.customers.set(input.id, input.deleted
     ? ({ id: input.id, object: "customer", deleted: true } as Stripe.DeletedCustomer)
-    : ({ id: input.id, object: "customer", email: input.email ?? null, metadata: input.businessId ? { lobbystack_business: input.businessId } : {}, livemode: false } as unknown as Stripe.Customer));
+    : ({ id: input.id, object: "customer", email: input.email ?? null, currency: input.currency ?? null, metadata: input.businessId ? { lobbystack_business: input.businessId } : {}, livemode: false } as unknown as Stripe.Customer));
 }

@@ -15,6 +15,7 @@ export const MAX_UNANSWERED_QUESTION_LENGTH = 300;
 /** The longest answer saved as a text entry, in characters. */
 export const MAX_UNANSWERED_ANSWER_LENGTH = 5_000;
 /** The most open questions the dashboard lists at once. */
+// The most open questions a list returns, and how many it returns without a limit.
 const OPEN_QUESTIONS_LIMIT = 50;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -184,14 +185,16 @@ async function countOpenByReceptionist(tx: DatabaseTransaction, businessId: stri
  * The business's open questions, most asked first, and how many are open,
  * each with who heard it. receptionistId keeps the questions that
  * receptionist heard, and the count counts those. `openByReceptionist` counts
- * every receptionist's open questions, for the filter. Anyone on the team
- * reads them.
+ * every receptionist's open questions, for the filter. limit (1 to 50, 50
+ * without one) and offset pick a page of them. Anyone on the team reads them.
  */
 export async function listOpenUnansweredQuestions(
   context: DomainContext,
-  input: { userId: string; businessId: string; receptionistId?: string | null | undefined },
+  input: { userId: string; businessId: string; receptionistId?: string | null | undefined; limit?: number | undefined; offset?: number | undefined },
 ): Promise<{ questions: OpenUnansweredQuestion[]; openCount: number; openByReceptionist: Record<string, number> }> {
   const { userId, businessId } = input;
+  const limit = Number.isFinite(input.limit) ? Math.min(Math.max(Math.trunc(input.limit!), 1), OPEN_QUESTIONS_LIMIT) : OPEN_QUESTIONS_LIMIT;
+  const offset = Number.isFinite(input.offset) ? Math.max(Math.trunc(input.offset!), 0) : 0;
   if (input.receptionistId && !isUuid(input.receptionistId)) throw failure("receptionist must be a receptionist id.", 400, "invalid_receptionist");
   return await withBusinessTransaction(context.db, { userId, businessId, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, { userId, businessId });
@@ -211,7 +214,8 @@ export async function listOpenUnansweredQuestions(
       lastConversationId: unansweredQuestions.lastConversationId,
     }).from(unansweredQuestions).where(open)
       .orderBy(desc(unansweredQuestions.timesAsked), desc(unansweredQuestions.lastAskedAt), desc(unansweredQuestions.id))
-      .limit(OPEN_QUESTIONS_LIMIT);
+      .limit(limit)
+      .offset(offset);
     const [count] = await tx.select({ value: sql<number>`count(*)::int` }).from(unansweredQuestions).where(open);
     const askers = await loadAskers(tx, businessId, rows.map((row) => row.id));
     return {

@@ -146,7 +146,7 @@ describe("the Receptionists page at /agent/receptionists", () => {
   it("opens under its own title, the default first, with each one's page, status, entry points and language", async () => {
     const api = fakeApi();
     await openPage();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Receptionists");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("AI agents");
     await screen.findByText("Kitsilano clinic");
     expect(bodyRows().map((item) => within(item).getAllByText(/./, { selector: "span.font-medium" })[0]!.textContent)).toEqual(["Front desk", "Kitsilano clinic", "Gastown store", "Billing"]);
 

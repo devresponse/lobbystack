@@ -5,7 +5,7 @@ exports[`pnpm billing's output > applies alloplace, then verifies it 1`] = `
   "applied": {
     "code": 0,
     "err": "",
-    "out": "alloplace billing.json v1 (2847caeb51f8) to https://demo.alloplace.com and Polar sandbox organization Test organization (org_test)
+    "out": "alloplace billing.json v1 (eaa1ff9d2369) to https://demo.alloplace.com and Polar sandbox organization Test organization (org_test)
 
 Postgres: the file is applied
 Polar: 11 calls
@@ -37,10 +37,10 @@ Polar:
 
 Links: recorded 6 changes in run <uuid>.
 
-alloplace billing.json v1 (2847caeb51f8) against Polar sandbox and https://demo.alloplace.com
+alloplace billing.json v1 (eaa1ff9d2369) against Polar sandbox and https://demo.alloplace.com
 
 File and Postgres
-  ok     catalog 2847caeb51f8 applied
+  ok     catalog eaa1ff9d2369 applied
   ok     the deployed code was built with this file
   ok     4 plans, 4 live prices
   ok     2 sold plans active and linked
@@ -71,7 +71,7 @@ Result: in sync (exit 0).",
         {
           "code": "catalog_hash",
           "level": "ok",
-          "message": "catalog 2847caeb51f8 applied",
+          "message": "catalog eaa1ff9d2369 applied",
           "pair": "file_postgres",
           "subject": "catalog",
         },
@@ -201,7 +201,7 @@ exports[`pnpm billing's output > plans alloplace on an empty organization 1`] = 
   "out": {
     "brand": "alloplace",
     "catalog": [],
-    "hash": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199",
+    "hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
     "instance": "https://demo.alloplace.com",
     "links": {
       "plans": 2,
@@ -300,7 +300,7 @@ exports[`pnpm billing's output > plans alloplace on the objects polar-setup.mjs 
   "out": {
     "brand": "alloplace",
     "catalog": [],
-    "hash": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199",
+    "hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
     "instance": "https://demo.alloplace.com",
     "links": {
       "plans": 2,
@@ -418,7 +418,7 @@ exports[`pnpm billing's output > plans realinfobot on an empty organization 1`] 
   "out": {
     "brand": "realinfobot",
     "catalog": [],
-    "hash": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199",
+    "hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
     "instance": "https://demo.alloplace.com",
     "links": {
       "plans": 2,
@@ -517,7 +517,7 @@ exports[`pnpm billing's output > plans realinfobot on the objects polar-setup.mj
   "out": {
     "brand": "realinfobot",
     "catalog": [],
-    "hash": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199",
+    "hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
     "instance": "https://demo.alloplace.com",
     "links": {
       "plans": 2,

@@ -35,7 +35,7 @@ describe("billing jobs: usage", () => {
 
   it("never sends a managed enterprise plan's usage to Polar", async () => {
     const job = billingJob({ usageEventId: randomUUID() });
-    vi.mocked(loadBillingUsageEvent).mockResolvedValue({ id: String(job.payload.usageEventId), sourceKey: "voice:call-1", isFinal: true, plan: "enterprise", businessId: job.businessId!, usageKind: "voice_seconds", quantity: 120, billableQuantity: null, billingIntervalAtRecordTime: null, createdAt: new Date("2026-01-01T00:00:00.000Z"), syncStatus: "pending", billingKey: "business-key", customerId: "polar-customer-id" });
+    vi.mocked(loadBillingUsageEvent).mockResolvedValue({ id: String(job.payload.usageEventId), sourceKey: "voice:call-1", isFinal: true, plan: "enterprise", businessId: job.businessId!, usageKind: "voice_seconds", quantity: 120, billableQuantity: null, billingIntervalAtRecordTime: null, createdAt: new Date("2026-01-01T00:00:00.000Z"), syncStatus: "pending", billingKey: "business-key", customerId: "polar-customer-id", periodStart: null, periodEnd: null });
     const recordUsage = vi.fn();
 
     expect(await handleJob(job, { domain: { db: undefined as never }, billing: polarFake({ recordUsage }) })).toEqual({ status: "skipped", entityId: String(job.payload.usageEventId) });
@@ -59,8 +59,10 @@ describe("billing jobs: usage", () => {
       syncStatus: "pending",
       billingKey: "business-key",
       customerId: "polar-customer-id",
+      periodStart: null,
+      periodEnd: null,
     });
-    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "alert_sms:operator_notification:delivery-1", quantity: 2, seq: 0 });
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "alert_sms:operator_notification:delivery-1", quantity: 2, seq: 0, rateCents: null, sentAt: new Date(), expired: false });
     vi.mocked(confirmBillingUsageSync).mockResolvedValue(true);
     const recordUsage = vi.fn().mockResolvedValue(undefined);
     const usage = { businessId: job.businessId, usageEventId: String(job.payload.usageEventId) };
@@ -81,7 +83,7 @@ describe("billing jobs: usage", () => {
     expect(confirmBillingUsageSync).toHaveBeenCalledWith(domain, { ...usage, seq: 0 });
 
     // A correction after Polar took the first event: one segment fewer, under the row's next number.
-    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "alert_sms:operator_notification:delivery-1:2", quantity: -1, seq: 2 });
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "alert_sms:operator_notification:delivery-1:2", quantity: -1, seq: 2, rateCents: null, sentAt: new Date(), expired: false });
     await handleJob(job, { domain, billing: polarFake({ recordUsage }) });
     expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ quantity: -1, idempotencyKey: "alert_sms:operator_notification:delivery-1:2", timestamp: "2026-01-01T00:00:00.000Z" }));
     expect(confirmBillingUsageSync).toHaveBeenLastCalledWith(domain, { ...usage, seq: 2 });
@@ -89,7 +91,7 @@ describe("billing jobs: usage", () => {
     const event = vi.mocked(loadBillingUsageEvent).mock.results[0]!.value;
     const original = await event;
     vi.mocked(loadBillingUsageEvent).mockResolvedValue({ ...original!, usageKind: "voice_seconds", quantity: 180, billableQuantity: 30, billingIntervalAtRecordTime: "annual" });
-    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "voice:call-1", quantity: 30, seq: 0 });
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "voice:call-1", quantity: 30, seq: 0, rateCents: null, sentAt: new Date(), expired: false });
     await handleJob(job, { domain, billing: polarFake({ recordUsage }) });
     expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ eventName: "billing.voice_minutes", quantity: 0.5, externalCustomerId: "business-key" }));
 
@@ -127,8 +129,10 @@ describe("billing jobs: usage", () => {
       syncStatus: "pending",
       billingKey: "business-key",
       customerId: "polar-customer-id",
+      periodStart: null,
+      periodEnd: null,
     });
-    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "voice:call_1", quantity: 120, seq: 0 });
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "voice:call_1", quantity: 120, seq: 0, rateCents: null, sentAt: new Date(), expired: false });
     const error = new Error("polar unavailable");
     const recordUsage = vi.fn().mockRejectedValue(error);
 

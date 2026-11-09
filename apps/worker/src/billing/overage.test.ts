@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { claimBillingSubscription, loadOverageWork, recordDeletedBusinessPlanEnded, recordOverageSubscription, recordProductEvent, type OverageWork } from "@lobbystack/domain";
+import { claimBillingSubscription, loadOverageWork, loadStripeSelling, recordDeletedBusinessPlanEnded, recordOverageSubscription, recordProductEvent, type OverageWork } from "@lobbystack/domain";
 import type { StripeCatalogPrice } from "@lobbystack/providers/stripe/catalog";
 import { StripeBilling } from "@lobbystack/providers/stripe/adapter";
 import { createFakeStripe, type FakeStripe } from "@lobbystack/providers/stripe/fake";
@@ -96,6 +96,22 @@ describe("billing.ensureOverage", () => {
     // Once Stripe has ended it, the account has none, and there's nothing to do.
     vi.mocked(loadOverageWork).mockResolvedValue(work({ subscriptionId: plan, subscriptionState: "canceled" }));
     expect(await handleJob(job("billing.ensureOverage", randomUUID()), { domain, billing })).toMatchObject({ status: "skipped" });
+  });
+
+  it("names the plan subscription when its checkout sold the overage prices, as under merchant of record, and leaves its end to the plan", async () => {
+    const { stripe, billing } = await paidThroughCheckout();
+    const checkout = await billing.createCheckout({ customer: { id: "cus_1", billingKey: "business:b1" }, email: "owner@example.com", price: { ref: "price_starter_month", discountRef: null }, businessId: "b1", requestId: "request-2", metadata: { lobbystack_business: "b1" }, successUrl: "https://app.example/settings/plan", cancelUrl: "https://app.example/settings/plan", locale: null, overageOnCheckout: { currency: "cad" }, merchantOfRecord: true });
+    const plan = stripe.completeCheckout(checkout.id).id;
+    const businessId = randomUUID();
+    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 1 });
+    vi.mocked(loadOverageWork).mockResolvedValue(work({ subscriptionId: plan }));
+    expect(await handleJob(job("billing.ensureOverage", businessId), { domain, billing })).toEqual({ status: "completed", entityId: plan });
+    expect(recordOverageSubscription).toHaveBeenCalledWith(domain, { businessId, planSubscriptionId: plan, overageSubscriptionId: plan });
+    expect(overages(stripe)).toEqual([]);
+    // The plan's own end ends its overage, so there's nothing else to end.
+    vi.mocked(loadOverageWork).mockResolvedValue(work({ subscriptionId: plan, subscriptionState: "canceled", overageSubscriptionId: plan }));
+    expect(await handleJob(job("billing.ensureOverage", businessId), { domain, billing })).toMatchObject({ status: "skipped" });
+    expect(stripe.state.subscriptions.get(plan)!.cancel_at_period_end).toBe(false);
   });
 
   it("makes no other while one Stripe ended after failed payments has its invoice open", async () => {

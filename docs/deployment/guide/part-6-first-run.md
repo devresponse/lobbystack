@@ -200,7 +200,7 @@ The alerts for website chats, "New website chat message" and "Visitor asking for
 **The public page**
 
 1. Open **Settings** > **Public profile**. Fill in the **Details** (**Category**, **Description**, **Public email** and **Address**), choose what the page shows (phone number, opening hours, services and map), and under **Chat**, pick the widget.
-2. Turn on **Published** and click **Save**. Until it's published, nobody outside your team can open the page.
+2. Click **Publish page**, which saves the details and publishes the page at once. Until it's published, nobody outside your team can open the page.
 3. **Open page** shows it, at `https://<your address>/profile/<a short form of the business name>`. **Copy link** copies the address.
 4. **Settings** > **QR code** prints signs that open the page.
 

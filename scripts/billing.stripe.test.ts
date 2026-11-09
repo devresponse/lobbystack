@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { billingCatalogPlans, billingCatalogWriteOrder, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, type StoredBillingPlan, type StoredBillingPrice } from "../packages/domain/src/server/billingCatalog";
 import { createFakeStripe, type FakeStripe } from "../packages/providers/src/stripe/fake";
-import { apiBillingCatalogLinkSchema, billingCatalogLinkRequest, billingProfileSchema, canonicalBillingProfileJson, perMonthCents, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "../packages/shared/src/index";
+import { apiBillingCatalogLinkSchema, billingCatalogLinkRequest, billingProfileForProvider, billingProfileSchema, canonicalBillingProfileJson, perMonthCents, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "../packages/shared/src/index";
 import { runBilling } from "./billing";
 
 // pnpm billing --stripe end to end (the Stripe plan's step 11), against the
@@ -85,7 +85,8 @@ async function instanceFetch(instance: Instance, url: URL, init: RequestInit): P
   if (url.pathname === "/api/v1/billing/catalog/runs" && init.method === "POST") {
     const profile = billingProfileSchema.parse(body!.billing_file);
     const hash = hashOf(profile);
-    const diff = diffBillingCatalog({ plans: desiredBillingPlans(profile), currency: profile.currency, current: instance, now });
+    // As the admin applies it: the file as the deployment's provider sells it.
+    const diff = diffBillingCatalog({ plans: desiredBillingPlans(billingProfileForProvider(profile, instance.provider)), currency: profile.currency, current: instance, now });
     const refusals = [...diff.refusals];
     if (body!.replaces_hash !== undefined && body!.replaces_hash !== latestHash) refusals.push({ code: "catalog_changed", path: "replaces_hash", message: "Someone applied in between." });
     if (!profile.stripe && instance.provider === "stripe") refusals.push({ code: "provider_block_missing", path: "billing_file.stripe", message: "No stripe block." });
@@ -124,10 +125,10 @@ afterEach(async () => {
 });
 
 /** A checkout with RealInfoBot's file and a stripe block, an instance on Stripe whose code was built with it, and an empty Stripe sandbox. */
-async function setUp(options: { change?: (file: Record<string, any>) => void; provider?: "stripe" | "polar"; account?: string } = {}) {
+async function setUp(options: { change?: (file: Record<string, any>) => void; provider?: "stripe" | "polar"; account?: string; block?: Partial<typeof stripeBlock> } = {}) {
   root = await mkdtemp(join(tmpdir(), "billing-stripe-"));
   const file = JSON.parse(await readFile(new URL("../brands/realinfobot/billing.json", import.meta.url), "utf8")) as Record<string, any>;
-  file.stripe = structuredClone(stripeBlock);
+  file.stripe = { ...structuredClone(stripeBlock), ...options.block };
   const deployed = billingProfileSchema.parse(structuredClone(file));
   options.change?.(file);
   await mkdir(join(root, "brands", "realinfobot"), { recursive: true });
@@ -135,7 +136,7 @@ async function setUp(options: { change?: (file: Record<string, any>) => void; pr
   const stripe = createFakeStripe({ accountId: "acct_dev1" });
   const instance: Instance = { plans: [], prices: [], catalogRuns: [], linkRuns: [], codeHash: hashOf(deployed), provider: options.provider ?? "stripe", stripe: { env: "sandbox", account: options.account ?? "acct_dev1", secret: null }, requests: [] };
   // The deployed file was applied when the instance was set up.
-  const seeded = diffBillingCatalog({ plans: desiredBillingPlans(deployed), currency: deployed.currency, current: instance, now: new Date().toISOString() });
+  const seeded = diffBillingCatalog({ plans: desiredBillingPlans(billingProfileForProvider(deployed, instance.provider)), currency: deployed.currency, current: instance, now: new Date().toISOString() });
   write(instance, seeded.writes);
   instance.catalogRuns.push(run("catalog", { hash: instance.codeHash, code_hash: instance.codeHash, changes: seeded.writes.map((entry) => entry.change) }));
   return { stripe, instance };
@@ -229,6 +230,17 @@ describe("pnpm billing --stripe", () => {
     expect(writes(context.stripe)).toHaveLength(before);
   });
 
+  it("sells monthly prices only with Stripe as the merchant of record, and links every price the instance holds", async () => {
+    const context = await setUp({ block: { overage: "checkout", managedPayments: true } });
+    // The instance applied the file as a Stripe deployment sells it: no yearly prices.
+    expect([...new Set(context.instance.prices.map((price) => price.period))]).toEqual(["monthly"]);
+    const applied = await billing(["apply", ...sandbox, "--yes"], context);
+    expect(applied.err).toBe("");
+    expect(applied.out).toContain("Links: recorded");
+    const sold = context.stripe.state.catalog.prices.filter((price) => price.lookup_key?.startsWith("ls_realinfobot_"));
+    expect(sold.map((price) => price.recurring?.interval)).not.toContain("year");
+    expect(context.instance.prices.map((price) => price.provider_ref).sort()).toEqual(sold.map((price) => price.id).sort());
+  });
   it("finishes a run cut off halfway on the next run, making nothing twice", async () => {
     const context = await setUp();
     context.stripe.cutAfterWrites(6);

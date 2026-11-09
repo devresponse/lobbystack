@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Writes .env from .env.example with every internal secret generated. Provider credentials
-// (Twilio, Polar, ...) are cleared rather than generated: only the operator can supply them.
+// (Twilio, Polar, Stripe, ...) are cleared rather than generated: only the operator can supply them.
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PROVIDER_CREDENTIALS = new Set(["TWILIO_AUTH_TOKEN", "POLAR_WEBHOOK_SECRET"]);
+// The billing provider's own: POLAR_WEBHOOK_SECRET on Polar, STRIPE_WEBHOOK_SECRET and STRIPE_API_KEY on Stripe.
+const PROVIDER_CREDENTIALS = new Set(["TWILIO_AUTH_TOKEN", "POLAR_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET", "STRIPE_METER_WEBHOOK_SECRET", "STRIPE_API_KEY"]);
 const PLACEHOLDER_PREFIX = "replace-with-";
 
 export function generateEnv(example, random = () => randomBytes(32).toString("hex")) {

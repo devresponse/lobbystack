@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { hostedCheckoutPlanSlugs } from "./billing";
-import { billingProfileSchema, canonicalBillingProfileJson, normalizeBillingProfile, planTermsJson, resolveBillingPlans, type BillingProfile, type ResolvedBillingPlan } from "./billingProfile";
+import { billingProfileForProvider, billingProfileSchema, canonicalBillingProfileJson, normalizeBillingProfile, planTermsJson, resolveBillingPlans, type BillingProfile, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
@@ -163,6 +163,37 @@ describe("billingProfileSchema", () => {
     // A business holds one number at most.
     refused(withPlans({}, (file) => { file.plans.pro.limits.businessNumbers = 2; }), /^plans\.pro\.limits\.businessNumbers: /);
     refused(withPlans({ extra: extra({ limits: { businessNumbers: 2 } }) }), /^plans\.extra\.limits\.businessNumbers: /);
+  });
+});
+
+describe("the file as each provider sells it", () => {
+  const brandFile = (brand: string): unknown => JSON.parse(readFileSync(new URL(`../../../brands/${brand}/billing.json`, import.meta.url), "utf8"));
+
+  it.each(["alloplace", "realinfobot"])("still passes the schema for %s, on Polar and on Stripe", (brand) => {
+    const file = parse(brandFile(brand));
+    expect(problems(billingProfileForProvider(file, "polar"))).toEqual([]);
+    expect(problems(billingProfileForProvider(file, "stripe"))).toEqual([]);
+  });
+
+  it("still passes the schema once Stripe, with overage on the checkout, drops the yearly prices and the plans with only those", () => {
+    const file = parse(withPlans({
+      "pro-yearly": extra({ prices: { annualCents: 80000 } }),
+      "starter-yearly": extra({ tier: "starter", prices: { annualCents: 30000 } }),
+      "starter-launch": extra({ tier: "starter", prices: { monthlyCents: 3000, annualCents: 30000 }, discount: { type: "fixed", amountCents: 2000, duration: "once" } }),
+    }, (raw) => {
+      raw.plans.pro.prices = { annualCents: 87000 };
+      raw.stripe = { ...raw.stripe, overage: "checkout", managedPayments: true };
+    }));
+    const onStripe = billingProfileForProvider(file, "stripe");
+    expect(problems(onStripe)).toEqual([]);
+    // Pro has only a yearly price, so it isn't sold, and neither plan with only a yearly price is offered.
+    expect(onStripe.plans.pro).toMatchObject({ sold: false });
+    expect(Object.keys(onStripe.plans)).not.toContain("pro-yearly");
+    expect(Object.keys(onStripe.plans)).not.toContain("starter-yearly");
+    expect(onStripe.plans["starter-launch"]).toMatchObject({ prices: { monthlyCents: 3000 } });
+    expect(JSON.stringify(onStripe.plans)).not.toContain("annualCents");
+    // Polar sells the file as it is.
+    expect(billingProfileForProvider(file, "polar")).toBe(file);
   });
 });
 

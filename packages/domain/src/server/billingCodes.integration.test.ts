@@ -733,8 +733,8 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
         const { businessId } = await ownedBusiness(tx, "portal");
         await polarEvent(tx, businessId, "subscription.active", { plan: "starter", planCode: "salons-half-off", currentPeriodStart: "2026-11-01T00:00:00.000Z", currentPeriodEnd: "2026-12-01T00:00:00.000Z" });
         await as(tx, "owner");
-        const [plan] = await rows(tx, sql`select polar_disc from public.billing_plans where code = 'salons-half-off'`);
-        const discountId = String(plan!.polar_disc);
+        const [plan] = await rows(tx, sql`select provider_disc from public.billing_plans where code = 'salons-half-off'`);
+        const discountId = String(plan!.provider_disc);
         // A discount nobody's promo plan owns stays.
         await polarEvent(tx, businessId, "subscription.updated", { plan: "starter", planCode: "salons-half-off", discountId });
         await polarEvent(tx, businessId, "subscription.updated", { plan: "pro", planCode: "pro", discountId: "disc_dashboard" });

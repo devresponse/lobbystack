@@ -20,7 +20,56 @@ import {
   planChangeRefusalSentences,
   planChangeRefusals,
   perMonthCents,
+  meterEventTime,
+  priceUsage,
 } from "./billing";
+
+describe("usage as money (the Stripe plan's step 16)", () => {
+  it("prices each kind to four decimals of a cent: a call by the minute, a text segment or transfer each", () => {
+    expect(priceUsage("voice_seconds", 90, 20)).toBe(30);
+    expect(priceUsage("voice_seconds", 7, 18)).toBe(2.1);
+    expect(priceUsage("voice_seconds", 1, 13)).toBe(0.2167);
+    expect(priceUsage("alert_sms_segments", 3, 4)).toBe(12);
+    expect(priceUsage("outbound_call_attempts", -1, 25)).toBe(-25);
+  });
+
+  it("dates usage by its own time while its month's invoice can take it, else by now", () => {
+    const occurred = new Date("2026-11-30T23:00:00Z");
+    // The month ends 12-01 00:00; with an hour's grace the invoice takes usage sent before 00:30.
+    expect(meterEventTime(occurred, new Date("2026-12-01T00:29:00Z"), 1)).toEqual(occurred);
+    expect(meterEventTime(occurred, new Date("2026-12-01T00:31:00Z"), 1)).toEqual(new Date("2026-12-01T00:31:00Z"));
+    // Three days' grace keeps it on November's invoice longer.
+    expect(meterEventTime(occurred, new Date("2026-12-03T23:00:00Z"), 72)).toEqual(occurred);
+    expect(meterEventTime(new Date("2026-11-08T10:00:00Z"), new Date("2026-11-08T10:05:00Z"), 1)).toEqual(new Date("2026-11-08T10:00:00Z"));
+  });
+
+  it("dates usage by the plan period's renewal instead of the month's end when overage bills on the plan subscription", () => {
+    const period = { start: new Date("2026-11-08T11:00:00Z"), end: new Date("2026-12-08T11:00:00Z") };
+    // Usage just before the renewal at 11:00 belongs to the period it ended, whose invoice takes it until 11:30 with an hour's grace.
+    const late = new Date("2026-11-08T10:50:00Z");
+    expect(meterEventTime(late, new Date("2026-11-08T11:29:00Z"), 1, period)).toEqual(late);
+    expect(meterEventTime(late, new Date("2026-11-08T11:31:00Z"), 1, period)).toEqual(new Date("2026-11-08T11:31:00Z"));
+    // The month's end means nothing then.
+    const monthEnd = new Date("2026-11-30T23:00:00Z");
+    expect(meterEventTime(monthEnd, new Date("2026-12-01T00:31:00Z"), 1, period)).toEqual(monthEnd);
+    // Usage past the period's end, before the renewal is recorded, keeps its time on the next period.
+    const next = new Date("2026-12-08T11:10:00Z");
+    expect(meterEventTime(next, new Date("2026-12-08T11:45:00Z"), 1, period)).toEqual(next);
+  });
+
+  it("dates usage from before the period the renewal ended by now, since its invoice is final", () => {
+    // The period before this one ran from 10-08 11:00; the one before that was invoiced on 10-08.
+    const period = { start: new Date("2026-11-08T11:00:00Z"), end: new Date("2026-12-08T11:00:00Z") };
+    const justRenewed = new Date("2026-11-08T11:10:00Z");
+    // Within Stripe's 35 days and the renewal's grace, but from two periods back.
+    expect(meterEventTime(new Date("2026-10-06T12:00:00Z"), justRenewed, 1, period)).toEqual(justRenewed);
+    // Usage surely in the period the renewal ended keeps its time.
+    const previous = new Date("2026-10-20T12:00:00Z");
+    expect(meterEventTime(previous, justRenewed, 1, period)).toEqual(previous);
+    // Its first days could be the period before's when that one is shorter, so they go out with now, a period late.
+    expect(meterEventTime(new Date("2026-10-10T12:00:00Z"), justRenewed, 1, period)).toEqual(justRenewed);
+  });
+});
 
 describe("knowledge storage limits", () => {
   it("seed each plan's limit until a catalog apply", () => {

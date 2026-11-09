@@ -46,6 +46,15 @@ jobs:
       - run: pnpm replacement:telemetry
       - name: Validate Compose config
         run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
+      # pnpm build made the landing site for Polar, the default. Its legal pages name the deployment's processor.
+      - name: Build the landing site for a deployment billed through Stripe
+        run: |
+          BILLING_PROVIDER=stripe pnpm --filter @lobbystack/landing build
+          grep -q "We are the seller" apps/landing/dist/terms/index.html
+          if grep -q "Polar" apps/landing/dist/terms/index.html apps/landing/dist/privacy/index.html; then
+            echo "The Stripe build's legal pages still name Polar."
+            exit 1
+          fi
 
   # The Zapier integration is a standalone npm package on the Node version
   # Zapier runs (22). Its tests mock every HTTP call.

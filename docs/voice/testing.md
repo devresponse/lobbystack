@@ -55,7 +55,7 @@ Each field answers one question:
 - **`said what it mustn't: "…"`**: the first of the receptionist's lines that matched the scenario's `mustNotSay`, which fails the run
 - **`hand-overs`**: each request GPT-Live handed to the backend after the opening question, or from a scenario's own opening on, by the tools the agent used. `reply` means the agent answered without a tool.
 - **`checks`**: each answer from the caller check, which runs when the caller speaks after the agent ended the call
-- **`goodbyes`**: how many of the receptionist's lines said goodbye. More than 1 means the caller heard a double goodbye.
+- **`goodbyes`**: how many of the receptionist's lines said goodbye, as the worker recognizes one in any language calls open in (`saysGoodbye`). More than 1 means the caller heard a double goodbye.
 - **`receptionist`**: what the receptionist said after the opening question, or from a scenario's own opening on
 
 The script exits with code 1 when any run fails.

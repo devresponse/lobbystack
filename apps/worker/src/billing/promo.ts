@@ -108,7 +108,8 @@ async function dropPromoDiscount(dependencies: WorkerDependencies, input: { busi
     const pending = links.planFor(subscription.next?.priceRef ?? null);
     // A promo product keeps its own discount, so only a standard product loses it.
     if (!product || product.code !== product.plan || (pending && pending.code !== pending.plan)) return { status: "skipped", entityId: businessId };
-    await billing.removeDiscount({ subscriptionId: subscription.id, requestId: `drop-discount:${input.discountId}` });
+    // A promo coupon is every subscriber's, so the key names the subscription too: Stripe refuses a key used again on another path.
+    await billing.removeDiscount({ subscriptionId: subscription.id, requestId: `drop-discount:${subscription.id}:${input.discountId}` });
     return { status: "completed", entityId: `${businessId}:${input.discountId}` };
   } catch (error) {
     const refusal = planChangeRefusalFor(billing, error);

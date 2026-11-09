@@ -38,7 +38,7 @@ import { billingVerifyReport, type BillingVerifyResult } from "../packages/domai
 import { PolarCatalogClient, type PolarSnapshot } from "../packages/providers/src/polar/polarCatalog";
 import { StripeCatalogClient, createStripeCatalogClient, type StripeCatalogApi, type StripeSnapshot } from "../packages/providers/src/stripe/catalog";
 import { BRANDS } from "../packages/shared/src/brands/generated";
-import { billingProfileSchema, billingProviderNames, canonicalBillingProfileJson, polarBaseUrls, stripeKeyMode, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "../packages/shared/src/index";
+import { billingProfileForProvider, billingProfileSchema, billingProviderNames, canonicalBillingProfileJson, polarBaseUrls, stripeKeyMode, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../packages/shared/src/index";
 
 export type BillingIo = {
   env: NodeJS.ProcessEnv;
@@ -170,7 +170,7 @@ function parse(argv: string[]): Options {
 
 type BillingFile = { json: unknown; profile: BillingProfile; hash: string; plans: ReturnType<typeof desiredBillingPlans> };
 
-async function readBillingFile(root: string, brand: string): Promise<BillingFile> {
+async function readBillingFile(root: string, brand: string, provider: BillingProvider): Promise<BillingFile> {
   const path = join(root, "brands", brand, "billing.json");
   let text: string;
   try {
@@ -186,7 +186,8 @@ async function readBillingFile(root: string, brand: string): Promise<BillingFile
   }
   const parsed = billingProfileSchema.safeParse(json);
   if (!parsed.success) throw new Usage(`brands/${brand}/billing.json doesn't pass the schema: ${parsed.error.issues.map((issue) => `${issue.path.join(".") || "file"}: ${issue.message}`).join("; ")}`);
-  return { json, profile: parsed.data, hash: sha256(canonicalBillingProfileJson(parsed.data)), plans: desiredBillingPlans(parsed.data) };
+  // The plans as the provider sells them: on Stripe with overage on the checkout, no yearly prices.
+  return { json, profile: parsed.data, hash: sha256(canonicalBillingProfileJson(parsed.data)), plans: desiredBillingPlans(billingProfileForProvider(parsed.data, provider)) };
 }
 
 async function polarToken(options: Options, io: BillingIo): Promise<string> {
@@ -600,7 +601,7 @@ export async function runBilling(argv: string[], io: BillingIo): Promise<number>
     return exit.failed;
   }
   try {
-    const file = await readBillingFile(io.root, options.brand);
+    const file = await readBillingFile(io.root, options.brand, options.provider);
     const connection = resolveConnection(await readConfig(configPath(io.env)), io.env, { profile: options.profile });
     const api = createClient({ url: connection.url, key: connection.key, userAgent: "lobbystack-billing", ...(io.fetch ? { fetch: io.fetch } : {}) });
     if (options.provider === "stripe") {

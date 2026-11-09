@@ -1,5 +1,7 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 
 import { createDatabaseClient, type DatabaseClient } from "@lobbystack/db";
@@ -35,6 +37,21 @@ function databaseUrl(name: string, credentials?: { user: string; password: strin
 function reset(url: string, args: string[], input = "") {
   const run = spawnSync(process.execPath, [script, url, ...args], { cwd: root, encoding: "utf8", input, timeout: 60_000 });
   return { status: run.status, out: `${run.stdout}${run.stderr}` };
+}
+
+/** The script run without blocking, so a stand-in server in this process can answer it. */
+function resetAsync(url: string, args: string[], env: Record<string, string>): Promise<{ status: number | null; out: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [script, url, ...args], { cwd: root, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.stderr.on("data", (chunk) => (out += chunk));
+    const timer = setTimeout(() => child.kill(), 60_000);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolve({ status, out });
+    });
+  });
 }
 
 // Every table's row count, every sequence's state, both migration histories and the database's
@@ -93,7 +110,8 @@ const FILL = `
   insert into public.calls (business_id, provider_call_id, transport, started_at) values ('11111111-1111-4111-8111-111111111111', 'CA-reset', 'twilio', now());
   insert into public.phone_numbers (business_id, e164, status) values ('11111111-1111-4111-8111-111111111111', '+15145550100', 'active');
   insert into public.billing_accounts (business_id, billing_key, customer_id, subscription_id, subscription_state) values ('11111111-1111-4111-8111-111111111111', 'reset-billing-key', 'cus_reset', 'sub_reset', 'active');
-  insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'alloplace', 1, repeat('a', 64), '{}', 'sandbox', 'org_reset');
+  insert into public.billing_accounts (business_id, billing_key, source, customer_id, subscription_id, subscription_state, overage_subscription_id) values ('22222222-2222-4222-8222-222222222222', 'reset-stripe-key', 'stripe', 'cus_stripereset', 'sub_stripeplan', 'active', 'sub_stripeoverage');
+  insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'passed', 'alloplace', 1, repeat('a', 64), '{}', 'polar', 'sandbox', 'org_reset');
   insert into public.deployment_branding (id, app_name, saved_by_user_id) values (1, 'Reset Brand', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
   insert into public.storage_objects (business_id, object_key, purpose, file_name, content_type) values ('11111111-1111-4111-8111-111111111111', 'reset/doc.pdf', 'knowledge_document', 'doc.pdf', 'application/pdf');
   insert into public.audit_logs (business_id, event_type, entity_type) values ('11111111-1111-4111-8111-111111111111', 'business.created', 'business');
@@ -136,8 +154,36 @@ describe.skipIf(!adminUrl)("devops/reset-database.mjs", () => {
     expect(run.out).toContain("2 businesses: Reset Plumbing, Reset Salon");
     expect(run.out).toContain("1 phone number bought in Twilio: +15145550100");
     expect(run.out).toContain("1 live Polar subscription");
+    // The script wraps its lines at 100 characters.
+    const text = run.out.replace(/\s+/g, " ");
+    expect(text).toContain("1 live Stripe subscription by this database's records");
+    expect(text).toContain("Set STRIPE_READ_KEY to a key that reads subscriptions, and the script lists them.");
     expect(run.out).toContain("Dry run: nothing was deleted.");
     expect(await businesses()).toBe(2);
+  });
+
+  it("lists the subscriptions Stripe still bills, with STRIPE_READ_KEY", async () => {
+    const asked: string[] = [];
+    const stripe = createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://stripe.test");
+      asked.push(`${request.headers.authorization} ${url.pathname} ${url.searchParams.get("customer")} ${url.searchParams.get("status")}`);
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ object: "list", has_more: false, data: [{ id: "sub_stripeplan", status: "active" }, { id: "sub_stripeoverage", status: "active" }, { id: "sub_old", status: "canceled" }] }));
+    });
+    await new Promise<void>((resolve) => stripe.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = stripe.address() as AddressInfo;
+      const run = await resetAsync(databaseUrl(database), ["--dry-run"], { STRIPE_READ_KEY: "rk_test_resetreadkey", RESET_STRIPE_API_URL: `http://127.0.0.1:${port}/v1` });
+      expect(run.status, run.out).toBe(0);
+      const text = run.out.replace(/\s+/g, " ");
+      expect(text).toContain("2 subscriptions Stripe still bills: sub_stripeplan (cus_stripereset, active), sub_stripeoverage (cus_stripereset, active).");
+      expect(text).not.toContain("by this database's records");
+      expect(run.out).not.toContain("sub_old");
+      expect(run.out).not.toContain("rk_test_resetreadkey");
+      expect(asked).toEqual(["Bearer rk_test_resetreadkey /v1/subscriptions cus_stripereset all"]);
+    } finally {
+      await new Promise((resolve) => stripe.close(resolve));
+    }
   });
 
   it("deletes nothing unless the database's name is given", async () => {
@@ -162,14 +208,14 @@ describe.skipIf(!adminUrl)("devops/reset-database.mjs", () => {
   });
 
   it("refuses a database linked to Polar's live organization", async () => {
-    await target.pool.query("insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'alloplace', 1, repeat('b', 64), '{}', 'production', 'org_live')");
+    await target.pool.query("insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'passed', 'alloplace', 1, repeat('b', 64), '{}', 'polar', 'live', 'org_live')");
     try {
       const run = reset(databaseUrl(database), ["--confirm", database]);
       expect(run.status, run.out).toBe(1);
       expect(run.out).toContain("--allow-live-payments");
       expect(await businesses()).toBe(2);
     } finally {
-      await target.pool.query("delete from public.billing_runs where polar_env = 'production'");
+      await target.pool.query("delete from public.billing_runs where provider = 'polar' and provider_env = 'live'");
     }
   });
 

@@ -71,7 +71,8 @@ const keyEditor = (label: string) => screen.getByText(label, { selector: "p" }).
 
 async function pick(scope: HTMLElement, name: string) {
   await userEvent.click(within(scope).getByRole("combobox", { name: /^Receptionist/ }));
-  await userEvent.click(within(within(scope).getByRole("listbox")).getByRole("option", { name: new RegExp(`^${name}`) }));
+  // The open list is drawn over the page, outside the card.
+  await userEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: new RegExp(`^${name}`) }));
 }
 
 describe("who answers a widget key", () => {

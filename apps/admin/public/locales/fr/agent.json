@@ -10,7 +10,7 @@
       "description": "Message d'accueil et paramètres de transfert de votre réceptionniste."
     },
     "receptionists": {
-      "title": "Réceptionnistes",
+      "title": "Agents IA",
       "description": "Qui répond à vos appels, à vos chats et sur vos pages. Ajoutez-en une pour chaque lieu, équipe ou langue."
     },
     "knowledge": {

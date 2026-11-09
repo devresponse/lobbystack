@@ -17,8 +17,14 @@ export type FakeStripeState = {
   invoicePayments: Array<{ invoice: string; paymentIntent: string; status?: string }>;
   /** The pending update on each subscription that has one: the invoice it waits on, and the update it applies once that's paid. */
   pendingUpdates: Map<string, { invoice: string; params: Stripe.SubscriptionUpdateParams }>;
+  /** The meter events sent, each with its meter's event name, the customer and its value. */
+  meterEvents: Array<{ event_name: string; customer: string; value: number; identifier: string; timestamp: number }>;
+  /** Customer balance transactions, newest first. */
+  balanceTransactions: Stripe.CustomerBalanceTransaction[];
   /** Products, prices, meters, coupons, portal configurations, endpoints and Stripe Tax: what pnpm billing makes. */
   catalog: FakeCatalogState;
+  /** Subscriptions a Managed Payments checkout made, whose card the API can't set. */
+  managedPayments: Set<string>;
 };
 
 /** One call the adapter made, with its parameters and idempotency key. */
@@ -32,7 +38,7 @@ export class FakeStripeContext {
   private counter = 0;
 
   constructor(readonly clock: FakeClock, accountId: string) {
-    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], pendingUpdates: new Map(), catalog: emptyFakeCatalog() };
+    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], pendingUpdates: new Map(), meterEvents: [], balanceTransactions: [], catalog: emptyFakeCatalog(), managedPayments: new Set() };
   }
 
   /** A new ID with Stripe's prefix for the kind of object, numbered in the order the fake made them. */

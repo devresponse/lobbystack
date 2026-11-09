@@ -10,6 +10,12 @@ export const overdueBillingWork = getMeter("lobbystack-worker").createCounter("l
 /** One PostHog issue for all overdue billing work; its operation and counts say which. */
 export const OVERDUE_BILLING_WORK = "Billing work waited longer than it should.";
 
+/** A live subscription to something the catalog doesn't link, in the words of the deployment's provider. Polar's is the issue PostHog already has. */
+const HELD_SUBSCRIPTION: Record<"polar" | "stripe", string> = {
+  polar: "A live Polar subscription is for a product no plan maps to, so the business's plan waits. Link the product with pnpm billing apply, or move the subscription in Polar to a product the catalog sells.",
+  stripe: "A live Stripe subscription is for a price no plan maps to, so the business's plan waits. Link the price with pnpm billing apply, or move the subscription in Stripe to a price the catalog sells.",
+};
+
 /**
  * billing.reconcile: applies a stored billing event to the business's
  * account. A provider that reads back (Stripe) has the event's subscription,
@@ -29,8 +35,8 @@ export async function reconcileBillingEvent(job: JobEnvelope, dependencies: Work
     }
   }
   const result = await reconcileBillingProviderEvent(dependencies.domain, { businessId, providerEventId, ...readBack });
-  // The event waits, and the billing sweep runs it again each hour until someone links the product.
-  if (result === "held") await reportError(new Error("A live Polar subscription is for a product no plan maps to, so the business's plan waits. Link the product with pnpm billing apply, or move the subscription in Polar to a product the catalog sells."), { operation: "job.billing.reconcile", businessId, providerEventId });
+  // The event waits, and the billing sweep runs it again each hour until someone links the product or price.
+  if (result === "held") await reportError(new Error(HELD_SUBSCRIPTION[billing?.id ?? "polar"]), { operation: "job.billing.reconcile", businessId, providerEventId });
   return { status: result === "processed" ? "completed" : "skipped", entityId: providerEventId };
 }
 

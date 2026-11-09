@@ -1253,7 +1253,7 @@ export const billingAccounts = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
-    /** Who bills the business: polar, stripe or managed (the operator, outside the provider). Every insert names it; the polar default goes with the contract migration. */
+    /** Who bills the business: polar, stripe or managed (the operator, outside the provider). A new account names it. The default stays: reconcile's upsert leaves it out for an account that exists, and PostgreSQL checks NOT NULL before it finds the conflict (migration 0147). */
     source: varchar("source", { length: 32 }).default("polar").notNull(),
     billingKey: text("billing_key").notNull(),
     customerId: text("customer_id"),
@@ -1280,7 +1280,7 @@ export const billingAccounts = pgTable(
     subscriptionClaim: uuid("subscription_claim"),
     /** When that run's claim runs out, in case its worker died. */
     subscriptionClaimedUntil: timestamp("subscription_claimed_until", { withTimezone: true }),
-    /** Stripe's monthly overage subscription, beside the plan's; null on Polar. Migration 0146. */
+    /** Stripe's monthly overage subscription, beside the plan's, or the plan's own when overage is on its checkout (merchant of record); null on Polar. Migration 0146. */
     overageSubscriptionId: text("overage_subscription_id"),
     /** When the subscription ends unless resumed, as the provider last said; null when it renews. */
     cancelAt: timestamp("cancel_at", { withTimezone: true }),
@@ -1348,8 +1348,6 @@ export const billingTransactions = pgTable(
     invoiceUrl: text("invoice_url"),
     orderId: text("order_id"),
     subscriptionId: text("subscription_id"),
-    /** @deprecated providerCustomerId. A trigger keeps the two equal until the contract migration drops this one. */
-    polarCustomerId: text("polar_customer_id"),
     /** The payer's customer at the billing provider. Migration 0146. */
     providerCustomerId: text("provider_customer_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
@@ -1428,7 +1426,7 @@ export const billingRuns = pgTable(
   "billing_runs",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    /** catalog (an apply), polar (a link to Polar's products; link once the contract migration renames it) or verify (a check of the file, the tables and the provider). */
+    /** catalog (an apply), link (provider objects linked to the catalog) or verify (a check of the file, the tables and the provider). */
     kind: varchar("kind", { length: 8 }).notNull(),
     /** applied or unchanged for a catalog or link run; passed, drift or failed for a verify. */
     status: varchar("status", { length: 10 }).notNull(),
@@ -1448,10 +1446,6 @@ export const billingRuns = pgTable(
     changes: jsonb("changes").$type<unknown[]>().notNull().default([]),
     /** Drift a verify found; always empty for a catalog run. */
     problems: jsonb("problems").$type<unknown[]>().notNull().default([]),
-    /** @deprecated providerEnv. Polar's sandbox or production; a trigger keeps it in step until the contract migration drops it. */
-    polarEnv: varchar("polar_env", { length: 10 }),
-    /** @deprecated providerAccount. A trigger keeps it in step until the contract migration drops it. */
-    polarOrg: text("polar_org"),
     /** polar or stripe: the provider a link or verify run ran against; null for a catalog run. Migration 0146. */
     provider: varchar("provider", { length: 8 }),
     /** sandbox or live: the provider's environment. */
@@ -1529,8 +1523,6 @@ export const billingPlans = pgTable(
     offerEnd: timestamp("offer_end", { withTimezone: true }),
     /** Code-less Polar discount applied at checkout: type, basis_points or amount_cents, duration, duration_in_months. */
     discount: jsonb("discount").$type<Record<string, unknown>>(),
-    /** @deprecated providerDisc. A trigger keeps the two equal until the contract migration drops this one. */
-    polarDisc: text("polar_disc"),
     /** The provider's discount for the plan, recorded by a link: a Polar discount or a Stripe coupon. Migration 0146. */
     providerDisc: text("provider_disc"),
     /** SHA-256 of the terms subscribers and Polar depend on. A change makes a sold plan draft again. */
@@ -1546,7 +1538,6 @@ export const billingPlans = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("billing_plans_polar_disc_unique").on(table.polarDisc).where(sql`${table.polarDisc} is not null`),
     uniqueIndex("billing_plans_provider_disc_unique").on(table.providerDisc).where(sql`${table.providerDisc} is not null`),
   ],
 );
@@ -1565,8 +1556,6 @@ export const billingPrices = pgTable(
     cents: integer("cents").notNull(),
     /** Price per month, computed: cents, or for annual cents / 12 rounded to a whole unit (migration 0119). */
     perMonth: integer("per_month").generatedAlwaysAs(sql`CASE WHEN period = 'annual' THEN (round(cents / 1200.0) * 100)::integer ELSE cents END`),
-    /** @deprecated providerRef. A trigger keeps the two equal until the contract migration drops this one. */
-    polarId: text("polar_id"),
     /** The provider's object that sells it, recorded by a link: a Polar product or a Stripe price. Migration 0146. */
     providerRef: text("provider_ref"),
     /** The run that last changed the row. */
@@ -1577,7 +1566,6 @@ export const billingPrices = pgTable(
   },
   (table) => [
     uniqueIndex("billing_prices_live_unique").on(table.plan, table.period).where(sql`${table.retiredAt} is null`),
-    uniqueIndex("billing_prices_polar_unique").on(table.polarId).where(sql`${table.polarId} is not null`),
     uniqueIndex("billing_prices_provider_ref_unique").on(table.providerRef).where(sql`${table.providerRef} is not null`),
   ],
 );
@@ -1669,13 +1657,12 @@ export const billingOffers = pgView("billing_offers", {
   ends: varchar("ends", { length: 8 }),
   offerEnd: timestamp("offer_end", { withTimezone: true }),
   discount: jsonb("discount").$type<Record<string, unknown>>(),
-  polarDisc: text("polar_disc"),
   sort: smallint("sort").notNull(),
   period: varchar("period", { length: 8 }),
   currency: char("currency", { length: 3 }),
   cents: integer("cents"),
   perMonth: integer("per_month"),
-  polarId: text("polar_id"),
+  receptionists: smallint("receptionists"),
   providerDisc: text("provider_disc"),
   providerRef: text("provider_ref"),
 }).existing();
@@ -1897,9 +1884,7 @@ export const providerEvents = pgTable(
   (table) => [
     uniqueIndex("provider_events_provider_id_unique").on(table.provider, table.providerEventId),
     index("provider_events_business_idx").on(table.businessId, table.createdAt),
-    // The billing sweep's read of Polar events still waiting to apply. Migration 0114.
-    index("provider_events_polar_received_idx").on(table.createdAt).where(sql`${table.status} = 'received' and ${table.provider} = 'polar'`),
-    // The same for either billing provider. Migration 0146.
+    // The billing sweep's read of either billing provider's events still waiting to apply. Migration 0146.
     index("provider_events_billing_received_idx").on(table.createdAt).where(sql`${table.status} = 'received' and ${table.provider} in ('polar', 'stripe')`),
   ],
 );

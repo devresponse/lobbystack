@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { billingPlanCatalog, type BillingInterval } from "./billing";
+import { billingPlanCatalog, type BillingInterval, type BillingProvider } from "./billing";
 import type { InterfaceLocale } from "./locales";
 
 // brands/<brand>/billing.json: every plan a brand sells, standard or not, and
@@ -140,8 +140,8 @@ function planPrices(plan: unknown): PlanPrices | undefined {
 }
 
 /**
- * The checks that need more than one field (C1 to C7 of the design, C8 and C9
- * of the Stripe plan), which the JSON Schema can't carry. Each issue's path
+ * The checks that need more than one field (C1 to C7 of the design, and C8 of
+ * the Stripe plan), which the JSON Schema can't carry. Each issue's path
  * names the field to fix.
  */
 export function checkBillingProfile(profile: ProfileShape, context: z.RefinementCtx): void {
@@ -180,16 +180,33 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
   if (profile.stripe) {
     // C8: Managed Payments sells through Checkout alone, so overage can't be a subscription of its own.
     if (profile.stripe.managedPayments && profile.stripe.overage !== "checkout") context.addIssue({ code: "custom", path: ["stripe", "overage"], message: "with managedPayments, overage is checkout: Managed Payments sells only through Checkout" });
-    // C9: overage on the plan's checkout is invoiced with the plan, which fits monthly plans only.
-    if (profile.stripe.overage === "checkout") {
-      for (const [code, plan] of Object.entries(profile.plans)) {
-        if (planPrices(plan)?.annualCents !== undefined) issue([code, "prices", "annualCents"], "with stripe.overage checkout, overage is invoiced with the plan, so a plan can't be annual");
-      }
-    }
   }
 }
 
 export const billingProfileSchema = billingProfileShape.superRefine(checkBillingProfile);
+
+/**
+ * The file as a deployment on the provider sells it. With stripe.overage
+ * checkout, overage is invoiced with the plan each month, so a Stripe
+ * deployment leaves out every yearly price, as merchant of record needs, and
+ * doesn't sell a plan that has only a yearly one (C9 of the Stripe plan). The
+ * brand's Polar deployments sell the file as it is. What it returns is cast to
+ * the file's type, so billingProfile.test.ts checks it still passes the schema.
+ */
+export function billingProfileForProvider<T extends Pick<z.output<typeof billingProfileShape>, "stripe" | "plans">>(profile: T, provider: BillingProvider): T {
+  if (provider !== "stripe" || profile.stripe?.overage !== "checkout") return profile;
+  const plans = Object.fromEntries(Object.entries(profile.plans).flatMap(([code, plan]): Array<[string, unknown]> => {
+    const own = planPrices(plan);
+    if (own?.annualCents === undefined) return [[code, plan]];
+    const { annualCents: _yearly, ...monthly } = own;
+    if (monthly.monthlyCents !== undefined) return [[code, { ...(plan as object), prices: monthly }]];
+    // Only a yearly price: an additional plan isn't offered here, and a standard one isn't sold.
+    if (!isStandardCode(code)) return [];
+    const { prices: _prices, ...unsold } = plan as Record<string, unknown>;
+    return [[code, { ...unsold, sold: false }]];
+  }));
+  return { ...profile, plans } as T;
+}
 
 /** A billing.json as checked. */
 export type BillingProfile = z.output<typeof billingProfileSchema>;

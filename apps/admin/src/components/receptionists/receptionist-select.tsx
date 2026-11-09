@@ -9,6 +9,7 @@ import { RECEPTIONIST_PICKER_SEARCH_FROM } from "@lobbystack/shared";
 
 import { intlLocale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
+import { useOverlayPanel } from "./overlay-panel";
 import { ReceptionistAvatar } from "./receptionist-avatar";
 import { foldForSearch, receptionistMatches, type ReceptionistOption } from "./receptionist-choices";
 
@@ -19,7 +20,9 @@ import { foldForSearch, receptionistMatches, type ReceptionistOption } from "./r
 // names the highlighted choice with aria-activedescendant. From 8
 // receptionists the open list starts with a search box, which takes the focus
 // and filters by name and "What it helps with". With one receptionist there is
-// nothing to choose, so it renders nothing unless alwaysShow.
+// nothing to choose, so it renders nothing unless alwaysShow. The open list
+// is drawn over the page, so a card or table that clips or scrolls neither
+// cuts it off nor shifts under it; in a dialog it stays under the button.
 
 export const RECEPTIONISTS_PAGE_PATH = "/agent/receptionists";
 
@@ -71,6 +74,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
   const button = useRef<HTMLButtonElement>(null);
   const searchField = useRef<HTMLInputElement>(null);
   const typed = useRef({ text: "", at: 0 });
+  const { prepare, contains, render: renderList, overlay } = useOverlayPanel({ open, root, anchor: button, align, maxHeight: 416 });
   const searchable = receptionists.length >= RECEPTIONIST_PICKER_SEARCH_FROM;
   const labelId = `${id}-label`;
   const valueId = `${id}-value`;
@@ -92,14 +96,14 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
-      if (root.current && !root.current.contains(event.target as Node)) {
+      if (!contains(event.target as Node)) {
         setOpen(false);
         setQuery("");
       }
     };
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
-  }, [open]);
+  }, [open, contains]);
 
   useEffect(() => {
     if (open && searchable) searchField.current?.focus();
@@ -119,6 +123,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
     if (disabled) return;
     const chosen = choices.findIndex(isChosen);
     setActive(at === "first" ? 0 : at === "last" ? choices.length - 1 : Math.max(chosen, 0));
+    prepare();
     setOpen(true);
   }
 
@@ -150,7 +155,10 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
       const choice = choices[index]!;
       if (choice.kind === "receptionist" && foldForSearch(choice.receptionist.name).startsWith(text)) {
         setActive(index);
-        if (!open) setOpen(true);
+        if (!open) {
+          prepare();
+          setOpen(true);
+        }
         return;
       }
     }
@@ -169,6 +177,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
           event.preventDefault();
           setQuery(event.key);
           setActive(0);
+          prepare();
           setOpen(true);
         }
       }
@@ -208,6 +217,15 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
         event.preventDefault();
         close();
         return;
+      case "Tab":
+        // Drawn over the page, the list sits at the document's end: from its search box, Tab goes on from
+        // the button, as from a list under it, and Shift+Tab goes back to the button.
+        if (!fromSearch || !overlay) return;
+        if (event.shiftKey) {
+          event.preventDefault();
+          button.current?.focus();
+        } else close();
+        return;
       default:
         if (!fromSearch && event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) typeAhead(event.key);
     }
@@ -223,7 +241,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
     <div
       ref={root}
       className={cn("relative flex min-w-0 flex-col gap-1.5", className)}
-      onBlur={(event) => { if (open && !root.current?.contains(event.relatedTarget as Node | null)) { setOpen(false); setQuery(""); } }}
+      onBlur={(event) => { if (open && !contains(event.relatedTarget as Node | null)) { setOpen(false); setQuery(""); } }}
     >
       <span id={labelId} className={hideLabel ? "sr-only" : "text-sm font-medium"}>{label}</span>
       <button
@@ -258,8 +276,10 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
         </span>
         <ChevronDown aria-hidden="true" className={cn("size-4 flex-none text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
-      {open ? (
-        <div className={cn("absolute top-full z-50 mt-1 flex max-h-[min(26rem,70svh)] w-max min-w-full max-w-[min(26rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg", align === "end" ? "right-0" : "left-0")}>
+      {open ? renderList(
+        "flex w-max max-w-[min(26rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg",
+        cn("absolute top-full z-50 mt-1 max-h-[min(26rem,70svh)] min-w-full", align === "end" ? "right-0" : "left-0"),
+        <>
           {searchable ? (
             <div className="flex items-center gap-2 border-b border-border px-2.5">
               <Search aria-hidden="true" className="size-4 flex-none text-muted-foreground" />
@@ -304,7 +324,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
             ))}
           </ul>
           {matches === 0 ? <p role="status" className="px-3 py-2 text-sm text-muted-foreground">{t("picker.noMatches")}</p> : null}
-        </div>
+        </>,
       ) : null}
     </div>
   );

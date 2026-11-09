@@ -19,9 +19,9 @@ describe("worker schedulers", () => {
 
     await configureSchedulers(queues, [{ id: "business-a", active: true }, { id: "business-b", active: true }]);
 
-    expect(upsertJobScheduler).toHaveBeenCalledTimes(26);
+    expect(upsertJobScheduler).toHaveBeenCalledTimes(28);
     const tenantCalls = upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId !== null);
-    expect(tenantCalls).toHaveLength(20);
+    expect(tenantCalls).toHaveLength(22);
     expect(tenantCalls.filter((call) => call[2].data.type === "api.retention")).toHaveLength(2);
     for (const call of tenantCalls) {
       expect(call[2].data.businessId).toMatch(/^business-[ab]$/);
@@ -60,7 +60,7 @@ describe("worker schedulers", () => {
       "outbox-backlog-sample:dormant",
     ]);
     const tenantTypes = upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId === "dormant").map((call) => call[2].data.type);
-    expect(tenantTypes).toHaveLength(8);
+    expect(tenantTypes).toHaveLength(9);
     expect(tenantTypes).toContain("privacy.scrubMessage");
     // A dormant business can still pay for a promo plan that ends.
     expect(upsertJobScheduler).toHaveBeenCalledWith("promo-plan-end:dormant", { every: 24 * 60 * 60_000 }, expect.anything());
@@ -79,6 +79,7 @@ describe("worker schedulers", () => {
       "operator-daily-summary:closed",
       "outbox-backlog-sample:closed",
       "promo-plan-end:closed",
+      "usage-totals-check:closed",
     ]);
     expect(upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId === "closed").map((call) => [call[0], call[1].every]).sort()).toEqual([
       ["api-retention:closed", 60 * 60_000],
@@ -95,7 +96,7 @@ describe("worker schedulers", () => {
     await configureSchedulers(queues, [{ id: "closed", active: false, closed: true }], applied);
     upsertJobScheduler.mockClear();
     await configureSchedulers(queues, [{ id: "closed", active: true, closed: false }], applied);
-    expect(upsertJobScheduler.mock.calls.map((call) => call[0]).sort()).toEqual(["calendar-reconcile:closed", "operator-daily-summary:closed", "outbox-backlog-sample:closed", "promo-plan-end:closed", "telemetry-flush:closed"]);
+    expect(upsertJobScheduler.mock.calls.map((call) => call[0]).sort()).toEqual(["calendar-reconcile:closed", "operator-daily-summary:closed", "outbox-backlog-sample:closed", "promo-plan-end:closed", "telemetry-flush:closed", "usage-totals-check:closed"]);
   });
 
   it("calls Redis on a refresh only for what changed", async () => {
@@ -128,6 +129,7 @@ describe("worker schedulers", () => {
       "promo-plan-end:b",
       "telemetry-flush:b",
       "unit-economics-rollup:b",
+      "usage-totals-check:b",
     ]);
     expect([...applied.keys()].some((name) => name.endsWith(":b"))).toBe(false);
   });

@@ -11,7 +11,7 @@ import { isStripeAlreadyCanceled, isStripeMissing, stripeRefusalFor } from "./er
 import { endStripeOverage, ensureStripeOverage } from "./overage";
 import { changeStripePlan, endStripePlanAtRenewal, removeStripeDiscount } from "./planChange";
 import { providerSubscriptionFromStripe } from "./subscriptions";
-import { creditStripeBalance, reportStripeUsage, stripeInvoicedOverage, stripeUsageTotals } from "./usage";
+import { creditStripeBalance, reportStripeUsage, stripeUsageCredits, stripeUsageTotals } from "./usage";
 
 // Stripe behind the billing provider interface (ADR 0010). Step 9 of the
 // Stripe plan brings the core: the customer, reading a subscription, the
@@ -74,7 +74,7 @@ export class StripeBilling implements BillingProvider {
     }, { idempotencyKey: `customer:${input.businessId}${attempt}` });
   }
 
-  async createCheckout(input: { customer: CustomerRef; email: string; price: PriceRef; businessId: string; requestId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null }): Promise<{ id: string; url: string; expiresAt: Date | null }> {
+  async createCheckout(input: Parameters<BillingProvider["createCheckout"]>[0]): Promise<{ id: string; url: string; expiresAt: Date | null }> {
     return await createStripeCheckout(this.api, input);
   }
 
@@ -137,7 +137,7 @@ export class StripeBilling implements BillingProvider {
     return found === this.account ? null : { expected: this.account, found };
   }
 
-  async ensureOverage(input: { customerId: string; planSubscriptionId: string; businessId: string; currency: string }): Promise<{ subscriptionId: string } | { unpaidSubscriptionId: string }> {
+  async ensureOverage(input: Parameters<NonNullable<BillingProvider["ensureOverage"]>>[0]): Promise<{ subscriptionId: string } | { unpaidSubscriptionId: string }> {
     return await ensureStripeOverage(this.api, input);
   }
 
@@ -153,12 +153,24 @@ export class StripeBilling implements BillingProvider {
     return await stripeUsageTotals(this.api, input);
   }
 
-  async invoicedOverage(input: { subscriptionId: string; periodStart: Date }): Promise<{ cents: Record<OverageKind, number>; finalizedAt: Date } | null> {
-    return await stripeInvoicedOverage(this.api, input);
+  async usageCredits(input: { customerId: string }): Promise<Record<OverageKind, number>> {
+    return await stripeUsageCredits(this.api, input);
   }
 
-  async creditBalance(input: { customerId: string; cents: number; identifier: string }): Promise<void> {
+  async creditBalance(input: { customerId: string; kind: OverageKind; cents: number; currency: string; identifier: string }): Promise<void> {
     await creditStripeBalance(this.api, input);
+  }
+
+  /**
+   * The customer's currency, which Stripe sets from its first subscription:
+   * under merchant of record, Adaptive Pricing bills a customer abroad in
+   * their own, and a balance credit in another currency never reaches their
+   * invoices. Null for a customer that's gone or not billed yet.
+   */
+  async customerCurrency(customerId: string): Promise<string | null> {
+    const customer = await this.api.customers.retrieve(customerId);
+    if ("deleted" in customer && customer.deleted) return null;
+    return (customer as Stripe.Customer).currency ?? null;
   }
 
   /** Stripe's billing portal for the business's customer, with the deployment's configuration once a link recorded one, in the business's language when Stripe has it. */

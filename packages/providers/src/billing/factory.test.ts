@@ -13,9 +13,8 @@ describe("the billing provider factory", () => {
   it("bills through Polar when BILLING_PROVIDER is unset or polar, and stops for anything else", () => {
     expect(readBillingProviderId({})).toBe("polar");
     expect(readBillingProviderId({ BILLING_PROVIDER: " Polar " })).toBe("polar");
-    expect(() => readBillingProviderId({ BILLING_PROVIDER: "stripe" })).toThrow("isn't available yet");
-    expect(() => readBillingProviderId({ BILLING_PROVIDER: "stripe", BILLING_STRIPE_PREVIEW: "false" })).toThrow("isn't available yet");
-    expect(readBillingProviderId({ BILLING_PROVIDER: "stripe", BILLING_STRIPE_PREVIEW: "true" })).toBe("stripe");
+    expect(readBillingProviderId({ BILLING_PROVIDER: "stripe" })).toBe("stripe");
+    expect(readBillingProviderId({ BILLING_PROVIDER: " Stripe " })).toBe("stripe");
     expect(() => readBillingProviderId({ BILLING_PROVIDER: "paddle" })).toThrow("must be polar or stripe");
   });
 
@@ -26,24 +25,24 @@ describe("the billing provider factory", () => {
     expect(live).toBeInstanceOf(PolarBilling);
     expect(live).toMatchObject({ id: "polar", env: "live", account: "org-1" });
     expect(createBillingProvider({ ...polar, POLAR_API_BASE_URL: "https://sandbox-api.polar.sh/" })).toMatchObject({ env: "sandbox" });
-    expect(() => createBillingProvider({ ...polar, BILLING_PROVIDER: "stripe" })).toThrow("isn't available yet");
+    // A Stripe deployment with Polar's variables left over has no Stripe credentials.
+    expect(createBillingProvider({ ...polar, BILLING_PROVIDER: "stripe" })).toBeUndefined();
   });
 
-  it("builds Stripe behind BILLING_STRIPE_PREVIEW, with test keys only, its catalog client and its webhook", () => {
-    const stripe = { BILLING_PROVIDER: "stripe", BILLING_STRIPE_PREVIEW: "true", STRIPE_ACCOUNT_ID: "acct_1" };
+  it("builds Stripe in a sandbox with a test key and for real with a live one, its catalog client and its webhook", () => {
+    const stripe = { BILLING_PROVIDER: "stripe", STRIPE_ACCOUNT_ID: "acct_1" };
     expect(createBillingProvider(stripe)).toBeUndefined();
     const sandbox = createBillingProvider({ ...stripe, STRIPE_API_KEY: "rk_test_abc123" });
     expect(sandbox).toBeInstanceOf(StripeBilling);
     expect(sandbox).toMatchObject({ id: "stripe", env: "sandbox", account: "acct_1" });
-    expect(() => createBillingProvider({ ...stripe, STRIPE_API_KEY: "rk_live_abc123" })).toThrow("test keys only");
+    expect(createBillingProvider({ ...stripe, STRIPE_API_KEY: "rk_live_abc123" })).toMatchObject({ id: "stripe", env: "live", account: "acct_1" });
     expect(() => createBillingProvider({ ...stripe, STRIPE_API_KEY: "pk_test_abc123" })).toThrow("secret or restricted key");
-    expect(() => createBillingProvider({ BILLING_PROVIDER: "stripe", STRIPE_ACCOUNT_ID: "acct_1", STRIPE_API_KEY: "rk_test_abc123" })).toThrow("isn't available yet");
     expect(createBillingWebhook(stripe)).toBeInstanceOf(StripeWebhook);
-    // The daily check reads with the worker's key, a test one in the preview.
+    // The daily check reads with the worker's key, of either mode.
     expect(createBillingCatalogClient(stripe)).toBeUndefined();
     expect(createBillingCatalogClient({ ...stripe, STRIPE_API_KEY: "rk_test_abc123" })).toBeInstanceOf(StripeCatalogClient);
     expect(createBillingCatalogClient(stripe, "rk_test_read123")).toMatchObject({ provider: "stripe" });
-    expect(() => createBillingCatalogClient({ ...stripe, STRIPE_API_KEY: "rk_live_abc123" })).toThrow("test keys only");
+    expect(createBillingCatalogClient({ ...stripe, STRIPE_API_KEY: "rk_live_abc123" })).toBeInstanceOf(StripeCatalogClient);
   });
 
   it("builds the daily check's catalog client with the worker's token, or the token it's given", () => {

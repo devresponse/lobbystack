@@ -132,6 +132,11 @@ describe("Stripe's events in reconcile's terms", () => {
     const overage = deliver("invoice.paid", invoice({ id: "in_2", parent: { type: "subscription_details", subscription_details: { subscription: "sub_overage", metadata: { lobbystack_business: businessId, lobbystack_role: "overage" } } } }));
     expect(overage).toMatchObject({ kind: "payment", businessId, payload: { orderId: "in_2" } });
     expect(overage!.payload).not.toHaveProperty("subscriptionId");
+    expect(overage!.payload).toMatchObject({ overageSubscriptionId: "sub_overage" });
+    // The amount asked for, less a balance credit; a voided invoice keeps its order row, now void.
+    expect(deliver("invoice.paid", invoice({ amount_due: 7000 }))!.payload).toMatchObject({ amountCents: 7000 });
+    expect(deliver("invoice.voided", invoice({ status: "void", status_transitions: { paid_at: null } }))!.payload).toMatchObject({ kind: "payment", orderId: "in_1", status: "void" });
+    expect(deliver("invoice.marked_uncollectible", invoice({ status: "uncollectible", status_transitions: { paid_at: null } }))!.payload).toMatchObject({ status: "uncollectible" });
   });
 
   it("reads a checkout session's request and outcome, a refund's payment and a dispute", () => {

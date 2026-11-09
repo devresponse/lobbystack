@@ -11,6 +11,7 @@ import type { AiTraceStep } from "@lobbystack/domain";
 import { toAiTraceSteps, type ReceptionistAgent } from "../agent";
 import type { KeypadPasscodeCheck, KeypadPasscodeOutcome } from "../tools";
 import { CALL_ENDING, DIRECT_ANSWER_TOOLS, directToolAnswer, fitToAppend, type DirectAnswerStep } from "./directAnswer";
+import { saysGoodbye } from "./goodbye";
 import { greetingCommand, openingAfterCallerCommand } from "./greeting";
 import { recordingMs } from "./greetingRecording";
 import { LiveLatencyTracker, type LiveCallLatency } from "./latency";
@@ -362,6 +363,8 @@ const PASSCODE_IDLE_MS = 60_000;
 // The facts GPT-Live receives when a request fails. Its instructions say what to do then.
 const FAILED_ANSWER = "The backend couldn't complete this request.";
 const CALLER_SPOKE_AGAIN = "The caller spoke again before the call ended, so reply to what they said.";
+// The result that ends the call, sent quietly when GPT-Live already said goodbye to the caller.
+const GOODBYE_ALREADY_SAID = "The call is ending. You already said goodbye, so don't say it again.";
 const STILL_WORKING = "Still checking. This is taking a few more seconds.";
 // Commands for GPT-Live when the call has to end, or a transfer didn't go through.
 const WRAP_UP: Record<LiveCallWrapUp, string> = {
@@ -435,7 +438,7 @@ type WrapUp = { reason: LiveCallWrapUp; requestedAt: number; eventId?: string; s
 // that ended the call was made on the session timeline: the caller speaking
 // after it holds the hangup until a check says whether they're only saying
 // goodbye, or cancels it when there's no check.
-type PendingHangup = { afterMs: number; requestedAt: number; onCancelled?: () => void; callerSpoke?: boolean; checking?: boolean };
+type PendingHangup = { afterMs: number; requestedAt: number; onCancelled?: () => void; callerSpoke?: boolean; checking?: boolean; goodbyeSaid?: boolean };
 // The close reason when another worker took the call over.
 const DETACHED = "detached";
 type StepLike = DirectAnswerStep & { toolResults: Array<{ toolName: string; output: unknown }> };
@@ -1178,9 +1181,9 @@ export class LiveCallController {
       return;
     }
     const quietSince = Math.max(this.playbackEndsAt(), this.lastSpeechAt, this.lastCallerAt);
-    // The goodbye follows the result that ended the call, unless GPT-Live stays silent.
+    // The goodbye follows the result that ended the call, unless GPT-Live stays silent or said it already.
     const answeredAt = Math.max(this.lastAnswerSentAt ?? 0, hangup.requestedAt);
-    const saidGoodbye = this.lastSpeechAt >= answeredAt || now - answeredAt > GOODBYE_START_MS;
+    const saidGoodbye = hangup.goodbyeSaid === true || this.lastSpeechAt >= answeredAt || now - answeredAt > GOODBYE_START_MS;
     const done = this.runningDelegations === 0 && saidGoodbye && now - quietSince >= CALLER_DONE_QUIET_MS;
     if (!done && now - Math.max(hangup.requestedAt, this.lastCallerAt) < CALLER_DONE_MAX_MS) {
       setTimeout(() => this.hangUpWhenQuiet(hangup), GOODBYE_POLL_MS);
@@ -1513,6 +1516,17 @@ export class LiveCallController {
     });
   }
 
+  // Whether the receptionist said goodbye after the caller's latest words.
+  private saidGoodbyeSinceCaller(): boolean {
+    let index = this.turns.length - 1;
+    for (; index >= 0; index -= 1) {
+      const turn = this.turns[index]!;
+      if (turn.role === "caller" && withoutSoundTags(turn.text).trim()) break;
+    }
+    if (index < 0) return false;
+    return this.turns.slice(index + 1).some((turn) => turn.role === "receptionist" && saysGoodbye(withoutSoundTags(turn.text)));
+  }
+
   private conversationText(): string {
     return this.turns.flatMap((turn) => {
       const text = withoutSoundTags(turn.text).trim();
@@ -1676,6 +1690,14 @@ export class LiveCallController {
       } else if (ended && (this.hangupCancelled || this.pendingHangup?.callerSpoke) && !this.ending) {
         // The caller spoke again, so GPT-Live replies to them: a goodbye now could cut them off.
         sent = CALLER_SPOKE_AGAIN;
+        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
+      } else if (ended && this.pendingHangup && !this.ending && this.saidGoodbyeSinceCaller()) {
+        // GPT-Live answered the caller's goodbye while the backend worked. Told aloud
+        // that the call is ending, it says another (6 of 28 eval runs with a recording),
+        // so it's told quietly, and the hangup follows the goodbye it already said.
+        this.unheardResults = [];
+        this.pendingHangup.goodbyeSaid = true;
+        sent = GOODBYE_ALREADY_SAID;
         this.send({ type: "session.thinking.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
       } else {
         this.unheardResults = [];

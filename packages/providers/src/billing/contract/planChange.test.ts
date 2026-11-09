@@ -66,7 +66,7 @@ describe("the billing provider contract: a plan change on Stripe", () => {
   });
 
   it("drops a declined upgrade by voiding its invoice, and refuses it as payment_failed", async () => {
-    const { billing, stripe } = await onStarter("pm_card_chargeDeclined");
+    const { billing, stripe } = await onStarter("pm_card_chargeCustomerFail");
     expect(await refusalOf(billing, billing.changePlan({ subscriptionId: "sub_1", to: pro, discount: "keep", when: "now", proration: "invoice_now", requestId: "r1" }))).toBe("payment_failed");
     const [invoice] = [...stripe.state.invoices.values()];
     expect(invoice?.status).toBe("void");
@@ -117,6 +117,25 @@ describe("the billing provider contract: a plan change on Stripe", () => {
     expect(stripe.requests.map((request) => request.call)).toContain("subscriptionSchedules.release");
   });
 
+  it("carries the metered overage items into each phase of a renewal schedule, without a quantity, as overage on the plan's checkout puts them", async () => {
+    const { billing, stripe } = stripeHarness({ clock: new FakeClock(Math.floor(Date.now() / 1000)) });
+    stripe.addCustomer({ id: "cus_1", businessId: "b1" });
+    const metered = (kind: string) => ({ id: `price_overage_${kind}`, active: true, product: "prod_overage", currency: "cad", unit_amount: 100, lookup_key: `ls_overage_${kind}_cad`, tax_behavior: "exclusive" as const, recurring: { interval: "month" as const, interval_count: 1, usage_type: "metered" as const, meter: `mtr_${kind}` }, metadata: {}, created: 1 });
+    stripe.loadCatalog({ prices: [metered("voice"), metered("sms"), metered("transfers")] });
+    const overage = ["price_overage_voice", "price_overage_sms", "price_overage_transfers"];
+    const now = stripe.clock.now();
+    stripe.addSubscription({ id: "sub_1", customer: "cus_1", price: pro.ref, overagePrices: overage, periodStart: now, periodEnd: now + 30 * 86_400 });
+    await billing.changePlan({ subscriptionId: "sub_1", to: starter, discount: "remove", when: "renewal", proration: "none", requestId: "r1" });
+    const phases = (stripe.requests.find((request) => request.call === "subscriptionSchedules.update")!.params as { phases: Array<{ items: unknown[] }> }).phases;
+    expect(phases.map((phase) => phase.items)).toEqual([
+      [{ price: pro.ref, quantity: 1 }, ...overage.map((price) => ({ price }))],
+      [{ price: starter.ref, quantity: 1 }, ...overage.map((price) => ({ price }))],
+    ]);
+    // At the renewal the plan's item moves, and the overage items stay.
+    expect(stripe.enterSchedulePhase("sub_1").items.data.map((item) => item.price.id)).toEqual([starter.ref, ...overage]);
+    await expect(billing.getSubscription("sub_1")).resolves.toMatchObject({ priceRef: starter.ref, next: null });
+  });
+
   it("ends a promo plan at the renewal: on its tier's price without the coupon, or cancelled after releasing a schedule", async () => {
     const { billing, stripe, periodEnd } = await onStarter();
     await billing.changePlan({ subscriptionId: "sub_1", to: proLaunch, discount: "price", when: "now", proration: "invoice_now", requestId: "r0" });
@@ -131,8 +150,8 @@ describe("the billing provider contract: a plan change on Stripe", () => {
   it("removes the discounts, keyed by the request", async () => {
     const { billing, stripe } = await onStarter();
     await billing.changePlan({ subscriptionId: "sub_1", to: proLaunch, discount: "price", when: "now", proration: "invoice_now", requestId: "r0" });
-    await expect(billing.removeDiscount({ subscriptionId: "sub_1", requestId: "drop-discount:coupon_1" })).resolves.toMatchObject({ priceRef: proLaunch.ref, discountRef: null });
-    expect(stripe.requests.filter((request) => request.call === "subscriptions.update").at(-1)).toEqual({ call: "subscriptions.update", params: { id: "sub_1", discounts: "" }, idempotencyKey: "drop-discount:coupon_1" });
+    await expect(billing.removeDiscount({ subscriptionId: "sub_1", requestId: "drop-discount:sub_1:coupon_1" })).resolves.toMatchObject({ priceRef: proLaunch.ref, discountRef: null });
+    expect(stripe.requests.filter((request) => request.call === "subscriptions.update").at(-1)).toEqual({ call: "subscriptions.update", params: { id: "sub_1", discounts: "" }, idempotencyKey: "drop-discount:sub_1:coupon_1" });
   });
 });
 
@@ -169,5 +188,17 @@ describe("the billing provider contract: cancelling, resuming and keeping a plan
     await expect(billing.cancel({ subscriptionId: "sub_1", when: "now", requestId: "r1" })).resolves.toBeNull();
     expect(stripe.state.subscriptions.get("sub_1")?.status).toBe("canceled");
     await expect(billing.cancel({ subscriptionId: "sub_1", when: "now", requestId: "r2" })).resolves.toBeNull();
+    // A plan without overage on it gets no last invoice.
+    expect(stripe.requests.find((request) => request.call === "subscriptions.cancel")?.params).toEqual({ id: "sub_1" });
+    expect(stripe.state.invoices.size).toBe(0);
+  });
+
+  it("ends one with overage on it now with its last invoice, which takes the usage so far", async () => {
+    const { billing, stripe } = stripeHarness({ clock: new FakeClock(Math.floor(Date.now() / 1000)) });
+    stripe.addCustomer({ id: "cus_1", businessId: "b1" });
+    stripe.addSubscription({ id: "sub_1", customer: "cus_1", price: pro.ref, overagePrices: ["price_overage_voice", "price_overage_sms", "price_overage_transfers"] });
+    await expect(billing.cancel({ subscriptionId: "sub_1", when: "now", requestId: "r1" })).resolves.toBeNull();
+    expect(stripe.requests.find((request) => request.call === "subscriptions.cancel")).toEqual({ call: "subscriptions.cancel", params: { id: "sub_1", invoice_now: true, prorate: false }, idempotencyKey: "cancel:r1" });
+    expect(stripe.state.invoices.size).toBe(1);
   });
 });

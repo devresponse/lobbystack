@@ -12,7 +12,7 @@ See [docs/branding.md](../docs/branding.md) for the fields and how a deployment 
 
 A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
 
-It also holds the settings of the billing provider its deployments use: the `polar` block, or the `stripe` block that Stripe billing is adding ([Stripe billing](../docs/roadmap/stripe-billing.md)). An apply refuses a file without the block of its deployment's provider.
+It also holds the settings of the billing providers its deployments use: the `polar` block and the `stripe` block ([Stripe billing](../docs/providers/stripe.md)). An apply refuses a file without the block of its deployment's provider. Once a Stripe deployment is linked, an apply refuses a change to `stripe.overage` or `managedPayments` (`selling_mode_changed`): its customers' subscriptions were made that way. AlloPlace's and RealInfoBot's `stripe` blocks sell with Stripe as the merchant of record (`managedPayments`, with `overage` on the plan's checkout), so their Stripe deployments sell monthly prices only, while their Polar deployments sell the yearly ones too.
 
 It is public like the rest of this folder, so it never holds a key, a token, a webhook secret or a Polar product id. Keys, tokens and the webhook secret stay in environment variables, and the deployment's tables keep the product ids, so no product id variable is needed.
 

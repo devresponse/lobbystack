@@ -54,7 +54,6 @@ const refundEvent = JSON.stringify({ id: "evt_2", object: "event", type: "charge
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("BILLING_PROVIDER", "stripe");
-  vi.stubEnv("BILLING_STRIPE_PREVIEW", "true");
   vi.stubEnv("STRIPE_API_KEY", "rk_test_admin123");
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", secret);
   mocks.lookup.mockResolvedValue([{ id: businessId }]);

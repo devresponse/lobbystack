@@ -18,7 +18,7 @@ The original project saved the receptionist's query when its `searchKnowledge` l
 
 ## Answer or dismiss a question
 
-1. Go to **Agent > Questions** (`/agent/questions`), right below **Knowledge** in the sidebar. Its **Unanswered Questions** list shows the open questions most asked first, up to 50, with how many times people asked and when they last asked; the badge counts every open one. While any are open, Home also shows a card under **Action required** that opens this page and counts as one action. Only owners and admins see that card.
+1. Go to **Agent > Questions** (`/agent/questions`), right below **Knowledge** in the sidebar. Its **Unanswered Questions** list shows the open questions most asked first, 10 to a page, with how many times people asked and when they last asked; the badge counts every open one. Past 10, the pagination under the list moves between pages and sets how many a page shows, up to 50. While any are open, Home also shows a card under **Action required** that opens this page and counts as one action. Only owners and admins see that card.
 2. Click **Answer**, write what the receptionist should say (up to 5,000 characters), and click **Save Answer**. LobbyStack adds an active text entry titled with the question, at the default priority, and the question leaves the list. The entry appears in the table on the Knowledge page, where it can be edited, paused or deleted like any other. The receptionist's snapshot refreshes like after any new entry, so the next call or chat has it.
 3. Or click **Dismiss** to take a question off the list.
 

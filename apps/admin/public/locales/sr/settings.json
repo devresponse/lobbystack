@@ -117,6 +117,9 @@
       "title": "Vaša stranica",
       "description": "{{business}} dobija stranicu na ovoj adresi, sa radnim vremenom, uslugama, lokacijom i četom.",
       "label": "Objavljena",
+      "labelOff": "Nije objavljena",
+      "publishAction": "Objavi stranicu",
+      "unpublishAction": "Povuci stranicu",
       "on": "Svako ko ima link može da vidi stranicu, a pretraživači mogu da je prikažu.",
       "off": "Samo Vaš tim vidi stranicu dok je ne objavite.",
       "since": "Objavljena {{date}}",
@@ -644,7 +647,9 @@
         "partially_refunded": "Delimično vraćeno",
         "succeeded": "Završeno",
         "failed": "Neuspelo",
-        "canceled": "Otkazano"
+        "canceled": "Otkazano",
+        "void": "Poništeno",
+        "uncollectible": "Neplaćeno"
       },
       "kindLabels": {
         "order": "Porudžbina",

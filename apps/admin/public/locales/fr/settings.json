@@ -117,6 +117,9 @@
       "title": "Votre page",
       "description": "{{business}} a une page à cette adresse, avec vos heures d'ouverture, vos services, votre adresse et le clavardage.",
       "label": "Publiée",
+      "labelOff": "Non publiée",
+      "publishAction": "Publier la page",
+      "unpublishAction": "Annuler la publication",
       "on": "Toute personne qui a le lien peut voir la page, et les moteurs de recherche peuvent la répertorier.",
       "off": "Seule votre équipe peut voir la page jusqu'à ce que vous la publiiez.",
       "since": "Publiée le {{date}}",
@@ -644,7 +647,9 @@
         "partially_refunded": "Remboursement partiel",
         "succeeded": "Effectué",
         "failed": "Échoué",
-        "canceled": "Annulé"
+        "canceled": "Annulé",
+        "void": "Invalidé",
+        "uncollectible": "Impayé"
       },
       "kindLabels": {
         "order": "Commande",

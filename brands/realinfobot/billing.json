@@ -8,6 +8,16 @@
     "upgradeProration": "invoice",
     "downgradeProration": "next_period"
   },
+  "stripe": {
+    "upgrade": "invoice",
+    "downgrade": "next_period",
+    "portalPlanChanges": false,
+    "portalCancel": false,
+    "tax": { "behavior": "exclusive", "code": "txcd_10103001" },
+    "usageGraceHours": 1,
+    "overage": "checkout",
+    "managedPayments": true
+  },
   "plans": {
     "free_cloud": {
       "sold": false,

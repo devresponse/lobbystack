@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
-import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
+import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, saysGoodbye, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
 import { snapshotForReceptionist } from "@lobbystack/domain";
 import { callOpening, demoSnapshot, type BusinessContextSnapshot } from "@lobbystack/shared";
 import OpenAI from "openai";
@@ -27,8 +27,6 @@ const END_WINDOW_MS = 15_000;
 const REPLY_QUIET_MS = 1_500;
 // How long the caller waits for a greeting before speaking: long enough for the worker's fallback and both retries.
 const GREETING_WAIT_MS = 15_000;
-// For the report only: the product never matches words to end a call.
-const GOODBYE = /\b(bye|goodbye|take care|have a (good|great|nice|wonderful)|thanks for calling)\b/i;
 
 const { values } = parseArgs({
   options: {
@@ -239,7 +237,8 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       ws.send({ type: "session.close" });
       await Promise.race([closed, sleep(5_000)]);
     }
-    const goodbyes = replies.filter((line) => GOODBYE.test(line)).length;
+    // Goodbyes as the controller recognizes them. The product never matches words to end a call.
+    const goodbyes = replies.filter((line) => saysGoodbye(line)).length;
     const endedAfterMs = ended === undefined ? undefined : Math.max(0, ended - lastLineAt);
     const forbidden = scenario.mustNotSay ? replies.find((line) => scenario.mustNotSay!.test(line)) : undefined;
     // After the recording, GPT-Live should wait for the caller instead of greeting again.

@@ -1,8 +1,16 @@
-import type { LegalDocument } from "./types"
+import { processorNames } from "./processor"
+import type { LegalDocument, LegalProcessor } from "./types"
+
+// 12.2 says who sells. Polar resells the plans as the merchant of record. With Stripe the operator sells
+// them and Stripe only processes the payment, which the operator's lawyer reviews before live payments.
+const payment: Record<LegalProcessor, string> = {
+  polar: `12.2 <strong>Plaćanje.</strong> Naš pružalac usluga obrade plaćanja, trenutno Polar, obrađuje kupovinu i naplatu. Ovlašćujete nas i kompaniju Polar da o dospeću teretimo Vaše sredstvo plaćanja za naknade za pretplatu, troškove potrošnje i poreze. Na Vašu kupovinu se primenjuju i uslovi kompanije Polar.`,
+  stripe: `12.2 <strong>Plaćanje.</strong> Naš pružalac usluga obrade plaćanja, trenutno Stripe, za nas obrađuje kupovinu i naplatu. Mi smo prodavac, i ovlašćujete nas da o dospeću, preko kompanije Stripe, teretimo Vaše sredstvo plaćanja za naknade za pretplatu, troškove potrošnje i poreze. Na obradu Vašeg plaćanja se primenjuju i uslovi kompanije Stripe.`,
+}
 
 const support = `<a href="mailto:support@lobbystack.com">support@lobbystack.com</a>`
 
-export const termsSr: LegalDocument = {
+export const termsSr = (processor: LegalProcessor): LegalDocument => ({
   updated: "Poslednje ažuriranje: 26. septembar 2026.",
   h1: "Uslovi korišćenja",
   intro: `Ovi Uslovi korišćenja („Uslovi“) uređuju Vaše korišćenje hostovane usluge, sajtova i podrške kompanije LobbyStack. Pročitajte ih pre nego što počnete da koristite LobbyStack. Oni ograničavaju našu odgovornost, čine Vas odgovornim za pristanak na snimanje poziva i za usklađenost SMS poruka sa propisima i utvrđuju način na koji rešavamo sporove.`,
@@ -145,7 +153,7 @@ export const termsSr: LegalDocument = {
       nav: "Treća lica",
       title: "11. Usluge trećih lica",
       blocks: [
-        `11.1 Usluga se oslanja na Usluge trećih lica, uključujući OpenAI za AI glas i tekst, Twilio za brojeve telefona, pozive i SMS poruke, Google Calendar kada ga povežete, Polar za naplatu i Firecrawl kada uvezete svoj sajt. <a href="/sr/privacy/">Politika privatnosti</a> navodi pružaoce usluga koji obrađuju podatke o ličnosti.`,
+        `11.1 Usluga se oslanja na Usluge trećih lica, uključujući OpenAI za AI glas i tekst, Twilio za brojeve telefona, pozive i SMS poruke, Google Calendar kada ga povežete, ${processorNames[processor]} za naplatu i Firecrawl kada uvezete svoj sajt. <a href="/sr/privacy/">Politika privatnosti</a> navodi pružaoce usluga koji obrađuju podatke o ličnosti.`,
         `11.2 Kada povežete ili koristite Uslugu trećeg lica, na Vas se primenjuju i njeni uslovi i pravila. Odgovorni ste za njihovo poštovanje i za svaki nalog koji imate kod tog pružaoca usluga.`,
         `11.3 Ne kontrolišemo Usluge trećih lica i nismo odgovorni za njihovu dostupnost, tačnost, bezbednost, cene ili izmene. Ako pružalac usluga izmeni ili ukine uslugu na koju se oslanjamo, možemo izmeniti ili ukloniti odgovarajuću funkciju.`,
       ],
@@ -156,12 +164,12 @@ export const termsSr: LegalDocument = {
       title: "12. Paketi, naknade i naplata",
       blocks: [
         `12.1 <strong>Paketi.</strong> Nudimo paket Free, plaćene pakete Starter i Pro i pakete Enterprise na osnovu Porudžbine. <a href="/sr/pricing/">Stranica sa cenama</a>, proces kupovine ili Vaša Porudžbina utvrđuju važeće cene, uključenu potrošnju i cene prekoračenja.`,
-        `12.2 <strong>Plaćanje.</strong> Naš pružalac usluga obrade plaćanja, trenutno Polar, obrađuje kupovinu i naplatu. Ovlašćujete nas i kompaniju Polar da o dospeću teretimo Vaše sredstvo plaćanja za naknade za pretplatu, troškove potrošnje i poreze. Na Vašu kupovinu se primenjuju i uslovi kompanije Polar.`,
+        payment[processor],
         `12.3 <strong>Automatsko obnavljanje.</strong> Plaćeni paketi se automatski obnavljaju na kraju svakog mesečnog ili godišnjeg perioda po tada važećoj ceni, sve dok ih ne otkažete. Možete ih otkazati na kontrolnoj tabli ili kontaktiranjem podrške. Otkazivanje proizvodi dejstvo na kraju tekućeg perioda.`,
         `12.4 <strong>Troškovi potrošnje.</strong> Plaćeni paketi uključuju utvrđene količine potrošnje, kao što su minuti razgovora i SMS obaveštenja. Potrošnja iznad tih količina naplaćuje se kao prekoračenje po cenama prikazanim na stranici sa cenama ili u Vašoj Porudžbini. Merodavne su naše evidencije o potrošnji i evidencije naših pružalaca usluga, osim ako sadrže očiglednu grešku.`,
         `12.5 <strong>Limiti potrošnje.</strong> Na paketima Starter i Pro možete postaviti limit potrošnje za prekoračenje. Kada ga dostignete, Usluga zaustavlja funkcije koje bi stvorile dodatne troškove prekoračenja do sledećeg obračunskog perioda ili dok ne povećate limit. <strong>To znači da AI recepcioner može prestati da odgovara na pozive.</strong> Limit ograničava samo troškove prekoračenja. Ne ograničava naknade za pretplatu niti poreze. Nismo odgovorni za pozive propuštene zbog limita ili zato što ste iskoristili uključenu potrošnju.`,
         `12.6 <strong>Porezi.</strong> Cene ne uključuju poreze, osim ako je drugačije navedeno. Plaćate sve poreze na promet, upotrebu, robu i usluge, dodatu vrednost i slične poreze, osim poreza na naš prihod.`,
-        `12.7 <strong>Zakasnelo ili neuspelo plaćanje.</strong> Ako plaćanje ne uspe, mi ili Polar možemo ponovo pokušati naplatu. Ako iznos ostane neplaćen, možemo suspendovati Vaš nalog ili ga prebaciti na niži paket, osloboditi Vaš broj telefona ili zatvoriti Vaš nalog.`,
+        `12.7 <strong>Zakasnelo ili neuspelo plaćanje.</strong> Ako plaćanje ne uspe, mi ili ${processorNames[processor]} možemo ponovo pokušati naplatu. Ako iznos ostane neplaćen, možemo suspendovati Vaš nalog ili ga prebaciti na niži paket, osloboditi Vaš broj telefona ili zatvoriti Vaš nalog.`,
         `12.8 <strong>Povraćaj novca.</strong> Naknade se ne vraćaju, uključujući slučajeve delimičnih perioda, neiskorišćene potrošnje, prelaska na niži paket i otkazivanja, osim ako zakon zahteva drugačije ili se pisanim putem drugačije ne saglasimo.`,
         `12.9 <strong>Izmene cena.</strong> Možemo menjati cene i uključenu potrošnju. Za aktivan plaćeni paket obavestićemo Vas najmanje 30 dana unapred, a izmena se primenjuje od Vašeg sledećeg obnavljanja. Ako se ne slažete, otkažite paket pre obnavljanja.`,
         `12.10 <strong>Sporovi oko naplate.</strong> Dužni ste da nas o sporu oko naplate obavestite u roku od 60 dana od zaduženja. Kontaktirajte nas pre nego što pokrenete osporavanje transakcije kod izdavaoca kartice (chargeback).`,
@@ -379,4 +387,4 @@ export const termsSr: LegalDocument = {
       ],
     },
   ],
-}
+})

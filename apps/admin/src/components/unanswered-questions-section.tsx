@@ -1,12 +1,14 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTable, type PaginationState } from "@tanstack/react-table";
 import { MessageCircleQuestionMark } from "lucide-react";
-import { Fragment, useCallback, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { useReceptionistChoices, useReceptionistFilter, receptionistQuery } from "@/components/receptionists/receptionist-choices";
+import { DataTablePagination, paginationFeatures } from "@/components/data-table/pagination";
 import { ReceptionistFilter } from "@/components/receptionists/receptionist-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,16 +35,21 @@ const MAX_ANSWER_LENGTH = 5_000;
 
 const errorCode = (error: unknown) => (error as { code?: unknown } | null)?.code;
 
-/** The open questions, or with a receptionist the ones it heard, under one key per business so a change refreshes them all. */
-export const unansweredQuestionsQueryKey = (businessId: string | undefined, receptionistId: string | null = null) => receptionistId ? ["unanswered-questions", businessId, receptionistId] as const : ["unanswered-questions", businessId] as const;
+/** A page of the list: its number from 0 and how many questions it holds. */
+export type QuestionsPage = { pageIndex: number; pageSize: number };
 
-export function fetchUnansweredQuestions(businessId: string, receptionistId: string | null = null): Promise<UnansweredQuestions> {
-  return requestJson<UnansweredQuestions>(`/api/knowledge/questions?businessId=${encodeURIComponent(businessId)}${receptionistQuery(receptionistId)}`);
+/** The open questions, or with a receptionist the ones it heard, or a page of them, under one key per business so a change refreshes them all. */
+export const unansweredQuestionsQueryKey = (businessId: string | undefined, receptionistId: string | null = null, page?: QuestionsPage) => ["unanswered-questions", businessId, ...(receptionistId ? [receptionistId] : []), ...(page ? ["page", page.pageIndex, page.pageSize] : [])] as const;
+
+/** The open questions, most asked first: the first 50 without a page, as Home's card reads them. */
+export function fetchUnansweredQuestions(businessId: string, receptionistId: string | null = null, page?: QuestionsPage): Promise<UnansweredQuestions> {
+  const paging = page ? `&limit=${page.pageSize}&offset=${page.pageIndex * page.pageSize}` : "";
+  return requestJson<UnansweredQuestions>(`/api/knowledge/questions?businessId=${encodeURIComponent(businessId)}${receptionistQuery(receptionistId)}${paging}`);
 }
 
 /** Open questions the receptionist couldn't answer, most asked first. Owners and admins answer or dismiss them. */
 export function UnansweredQuestionsSection({ businessId, canManage }: { businessId: string; canManage: boolean }) {
-  const { i18n, t } = useTranslation(["knowledge", "receptionists"]);
+  const { i18n, t } = useTranslation(["knowledge", "receptionists", "agent"]);
   const queryClient = useQueryClient();
   const [answering, setAnswering] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -54,7 +61,27 @@ export function UnansweredQuestionsSection({ businessId, canManage }: { business
   const { receptionists } = useReceptionistChoices(businessId);
   const several = receptionists.length > 1;
   const [receptionistId] = useReceptionistFilter();
-  const questions = useQuery({ queryKey: unansweredQuestionsQueryKey(businessId, receptionistId), queryFn: () => fetchUnansweredQuestions(businessId, receptionistId) });
+  // 10 questions a page, as the tables start.
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 });
+  const questions = useQuery({
+    queryKey: unansweredQuestionsQueryKey(businessId, receptionistId, pagination),
+    queryFn: () => fetchUnansweredQuestions(businessId, receptionistId, pagination),
+    // The page on screen stays while the next one loads.
+    placeholderData: keepPreviousData,
+  });
+  const total = questions.data?.openCount ?? 0;
+  // Another receptionist's questions start at their first page.
+  useEffect(() => {
+    setPagination((current) => (current.pageIndex === 0 ? current : { ...current, pageIndex: 0 }));
+  }, [receptionistId]);
+  // Answering or dismissing the last question of the last page goes back a page.
+  useEffect(() => {
+    if (!questions.data) return;
+    setPagination((current) => {
+      const lastPage = Math.max(0, Math.ceil(total / current.pageSize) - 1);
+      return current.pageIndex > lastPage ? { ...current, pageIndex: lastPage } : current;
+    });
+  }, [total, questions.data]);
   const refresh = async (answered: boolean) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: unansweredQuestionsQueryKey(businessId) }),
@@ -90,6 +117,8 @@ export function UnansweredQuestionsSection({ businessId, canManage }: { business
   const locale = intlLocale(i18n.resolvedLanguage ?? i18n.language);
   const formatDate = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(value));
   const open = questions.data?.questions ?? [];
+  // The tables' pagination, driven by the page of questions the server sent.
+  const table = useTable({ features: paginationFeatures, columns: [], data: open, manualPagination: true, rowCount: total, onPaginationChange: setPagination, state: { pagination } });
   const heardBy = (askers: QuestionAsker[]) => {
     const names = askers.map((asker) => asker.archived ? t("receptionists:record.archived", { name: asker.name }) : asker.name);
     const more = names.length - NAMES_SHOWN;
@@ -108,9 +137,10 @@ export function UnansweredQuestionsSection({ businessId, canManage }: { business
       className="w-full sm:w-72"
       counts={questions.data?.openByReceptionist ? { byReceptionist: questions.data.openByReceptionist, label: (count) => t("unansweredQuestions.home.count", { count }) } : undefined}
     />
-    {questions.isLoading ? <Card className="border-border/70"><CardContent className="flex flex-col gap-4">{Array.from({ length: 3 }, (_, index) => <div className="flex flex-col gap-2" key={index}><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div>)}</CardContent></Card>
+    {/* A page past the last, after its last question went, shows as loading until it moves back. */}
+    {questions.isLoading || (!open.length && total > 0) ? <Card className="border-border/70"><CardContent className="flex flex-col gap-4">{Array.from({ length: 3 }, (_, index) => <div className="flex flex-col gap-2" key={index}><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div>)}</CardContent></Card>
       : questions.isError ? <p className="px-1 text-sm text-destructive">{t("unansweredQuestions.loadFailed")}</p>
-      : open.length ? <Card className="ph-mask border-border/70"><CardContent><ItemGroup>
+      : open.length ? <><Card className="ph-mask border-border/70"><CardContent><ItemGroup>
         {open.map((question, index) => {
           const editing = answering === question.id;
           const askers = question.askedOf ?? [];
@@ -155,6 +185,7 @@ export function UnansweredQuestionsSection({ businessId, canManage }: { business
           </Fragment>;
         })}
       </ItemGroup></CardContent></Card>
+        <DataTablePagination labels={{ rowsPerPage: t("agent:pagination.rowsPerPage"), pageOf: (page, pages) => t("agent:pagination.pageOf", { page, total: pages }), firstPage: t("agent:pagination.firstPage"), previousPage: t("agent:pagination.previousPage"), nextPage: t("agent:pagination.nextPage"), lastPage: t("agent:pagination.lastPage"), goToPage: (page) => t("agent:pagination.goToPage", { page }) }} table={table} /></>
       : <div className="rounded-xl border border-dashed p-8 text-center"><p className="type-empty-title">{t("unansweredQuestions.emptyTitle")}</p><p className="type-empty-description mt-2">{t("unansweredQuestions.emptyDescription")}</p></div>}
   </section>;
 }

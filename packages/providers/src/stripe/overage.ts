@@ -33,31 +33,45 @@ export const stripeOverageLookupKeys = (currency: string) => Object.values(strip
 /**
  * The plan subscription's overage subscription, made once: one a try that
  * died made is found again by its metadata, and one set to end with its month
- * is kept on. One that ended is replaced, unless it's owing (see owing). The
- * checkout's card moves from the plan subscription to the customer, so a card
- * changed in the portal pays for both.
+ * is kept on. A customer has one at a time, whatever plan it came with: the
+ * meters count by customer, so a second would bill the same usage again, as
+ * when a business buys a plan again before the last one's overage month ends.
+ * One that ended is replaced, unless one is owing (see owing). The checkout's
+ * card moves from the plan subscription to the customer, so a card changed in
+ * the portal pays for both.
  */
 export async function ensureStripeOverage(api: StripeApi, input: Parameters<NonNullable<BillingProvider["ensureOverage"]>>[0]): ReturnType<NonNullable<BillingProvider["ensureOverage"]>> {
+  if (input.onPlan) {
+    // Sold on the plan's checkout, overage bills on the plan subscription, which must hold all three prices.
+    const prices = await stripeOveragePrices(api, input.currency);
+    const plan = await api.subscriptions.retrieve(input.planSubscriptionId);
+    const held = new Set(plan.items.data.map((item) => item.price.id));
+    const lacking = prices.filter((price) => !held.has(price));
+    if (lacking.length) throw new BillingProviderError("stripe", "not_found", `The plan subscription ${plan.id} lacks ${lacking.length} of the overage prices its checkout sells (${lacking.join(", ")}), so its usage past the allowance can't be billed.`);
+    return { subscriptionId: plan.id };
+  }
   const subscriptions = await api.subscriptions.list({ customer: input.customerId, status: "all", limit: 100, expand: ["data.latest_invoice"] });
-  const plans = subscriptions.data.filter((subscription) => subscription.metadata?.lobbystack_role === "overage" && subscription.metadata?.lobbystack_plan_subscription === input.planSubscriptionId);
-  const unpaid = plans.find(owing);
+  const overages = subscriptions.data.filter((subscription) => subscription.metadata?.lobbystack_role === "overage");
+  const unpaid = overages.find(owing);
   if (unpaid) return { unpaidSubscriptionId: unpaid.id };
-  const found = plans.find((subscription) => !endedStates.has(subscription.status));
+  const plans = overages.filter((subscription) => subscription.metadata?.lobbystack_plan_subscription === input.planSubscriptionId);
+  const live = overages.filter((subscription) => !endedStates.has(subscription.status));
+  const found = live.find((subscription) => plans.includes(subscription)) ?? live[0];
   if (found) {
-    if (found.cancel_at_period_end || found.cancel_at) await api.subscriptions.update(found.id, { cancel_at: "", cancel_at_period_end: false });
+    // Stripe takes one of the two at a time; cancel_at_period_end sets cancel_at too.
+    const end = found.cancel_at_period_end ? { cancel_at_period_end: false } : found.cancel_at ? { cancel_at: "" as const } : {};
+    const moved = found.metadata?.lobbystack_plan_subscription !== input.planSubscriptionId ? { metadata: { lobbystack_plan_subscription: input.planSubscriptionId } } : {};
+    if (Object.keys(end).length || Object.keys(moved).length) await api.subscriptions.update(found.id, { ...end, ...moved });
     return { subscriptionId: found.id };
   }
-  const lookupKeys = stripeOverageLookupKeys(input.currency);
-  const prices = await api.prices.list({ lookup_keys: lookupKeys, active: true, limit: 10 });
-  const items = lookupKeys.map((key) => prices.data.find((price) => price.lookup_key === key)).filter((price) => price !== undefined);
-  if (items.length !== lookupKeys.length) throw new BillingProviderError("stripe", "not_found", `Stripe sells ${items.length} of the ${lookupKeys.length} overage prices (${lookupKeys.join(", ")}). Run pnpm billing apply --stripe.`);
+  const items = await stripeOveragePrices(api, input.currency);
   const plan = await api.subscriptions.retrieve(input.planSubscriptionId);
   const card = typeof plan.default_payment_method === "string" ? plan.default_payment_method : plan.default_payment_method?.id ?? null;
   if (card) await api.customers.update(input.customerId, { invoice_settings: { default_payment_method: card } });
   // The key counts the plan's overage subscriptions so far, so Stripe never answers a replacement with the one before.
   const made = await api.subscriptions.create({
     customer: input.customerId,
-    items: items.map((price) => ({ price: price.id })),
+    items: items.map((price) => ({ price })),
     billing_cycle_anchor_config: { day_of_month: 1, hour: 0, minute: 0, second: 0 },
     proration_behavior: "none",
     automatic_tax: { enabled: true },
@@ -66,6 +80,15 @@ export async function ensureStripeOverage(api: StripeApi, input: Parameters<NonN
   // Both subscriptions pay with the customer's default card from now on.
   if (card) await api.subscriptions.update(input.planSubscriptionId, { default_payment_method: "" });
   return { subscriptionId: made.id };
+}
+
+/** The three overage prices Stripe sells in the currency, by lookup key, or a refusal naming the ones missing. */
+export async function stripeOveragePrices(api: StripeApi, currency: string): Promise<string[]> {
+  const lookupKeys = stripeOverageLookupKeys(currency);
+  const prices = await api.prices.list({ lookup_keys: lookupKeys, active: true, limit: 10 });
+  const found = lookupKeys.map((key) => prices.data.find((price) => price.lookup_key === key)).filter((price) => price !== undefined);
+  if (found.length !== lookupKeys.length) throw new BillingProviderError("stripe", "not_found", `Stripe sells ${found.length} of the ${lookupKeys.length} overage prices (${lookupKeys.join(", ")}). Run pnpm billing apply --stripe.`);
+  return found.map((price) => price.id);
 }
 
 /**

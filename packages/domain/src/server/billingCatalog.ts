@@ -7,6 +7,7 @@ import { billingPlans, billingPrices, billingRuns, withBusinessTransaction, type
 import type { BillingEnv, BillingProviderId } from "@lobbystack/providers/billing/types";
 import {
   DEFAULT_PLAN_RECEPTIONISTS,
+  billingProfileForProvider,
   billingProfileHash,
   canonicalBillingProfileJson,
   canonicalJson,
@@ -381,10 +382,9 @@ function runResource(row: Row): ApiBillingCatalogRun {
 
 type CatalogState = { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; latest: Row | null; latestLink: Row | null };
 
-/** The latest run of a kind; link means a link to any provider, whether its row says polar or link. */
+/** The latest run of a kind; link means a link to any provider. */
 async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "link" | "verify"): Promise<Row | null> {
-  const kinds = kind === "link" ? ["polar", "link"] : [kind];
-  const [row] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind in (${sql.join(kinds.map((entry) => sql`${entry}`), sql`, `)}) order by started_at desc, id desc limit 1`)).rows;
+  const [row] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind = ${kind} order by started_at desc, id desc limit 1`)).rows;
   return row ?? null;
 }
 
@@ -549,6 +549,15 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
     // The provider's block says how it sells: proration, the portal and, on Stripe, tax.
     const own = deploymentProvider(deployment);
     if (!profile[own.id]) refusals.push({ code: "provider_block_missing", message: `This deployment bills through ${billingProviderNames[own.id]}, and the file has no ${own.id} block. Add one in a pull request.`, path: `billing_file.${own.id}` });
+    // A linked Stripe deployment keeps how it sells: its customers' subscriptions were made that way, and switching
+    // would put the overage prices on new plan subscriptions while older ones keep an overage subscription of
+    // their own, so Stripe's meters, which count by customer, would bill the same usage twice.
+    const sold = (current.latest?.profile as { stripe?: Partial<Record<"overage" | "managedPayments", unknown>> } | null | undefined)?.stripe;
+    if (own.id === "stripe" && current.latestLink && sold && profile.stripe) {
+      for (const field of ["overage", "managedPayments"] as const) {
+        if (sold[field] !== undefined && sold[field] !== profile.stripe[field]) refusals.push({ code: "selling_mode_changed", message: `This deployment sells with stripe.${field} ${JSON.stringify(sold[field])}, and it stays with it: its customers' subscriptions were made that way. Another way of selling gets a deployment of its own.`, path: `billing_file.stripe.${field}` });
+      }
+    }
     if (codeHash !== hash && !allowUndeployed) {
       refusals.push({ code: "file_not_deployed", message: codeHash === null ? `The running code has no billing.json for ${body.brand}. Deploy it first, or send allow_undeployed: true to try the file on a sandbox.` : `This file isn't the one the running code was built with (${codeHash.slice(0, 12)}). Deploy the merged file first, or send allow_undeployed: true to try it on a sandbox.`, path: "billing_file" });
     }
@@ -556,7 +565,7 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
       refusals.push({ code: "catalog_changed", message: latestHash === null ? "Nothing was applied yet, so there is no run to replace. Run a dry run again." : `The latest catalog run has hash ${latestHash}, so someone applied in between. Run a dry run again.`, path: "replaces_hash" });
     }
     const now = new Date().toISOString();
-    const diff = diffBillingCatalog({ plans: desiredBillingPlans(profile), currency: profile.currency, current, now });
+    const diff = diffBillingCatalog({ plans: desiredBillingPlans(billingProfileForProvider(profile, own.id)), currency: profile.currency, current, now });
     refusals.push(...diff.refusals);
     const changes = diff.writes.map((write) => write.change);
     const base = {
@@ -819,7 +828,8 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
     if (refusals.length) throw new PublicApiError(409, "conflict", `${link.provider === "polar" ? "Polar's products" : `${name}'s objects`} can't be linked: ${[...new Set(refusals.map((refusal) => refusal.code))].join(", ")}. details lists each reason.`, refusals.map((refusal) => ({ path: refusal.path, message: refusal.message, code: refusal.code })));
 
     const [run] = await tx.insert(billingRuns).values({
-      kind: base.kind,
+      // Stored as link for every provider; runResource shows Polar's as polar.
+      kind: "link",
       startedAt: runStart(latestLink),
       status: changes.length ? "applied" : "unchanged",
       brand: link.brand,
@@ -930,18 +940,36 @@ const prorations = ["invoice", "prorate", "next_period", "reset"] as const;
 export type PlanChangeProration = (typeof prorations)[number];
 
 /**
- * How a plan change asks Polar to charge: billing.json's polar.upgradeProration
- * for an upgrade and downgradeProration for a downgrade, from the latest apply.
- * Before the first apply, the values the brand files ship with: an upgrade is
- * invoiced at once and a downgrade waits for the next period.
+ * How the last applied billing.json charges plan changes on the deployment's
+ * provider: the polar block's upgradeProration and downgradeProration, or the
+ * stripe block's upgrade and downgrade. Before the first apply, the values the
+ * brand files ship with: an upgrade is invoiced at once and a downgrade waits
+ * for the next period.
  */
-/** How the last applied billing.json charges plan changes on the deployment's provider: Polar's proration words, or the stripe block's upgrade and downgrade. */
 export async function loadPlanChangeProration(context: DomainContext, provider: BillingProviderId = "polar"): Promise<{ upgrade: PlanChangeProration; downgrade: PlanChangeProration }> {
   const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
   const profile = latest?.profile as { polar?: Record<string, unknown>; stripe?: Record<string, unknown> } | null | undefined;
   const pick = (value: unknown, fallback: PlanChangeProration): PlanChangeProration => (prorations as readonly unknown[]).includes(value) ? value as PlanChangeProration : fallback;
   if (provider === "stripe") return { upgrade: pick(profile?.stripe?.upgrade, "invoice"), downgrade: pick(profile?.stripe?.downgrade, "next_period") };
   return { upgrade: pick(profile?.polar?.upgradeProration, "invoice"), downgrade: pick(profile?.polar?.downgradeProration, "next_period") };
+}
+
+/**
+ * How the last applied billing.json sells on Stripe: its stripe block's
+ * managedPayments and overage, its currency, and the hours Stripe waits
+ * before finalizing an invoice with usage (usageGraceHours, 1 unless set);
+ * Stripe directly without a block.
+ */
+export async function loadStripeSelling(context: DomainContext): Promise<{ managedPayments: boolean; overage: "separate" | "checkout"; currency: string | null; usageGraceHours: number }> {
+  const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
+  const profile = latest?.profile as { currency?: unknown; stripe?: { managedPayments?: unknown; overage?: unknown; usageGraceHours?: unknown } } | null | undefined;
+  const hours = profile?.stripe?.usageGraceHours;
+  return {
+    managedPayments: profile?.stripe?.managedPayments === true,
+    overage: profile?.stripe?.overage === "checkout" ? "checkout" : "separate",
+    currency: typeof profile?.currency === "string" ? profile.currency : null,
+    usageGraceHours: typeof hours === "number" && Number.isInteger(hours) && hours >= 1 && hours <= 72 ? hours : 1,
+  };
 }
 
 const runKinds = ["catalog", "polar", "link", "verify"] as const;
@@ -953,9 +981,8 @@ export async function listBillingCatalogRunsForApi(context: DomainContext, input
   if (input.kind !== undefined && !(runKinds as readonly string[]).includes(input.kind)) throw invalidRequest("kind must be catalog, polar, link or verify.", [{ path: "kind", message: "One of catalog, polar, link or verify." }]);
   // Run times are stored to the millisecond, as the cursor carries them, so the comparison is exact.
   const conditions: SQL[] = [];
-  // polar: Polar's links, whether the row says polar or link. link: every provider's links.
-  if (input.kind === "polar") conditions.push(sql`(kind = 'polar' or (kind = 'link' and provider = 'polar'))`);
-  else if (input.kind === "link") conditions.push(sql`kind in ('polar', 'link')`);
+  // polar: Polar's links, as the API has named them. link: every provider's links.
+  if (input.kind === "polar") conditions.push(sql`kind = 'link' and provider = 'polar'`);
   else if (input.kind !== undefined) conditions.push(sql`kind = ${input.kind}`);
   if (cursor) conditions.push(sql`(started_at, id) < (${cursor.at.toISOString()}::timestamptz, ${cursor.id}::uuid)`);
   const where = conditions.length ? sql`where ${sql.join(conditions, sql` and `)}` : sql``;

@@ -8,6 +8,7 @@ import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import en from "../../public/locales/en/knowledge.json";
+import enAgent from "../../public/locales/en/agent.json";
 import enCommon from "../../public/locales/en/common.json";
 import enReceptionists from "../../public/locales/en/receptionists.json";
 import es from "../../public/locales/es/knowledge.json";
@@ -39,15 +40,17 @@ const listed: UnansweredQuestions = {
   ],
 };
 
-type Setup = { strings?: typeof en; data?: UnansweredQuestions; canManage?: boolean; locale?: "en" | "fr" | "es" | "sr"; patch?: () => Response; cached?: boolean; receptionists?: ReceptionistOption[] };
-async function setup({ strings = en, data = listed, canManage = true, locale = "en", patch = () => Response.json({ ok: true }), cached = true, receptionists = [FRONT_DESK] }: Setup = {}) {
+type Setup = { strings?: typeof en; data?: UnansweredQuestions; list?: (url: string) => UnansweredQuestions; canManage?: boolean; locale?: "en" | "fr" | "es" | "sr"; patch?: () => Response; cached?: boolean; receptionists?: ReceptionistOption[] };
+/** The list's first page, as it opens. */
+const FIRST_PAGE = { pageIndex: 0, pageSize: 10 };
+async function setup({ strings = en, data = listed, list, canManage = true, locale = "en", patch = () => Response.json({ ok: true }), cached = true, receptionists = [FRONT_DESK] }: Setup = {}) {
   const i18n = createInstance();
-  await i18n.init({ lng: locale, defaultNS: "knowledge", interpolation: { escapeValue: false }, resources: { en: { knowledge: strings, common: enCommon, receptionists: enReceptionists }, fr: { knowledge: fr }, es: { knowledge: es }, sr: { knowledge: sr } } });
+  await i18n.init({ lng: locale, defaultNS: "knowledge", interpolation: { escapeValue: false }, resources: { en: { knowledge: strings, common: enCommon, receptionists: enReceptionists, agent: enAgent }, fr: { knowledge: fr }, es: { knowledge: es }, sr: { knowledge: sr } } });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
-  if (cached) client.setQueryData(unansweredQuestionsQueryKey("business"), data);
+  if (cached) client.setQueryData(unansweredQuestionsQueryKey("business", null, FIRST_PAGE), data);
   client.setQueryData(receptionistChoicesQueryKey("business"), { receptionists });
-  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method ? patch() : Response.json(data));
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => init?.method ? patch() : Response.json(list ? list(url) : data));
   vi.stubGlobal("fetch", fetchMock);
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><UnansweredQuestionsSection businessId="business" canManage={canManage} /></QueryClientProvider></I18nextProvider>);
   return { fetchMock, i18n, client };
@@ -142,7 +145,23 @@ describe("the unanswered questions list", () => {
   it("loads its business's list when nothing is cached", async () => {
     const { fetchMock } = await setup({ cached: false });
     expect(await screen.findByText("Do you validate parking?")).toBeTruthy();
-    expect(listRequests(fetchMock).map(([url]) => url)).toEqual(["/api/knowledge/questions?businessId=business"]);
+    expect(listRequests(fetchMock).map(([url]) => url)).toEqual(["/api/knowledge/questions?businessId=business&limit=10&offset=0"]);
+  });
+
+  it("lists 10 questions a page and asks the server for the page picked", async () => {
+    const questions = (from: number, count: number) => Array.from({ length: count }, (_, index) => ({ id: `q${from + index}`, question: `Question ${from + index + 1}?`, timesAsked: 1, firstAskedAt: "2026-10-01T12:00:00Z", lastAskedAt: "2026-10-01T12:00:00Z", lastChannel: "voice" }));
+    const pages: Record<string, UnansweredQuestions> = { 0: { openCount: 23, questions: questions(0, 10) }, 10: { openCount: 23, questions: questions(10, 10) }, 20: { openCount: 23, questions: questions(20, 3) } };
+    const { fetchMock } = await setup({ cached: false, list: (url) => pages[new URL(url, "https://admin.example").searchParams.get("offset") ?? "0"]! });
+    expect(await screen.findByText("Question 1?")).toBeTruthy();
+    expect(screen.getAllByText(/^Question \d+\?$/u)).toHaveLength(10);
+    expect(screen.getAllByText("Page 1 of 3").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByText("Question 11?")).toBeTruthy();
+    expect(screen.queryByText("Question 1?")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^Go to page 3/ }));
+    expect(await screen.findByText("Question 23?")).toBeTruthy();
+    expect(screen.getAllByText(/^Question \d+\?$/u)).toHaveLength(3);
+    expect(listRequests(fetchMock).map(([url]) => new URL(url, "https://admin.example").search)).toEqual(["?businessId=business&limit=10&offset=0", "?businessId=business&limit=10&offset=10", "?businessId=business&limit=10&offset=20"]);
   });
 
   it("shows teammates who can't edit knowledge the questions without actions", async () => {
@@ -197,7 +216,7 @@ describe("questions with several receptionists", () => {
     expect(kitsilano.textContent).toContain("2 questions your receptionist couldn't answer");
     await user.click(kitsilano);
     expect(testNavigation.router.replace).toHaveBeenLastCalledWith(`/agent/questions?receptionist=${KITSILANO.id}`, { scroll: false });
-    await waitFor(() => expect(listRequests(fetchMock).map(([url]) => url)).toContain(`/api/knowledge/questions?businessId=business&receptionist=${KITSILANO.id}`));
+    await waitFor(() => expect(listRequests(fetchMock).map(([url]) => url)).toContain(`/api/knowledge/questions?businessId=business&receptionist=${KITSILANO.id}&limit=10&offset=0`));
   });
 
   it("saves an answer for only the receptionists that heard it, once asked to", async () => {

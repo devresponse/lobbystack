@@ -658,6 +658,13 @@ export function isBillingPackStatus(value: string | null | undefined): value is 
   return (billingPackStatuses as readonly (string | null | undefined)[]).includes(value);
 }
 
+/**
+ * The error of a pack checkout that a plan's start closed, since a pack paid
+ * after the plan started would end at once. The API answers it as the
+ * checkout's error, which the CLI tells apart from a provider's failure.
+ */
+export const PACK_CHECKOUT_CLOSED_FOR_PLAN = "A plan started for this business, so this pack's checkout closed.";
+
 /** What a pack gives a business each UTC month while it lasts, and its limits: everything but the minutes, which last the whole pack. */
 export type BillingPackIncluded = {
   alertSmsSegments: number;

@@ -8,6 +8,7 @@ import { apiPackCheckoutSchema } from "@lobbystack/shared";
 import { createBillingCheckoutRequestInTransaction, loadBillingCheckoutRequest, OPEN_PURCHASE_REFUSAL, setManagedPlanInTransaction } from "./billing";
 import { claimPackCheckout, createPackCheckoutRequest, createPackCheckoutRequestInTransaction, loadPackCheckoutRequest, markPackCheckoutFailed, markPackCheckoutPaidInTransaction, markPackCheckoutReady, PACK_CHECKOUT_PAGE_MS, readPackCheckoutInTransaction, releasePackCheckout } from "./billingPackCheckout";
 import { createBillingSubscriptionRequestInTransaction } from "./billingSubscription";
+import { PACK_CHECKOUT_CLOSED_FOR_PLAN } from "./billingPacks";
 import { workUnderWay } from "./businessDeletion";
 import { generateApiKey } from "./publicApi/apiKeys";
 import { PublicApiError } from "./publicApi/errors";
@@ -441,6 +442,13 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       expect(await workUnderWay(tx, businessId)).toBeNull();
       // Paid, failed or expired ones are done.
       await tx.update(billingPackCheckouts).set({ status: "paid", expiresAt: new Date(Date.now() + 30 * MINUTE) }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
+      expect(await workUnderWay(tx, businessId)).toBeNull();
+      await tx.update(billingPackCheckouts).set({ status: "expired" }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
+      expect(await workUnderWay(tx, businessId)).toBeNull();
+      // One a plan's start closed stays payable on Polar, and on Stripe until the close went through, so it counts until its page expires.
+      await tx.update(billingPackCheckouts).set({ error: PACK_CHECKOUT_CLOSED_FOR_PLAN }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
+      expect(await workUnderWay(tx, businessId)).toBe("checkout_open");
+      await tx.update(billingPackCheckouts).set({ expiresAt: new Date(Date.now() - MINUTE) }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
       expect(await workUnderWay(tx, businessId)).toBeNull();
     });
   });

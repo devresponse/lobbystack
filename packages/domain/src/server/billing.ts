@@ -16,7 +16,7 @@ import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
 import { dateField, numberField, recordObject, stringField } from "./billingFields";
-import { applyPackEventInTransaction, applyStripePackRefundInTransaction, packsGiveWayToSubscriptionInTransaction, type PackEventInput } from "./billingPackEvents";
+import { applyPackEventInTransaction, applyStripePackRefundInTransaction, packsGiveWayToSubscriptionInTransaction, subscriptionLiveSince, type PackEventInput } from "./billingPackEvents";
 import { clearPackNumberReleaseInTransaction } from "./billingPacks";
 import { limitsFor, polarProductLinks, readBillingCatalogSnapshot, readBillingPlanLimitBook } from "./billingPlans";
 import { readBillingDeployment } from "./billingProvider";
@@ -1219,8 +1219,12 @@ export async function reconcileBillingProviderEvent(
       // A plan with fewer receptionists pauses the newest ones past its number, in a job of its
       // own so nothing about receptionists can hold up the payment.
       if (polarFields.plan || polarFields.subscriptionState) await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_reconcile");
-      // Decision 6, pack to subscription: a subscription that starts ends the live prepaid packs in this transaction.
-      if (startedSubscription) await packsGiveWayToSubscriptionInTransaction(tx, { businessId: input.businessId, at: new Date() });
+      // Decision 6, pack to subscription: a subscription that starts ends the live prepaid packs in this transaction,
+      // and a pack paid after it went live is reported for a refund, whichever event came first.
+      if (startedSubscription) {
+        const subscription = subscriptionId ? { id: subscriptionId, liveSince: subscriptionLiveSince(payload, { eventCreatedAt: event.createdAt, newToAccount: subscriptionId !== existing?.subscriptionId }) } : undefined;
+        await packsGiveWayToSubscriptionInTransaction(tx, { businessId: input.businessId, at: new Date(), ...(subscription ? { subscription } : {}) });
+      }
       // On Stripe, overage is a subscription of its own (the Stripe plan's step 13). billing.ensureOverage gives a
       // live plan without one its overage subscription, takes back an end set while the plan wasn't live, and ends
       // it with its month once the plan has ended. Each plan event that finds one of those to do queues it once.

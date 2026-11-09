@@ -68,7 +68,7 @@ const livePackColumns = {
 };
 
 /** Why a pack checkout a plan's start closed: a pack paid after the plan started would end at once (billingPackEvents.ts). */
-export const PACK_CHECKOUT_CLOSED_FOR_PLAN = "A plan started for this business, so this pack's checkout closed.";
+export { PACK_CHECKOUT_CLOSED_FOR_PLAN } from "@lobbystack/shared";
 
 /** The pack statuses that have ended: an ended pack never comes back. */
 export const endedPackStatuses = ["expired", "replaced", "refunded"] as const satisfies readonly BillingPackStatus[];
@@ -520,8 +520,8 @@ export async function expirePackInTransaction(tx: DatabaseTransaction, input: { 
   return { packId: pack.id, status: "expired", previous: pack.status as BillingPackStatus };
 }
 
-/** A pack a subscription ended, with the seconds it still held. */
-export type ReplacedPack = { id: string; pack: string; unusedSeconds: number };
+/** A pack a subscription's start ended: the seconds it still held, and its payment, reported for a refund when it was paid after that start. */
+export type ReplacedPack = { id: string; pack: string; unusedSeconds: number; paidAt: Date; provider: "polar" | "stripe"; providerRef: string; amountCents: number; currency: string };
 
 /**
  * Ends every live or frozen pack of the business because a subscription
@@ -532,7 +532,7 @@ export type ReplacedPack = { id: string; pack: string; unusedSeconds: number };
 export async function replaceLivePacksInTransaction(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<ReplacedPack[]> {
   await lockBusinessPacks(tx, input.businessId);
   // A pack whose end has come is the expiry job's: it ends expired, as it would have anyway.
-  const packs = await tx.select({ id: billingPacks.id, pack: billingPacks.pack, secondsTotal: billingPacks.secondsTotal, secondsUsed: billingPacks.secondsUsed, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents })
+  const packs = await tx.select({ id: billingPacks.id, pack: billingPacks.pack, secondsTotal: billingPacks.secondsTotal, secondsUsed: billingPacks.secondsUsed, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents, paidAt: billingPacks.paidAt, provider: billingPacks.provider, providerRef: billingPacks.providerRef, currency: billingPacks.currency })
     .from(billingPacks)
     .where(and(eq(billingPacks.businessId, input.businessId), inArray(billingPacks.status, ["active", "frozen"]), or(isNull(billingPacks.endsAt), gt(billingPacks.endsAt, input.at))))
     .for("update");
@@ -541,7 +541,7 @@ export async function replaceLivePacksInTransaction(tx: DatabaseTransaction, inp
     const columns = endedColumns(pack, "replaced", input.at, pack.refundedCents);
     await tx.update(billingPacks).set(columns).where(eq(billingPacks.id, pack.id));
     await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.pack_replaced", entityType: "billing_pack", entityId: pack.id, payload: { pack: pack.pack, unusedSeconds: columns.unusedSeconds } });
-    replaced.push({ id: pack.id, pack: pack.pack, unusedSeconds: columns.unusedSeconds });
+    replaced.push({ id: pack.id, pack: pack.pack, unusedSeconds: columns.unusedSeconds, paidAt: pack.paidAt, provider: pack.provider === "polar" ? "polar" : "stripe", providerRef: pack.providerRef, amountCents: pack.amountCents, currency: pack.currency });
   }
   return replaced;
 }

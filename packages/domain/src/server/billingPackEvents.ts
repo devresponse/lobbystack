@@ -1,7 +1,7 @@
-import { and, eq, gt, inArray, isNull, min, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lte, min, or, sql } from "drizzle-orm";
 
-import { auditLogs, billingAccounts, billingPackCheckouts, billingPackPrices, billingTransactions, enqueueOutbox, providerEvents, type DatabaseTransaction } from "@lobbystack/db";
-import { isPaidSubscription, isReplacedSubscription, isUuid, isYearlyBillingInterval } from "@lobbystack/shared";
+import { auditLogs, billingAccounts, billingPackCheckouts, billingPackPrices, billingPacks, billingTransactions, enqueueOutbox, providerEvents, type DatabaseTransaction } from "@lobbystack/db";
+import { isPaidSubscription, isReplacedSubscription, isUuid, isYearlyBillingInterval, liveSubscriptionStates } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 
@@ -122,17 +122,47 @@ export async function applyStripePackRefundInTransaction(tx: DatabaseTransaction
  * business's live packs, their unused minutes recorded, and the month's
  * allowances count from now. A number set to go once the last pack ended stays.
  * The business's open pack checkouts close too (closePackCheckoutsForPlan).
+ * A pack paid after the subscription went live gave way to it, as switchToPack
+ * says when the subscription's events come first: it is reported with the
+ * payment to refund, whichever events LobbyStack applied first.
  * Returns the packs it ended; none for a business without a live pack.
  */
-export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<string[]> {
+export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransaction, input: { businessId: string; at: Date; subscription?: { id: string; liveSince: Date } }): Promise<string[]> {
   const replaced = await replaceLivePacksInTransaction(tx, input);
   await clearPackNumberReleaseInTransaction(tx, input.businessId);
   if (replaced.length) {
     await tx.update(billingAccounts).set({ allowancesSince: input.at, updatedAt: input.at }).where(eq(billingAccounts.businessId, input.businessId));
     for (const pack of replaced) await publishPackUpdate(tx, input.businessId, pack.id, "replaced");
   }
+  const subscription = input.subscription;
+  if (subscription) {
+    for (const pack of replaced) {
+      if (pack.paidAt <= subscription.liveSince) continue;
+      await reportPackGaveWay(tx, { businessId: input.businessId, packId: pack.id, subscriptionId: subscription.id, payment: { pack: pack.pack, provider: pack.provider, providerRef: pack.providerRef, amountCents: pack.amountCents, currency: pack.currency } });
+    }
+  }
   await closePackCheckoutsForPlan(tx, input);
   return replaced.map((pack) => pack.id);
+}
+
+/**
+ * When a subscription that just started went live, by the provider's clock,
+ * which a pack's paid_at is compared with: the time of the event that started
+ * it, or for a subscription new to the account its start at the provider when
+ * that is earlier, so the answer holds whichever of its events came first.
+ * Stripe stamps seconds (start_date, created), Polar ISO times (started_at,
+ * created_at). LobbyStack's own receipt time when the event names none.
+ */
+export function subscriptionLiveSince(payload: Record<string, unknown>, input: { eventCreatedAt: Date; newToAccount: boolean }): Date {
+  const eventAt = dateField(payload, "subscriptionModifiedAt") ?? dateField(payload, "occurredAt") ?? input.eventCreatedAt;
+  if (!input.newToAccount) return eventAt;
+  const providerStart = [unixSeconds(payload.start_date), unixSeconds(payload.created), dateField(payload, "started_at"), dateField(payload, "created_at")]
+    .filter((at): at is Date => at !== undefined);
+  return new Date(Math.min(eventAt.getTime(), ...providerStart.map((at) => at.getTime())));
+}
+
+function unixSeconds(value: unknown): Date | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? new Date(value * 1000) : undefined;
 }
 
 /**
@@ -146,8 +176,9 @@ export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransa
 async function closePackCheckoutsForPlan(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<void> {
   const openStatuses = ["pending", "processing", "ready"];
   // Read first, locking what is open, so a business without an open pack checkout has nothing written.
+  // A page still being made can be made after its request's 15 minutes, so it closes whatever its expiry says.
   const open = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts)
-    .where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.status, openStatuses), gt(billingPackCheckouts.expiresAt, input.at)))
+    .where(and(eq(billingPackCheckouts.businessId, input.businessId), or(inArray(billingPackCheckouts.status, ["pending", "processing"]), and(eq(billingPackCheckouts.status, "ready"), gt(billingPackCheckouts.expiresAt, input.at)))))
     .for("update");
   if (!open.length) return;
   const closed = await tx.update(billingPackCheckouts)
@@ -289,7 +320,10 @@ async function recordPurchase(tx: DatabaseTransaction, input: PackEventInput, pu
     if (purchase.history.dispute !== "opened") status = (await applyDispute(tx, input.businessId, purchase.providerRef, purchase.history.dispute, now))?.status ?? status;
   }
   if ((endedPackStatuses as readonly string[]).includes(status)) {
-    // The payment went back before it arrived: nothing to switch onto, so the account, its allowances and the number stay.
+    // The payment went back before it arrived: nothing to switch onto, so the account, its allowances and the number
+    // stay. The pack was never in force, so its end is settled already, and no number's release starts from it.
+    await tx.update(billingPacks).set({ notices: sql`array_append(${billingPacks.notices}, 'ended')`, updatedAt: now })
+      .where(and(eq(billingPacks.id, recorded.packId), sql`not ('ended' = any(${billingPacks.notices}))`));
     await afterPackChange(tx, input.businessId, { packId: recorded.packId, status, previous: "active" });
     return;
   }
@@ -375,13 +409,21 @@ async function reportPackGaveWay(tx: DatabaseTransaction, input: { businessId: s
 }
 
 /**
- * Whether the subscription started after the business started buying the
- * pack: the first event LobbyStack stored about it is later. False without
- * any, so a subscription LobbyStack knew no event of is treated as the older.
+ * Whether the subscription went live after the business started buying the
+ * pack, which makes it the business's latest choice. The last snapshot of it
+ * stored before then says: one not live then, such as an unpaid subscription
+ * the business paid since, went live after. Without one that names a state,
+ * the first event LobbyStack stored about it is later. False without any event, so a
+ * subscription LobbyStack knew no event of is treated as the older.
  */
 async function subscribedSince(tx: DatabaseTransaction, businessId: string, subscriptionId: string, since: Date): Promise<boolean> {
-  const [first] = await tx.select({ at: min(providerEvents.createdAt) }).from(providerEvents)
-    .where(and(eq(providerEvents.businessId, businessId), eq(providerEvents.status, "processed"), sql`${providerEvents.payload}->>'subscriptionId' = ${subscriptionId}`));
+  const naming = and(eq(providerEvents.businessId, businessId), eq(providerEvents.status, "processed"), sql`${providerEvents.payload}->>'subscriptionId' = ${subscriptionId}`);
+  const [before] = await tx.select({ state: sql<string | null>`coalesce(${providerEvents.payload}->>'subscriptionState', ${providerEvents.payload}->>'status')` }).from(providerEvents)
+    .where(and(naming, sql`${providerEvents.payload}->>'kind' = 'subscription'`, lte(providerEvents.createdAt, since)))
+    .orderBy(desc(providerEvents.createdAt))
+    .limit(1);
+  if (before?.state) return !(liveSubscriptionStates as readonly string[]).includes(before.state);
+  const [first] = await tx.select({ at: min(providerEvents.createdAt) }).from(providerEvents).where(naming);
   const at = first?.at ? new Date(first.at) : null;
   return at !== null && at > since;
 }

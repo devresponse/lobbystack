@@ -123,9 +123,9 @@ import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
+import { listBusinessPacks } from "../billingPacks";
 import { billingSubscriptionChangeShown, createBillingSubscriptionRequestInTransaction, isBillingSubscriptionAction } from "../billingSubscription";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
-import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -137,14 +137,14 @@ import { changeKnowledgeAudienceInTransaction, createWebsiteRuleInTransaction, d
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { answerUnansweredQuestionInTransaction, dismissUnansweredQuestionInTransaction, listOpenUnansweredQuestionsInTransaction, type OpenUnansweredQuestion, type UnansweredAnswerAudience } from "../unansweredQuestions";
 import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
-import { normalizeOnboardingStage, resolveOnboardingStageForPlan, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
+import { normalizeOnboardingStage, resolveOnboardingStageForNumbers, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
-import { loadBillingContext } from "../usage";
+import { loadBillingContext, loadBusinessPlanLimits } from "../usage";
 import { createEntryLinkInTransaction, getEntryLinkInTransaction, listEntryLinkScansInTransaction, listEntryLinksInTransaction, updateEntryLinkInTransaction, type EntryLink, type EntryLinkPatch } from "../entryLinks";
 import { setPhoneNumberReceptionistInTransaction, setWidgetKeyReceptionistInTransaction } from "../receptionistEntryPoints";
 import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "../receptionistInput";
@@ -192,6 +192,7 @@ import {
   loadPhoneNumberResource,
   pageSize,
   serializeCalendarConnection,
+  serializeBillingPack,
   serializeContact,
   knowledgeEntryReceptionists,
   serializeNotificationPreferences,
@@ -376,7 +377,7 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
   const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
-  // A subscription a prepaid pack replaced ends at the provider shortly, whatever its own end date or next change says.
+  // A subscription a prepaid pack replaced counts as ended while the provider ends it, whatever its own state, end date or next change says.
   const replaced = Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
   // A promo plan's end, and what its renewal does; a plan that keeps going has neither.
   const [promo] = planCode ? await tx.select({ ends: billingPlans.ends }).from(billingPlans).where(eq(billingPlans.code, planCode)).limit(1) : [];
@@ -393,17 +394,18 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
     plan_ends: planEndsWith && account?.planEnds ? account.planEnds.toISOString() : null,
     plan_ends_with: planEndsWith,
     managed: isManagedBillingAccount(account),
-    subscription_state: account?.subscriptionState ?? null,
+    subscription_state: replaced ? null : account?.subscriptionState ?? null,
     billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
     current_period_end: paid && account?.currentPeriodEnd ? account.currentPeriodEnd.toISOString() : null,
     cancels_at: account?.cancelAt && isLiveSubscriptionState(account.subscriptionState) && !replaced ? account.cancelAt.toISOString() : null,
     next_change: !replaced && account?.nextPlanCode && (account.nextInterval === "monthly" || account.nextInterval === "annual") && account.nextChangeAt ? { plan: account.nextPlanCode, interval: account.nextInterval, at: account.nextChangeAt.toISOString() } : null,
-    payment_action_url: await loadPlanChangePayment(tx, { businessId, subscriptionId: account?.subscriptionId ?? null }),
+    payment_action_url: replaced ? null : await loadPlanChangePayment(tx, { businessId, subscriptionId: account?.subscriptionId ?? null }),
     spending_cap_cents: cap,
     overage_spend_cents: spend,
     spending_cap_reached: cap !== null && spend > 0 && spend >= cap,
     provider: billingProviderOf(process.env),
     provider_name: billingProviderNames[billingProviderOf(process.env)],
+    packs: (await listBusinessPacks(tx, businessId)).map(serializeBillingPack),
   };
 }
 
@@ -776,11 +778,11 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
-  const { plan, planCode } = await loadBillingContext(tx, businessId);
-  const limits = await readBillingPlanLimitBook(tx);
-  const paid = plan === "starter" || plan === "pro" || plan === "enterprise";
+  const { plan, limits } = await loadBusinessPlanLimits(tx, businessId);
+  // A prepaid pack is bought like a plan, and its own limits say whether it includes a number.
+  const paid = plan === "starter" || plan === "pro" || plan === "enterprise" || plan === "prepaid";
   // A hosted plan needs its number when it includes one: claims follow the plan's own count, which a promo plan can set to none.
-  const needsNumber = plan !== "self_host" && limitsFor(limits, plan, planCode).includedBusinessNumbers !== 0;
+  const needsNumber = plan !== "self_host" && limits.includedBusinessNumbers !== 0;
   const answeredCall = await hasAnsweredPhoneCall(tx, businessId);
   const item = (id: ApiOnboardingItem, done: boolean, skipped: boolean, required: boolean) => ({ id, status: done ? "done" as const : skipped ? "skipped" as const : "missing" as const, required });
   const checklist = [
@@ -795,7 +797,7 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
     item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
   ];
   // The step the dashboard shows: a business on a plan without a number goes back from the number steps to its plan.
-  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), plan, limits, planCode);
+  const stage = resolveOnboardingStageForNumbers(normalizeOnboardingStage(business.stage), limits.includedBusinessNumbers);
   const complete = stage === "complete";
   return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
 }

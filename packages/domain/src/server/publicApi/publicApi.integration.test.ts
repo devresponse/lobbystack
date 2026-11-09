@@ -4,7 +4,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, entryLinkDailyScans, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, unansweredQuestions, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPackPlans, billingPacks, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, entryLinkDailyScans, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, unansweredQuestions, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
 import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiQrLinkDetailSchema, apiQrLinkSchema, apiReceptionistSchema, apiUnansweredQuestionSchema, apiWebsiteRuleSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
@@ -1267,6 +1267,35 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     } finally {
       vi.unstubAllEnvs();
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("lists a business's prepaid packs in its billing, with the prepaid tier while one has time left", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-packs-${businessId}`, name: "Packs test", timezone: "UTC", businessType: "test" });
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
+    const generated = generateApiKey();
+    const [key] = await admin!.db.insert(apiKeys).values({ businessId, name: "billing", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["billing:manage"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: key!.id };
+    try {
+      // A business that never bought one reads as before, with an empty list.
+      const none = await getBillingForApi(context, caller);
+      expect(none).toMatchObject({ plan: "free_cloud", packs: [] });
+      expect(apiBillingSchema.safeParse(none).success).toBe(true);
+      await admin!.db.insert(billingPackPlans).values({ code: "pack_api_test", status: "active", names: { en: "API test pack", fr: "API test pack", es: "API test pack", sr: "API test pack" }, voiceSec: 30_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, termsHash: "0".repeat(64) }).onConflictDoNothing();
+      const paidAt = new Date(Date.now() - 86_400_000);
+      await admin!.db.insert(billingPacks).values({ businessId, pack: "pack_api_test", days: 90, provider: "stripe", providerRef: `pi_${randomUUID()}`, amountCents: 10_450, currency: "cad", secondsTotal: 30_000, secondsUsed: 600, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, paidAt, endsAt: new Date(paidAt.getTime() + 90 * 86_400_000) });
+      const held = await getBillingForApi(context, caller);
+      expect(held).toMatchObject({ plan: "prepaid", billing_interval: null, spending_cap_cents: null, packs: [{ pack: "pack_api_test", status: "active", seconds_total: 30_000, seconds_used: 600, seconds_left: 29_400, days: 90, currency: "cad", amount_cents: 10_450, refunded_cents: 0, ended_at: null, names: { en: "API test pack" } }] });
+      expect(apiBillingSchema.safeParse(held).success).toBe(true);
+      // A monthly subscription the pack replaced counts as ended while the provider ends it.
+      await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", plan: "starter", subscriptionId: "sub_replaced", subscriptionState: "active", billingInterval: "monthly", replacedSubscriptionId: "sub_replaced", cancelAt: new Date(Date.now() + 86_400_000) });
+      expect(await getBillingForApi(context, caller)).toMatchObject({ plan: "prepaid", subscription_state: null, cancels_at: null, payment_action_url: null });
+    } finally {
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+      // The catalog tests read every pack on sale, so the test's own goes once its business took its packs with it.
+      await admin!.db.delete(billingPackPlans).where(eq(billingPackPlans.code, "pack_api_test"));
     }
   });
 

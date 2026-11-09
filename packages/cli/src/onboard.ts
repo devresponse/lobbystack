@@ -282,14 +282,20 @@ async function syncBusinessDetails(run: Run): Promise<void> {
   await apply(run, "details", Object.keys(changes), async () => { await run.client.call("updateBusiness", { body: changes }); });
 }
 
-const paidPlans = new Set(["starter", "pro", "enterprise", "self_host"]);
+// A prepaid pack bought in the dashboard counts as paid: it includes a number, as Starter does.
+const paidPlans = new Set(["starter", "pro", "enterprise", "self_host", "prepaid"]);
 const hasPaidPlan = (billing: Billing) => billing.managed || paidPlans.has(billing.plan);
 
-/** Whether the manifest's checkout plan is one a checkout can still get: any plan for a free business, and Pro for a Starter one, which changes the Starter subscription. */
+/**
+ * Whether the manifest's checkout plan is one a checkout can still get: any
+ * plan for a free business or one on a prepaid pack, whose live packs end
+ * when the plan starts, and Pro for a Starter one, which changes the Starter
+ * subscription.
+ */
 function checkoutNeeded(manifest: Manifest, billing: Billing): boolean {
   const wanted = manifest.plan && "checkout" in manifest.plan ? manifest.plan.checkout : undefined;
   if (!wanted || billing.managed) return false;
-  return billing.plan === "free_cloud" || (billing.plan === "starter" && wanted.plan === "pro");
+  return billing.plan === "free_cloud" || billing.plan === "prepaid" || (billing.plan === "starter" && wanted.plan === "pro");
 }
 
 /** A managed plan takes effect at once, so it goes first: the rest of the run then has what a paid plan unlocks. */
@@ -784,8 +790,8 @@ async function syncPhoneNumber(run: Run, billing: Billing | undefined): Promise<
       try {
         offers = (await run.client.call("searchPhoneNumbers", { body: { ...wanted, limit: 5 } })).data;
       } catch (error) {
-        // A key that can't read the plan learns here that the business has no paid one, which only someone paying changes.
-        if (!(!billing && error instanceof ApiError && error.status === 409)) throw error;
+        // A key that can't read the plan learns here that the business has no paid one, which only someone paying changes; so does a prepaid pack that includes no number.
+        if (!((!billing || billing.plan === "prepaid") && error instanceof ApiError && error.status === 409)) throw error;
         run.log({ step: "phone number", action: "waiting", detail: "for a paid plan" });
         run.waiting.push(`${error.message} Pay for a plan in the dashboard, or add plan to the manifest, then run this again.`);
         return;

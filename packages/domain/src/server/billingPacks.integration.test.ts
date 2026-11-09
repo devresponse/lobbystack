@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, createDatabaseClient, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, createDatabaseClient, outboxMessages, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { correctAlertSmsUsage, getBillingUsageStatus, reserveAlertSmsUsage } from "./billing";
-import { applyPackRefundInTransaction, closePackDisputeInTransaction, expirePackInTransaction, freezePackInTransaction, replaceLivePacksInTransaction } from "./billingPacks";
+import { applyPackRefundInTransaction, closePackDisputeInTransaction, expirePackInTransaction, freezePackInTransaction, listBusinessPacks, PACK_NOTICE_RUN_DELAY_MS, replaceLivePacksInTransaction } from "./billingPacks";
 import { extendLiveCallReservation, finishLiveCall, startLivePhoneCall } from "./liveCalls";
 import { correctUsageInTransaction, loadBusinessPlanLimits, periodKeyFor } from "./usage";
 
@@ -133,6 +133,11 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
         return result;
       });
       expect(grants).toEqual([300, 300, 80, 0]);
+      // The owners hear about the low and the empty balance from a run after the call has settled, never mid-call.
+      const runs = await tx.select({ dedupeKey: outboxMessages.dedupeKey, availableAt: outboxMessages.availableAt, payload: outboxMessages.payload }).from(outboxMessages)
+        .where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.expirePacks")));
+      expect(runs.map((run) => run.dedupeKey).sort()).toEqual([`billing-pack:${later.id}:empty:voice:${first!.callId}`, `billing-pack:${later.id}:low:voice:${first!.callId}`]);
+      for (const run of runs) expect(run.availableAt.getTime()).toBeGreaterThan(Date.now() + PACK_NOTICE_RUN_DELAY_MS - 60_000);
       const status = await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }));
       expect(status).toMatchObject({ plan: "prepaid", voiceSecondsLeft: 0, voiceBlocked: true, pack: { secondsTotal: 1_400, secondsUsed: 1_400, secondsLeft: 0 } });
       // An empty pack still holds the prepaid tier: the caller hears busy, as on Free.
@@ -267,6 +272,34 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
       // A pack whose end already came is left to the expiry job.
       expect((await packRow(tx, over.id)).status).toBe("active");
       expect((await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }))).plan).toBe("free_cloud");
+    });
+  });
+
+  it("lists a business's packs as the screens and the API show them: held ones by end date, then the latest ended ones", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      expect(await inBusiness(tx, businessId, (scoped) => listBusinessPacks(scoped, businessId))).toEqual([]);
+      const later = await pack(tx, businessId, { seconds: 3_000, days: 60 });
+      const sooner = await pack(tx, businessId, { seconds: 600, days: 10, amountCents: 1_000 });
+      const forever = await pack(tx, businessId, { seconds: 600, days: null });
+      const passed = await pack(tx, businessId, { seconds: 600, days: 1, paidDaysAgo: 2 });
+      const disputed = await pack(tx, businessId, { seconds: 1_200, days: 30 });
+      const ended = await pack(tx, businessId, { seconds: 900, days: 90, paidDaysAgo: 120 });
+      await inBusiness(tx, businessId, async (scoped) => {
+        await applyPackRefundInTransaction(scoped, { businessId, provider: "stripe", providerRef: sooner.ref, refundedCents: 500, at: new Date() });
+        await freezePackInTransaction(scoped, { businessId, provider: "stripe", providerRef: disputed.ref });
+        await expirePackInTransaction(scoped, { businessId, packId: ended.id });
+      });
+      const listed = await inBusiness(tx, businessId, (scoped) => listBusinessPacks(scoped, businessId));
+      expect(listed.map((held) => held.id)).toEqual([passed.id, sooner.id, disputed.id, later.id, forever.id, ended.id]);
+      // A pack whose end date passed holds nothing, though the expiry job hasn't ended it yet.
+      expect(listed[0]).toMatchObject({ status: "active", secondsLeft: 0, days: 1 });
+      // A refund of half the payment takes half the seconds off.
+      expect(listed[1]).toMatchObject({ status: "active", secondsTotal: 300, secondsLeft: 300, refundedCents: 500, amountCents: 1_000, currency: "cad" });
+      // A frozen pack shows what it holds once its dispute is won.
+      expect(listed[2]).toMatchObject({ status: "frozen", secondsLeft: 1_200 });
+      expect(listed[4]).toMatchObject({ days: null, endsAt: null, secondsLeft: 600, names: { en: "Test pack" } });
+      expect(listed[5]).toMatchObject({ status: "expired", secondsLeft: 0, endedAt: expect.any(String) });
     });
   });
 });

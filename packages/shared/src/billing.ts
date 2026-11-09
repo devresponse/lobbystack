@@ -630,6 +630,11 @@ export const MAX_PACK_DAYS = 1_095;
 export const billingPackStatuses = ["active", "expired", "replaced", "refunded", "frozen"] as const;
 export type BillingPackStatus = (typeof billingPackStatuses)[number];
 
+/** Whether a stored status is one of a pack's. */
+export function isBillingPackStatus(value: string | null | undefined): value is BillingPackStatus {
+  return (billingPackStatuses as readonly (string | null | undefined)[]).includes(value);
+}
+
 /** What a pack gives a business each UTC month while it lasts, and its limits: everything but the minutes, which last the whole pack. */
 export type BillingPackIncluded = {
   alertSmsSegments: number;

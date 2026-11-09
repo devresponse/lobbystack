@@ -212,6 +212,16 @@ function planTable(data: Row): string {
   return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "receptionists", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
 }
 
+/** The plan in force, then each prepaid pack with its minutes left and when it ends; no table for a business without packs, or an older server. */
+function billingStatus(data: Row): string {
+  const { packs, ...plan } = data;
+  const held = (packs as Row[] | undefined) ?? [];
+  if (!held.length) return showRecord(plan);
+  const minutes = (seconds: unknown) => Math.floor(Number(seconds) / 60);
+  const rows = held.map((pack) => ({ pack: pack.pack, status: pack.status, minutes_left: minutes(pack.seconds_left), of: minutes(pack.seconds_total), paid_at: pack.paid_at, ends_at: pack.ends_at ?? "never ends" }));
+  return `${showRecord(plan)}\n\n${formatTable(rows, columns("pack", "status", "minutes_left", "of", "paid_at", "ends_at"))}`;
+}
+
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 const indent = (text: string) => text.split("\n").map((line) => (line ? `   ${line}` : line)).join("\n");
 
@@ -464,7 +474,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "remove-rule": { operation: "deleteWebsiteRule" },
   }),
   group("billing", "The plan, its checkout, cancelling and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
-    status: { operation: "getBilling" },
+    status: { operation: "getBilling", show: billingStatus },
     plans: { operation: "listBillingPlans", show: planTable },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
     checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : data.status === "changed" ? `The business already paid for a plan, so Polar moved that subscription to ${String(data.plan)} ${String(data.interval)} and charged any difference to the saved payment method. No page is needed.` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },

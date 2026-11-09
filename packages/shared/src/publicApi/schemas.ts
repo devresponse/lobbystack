@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { billingPlanSlugs, billingProviderEnvs, billingProviders, billingSubscriptionActions, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
+import { billingPackStatuses, billingPlanSlugs, billingProviderEnvs, billingProviders, billingSubscriptionActions, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
 import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
@@ -269,8 +269,25 @@ export const apiRuleReorderSchema = z.strictObject({
 const checkoutPlans = ["starter", "pro"] as const;
 const billingIntervals = ["monthly", "annual"] as const;
 
+export const apiBillingPackSchema = z.object({
+  id,
+  pack: z.string().describe("The pack's code, such as pack_500_180."),
+  names: z.record(z.string(), z.string()).nullable().describe("Display names by language: en, fr, es and sr."),
+  status: z.enum(billingPackStatuses).describe("active; frozen while a dispute holds its payment, when calls can't use it until the dispute is won; expired at its end date; replaced when a subscription started; refunded when its whole payment was refunded or a dispute was lost."),
+  seconds_total: z.number().int().describe("Voice seconds it holds after refunds: a partial refund takes its share off."),
+  seconds_used: z.number().int().describe("Voice seconds calls drew from it."),
+  seconds_left: z.number().int().describe("What it still holds, which a frozen pack gives only once its dispute is won. 0 once it ended or its end date passed."),
+  days: z.number().int().nullable().describe("How long it lasts from the payment, in 24-hour days. Null when it never ends."),
+  paid_at: timestamp,
+  ends_at: nullableTimestamp.describe("paid_at plus days, fixed at the payment. Null when it never ends."),
+  ended_at: nullableTimestamp.describe("When it ended. Null while active or frozen."),
+  currency: z.string(),
+  amount_cents: z.number().int().describe("What was paid, before refunds."),
+  refunded_cents: z.number().int(),
+}).describe("A prepaid pack the business bought.");
+
 export const apiBillingSchema = z.object({
-  plan: z.enum(billingPlanSlugs).describe("The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."),
+  plan: z.enum(billingPlanSlugs).describe("The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud, and a business that would be on free_cloud reads as prepaid while one of its packs has time left."),
   promo_plan: z.string().nullable().describe("The code of the promo plan in force, which behaves as plan with its own allowances, limits and overage rates. Null on a standard plan."),
   plan_ends: nullableTimestamp.describe("When a promo plan that lasts a set number of months ends: it ends at the subscription's first renewal from then on. Null otherwise."),
   plan_ends_with: z.enum(["tier", "cancel"]).nullable().describe("What that renewal does: tier moves the subscription to the plan's tier at its standard price, cancel ends it. Null when plan_ends is."),
@@ -290,6 +307,7 @@ export const apiBillingSchema = z.object({
   spending_cap_reached: z.boolean().describe("true once this month's overage reached the cap, which stops further billable usage."),
   provider: z.enum(billingProviders).describe("The deployment's billing provider, which sells its plans: polar or stripe."),
   provider_name: z.string().describe("How to name the provider to the business, such as Polar."),
+  packs: z.array(apiBillingPackSchema).describe("The prepaid packs bought: active and frozen ones first, the one that ends first first, then the latest 20 that ended, newest first. Calls draw on them only while plan is prepaid; a pack bought beside a yearly, past-due or managed plan waits, and its end date still comes. Empty when none was bought."),
 }).describe("The business's plan and what it spends.");
 
 export const apiBillingUpdateSchema = z.strictObject({
@@ -1552,6 +1570,7 @@ export type ApiRuleCreate = z.infer<typeof apiRuleCreateSchema>;
 export type ApiRuleUpdate = z.infer<typeof apiRuleUpdateSchema>;
 export type ApiRuleReorder = z.infer<typeof apiRuleReorderSchema>;
 export type ApiBilling = z.infer<typeof apiBillingSchema>;
+export type ApiBillingPack = z.infer<typeof apiBillingPackSchema>;
 export type ApiBillingCatalog = z.infer<typeof apiBillingCatalogSchema>;
 export type ApiBillingCatalogApply = z.infer<typeof apiBillingCatalogApplySchema>;
 export type ApiBillingCatalogLink = z.infer<typeof apiBillingCatalogLinkSchema>;

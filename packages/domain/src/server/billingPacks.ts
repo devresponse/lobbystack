@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { billingPackDraws, billingPackPlans, billingPacks, enqueueOutbox, phoneNumbers, type DatabaseTransaction } from "@lobbystack/db";
-import { packCapacitySeconds, packEndsAt, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
+import { isBillingPackStatus, MAX_PHONE_CALL_MS, packCapacitySeconds, packEndsAt, type BillingPackHolding, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
 
 import { isSharedSmsSender } from "./smsSender";
 
@@ -92,6 +92,62 @@ export async function readLivePacks(tx: DatabaseTransaction, businessId: string,
 /** The seconds a pack still holds: what it holds after refunds, less what calls drew. */
 export function packSecondsLeft(pack: Pick<LivePack, "secondsTotal" | "secondsUsed" | "amountCents" | "refundedCents">): number {
   return Math.max(0, packCapacitySeconds(pack) - pack.secondsUsed);
+}
+
+/** How many ended packs a pack list shows, newest first, after the live and frozen ones. */
+export const LISTED_ENDED_PACKS = 20;
+
+const heldPackColumns = {
+  id: billingPacks.id,
+  code: billingPacks.pack,
+  names: billingPackPlans.names,
+  status: billingPacks.status,
+  secondsTotal: billingPacks.secondsTotal,
+  secondsUsed: billingPacks.secondsUsed,
+  amountCents: billingPacks.amountCents,
+  refundedCents: billingPacks.refundedCents,
+  days: billingPacks.days,
+  paidAt: billingPacks.paidAt,
+  endsAt: billingPacks.endsAt,
+  endedAt: billingPacks.endedAt,
+  currency: billingPacks.currency,
+};
+
+/**
+ * The business's packs as Settings > Plan and the API show them: active and
+ * frozen ones first, the one that ends first first, then the latest
+ * LISTED_ENDED_PACKS ended ones, newest first. A pack whose end date passed
+ * holds nothing, though it stays active until the daily expiry job ends it; a
+ * frozen pack shows what it holds once its dispute is won. A business that
+ * never bought a pack gets an empty list from one indexed read.
+ */
+export async function listBusinessPacks(tx: DatabaseTransaction, businessId: string, now = new Date()): Promise<BillingPackHolding[]> {
+  const held = await tx.select(heldPackColumns).from(billingPacks).leftJoin(billingPackPlans, eq(billingPackPlans.code, billingPacks.pack))
+    .where(and(eq(billingPacks.businessId, businessId), inArray(billingPacks.status, ["active", "frozen"])))
+    .orderBy(sql`${billingPacks.endsAt} asc nulls last`, asc(billingPacks.paidAt), asc(billingPacks.id));
+  const ended = await tx.select(heldPackColumns).from(billingPacks).leftJoin(billingPackPlans, eq(billingPackPlans.code, billingPacks.pack))
+    .where(and(eq(billingPacks.businessId, businessId), inArray(billingPacks.status, [...endedPackStatuses])))
+    .orderBy(desc(billingPacks.paidAt), desc(billingPacks.id)).limit(LISTED_ENDED_PACKS);
+  return [...held, ...ended].map((row) => {
+    const status: BillingPackStatus = isBillingPackStatus(row.status) ? row.status : "active";
+    const timeLeft = (status === "active" || status === "frozen") && (row.endsAt === null || row.endsAt.getTime() > now.getTime());
+    return {
+      id: row.id,
+      code: row.code,
+      names: row.names ?? null,
+      status,
+      secondsTotal: packCapacitySeconds(row),
+      secondsUsed: row.secondsUsed,
+      secondsLeft: timeLeft ? packSecondsLeft(row) : 0,
+      days: row.days,
+      paidAt: row.paidAt.toISOString(),
+      endsAt: row.endsAt?.toISOString() ?? null,
+      endedAt: row.endedAt?.toISOString() ?? null,
+      currency: row.currency,
+      amountCents: row.amountCents,
+      refundedCents: row.refundedCents,
+    };
+  });
 }
 
 /**
@@ -187,7 +243,7 @@ export async function setPackDraw(tx: DatabaseTransaction, input: { businessId: 
   }
   const after = packBalance(await readLivePacks(tx, input.businessId, { now }));
   const crossed = packBalanceCrossing(before, after);
-  if (crossed && after) await queuePackNoticeRun(tx, input.businessId, after, crossed);
+  if (crossed && after) await queuePackNoticeRun(tx, { businessId: input.businessId, sourceKey: input.sourceKey, balance: after, notice: crossed, now });
   return { drawn: target - need, before, after };
 }
 
@@ -211,14 +267,31 @@ export function newestLivePack(balance: PackBalance): LivePack {
 }
 
 /**
- * Runs billing.expirePacks for the business now, rather than at its daily
- * run, when a call took its balance to low or empty: that job sends the
- * reminders due. The call's transaction may not read the owners, so it only
- * queues the run, once per newest pack and reminder.
+ * How long after a call reserved the balance down to low or empty its
+ * reminder run waits: past the longest call, so the run reads what the call
+ * really used once it was settled, not what it held while it ran.
  */
-async function queuePackNoticeRun(tx: DatabaseTransaction, businessId: string, balance: PackBalance, notice: PackBalanceNotice): Promise<void> {
-  const newest = newestLivePack(balance);
-  await enqueueOutbox(tx, { topic: "billing.expirePacks", businessId, aggregateType: "billing_pack", aggregateId: newest.id, dedupeKey: `billing-pack:${newest.id}:${notice}:run`, payload: { reason: notice } });
+export const PACK_NOTICE_RUN_DELAY_MS = MAX_PHONE_CALL_MS + 5 * 60_000;
+
+/**
+ * Runs billing.expirePacks for the business soon, rather than at its daily
+ * run, when a call took its balance to low or empty: that job sends the
+ * reminders the settled balance is due. The call's transaction may not read
+ * the owners, so it only queues the run, once per call, newest pack and
+ * reminder; the job records each reminder sent, so runs that find nothing
+ * new send nothing.
+ */
+async function queuePackNoticeRun(tx: DatabaseTransaction, input: { businessId: string; sourceKey: string; balance: PackBalance; notice: PackBalanceNotice; now: Date }): Promise<void> {
+  const newest = newestLivePack(input.balance);
+  await enqueueOutbox(tx, {
+    topic: "billing.expirePacks",
+    businessId: input.businessId,
+    aggregateType: "billing_pack",
+    aggregateId: newest.id,
+    dedupeKey: `billing-pack:${newest.id}:${input.notice}:${input.sourceKey}`,
+    availableAt: new Date(input.now.getTime() + PACK_NOTICE_RUN_DELAY_MS),
+    payload: { reason: input.notice },
+  });
 }
 
 async function giveBack(tx: DatabaseTransaction, businessId: string, sourceKey: string, draws: Array<{ packId: string; seconds: number }>, seconds: number): Promise<void> {

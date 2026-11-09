@@ -1809,6 +1809,7 @@ export const billingPacks = pgTable(
   },
   (table) => [
     uniqueIndex("billing_packs_provider_ref_unique").on(table.provider, table.providerRef),
+    index("billing_packs_business_idx").on(table.businessId, table.paidAt.desc()),
     index("billing_packs_live_idx").on(table.businessId, table.endsAt).where(sql`${table.status} = 'active'`),
     index("billing_packs_ending_idx").on(table.endsAt).where(sql`${table.status} in ('active', 'frozen') and ${table.endsAt} is not null`),
   ],

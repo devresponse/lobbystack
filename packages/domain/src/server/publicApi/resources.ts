@@ -18,6 +18,7 @@ import {
   widgetEmbedSnippet,
   weekdays,
   type ApiAppointment,
+  type ApiBillingPack,
   type ApiBusiness,
   type ApiCalendarConnection,
   type ApiCall,
@@ -38,6 +39,7 @@ import {
   type ApiStaff,
   type ApiWebhookEndpoint,
   type ApiWidgetKey,
+  type BillingPackHolding,
 } from "@lobbystack/shared";
 
 import { resolveCallOutcome } from "../callOutcome";
@@ -616,6 +618,11 @@ type PhoneNumberRow = { id: string; e164: string; receptionistId: string | null;
 
 export function serializePhoneNumber(row: PhoneNumberRow): ApiPhoneNumber {
   return { id: row.id, phone_number: row.e164, receptionist_id: row.receptionistId, status: phoneNumberStatuses[row.status] ?? "released", release_scheduled_at: isoOrNull(row.reclaimScheduledAt), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+}
+
+/** A prepaid pack as GET /billing lists it, from listBusinessPacks. */
+export function serializeBillingPack(pack: BillingPackHolding): ApiBillingPack {
+  return { id: pack.id, pack: pack.code, names: pack.names, status: pack.status, seconds_total: pack.secondsTotal, seconds_used: pack.secondsUsed, seconds_left: pack.secondsLeft, days: pack.days, paid_at: pack.paidAt, ends_at: pack.endsAt, ended_at: pack.endedAt, currency: pack.currency, amount_cents: pack.amountCents, refunded_cents: pack.refundedCents };
 }
 
 export async function listPhoneNumberResources(tx: DatabaseTransaction, businessId: string): Promise<ApiPhoneNumber[]> {

@@ -129,6 +129,10 @@ CREATE TABLE IF NOT EXISTS public.billing_packs (
 -- One pack per payment, so an event delivered twice adds nothing.
 CREATE UNIQUE INDEX IF NOT EXISTS billing_packs_provider_ref_unique
   ON public.billing_packs (provider, provider_ref);
+-- Every pack of a business, newest first: its pack list, the daily job's check
+-- that it has any, and the delete that cascades from businesses.
+CREATE INDEX IF NOT EXISTS billing_packs_business_idx
+  ON public.billing_packs (business_id, paid_at DESC);
 -- A business's live packs, earliest end first, for reservations and the plan in force.
 CREATE INDEX IF NOT EXISTS billing_packs_live_idx
   ON public.billing_packs (business_id, ends_at) WHERE status = 'active';

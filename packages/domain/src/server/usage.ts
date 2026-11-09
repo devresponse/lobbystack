@@ -89,7 +89,8 @@ export function estimateSmsSegments(body: string): number {
 export function effectiveBillingPlan(input: { deploymentMode: string; accountPlan: string | null; subscriptionState: string | null }): BillingPlanSlug {
   if (input.deploymentMode !== "cloud") return "self_host";
   const paidState = (liveSubscriptionStates as readonly (string | null)[]).includes(input.subscriptionState);
-  if (isBillingPlanSlug(input.accountPlan) && (input.accountPlan === "free_cloud" || paidState)) return input.accountPlan;
+  // Prepaid comes from live packs, never from the account's plan, so a stored "prepaid" counts as Free.
+  if (isBillingPlanSlug(input.accountPlan) && input.accountPlan !== "prepaid" && (input.accountPlan === "free_cloud" || paidState)) return input.accountPlan;
   return "free_cloud";
 }
 

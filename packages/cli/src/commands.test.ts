@@ -394,6 +394,29 @@ describe("billing plans", () => {
   });
 });
 
+describe("billing status", () => {
+  const billing = { plan: "prepaid", promo_plan: null, plan_ends: null, plan_ends_with: null, managed: false, subscription_state: null, billing_interval: null, current_period_end: null, cancels_at: null, next_change: null, payment_action_url: null, spending_cap_cents: null, overage_spend_cents: 0, spending_cap_reached: false, provider: "stripe", provider_name: "Stripe" };
+  const pack = (id: string, overrides: Record<string, unknown>) => ({ id, pack: "pack_500_90", names: { en: "500 minutes, 90 days" }, status: "active", seconds_total: 30_000, seconds_used: 0, seconds_left: 30_000, days: 90, paid_at: "2026-11-01T10:00:00.000Z", ends_at: "2027-01-30T10:00:00.000Z", ended_at: null, currency: "cad", amount_cents: 10_450, refunded_cents: 0, ...overrides });
+
+  it("prints the plan, then each prepaid pack with its minutes left and when it ends", async () => {
+    const api = fakeApi({ "GET /api/v1/billing": { body: { data: { ...billing, packs: [pack("6a1f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", { seconds_used: 1_830, seconds_left: 28_170 }), pack("7b2f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", { pack: "pack_250_365", seconds_total: 15_000, seconds_left: 15_000, days: null, ends_at: null })] } } } });
+    const result = await runCli(["billing", "status"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(result.out).toMatch(/Plan:\s+prepaid/);
+    expect(result.out).toMatch(/pack_500_90\s+active\s+469\s+500\s+2026-11-01T10:00:00\.000Z\s+2027-01-30T10:00:00\.000Z/);
+    expect(result.out).toMatch(/pack_250_365\s+active\s+250\s+250\s+2026-11-01T10:00:00\.000Z\s+never ends/);
+  });
+
+  it("prints the plan alone for a business without packs, as before", async () => {
+    const api = fakeApi({ "GET /api/v1/billing": { body: { data: { ...billing, plan: "free_cloud", packs: [] } } } });
+    const result = await runCli(["billing", "status"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(result.out).toMatch(/Plan:\s+free_cloud/);
+    expect(result.out).not.toMatch(/Minutes left/);
+    expect(result.out).not.toMatch(/Packs:/);
+  });
+});
+
 describe("billing catalog", () => {
   const brandFile = new URL("../../../brands/alloplace/billing.json", import.meta.url);
   const hash = "39ad3052ec5281525db2009617afe71a8ea908973b0d29f3846ce16f86055acf";

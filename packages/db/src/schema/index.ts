@@ -1290,6 +1290,10 @@ export const billingAccounts = pgTable(
     nextInterval: varchar("next_interval", { length: 16 }),
     /** When the waiting change takes effect. */
     nextChangeAt: timestamp("next_change_at", { withTimezone: true }),
+    /** Where this month's allowances start counting, set only when the business switches between a prepaid pack and a subscription; null means the whole month. Migration 0148. */
+    allowancesSince: timestamp("allowances_since", { withTimezone: true }),
+    /** The subscription a prepaid pack replaced, which LobbyStack treats as ended while the provider confirms it; null for every other business. */
+    replacedSubscriptionId: text("replaced_subscription_id"),
     ...legacyId,
     ...timestamps,
   },
@@ -1664,6 +1668,183 @@ export const billingOffers = pgView("billing_offers", {
   perMonth: integer("per_month"),
   receptionists: smallint("receptionists"),
   providerDisc: text("provider_disc"),
+  providerRef: text("provider_ref"),
+}).existing();
+
+// Prepaid minute packs of migration 0148: the packs on sale from billing.json's
+// packs section and their prices (the whole deployment's, written only by the
+// worker, retired and never deleted, like the plan catalog), each business's
+// pack checkouts, the ledger of packs bought, and which pack paid for each call.
+export const billingPackPlans = pgTable(
+  "billing_pack_plans",
+  {
+    /** Permanent pack code, its key in billing.json's packs. */
+    code: varchar("code", { length: 48 }).primaryKey(),
+    /** draft (not sellable yet), active, or retired (no one new may buy it). */
+    status: varchar("status", { length: 8 }).default("draft").notNull(),
+    /** Display names by language (en, fr, es, sr). */
+    names: jsonb("names").$type<Record<string, string>>().notNull(),
+    /** Voice seconds the pack holds for its whole length. */
+    voiceSec: integer("voice_sec").notNull(),
+    /** How long the pack lasts from its payment, in 24-hour days; null means it never ends. */
+    days: smallint("days"),
+    /** Alert SMS segments included a month while the pack lasts. */
+    smsSeg: integer("sms_seg").notNull(),
+    /** Outbound call attempts (transfers) included a month. */
+    callsOut: integer("calls_out").notNull(),
+    /** Website chat AI units included a month. */
+    chatUnits: integer("chat_units").notNull(),
+    /** Knowledge storage limit in bytes. */
+    kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
+    /** Business phone numbers included. */
+    numbers: smallint("numbers").notNull(),
+    /** Receptionists included, the default one too. */
+    receptionists: smallint("receptionists").notNull(),
+    /** SHA-256 of the minutes, length, allowances, limits and price. */
+    termsHash: char("terms_hash", { length: 64 }).notNull(),
+    /** When the first business bought it; its minutes and length are fixed from then. */
+    frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    /** Order on pack lists. */
+    sort: smallint("sort").default(100).notNull(),
+    /** The run that last changed the row. */
+    runId: uuid("run_id").references(() => billingRuns.id),
+    /** When the pack was retired; set exactly when status is retired. */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    ...timestamps,
+  },
+);
+
+export const billingPackPrices = pgTable(
+  "billing_pack_prices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** The pack code. */
+    pack: varchar("pack", { length: 48 }).notNull().references(() => billingPackPlans.code),
+    /** Three lowercase letters, from the file. */
+    currency: char("currency", { length: 3 }).notNull(),
+    /** The one-time price. */
+    cents: integer("cents").notNull(),
+    /** The provider's object that sells it, recorded by a link: a Polar product or a Stripe price. */
+    providerRef: text("provider_ref"),
+    /** The run that last changed the row. */
+    runId: uuid("run_id").references(() => billingRuns.id),
+    /** When this price stopped being sold. The row keeps provider_ref so payments at it still match. */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("billing_pack_prices_live_unique").on(table.pack).where(sql`${table.retiredAt} is null`),
+    uniqueIndex("billing_pack_prices_provider_ref_unique").on(table.providerRef).where(sql`${table.providerRef} is not null`),
+  ],
+);
+
+export const billingPackCheckouts = pgTable(
+  "billing_pack_checkouts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    pack: varchar("pack", { length: 48 }).notNull().references(() => billingPackPlans.code),
+    priceId: uuid("price_id").notNull().references(() => billingPackPrices.id),
+    /** pending, processing, ready (the link works), paid, failed or expired. */
+    status: varchar("status", { length: 16 }).default("pending").notNull(),
+    /** The provider's checkout: a Stripe Checkout Session or a Polar checkout. */
+    checkoutId: text("checkout_id"),
+    checkoutUrl: text("checkout_url"),
+    error: text("error"),
+    /** The email a new provider customer gets instead of the requester's. */
+    billingEmail: varchar("billing_email", { length: 320 }),
+    /** When the checkout stops being open, whatever its status. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [index("billing_pack_checkouts_business_idx").on(table.businessId, table.status, table.createdAt)],
+);
+
+export const billingPacks = pgTable(
+  "billing_packs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    /** The pack bought, from the catalog. */
+    pack: varchar("pack", { length: 48 }).notNull().references(() => billingPackPlans.code),
+    /** The price it was bought at. */
+    priceId: uuid("price_id").references(() => billingPackPrices.id),
+    /** The pack's length in days, copied at purchase; null for a pack that never ends. */
+    days: smallint("days"),
+    /** polar or stripe. */
+    provider: varchar("provider", { length: 8 }).notNull(),
+    /** The payment: a Stripe PaymentIntent or a Polar order. */
+    providerRef: text("provider_ref").notNull(),
+    /** The payment's row in billing_transactions. */
+    transactionId: uuid("transaction_id").references(() => billingTransactions.id, { onDelete: "set null" }),
+    /** What was paid, in currency. */
+    amountCents: integer("amount_cents").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    /** Voice seconds bought. */
+    secondsTotal: integer("seconds_total").notNull(),
+    /** Voice seconds calls have drawn; never more than bought. */
+    secondsUsed: integer("seconds_used").default(0).notNull(),
+    smsSeg: integer("sms_seg").notNull(),
+    callsOut: integer("calls_out").notNull(),
+    chatUnits: integer("chat_units").notNull(),
+    kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
+    numbers: smallint("numbers").notNull(),
+    receptionists: smallint("receptionists").notNull(),
+    /** When the payment cleared. */
+    paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
+    /** paid_at plus days times 24 hours, fixed at purchase; null means never. */
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /** active, expired, replaced (a subscription started), refunded or frozen (a dispute). */
+    status: varchar("status", { length: 10 }).default("active").notNull(),
+    /** Refunds so far, from the provider's events; a partial refund takes its share of the seconds off the pack. */
+    refundedCents: integer("refunded_cents").default(0).notNull(),
+    /** When it ended. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** The seconds left when it ended, for the accounts. */
+    unusedSeconds: integer("unused_seconds"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("billing_packs_provider_ref_unique").on(table.provider, table.providerRef),
+    index("billing_packs_live_idx").on(table.businessId, table.endsAt).where(sql`${table.status} = 'active'`),
+    index("billing_packs_ending_idx").on(table.endsAt).where(sql`${table.status} in ('active', 'frozen') and ${table.endsAt} is not null`),
+  ],
+);
+
+export const billingPackDraws = pgTable(
+  "billing_pack_draws",
+  {
+    packId: uuid("pack_id").notNull().references(() => billingPacks.id, { onDelete: "cascade" }),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    /** The usage row's source_key, such as voice:<call id>. */
+    sourceKey: varchar("source_key", { length: 255 }).notNull(),
+    /** Seconds the call took from the pack. */
+    seconds: integer("seconds").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    primaryKey({ columns: [table.packId, table.sourceKey] }),
+    index("billing_pack_draws_source_idx").on(table.businessId, table.sourceKey),
+  ],
+);
+
+/** The packs on sale now, each with its live price. Reads with the caller's row-level security. */
+export const billingPackOffers = pgView("billing_pack_offers", {
+  code: varchar("code", { length: 48 }).notNull(),
+  names: jsonb("names").$type<Record<string, string>>().notNull(),
+  voiceSec: integer("voice_sec").notNull(),
+  days: smallint("days"),
+  smsSeg: integer("sms_seg").notNull(),
+  callsOut: integer("calls_out").notNull(),
+  chatUnits: integer("chat_units").notNull(),
+  kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
+  numbers: smallint("numbers").notNull(),
+  receptionists: smallint("receptionists").notNull(),
+  sort: smallint("sort").notNull(),
+  priceId: uuid("price_id").notNull(),
+  currency: char("currency", { length: 3 }).notNull(),
+  cents: integer("cents").notNull(),
   providerRef: text("provider_ref"),
 }).existing();
 

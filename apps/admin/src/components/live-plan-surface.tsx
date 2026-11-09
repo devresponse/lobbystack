@@ -137,8 +137,8 @@ export function LivePlanSurface() {
   // A promo plan the business took with a code, shown by its own name and price while it has the plan's tier.
   const promoPlan = billing.data.promoPlan?.tier === plan ? billing.data.promoPlan : null;
   const money = (cents: number) => formatMoney(cents, promoPlan?.currency ?? currency, i18n.language);
-  // The plan's row in the deployment's plan list; self-host has none and no allowances.
-  const offer = plan === "self_host" ? undefined : findPlan(billing.data.plans, plan);
+  // The plan's row in the deployment's plan list; self-host has none and no allowances, and a prepaid pack isn't a plan.
+  const offer = plan === "self_host" || plan === "prepaid" ? undefined : findPlan(billing.data.plans, plan);
   // Only Starter and Pro are billed by interval: a lapsed annual plan keeps its interval on Free.
   const annual = (plan === "starter" || plan === "pro") && account?.billingInterval === "annual";
   const promoPrice = promoPlan?.prices.find((price) => price.interval === (annual ? "annual" : "monthly"));

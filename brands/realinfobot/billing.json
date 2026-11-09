@@ -39,5 +39,70 @@
       "overageCents": { "voiceMinute": 18, "alertSmsSegment": 2, "outboundCallAttempt": 2 }
     },
     "enterprise": { "sold": false, "custom": true }
+  },
+  "packs": {
+    "pack_250_90": {
+      "names": { "en": "250 minutes, 90 days", "fr": "250 minutes, 90 jours", "es": "250 minutos, 90 días", "sr": "250 minuta, 90 dana" },
+      "minutes": 250,
+      "days": 90,
+      "priceCents": 5500,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_250_180": {
+      "names": { "en": "250 minutes, 180 days", "fr": "250 minutes, 180 jours", "es": "250 minutos, 180 días", "sr": "250 minuta, 180 dana" },
+      "minutes": 250,
+      "days": 180,
+      "priceCents": 5900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_250_365": {
+      "names": { "en": "250 minutes, 365 days", "fr": "250 minutes, 365 jours", "es": "250 minutos, 365 días", "sr": "250 minuta, 365 dana" },
+      "minutes": 250,
+      "days": 365,
+      "priceCents": 6500,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_500_90": {
+      "names": { "en": "500 minutes, 90 days", "fr": "500 minutes, 90 jours", "es": "500 minutos, 90 días", "sr": "500 minuta, 90 dana" },
+      "minutes": 500,
+      "days": 90,
+      "priceCents": 9500,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_500_180": {
+      "names": { "en": "500 minutes, 180 days", "fr": "500 minutes, 180 jours", "es": "500 minutos, 180 días", "sr": "500 minuta, 180 dana" },
+      "minutes": 500,
+      "days": 180,
+      "priceCents": 9900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_500_365": {
+      "names": { "en": "500 minutes, 365 days", "fr": "500 minutes, 365 jours", "es": "500 minutos, 365 días", "sr": "500 minuta, 365 dana" },
+      "minutes": 500,
+      "days": 365,
+      "priceCents": 10900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_1000_90": {
+      "names": { "en": "1,000 minutes, 90 days", "fr": "1 000 minutes, 90 jours", "es": "1.000 minutos, 90 días", "sr": "1.000 minuta, 90 dana" },
+      "minutes": 1000,
+      "days": 90,
+      "priceCents": 17900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_1000_180": {
+      "names": { "en": "1,000 minutes, 180 days", "fr": "1 000 minutes, 180 jours", "es": "1.000 minutos, 180 días", "sr": "1.000 minuta, 180 dana" },
+      "minutes": 1000,
+      "days": 180,
+      "priceCents": 18900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_1000_365": {
+      "names": { "en": "1,000 minutes, 365 days", "fr": "1 000 minutes, 365 jours", "es": "1.000 minutos, 365 días", "sr": "1.000 minuta, 365 dana" },
+      "minutes": 1000,
+      "days": 365,
+      "priceCents": 19900,
+      "limits": { "knowledgeStorageMb": 20 }
+    }
   }
 }

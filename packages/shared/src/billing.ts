@@ -4,6 +4,10 @@ export const billingPlanSlugs = [
   "starter",
   "pro",
   "enterprise",
+  // In force while a prepaid minute pack has time left (migration 0148). It is
+  // never a billing account's own plan and never on sale as a plan: the
+  // business's live packs make it, and their own limits apply.
+  "prepaid",
 ] as const;
 export type BillingPlanSlug = (typeof billingPlanSlugs)[number];
 
@@ -237,6 +241,9 @@ export function stripeKeyMode(key: string): BillingProviderEnv | null {
 export const STRIPE_WEBHOOK_EVENTS = [
   "checkout.session.completed",
   "checkout.session.expired",
+  // A prepaid pack paid by a method that settles later, such as a bank debit.
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -252,6 +259,8 @@ export const STRIPE_WEBHOOK_EVENTS = [
   "invoice.marked_uncollectible",
   "charge.refunded",
   "charge.dispute.created",
+  // A prepaid pack a dispute froze comes back when the dispute is won.
+  "charge.dispute.closed",
 ] as const;
 
 /** The thin events Stripe sends when it can't use a meter event, to a destination of their own. */
@@ -371,6 +380,27 @@ export const billingPlanCatalog = {
     includedBusinessNumbers: null,
     includedReceptionists: null,
     overagesBillable: true,
+    voiceOverageRatePerMinuteCents: null,
+    alertSmsOverageRatePerSegmentCents: null,
+    outboundCallAttemptOverageRateCents: null,
+  },
+  // Only a fallback: a business on a pack gets the limits copied onto its live
+  // packs, and its voice minutes are the packs' balance, never a monthly
+  // allowance, so voice has no monthly number here. Nothing past an allowance
+  // is billed: it stops, as on Free. Starter's allowances, with 20 MB of
+  // knowledge, as both brands' packs give.
+  prepaid: {
+    hostedBilling: true,
+    monthlyChargeCents: null,
+    annualChargeCents: null,
+    knowledgeStorageBytes: 20 * 1024 * 1024,
+    voiceSecondsIncluded: null,
+    alertSmsSegmentsIncluded: 50,
+    outboundCallAttemptsIncluded: 20,
+    chatAiTokensIncluded: 50,
+    includedBusinessNumbers: 1,
+    includedReceptionists: 1,
+    overagesBillable: false,
     voiceOverageRatePerMinuteCents: null,
     alertSmsOverageRatePerSegmentCents: null,
     outboundCallAttemptOverageRateCents: null,
@@ -589,6 +619,79 @@ export function annualSavingPercent(list: Pick<BillingPlanList, "plans">): numbe
   return least > 0 ? least : null;
 }
 
+/** The longest a prepaid pack may last, in days: about three years (billing_pack_plans.days). */
+export const MAX_PACK_DAYS = 1_095;
+
+/**
+ * A prepaid pack's state: active while it has time left, expired at its end
+ * date, replaced when a subscription started, refunded when the provider
+ * refunded all of it, and frozen while a dispute holds its payment.
+ */
+export const billingPackStatuses = ["active", "expired", "replaced", "refunded", "frozen"] as const;
+export type BillingPackStatus = (typeof billingPackStatuses)[number];
+
+/** What a pack gives a business each UTC month while it lasts, and its limits: everything but the minutes, which last the whole pack. */
+export type BillingPackIncluded = {
+  alertSmsSegments: number;
+  outboundCallAttempts: number;
+  chatAiUnits: number;
+  knowledgeStorageBytes: number;
+  businessNumbers: number;
+  receptionists: number;
+};
+
+/** A prepaid pack on sale, as the screens and the API show it. */
+export type BillingPackOffer = {
+  code: string;
+  /** Display names by language: en, fr, es and sr. */
+  names: Record<string, string>;
+  /** Voice seconds the pack holds for its whole length. */
+  voiceSeconds: number;
+  /** How long it lasts from the payment, in days; null when it never ends. */
+  days: number | null;
+  included: BillingPackIncluded;
+  currency: string;
+  amountCents: number;
+  /** The provider sells it here, so a button can start its checkout. */
+  checkoutAvailable: boolean;
+  sortOrder: number;
+};
+
+/** A pack a business bought, as Settings > Plan and the API show it. */
+export type BillingPackHolding = {
+  id: string;
+  code: string;
+  names: Record<string, string> | null;
+  status: BillingPackStatus;
+  /** The seconds it holds after refunds. */
+  secondsTotal: number;
+  secondsUsed: number;
+  secondsLeft: number;
+  days: number | null;
+  /** ISO 8601. */
+  paidAt: string;
+  endsAt: string | null;
+  endedAt: string | null;
+  currency: string;
+  amountCents: number;
+  refundedCents: number;
+};
+
+/**
+ * The voice seconds a pack holds after refunds: a partial refund takes its
+ * share of the seconds off the pack, rounded down, and a full one all of them.
+ */
+export function packCapacitySeconds(pack: { secondsTotal: number; amountCents: number; refundedCents: number }): number {
+  if (pack.refundedCents <= 0) return pack.secondsTotal;
+  if (pack.amountCents <= 0 || pack.refundedCents >= pack.amountCents) return 0;
+  return Math.floor((pack.secondsTotal * (pack.amountCents - pack.refundedCents)) / pack.amountCents);
+}
+
+/** When a pack paid for at paidAt ends: its days counted as 24-hour days, so no month length or clock change moves it; null when it never ends. */
+export function packEndsAt(paidAt: Date, days: number | null): Date | null {
+  return days === null ? null : new Date(paidAt.getTime() + days * 86_400_000);
+}
+
 export const contentRetentionCategories = [
   "messages",
   "transcripts",
@@ -612,6 +715,8 @@ export const contentRetentionDaysByPlan = {
   starter: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
   pro: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
   enterprise: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
+  // A business on a prepaid pack keeps its content as a paying plan does.
+  prepaid: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
 } as const satisfies Record<
   BillingPlanSlug,
   Record<ContentRetentionCategory, number>

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { eq, getTableColumns, sql, type SQL } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 
-import { billingPlans, billingPrices, billingRuns, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { billingPackPlans, billingPackPrices, billingPlans, billingPrices, billingRuns, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import type { BillingEnv, BillingProviderId } from "@lobbystack/providers/billing/types";
 import {
   DEFAULT_PLAN_RECEPTIONISTS,
@@ -12,8 +12,10 @@ import {
   canonicalBillingProfileJson,
   canonicalJson,
   normalizeBillingProfile,
+  packTermsJson,
   planTermsJson,
   polarEnvForBaseUrl,
+  resolveBillingPacks,
   resolveBillingPlans,
   billingCatalogLinkRequest,
   billingProviderNames,
@@ -23,6 +25,8 @@ import {
   type ApiBillingCatalogApply,
   type ApiBillingCatalogChange,
   type ApiBillingCatalogLink,
+  type ApiBillingCatalogPack,
+  type ApiBillingCatalogPackPrice,
   type ApiBillingCatalogPlan,
   type ApiBillingCatalogPolar,
   type ApiBillingCatalogPrice,
@@ -36,6 +40,7 @@ import {
   type BillingProvider,
   type BillingProviderEnv,
   type PolarEnv,
+  type ResolvedBillingPack,
   type ResolvedBillingPlan,
 } from "@lobbystack/shared";
 
@@ -46,12 +51,14 @@ import { idempotencyRequestHash } from "./publicApi/idempotency";
 import { decodeCursor, pageSize, toPage, type Page, type PageRequest } from "./publicApi/resources";
 
 // The billing catalog: a brand's billing.json written into billing_plans and
-// billing_prices, with a billing_runs row for every apply (migration 0108).
-// One apply seeds an empty deployment and updates a filled one alike: it
-// resolves the rows the file describes, compares them with the rows Postgres
-// holds, and writes the difference in one transaction. A link then records
-// which Polar product sells each live price, and the worker records a verify
-// run each day. Nothing here calls Polar. Checkout, plan changes, Polar's
+// billing_prices, with a billing_runs row for every apply (migration 0108),
+// and its prepaid packs into billing_pack_plans and billing_pack_prices
+// (migration 0148). One apply seeds an empty deployment and updates a filled
+// one alike: it resolves the rows the file describes, compares them with the
+// rows Postgres holds, and writes the difference in one transaction, plans
+// first, then packs. A link then records which provider object sells each
+// live price, a pack's included, and the worker records a verify run each
+// day. Nothing here calls a provider. Checkout, plan changes, the provider's
 // webhook and the plan screens read the tables through billingPlans.ts.
 
 // One apply or link at a time, across every admin process.
@@ -90,6 +97,33 @@ export type StoredBillingPrice = {
 /** A resolved plan with the hash of its terms, as the file wants the row to be. */
 export type DesiredBillingPlan = ResolvedBillingPlan & { terms_hash: string };
 
+/** A billing_pack_plans row as the diff reads it: every column, times as ISO strings. */
+export type StoredBillingPack = Omit<ResolvedBillingPack, "price"> & {
+  status: PlanStatus;
+  terms_hash: string;
+  frozen_at: string | null;
+  run_id: string | null;
+  retired_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** A billing_pack_prices row as the diff reads it. */
+export type StoredBillingPackPrice = {
+  id: string;
+  pack: string;
+  currency: string;
+  cents: number;
+  provider_ref: string | null;
+  run_id: string | null;
+  retired_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** A resolved pack with the hash of its terms, as the file wants the row to be. */
+export type DesiredBillingPack = ResolvedBillingPack & { terms_hash: string };
+
 /** One row an apply writes: what the changes list shows, and the columns it sets. */
 export type BillingCatalogWrite = {
   change: ApiBillingCatalogChange;
@@ -108,6 +142,13 @@ const planValueColumns = ["tier", "sold", "custom", "overage", "voice_sec", "sms
 const allowanceColumns = ["voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers"] as const;
 const rateColumns = ["voice_rate", "sms_rate", "call_rate"] as const;
 const actionOrder: Record<ApiBillingCatalogChange["action"], number> = { retire: 0, update: 1, restore: 2, insert: 3 };
+// The pack columns an apply sets from the file. terms_hash covers all but names and sort.
+const packValueColumns = ["names", "voice_sec", "days", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "receptionists", "terms_hash", "sort"] as const;
+// What a pack gives its buyer, which a change flags when it goes down. days is
+// compared apart, since a pack without days is the longest.
+const packAllowanceColumns = ["voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "receptionists"] as const;
+// A bought pack's minutes and length are fixed from its first sale (migration 0148's frozen_at).
+const frozenPackColumns = ["voice_sec", "days"] as const;
 
 function same(a: unknown, b: unknown): boolean {
   return canonicalJson(a ?? null) === canonicalJson(b ?? null);
@@ -123,6 +164,8 @@ function sha256(text: string): string {
 
 const priceKey = (price: { plan: string; period: string; currency: string }) => `${price.plan}/${price.period}/${price.currency}`;
 const planPath = (code: string) => `billing_file.plans.${code}`;
+const packPriceKey = (price: { pack: string; currency: string }) => `${price.pack}/${price.currency}`;
+const packPath = (code: string) => `billing_file.packs.${code}`;
 
 function goesDown(from: unknown, to: unknown): boolean {
   return typeof from === "number" && typeof to === "number" && to < from;
@@ -130,6 +173,12 @@ function goesDown(from: unknown, to: unknown): boolean {
 
 function goesUp(from: unknown, to: unknown): boolean {
   return typeof from === "number" && typeof to === "number" && to > from;
+}
+
+/** A pack's length gets shorter: one without days never ends, so any number of days is shorter. */
+function getsShorter(from: unknown, to: unknown): boolean {
+  if (typeof to !== "number") return false;
+  return from === null || goesDown(from, to);
 }
 
 /**
@@ -147,6 +196,11 @@ function storedReceptionists(plan: Pick<StoredBillingPlan, "custom" | "tier" | "
 /** The rows a file's plans resolve to, each with its terms hash. */
 export function desiredBillingPlans(profile: BillingProfile): DesiredBillingPlan[] {
   return resolveBillingPlans(profile).map((plan) => ({ ...plan, terms_hash: sha256(planTermsJson(plan)) }));
+}
+
+/** The rows a file's packs resolve to, each with its terms hash. A file without packs gives none. */
+export function desiredBillingPacks(profile: Pick<BillingProfile, "currency" | "plans" | "packs">): DesiredBillingPack[] {
+  return resolveBillingPacks(profile).map((pack) => ({ ...pack, terms_hash: sha256(packTermsJson(pack)) }));
 }
 
 /**
@@ -266,9 +320,118 @@ export function diffBillingCatalog(input: { plans: DesiredBillingPlan[]; currenc
 }
 
 /**
- * The order the writes run in: plans before prices, for the foreign key, and
- * within each table retirements first, so the live price index never sees
- * two live rows for one plan and period.
+ * What an apply writes to make the pack tables match the file's packs, and
+ * the refusals that need the tables to find. Packs are matched by code and
+ * their prices by pack and currency, as plans and prices are, and a pack
+ * missing from the file is retired, never deleted. Every pack is sold, so a
+ * new one, a retired one back in the file and one whose terms change wait in
+ * draft until a link names the provider's object again. Once bought, a
+ * pack's minutes and length stay; the rest may change, since a bought pack
+ * keeps a copy of what it gave. Pure, like diffBillingCatalog.
+ */
+export function diffBillingPackCatalog(input: { packs: readonly DesiredBillingPack[]; currency: string; current: { plans: readonly Pick<StoredBillingPlan, "code">[]; packs: readonly StoredBillingPack[]; packPrices: readonly StoredBillingPackPrice[] }; now: string }): BillingCatalogDiff {
+  const writes: BillingCatalogWrite[] = [];
+  const refusals: ApiBillingCatalogRefusal[] = [];
+  const stored = new Map(input.current.packs.map((pack) => [pack.code, pack]));
+  const planCodes = new Set(input.current.plans.map((plan) => plan.code));
+  const write = (change: Omit<ApiBillingCatalogChange, "lowers_allowance" | "raises_price"> & Partial<Pick<ApiBillingCatalogChange, "lowers_allowance" | "raises_price">>, set: Record<string, unknown>, id?: string) => {
+    writes.push({ change: { lowers_allowance: false, raises_price: false, ...change }, set, ...(id ? { id } : {}) });
+  };
+
+  // Packs: matched by code.
+  const applied = new Map<string, DesiredBillingPack>();
+  for (const pack of input.packs) {
+    // The file's own plans can't have a pack's code (C10), and neither can a plan made through the API or retired.
+    if (planCodes.has(pack.code)) {
+      refusals.push({ code: "code_taken", message: `A plan already has the code ${pack.code}, so a pack can't use it. Pick another code.`, path: packPath(pack.code) });
+      continue;
+    }
+    applied.set(pack.code, pack);
+    const existing = stored.get(pack.code);
+    const values: Record<string, unknown> = Object.fromEntries(packValueColumns.map((column) => [column, pack[column]]));
+    if (!existing) {
+      // The provider must sell a pack before it is active.
+      write({ table: "billing_pack_plans", key: pack.code, action: "insert", fields: {} }, { code: pack.code, ...values, status: "draft" });
+      continue;
+    }
+    const retired = existing.status === "retired";
+    if (existing.frozen_at !== null && frozenPackColumns.some((column) => !same(existing[column], pack[column]))) {
+      refusals.push({ code: "plan_frozen", message: `${pack.code} has been bought since ${existing.frozen_at}, so its minutes and length can't change. Put new minutes or a new length under a new code.`, path: packPath(pack.code) });
+    }
+    const set: Record<string, unknown> = {};
+    const fields: ApiBillingCatalogChange["fields"] = {};
+    for (const column of packValueColumns) {
+      if (same(existing[column], values[column])) continue;
+      set[column] = values[column];
+      fields[column] = { from: existing[column], to: values[column] };
+    }
+    // A pack whose terms change goes back to draft until the provider sells it as defined again.
+    const status: PlanStatus = retired || (existing.status === "active" && existing.terms_hash !== pack.terms_hash) ? "draft" : existing.status;
+    if (status !== existing.status) {
+      set.status = status;
+      fields.status = { from: existing.status, to: status };
+    }
+    if (retired) {
+      set.retired_at = null;
+      fields.retired_at = { from: existing.retired_at, to: null };
+    }
+    if (!Object.keys(fields).length) continue;
+    write({
+      table: "billing_pack_plans",
+      key: pack.code,
+      action: retired ? "restore" : "update",
+      fields,
+      lowers_allowance: packAllowanceColumns.some((column) => column in fields && goesDown(fields[column]!.from, fields[column]!.to)) || ("days" in fields && getsShorter(fields.days!.from, fields.days!.to)),
+    }, set);
+  }
+  for (const existing of input.current.packs) {
+    if (existing.status === "retired" || applied.has(existing.code)) continue;
+    // Businesses may still hold it and the provider keeps its object, so it is retired, never deleted.
+    write({ table: "billing_pack_plans", key: existing.code, action: "retire", fields: {} }, { status: "retired", retired_at: input.now });
+  }
+
+  // Prices: one live price per pack, matched by pack and currency.
+  const livePrices = input.current.packPrices.filter((price) => price.retired_at === null);
+  const lockedCurrencies = [...new Set(livePrices.filter((price) => price.currency !== input.currency && price.provider_ref !== null).map((price) => price.currency))].sort();
+  if (lockedCurrencies.length) {
+    refusals.push({ code: "currency_locked", message: `The billing provider already sells packs in ${lockedCurrencies.join(", ")}, so the currency can't change to ${input.currency} while those prices are live.`, path: "billing_file.currency" });
+  }
+  const kept = new Set<string>();
+  for (const pack of applied.values()) {
+    const price = pack.price;
+    const rows = input.current.packPrices.filter((row) => row.pack === pack.code && row.currency === price.currency);
+    const live = rows.find((row) => row.retired_at === null);
+    const key = packPriceKey({ pack: pack.code, currency: price.currency });
+    if (live) {
+      kept.add(live.id);
+      // A price change keeps the row; the link that follows names the object selling the new price.
+      if (live.cents !== price.cents) write({ table: "billing_pack_prices", key, action: "update", fields: { cents: { from: live.cents, to: price.cents } }, raises_price: price.cents > live.cents }, { cents: price.cents }, live.id);
+      continue;
+    }
+    // A pack back in the file brings back its latest price, and with it the object its link names.
+    const [latest] = rows.filter((row) => row.retired_at !== null).sort((a, b) => byKey(b.retired_at!, a.retired_at!) || byKey(b.updated_at, a.updated_at));
+    if (latest) {
+      const fields: ApiBillingCatalogChange["fields"] = { retired_at: { from: latest.retired_at, to: null } };
+      if (latest.cents !== price.cents) fields.cents = { from: latest.cents, to: price.cents };
+      write({ table: "billing_pack_prices", key, action: "restore", fields, raises_price: price.cents > latest.cents }, { cents: price.cents, retired_at: null }, latest.id);
+    } else {
+      write({ table: "billing_pack_prices", key, action: "insert", fields: {} }, { pack: pack.code, currency: price.currency, cents: price.cents });
+    }
+  }
+  for (const price of livePrices) {
+    // Its currency left the file, or its pack did.
+    if (!kept.has(price.id)) write({ table: "billing_pack_prices", key: packPriceKey(price), action: "retire", fields: {} }, { retired_at: input.now }, price.id);
+  }
+
+  writes.sort((a, b) => byKey(a.change.table, b.change.table) || byKey(a.change.key, b.change.key) || actionOrder[a.change.action] - actionOrder[b.change.action]);
+  return { writes, refusals };
+}
+
+/**
+ * The order the writes run in: plans before prices, and packs before their
+ * prices, for the foreign keys, and within each table retirements first, so
+ * a live price index never sees two live rows for one plan and period, or
+ * for one pack.
  */
 export function billingCatalogWriteOrder(writes: readonly BillingCatalogWrite[]): BillingCatalogWrite[] {
   return [...writes].sort((a, b) => byKey(a.change.table, b.change.table) || actionOrder[a.change.action] - actionOrder[b.change.action] || byKey(a.change.key, b.change.key));
@@ -335,6 +498,44 @@ function storedPrice(row: Row): StoredBillingPrice {
   };
 }
 
+function storedPack(row: Row): StoredBillingPack {
+  return {
+    code: String(row.code),
+    status: row.status as PlanStatus,
+    names: row.names as StoredBillingPack["names"],
+    voice_sec: Number(row.voice_sec),
+    // smallint and bigint may arrive as text.
+    days: numberOrNull(row.days),
+    sms_seg: Number(row.sms_seg),
+    calls_out: Number(row.calls_out),
+    chat_units: Number(row.chat_units),
+    kb_bytes: Number(row.kb_bytes),
+    numbers: Number(row.numbers),
+    receptionists: Number(row.receptionists),
+    terms_hash: String(row.terms_hash),
+    frozen_at: isoOrNull(row.frozen_at),
+    sort: Number(row.sort),
+    run_id: (row.run_id ?? null) as string | null,
+    retired_at: isoOrNull(row.retired_at),
+    created_at: iso(row.created_at),
+    updated_at: iso(row.updated_at),
+  };
+}
+
+function storedPackPrice(row: Row): StoredBillingPackPrice {
+  return {
+    id: String(row.id),
+    pack: String(row.pack),
+    currency: String(row.currency),
+    cents: Number(row.cents),
+    provider_ref: (row.provider_ref ?? null) as string | null,
+    run_id: (row.run_id ?? null) as string | null,
+    retired_at: isoOrNull(row.retired_at),
+    created_at: iso(row.created_at),
+    updated_at: iso(row.updated_at),
+  };
+}
+
 /** Polar's sandbox or production as the provider columns name it. */
 export const providerEnvOfPolar = (env: PolarEnv): BillingEnv => (env === "production" ? "live" : "sandbox");
 
@@ -380,7 +581,7 @@ function runResource(row: Row): ApiBillingCatalogRun {
   };
 }
 
-type CatalogState = { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; latest: Row | null; latestLink: Row | null };
+type CatalogState = { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; packs: StoredBillingPack[]; packPrices: StoredBillingPackPrice[]; latest: Row | null; latestLink: Row | null };
 
 /** The latest run of a kind; link means a link to any provider. */
 async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "link" | "verify"): Promise<Row | null> {
@@ -388,11 +589,13 @@ async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "link" | "ve
   return row ?? null;
 }
 
-// The whole catalog, retired rows too, the latest catalog run and the latest link: section 7.5's Q9 and Q6.
+// The whole catalog, packs included, retired rows too, the latest catalog run and the latest link: section 7.5's Q9 and Q6.
 async function readCatalog(tx: DatabaseTransaction): Promise<CatalogState> {
   const plans = (await tx.execute<Row>(sql`select * from public.billing_plans order by sort, code`)).rows.map(storedPlan);
   const prices = (await tx.execute<Row>(sql`select * from public.billing_prices order by plan, period, retired_at nulls first`)).rows.map(storedPrice);
-  return { plans, prices, latest: await latestRun(tx, "catalog"), latestLink: await latestRun(tx, "link") };
+  const packs = (await tx.execute<Row>(sql`select * from public.billing_pack_plans order by sort, code`)).rows.map(storedPack);
+  const packPrices = (await tx.execute<Row>(sql`select * from public.billing_pack_prices order by pack, retired_at nulls first`)).rows.map(storedPackPrice);
+  return { plans, prices, packs, packPrices, latest: await latestRun(tx, "catalog"), latestLink: await latestRun(tx, "link") };
 }
 
 /** A run's start: when it holds the lock, to the millisecond, and after the latest run of its kind, so that run is always the last one written. */
@@ -409,6 +612,8 @@ function fieldNames(table: PgTable): Map<string, string> {
 
 const planFields = fieldNames(billingPlans);
 const priceFields = fieldNames(billingPrices);
+const packPlanFields = fieldNames(billingPackPlans);
+const packPriceFields = fieldNames(billingPackPrices);
 const timeColumns = new Set(["offer_end", "retired_at"]);
 
 function toFields(fields: Map<string, string>, set: Record<string, unknown>): Record<string, unknown> {
@@ -419,17 +624,36 @@ function toFields(fields: Map<string, string>, set: Record<string, unknown>): Re
   }));
 }
 
+// A plan or a pack is keyed by its code, a price by its row's id.
 async function runWrite(tx: DatabaseTransaction, write: BillingCatalogWrite, runId: string): Promise<void> {
   const stamp = { runId, updatedAt: sql`now()` as unknown as Date };
-  if (write.change.table === "billing_plans") {
-    const values = { ...toFields(planFields, write.set), ...stamp };
-    if (write.change.action === "insert") await tx.insert(billingPlans).values(values as typeof billingPlans.$inferInsert);
-    else await tx.update(billingPlans).set(values).where(eq(billingPlans.code, write.change.key));
-    return;
+  const insert = write.change.action === "insert";
+  switch (write.change.table) {
+    case "billing_plans": {
+      const values = { ...toFields(planFields, write.set), ...stamp };
+      if (insert) await tx.insert(billingPlans).values(values as typeof billingPlans.$inferInsert);
+      else await tx.update(billingPlans).set(values).where(eq(billingPlans.code, write.change.key));
+      return;
+    }
+    case "billing_prices": {
+      const values = { ...toFields(priceFields, write.set), ...stamp };
+      if (insert) await tx.insert(billingPrices).values(values as typeof billingPrices.$inferInsert);
+      else await tx.update(billingPrices).set(values).where(eq(billingPrices.id, write.id!));
+      return;
+    }
+    case "billing_pack_plans": {
+      const values = { ...toFields(packPlanFields, write.set), ...stamp };
+      if (insert) await tx.insert(billingPackPlans).values(values as typeof billingPackPlans.$inferInsert);
+      else await tx.update(billingPackPlans).set(values).where(eq(billingPackPlans.code, write.change.key));
+      return;
+    }
+    case "billing_pack_prices": {
+      const values = { ...toFields(packPriceFields, write.set), ...stamp };
+      if (insert) await tx.insert(billingPackPrices).values(values as typeof billingPackPrices.$inferInsert);
+      else await tx.update(billingPackPrices).set(values).where(eq(billingPackPrices.id, write.id!));
+      return;
+    }
   }
-  const values = { ...toFields(priceFields, write.set), ...stamp };
-  if (write.change.action === "insert") await tx.insert(billingPrices).values(values as typeof billingPrices.$inferInsert);
-  else await tx.update(billingPrices).set(values).where(eq(billingPrices.id, write.id!));
 }
 
 // The operations.
@@ -565,9 +789,13 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
       refusals.push({ code: "catalog_changed", message: latestHash === null ? "Nothing was applied yet, so there is no run to replace. Run a dry run again." : `The latest catalog run has hash ${latestHash}, so someone applied in between. Run a dry run again.`, path: "replaces_hash" });
     }
     const now = new Date().toISOString();
-    const diff = diffBillingCatalog({ plans: desiredBillingPlans(billingProfileForProvider(profile, own.id)), currency: profile.currency, current, now });
-    refusals.push(...diff.refusals);
-    const changes = diff.writes.map((write) => write.change);
+    const sells = billingProfileForProvider(profile, own.id);
+    const diff = diffBillingCatalog({ plans: desiredBillingPlans(sells), currency: profile.currency, current, now });
+    const packDiff = diffBillingPackCatalog({ packs: desiredBillingPacks(sells), currency: profile.currency, current, now });
+    refusals.push(...diff.refusals, ...packDiff.refusals);
+    // Plans' changes first, as before packs, then the packs'.
+    const writes = [...diff.writes, ...packDiff.writes];
+    const changes = writes.map((write) => write.change);
     const base = {
       kind: "catalog" as const,
       brand: body.brand,
@@ -609,7 +837,7 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
       idemKey: input.idempotencyKey,
       reqHash: requestHash,
     }).returning({ id: billingRuns.id });
-    for (const write of billingCatalogWriteOrder(diff.writes)) await runWrite(tx, write, run!.id);
+    for (const write of billingCatalogWriteOrder(writes)) await runWrite(tx, write, run!.id);
     const [finished] = (await tx.execute<Row>(sql`update public.billing_runs set ended_at = clock_timestamp() where id = ${run!.id}::uuid returning *`)).rows;
     return { run: runResource(finished!), replayed: false, status: 201 as const };
   }, dryRun ? { accessMode: "read only" } : {});
@@ -633,15 +861,37 @@ const linkWords: Record<BillingProvider, { object: string; discount: string; cha
 const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 /**
+ * The price row, a plan's or a pack's, that already has the object. Each
+ * table's unique index covers only its own rows, so a link looks across both.
+ */
+function linkOwner(current: { prices: readonly StoredBillingPrice[]; packPrices?: readonly StoredBillingPackPrice[] }, ref: string): { id: string; key: string; retired: boolean } | undefined {
+  const price = current.prices.find((entry) => entry.provider_ref === ref);
+  if (price) return { id: price.id, key: priceKey(price), retired: price.retired_at !== null };
+  const packPrice = current.packPrices?.find((entry) => entry.provider_ref === ref);
+  return packPrice ? { id: packPrice.id, key: packPriceKey(packPrice), retired: packPrice.retired_at !== null } : undefined;
+}
+
+/** How many times a link names each object, its plans' prices and its packs together. */
+function sentObjects(body: { plans: BillingCatalogLinkRequest["plans"]; packs?: BillingCatalogLinkRequest["packs"] }): Map<string, number> {
+  const counts = new Map<string, number>();
+  const count = (ref: string) => counts.set(ref, (counts.get(ref) ?? 0) + 1);
+  for (const plan of body.plans) for (const price of plan.prices) count(price.provider_ref);
+  for (const pack of body.packs ?? []) count(pack.provider_ref);
+  return counts;
+}
+
+/**
  * The rows a link writes, and the refusals the tables alone can find. A link
  * names every live price of every sold plan that isn't retired, each with the
  * provider's object that sells it, and each plan's discount. A row that has
  * none gets the one sent; a row with another keeps it unless replace_ids is
  * sent, which retires the row with its object and puts a new live row beside
  * it, so a subscriber on the old object can still be matched. A sold plan in
- * draft becomes active, since the link is complete. Pure, like the catalog diff.
+ * draft becomes active, since the link is complete. An object already linked
+ * to a pack's price, or named for a pack too, is taken. Pure, like the
+ * catalog diff.
  */
-export function diffBillingLinks(input: { body: Pick<BillingCatalogLinkRequest, "plans" | "replace_ids" | "provider" | "names">; current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }; now: string }): BillingCatalogDiff {
+export function diffBillingLinks(input: { body: Pick<BillingCatalogLinkRequest, "plans" | "replace_ids" | "provider" | "names"> & { packs?: BillingCatalogLinkRequest["packs"] }; current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; packPrices?: readonly StoredBillingPackPrice[] }; now: string }): BillingCatalogDiff {
   const writes: BillingCatalogWrite[] = [];
   const refusals: ApiBillingCatalogRefusal[] = [];
   const replace = input.body.replace_ids === true;
@@ -651,9 +901,7 @@ export function diffBillingLinks(input: { body: Pick<BillingCatalogLinkRequest, 
   const refuse = (code: ApiBillingCatalogRefusal["code"], path: string, message: string) => refusals.push({ code, message, path });
   const targets = new Map(input.current.plans.filter((plan) => plan.sold && plan.status !== "retired").map((plan) => [plan.code, plan]));
   const livePrices = (code: string) => input.current.prices.filter((price) => price.plan === code && price.retired_at === null);
-  const owner = (ref: string) => input.current.prices.find((price) => price.provider_ref === ref);
-  const sentIds = new Map<string, number>();
-  for (const plan of input.body.plans) for (const price of plan.prices) sentIds.set(price.provider_ref, (sentIds.get(price.provider_ref) ?? 0) + 1);
+  const sentIds = sentObjects(input.body);
   const sentDiscounts = new Map<string, number>();
   for (const plan of input.body.plans) if (plan.provider_disc !== null) sentDiscounts.set(plan.provider_disc, (sentDiscounts.get(plan.provider_disc) ?? 0) + 1);
 
@@ -698,9 +946,9 @@ export function diffBillingLinks(input: { body: Pick<BillingCatalogLinkRequest, 
         return;
       }
       periods.add(price.period);
-      const taken = owner(price.provider_ref);
+      const taken = linkOwner(input.current, price.provider_ref);
       if ((taken && taken.id !== row.id) || (sentIds.get(price.provider_ref) ?? 0) > 1) {
-        refuse("id_taken", `${pricePath}.${field.ref}`, taken && taken.id !== row.id ? `${sentence(words.object)} ${price.provider_ref} is already linked to ${priceKey(taken)}${taken.retired_at ? ", a retired price" : ""}. One ${words.object} sells one price.` : `${sentence(words.object)} ${price.provider_ref} is named for more than one price. One ${words.object} sells one price.`);
+        refuse("id_taken", `${pricePath}.${field.ref}`, taken && taken.id !== row.id ? `${sentence(words.object)} ${price.provider_ref} is already linked to ${taken.key}${taken.retired ? ", a retired price" : ""}. One ${words.object} sells one price.` : `${sentence(words.object)} ${price.provider_ref} is named for more than one price. One ${words.object} sells one price.`);
         return;
       }
       if (row.provider_ref === price.provider_ref) return;
@@ -741,6 +989,81 @@ export function diffBillingLinks(input: { body: Pick<BillingCatalogLinkRequest, 
   return { writes, refusals };
 }
 
+/**
+ * The pack rows a link writes, and the refusals the tables alone can find,
+ * by diffBillingLinks' rules. A link names every pack that isn't retired,
+ * each with the object that sells its live price, a Stripe price or a Polar
+ * product, so a payment for a pack always finds its pack. A row with another
+ * object keeps it unless replace_ids is sent, which retires the row with its
+ * object and puts a new live row beside it. A pack in draft becomes active.
+ * Pure.
+ */
+export function diffBillingPackLinks(input: { body: Pick<BillingCatalogLinkRequest, "plans" | "packs" | "replace_ids" | "provider">; current: { prices: readonly StoredBillingPrice[]; packs: readonly StoredBillingPack[]; packPrices: readonly StoredBillingPackPrice[] }; now: string }): BillingCatalogDiff {
+  const writes: BillingCatalogWrite[] = [];
+  const refusals: ApiBillingCatalogRefusal[] = [];
+  const replace = input.body.replace_ids === true;
+  const words = linkWords[input.body.provider];
+  const name = billingProviderNames[input.body.provider];
+  const refuse = (code: ApiBillingCatalogRefusal["code"], path: string, message: string) => refusals.push({ code, message, path });
+  const write = (table: ApiBillingCatalogChange["table"], key: string, action: ApiBillingCatalogChange["action"], fields: ApiBillingCatalogChange["fields"], set: Record<string, unknown>, id?: string) => {
+    writes.push({ change: { table, key, action, fields, lowers_allowance: false, raises_price: false }, set, ...(id ? { id } : {}) });
+  };
+  const targets = new Map(input.current.packs.filter((pack) => pack.status !== "retired").map((pack) => [pack.code, pack]));
+  const sentIds = sentObjects(input.body);
+
+  const named = new Set(input.body.packs.map((pack) => pack.code));
+  for (const pack of targets.values()) {
+    if (!named.has(pack.code)) refuse("links_incomplete", "packs", `Pack ${pack.code} isn't retired and isn't in the link. Name every pack that isn't retired, with the ${words.object} that sells its live price.`);
+  }
+
+  const seen = new Set<string>();
+  input.body.packs.forEach((sent, index) => {
+    const path = `packs[${index}]`;
+    if (seen.has(sent.code)) {
+      refuse("unknown_price", `${path}.code`, `Pack ${sent.code} is named twice.`);
+      return;
+    }
+    seen.add(sent.code);
+    const pack = targets.get(sent.code);
+    if (!pack) {
+      refuse("unknown_price", `${path}.code`, input.current.packs.some((entry) => entry.code === sent.code) ? `Pack ${sent.code} is retired, so nothing sells it.` : `There's no pack ${sent.code}.`);
+      return;
+    }
+    if (sent.terms_hash !== pack.terms_hash) refuse("terms_changed", `${path}.terms_hash`, `Pack ${pack.code}'s terms are ${pack.terms_hash.slice(0, 12)} now, not ${sent.terms_hash.slice(0, 12)}: its ${name} ${words.object} was made from other terms. Set ${name} up from the latest file again.`);
+
+    const linkPrice = () => {
+      const row = input.current.packPrices.find((entry) => entry.pack === pack.code && entry.retired_at === null);
+      if (!row || row.currency !== sent.currency) {
+        refuse("unknown_price", `${path}.currency`, `Pack ${pack.code} has no live price in ${sent.currency}.`);
+        return;
+      }
+      const taken = linkOwner(input.current, sent.provider_ref);
+      if ((taken && taken.id !== row.id) || (sentIds.get(sent.provider_ref) ?? 0) > 1) {
+        refuse("id_taken", `${path}.provider_ref`, taken && taken.id !== row.id ? `${sentence(words.object)} ${sent.provider_ref} is already linked to ${taken.key}${taken.retired ? ", a retired price" : ""}. One ${words.object} sells one price.` : `${sentence(words.object)} ${sent.provider_ref} is named for more than one price. One ${words.object} sells one price.`);
+        return;
+      }
+      if (row.provider_ref === sent.provider_ref) return;
+      const key = packPriceKey(row);
+      if (row.provider_ref === null) {
+        write("billing_pack_prices", key, "update", { provider_ref: { from: null, to: sent.provider_ref } }, { provider_ref: sent.provider_ref }, row.id);
+        return;
+      }
+      if (!replace) {
+        refuse("id_changed", `${path}.provider_ref`, `${key} is sold by ${words.object} ${row.provider_ref}. Send replace_ids to retire that row with its ${words.object} and link ${sent.provider_ref} to a new one.`);
+        return;
+      }
+      // The retired row keeps its object, so a pack bought through it still finds its pack.
+      write("billing_pack_prices", key, "retire", {}, { retired_at: input.now }, row.id);
+      write("billing_pack_prices", key, "insert", { provider_ref: { from: row.provider_ref, to: sent.provider_ref } }, { pack: row.pack, currency: row.currency, cents: row.cents, provider_ref: sent.provider_ref });
+    };
+    linkPrice();
+    if (pack.status === "draft") write("billing_pack_plans", pack.code, "update", { status: { from: "draft", to: "active" } }, { status: "active" });
+  });
+
+  writes.sort((a, b) => byKey(a.change.table, b.change.table) || byKey(a.change.key, b.change.key) || actionOrder[a.change.action] - actionOrder[b.change.action]);
+  return { writes, refusals };
+}
+
 /** A Polar link's plans in Polar's names, as its request was hashed before the provider's names. */
 const polarLinkPlan = (plan: BillingCatalogLinkRequest["plans"][number]) => ({
   code: plan.code,
@@ -753,9 +1076,9 @@ const polarLinkPlan = (plan: BillingCatalogLinkRequest["plans"][number]) => ({
  * Records the provider's objects that sell the catalog, or with dry_run shows
  * what it would record. It refuses a link made from another file than the
  * latest catalog run, for another provider or account than the deployment's
- * or the first link's, or that leaves a sold plan half linked; each reason is
- * a detail of one 409. Polar keeps its refusal codes and words. Idempotency as
- * for an apply.
+ * or the first link's, or that leaves a sold plan half linked or a pack
+ * unlinked; each reason is a detail of one 409. Polar keeps its refusal codes
+ * and words. Idempotency as for an apply.
  */
 export async function linkBillingCatalogForApi(context: DomainContext, input: { caller: BillingCatalogCaller; idempotencyKey: string | null; body: ApiBillingCatalogLink; deployment: BillingCatalogDeployment }): Promise<{ run: ApiBillingCatalogRun; replayed: boolean; status: 200 | 201 }> {
   const { caller, deployment } = input;
@@ -766,10 +1089,12 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
   if (!dryRun && !input.idempotencyKey) throw missingKey();
   const own = deploymentProvider(deployment);
   const codeHash = billingProfileHash(link.brand, deployment.codeHashes);
-  // A Polar link hashes as it did before the provider's names, so a retry sent either way matches.
+  // A Polar link hashes as it did before the provider's names, so a retry sent either way matches,
+  // and a link without packs as it did before packs.
+  const packs = link.packs.length ? { packs: link.packs } : {};
   const requestHash = idempotencyRequestHash(link.provider === "polar"
-    ? { operation: "linkBillingCatalog", brand: link.brand, hash: link.hash, polar_env: polarEnvOf(link.provider_env), polar_org: link.provider_account, plans: link.plans.map(polarLinkPlan), replace_ids: link.replace_ids }
-    : { operation: "linkBillingCatalog", brand: link.brand, hash: link.hash, provider: link.provider, provider_env: link.provider_env, provider_account: link.provider_account, plans: link.plans, objects: link.objects, replace_ids: link.replace_ids });
+    ? { operation: "linkBillingCatalog", brand: link.brand, hash: link.hash, polar_env: polarEnvOf(link.provider_env), polar_org: link.provider_account, plans: link.plans.map(polarLinkPlan), ...packs, replace_ids: link.replace_ids }
+    : { operation: "linkBillingCatalog", brand: link.brand, hash: link.hash, provider: link.provider, provider_env: link.provider_env, provider_account: link.provider_account, plans: link.plans, ...packs, objects: link.objects, replace_ids: link.replace_ids });
 
   return await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
     if (!dryRun) {
@@ -804,8 +1129,10 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
     }
     const now = new Date().toISOString();
     const diff = diffBillingLinks({ body: link, current, now });
-    refusals.push(...diff.refusals);
-    const changes = diff.writes.map((write) => write.change);
+    const packDiff = diffBillingPackLinks({ body: link, current, now });
+    refusals.push(...diff.refusals, ...packDiff.refusals);
+    const writes = [...diff.writes, ...packDiff.writes];
+    const changes = writes.map((write) => write.change);
     const base = {
       // Polar's links keep the kind polar in the API.
       kind: (link.provider === "polar" ? "polar" : "link") as ApiBillingCatalogRun["kind"],
@@ -850,7 +1177,7 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
       idemKey: input.idempotencyKey,
       reqHash: requestHash,
     }).returning({ id: billingRuns.id });
-    for (const write of billingCatalogWriteOrder(diff.writes)) await runWrite(tx, write, run!.id);
+    for (const write of billingCatalogWriteOrder(writes)) await runWrite(tx, write, run!.id);
     const [finished] = (await tx.execute<Row>(sql`update public.billing_runs set ended_at = clock_timestamp() where id = ${run!.id}::uuid returning *`)).rows;
     return { run: runResource(finished!), replayed: false, status: 201 as const };
   }, dryRun ? { accessMode: "read only" } : {});
@@ -904,7 +1231,20 @@ export function billingCatalogPlans(current: { plans: StoredBillingPlan[]; price
   return current.plans.map((plan) => planResource(plan, current.prices, provider));
 }
 
-/** Every plan and price the deployment holds, the latest apply, whether it matches the file in the running code, and the billing provider it runs with. */
+function packPriceResource(price: StoredBillingPackPrice): ApiBillingCatalogPackPrice {
+  const { pack: _pack, run_id: _runId, ...rest } = price;
+  return rest;
+}
+
+/** Every pack with its prices, the live one first, then the retired ones, latest first: as GET /billing/catalog shows them. */
+export function billingCatalogPacks(current: { packs: readonly StoredBillingPack[]; packPrices: readonly StoredBillingPackPrice[] }): ApiBillingCatalogPack[] {
+  return current.packs.map(({ run_id: _runId, ...pack }) => {
+    const ordered = current.packPrices.filter((price) => price.pack === pack.code).sort((a, b) => Number(a.retired_at !== null) - Number(b.retired_at !== null) || byKey(b.retired_at ?? "", a.retired_at ?? "") || byKey(a.currency, b.currency));
+    return { ...pack, prices: ordered.map(packPriceResource) };
+  });
+}
+
+/** Every plan, pack and price the deployment holds, the latest apply, whether it matches the file in the running code, and the billing provider it runs with. */
 export async function getBillingCatalogForApi(context: DomainContext, input: { deployment: BillingCatalogDeployment }): Promise<ApiBillingCatalog> {
   const current = await withBusinessTransaction(context.db, { actorType: "worker" }, readCatalog, { accessMode: "read only" });
   const codeHash = billingProfileHash(input.deployment.brand, input.deployment.codeHashes);
@@ -931,6 +1271,7 @@ export async function getBillingCatalogForApi(context: DomainContext, input: { d
     profile: (current.latest?.profile ?? null) as Record<string, unknown> | null,
     currency: current.prices.find((price) => price.retired_at === null)?.currency ?? null,
     plans: billingCatalogPlans(current, own.id),
+    packs: billingCatalogPacks(current),
     polar: polarBlock,
     provider: providerBlock,
   };

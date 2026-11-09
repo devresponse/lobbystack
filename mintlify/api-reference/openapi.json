@@ -18986,7 +18986,8 @@
               "free_cloud",
               "starter",
               "pro",
-              "enterprise"
+              "enterprise",
+              "prepaid"
             ],
             "description": "The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."
           },
@@ -19523,12 +19524,14 @@
                           "type": "string",
                           "enum": [
                             "billing_plans",
-                            "billing_prices"
+                            "billing_prices",
+                            "billing_pack_plans",
+                            "billing_pack_prices"
                           ]
                         },
                         "key": {
                           "type": "string",
-                          "description": "A plan's code, or code/period/currency for a price."
+                          "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                         },
                         "action": {
                           "type": "string",
@@ -19560,7 +19563,7 @@
                         },
                         "lowers_allowance": {
                           "type": "boolean",
-                          "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                          "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                         },
                         "raises_price": {
                           "type": "boolean",
@@ -20288,6 +20291,223 @@
             },
             "description": "Every plan, whatever its access or status, by sort then code."
           },
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "The pack's permanent code, its key in billing.json's packs."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "active",
+                    "retired"
+                  ],
+                  "description": "draft until the billing provider can sell it as defined, active, or retired."
+                },
+                "names": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Display names by language."
+                },
+                "voice_sec": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Voice seconds the pack holds."
+                },
+                "days": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "How many days a bought pack lasts from its payment. Null means it never ends."
+                },
+                "sms_seg": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Alert SMS segments included a month."
+                },
+                "calls_out": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Outbound call attempts included a month."
+                },
+                "chat_units": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Website chat AI units included a month."
+                },
+                "kb_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Knowledge storage limit in bytes."
+                },
+                "numbers": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Business phone numbers included."
+                },
+                "receptionists": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Receptionists active at once, the default included."
+                },
+                "terms_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "SHA-256 as 64 lowercase hex characters."
+                },
+                "frozen_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When it was first bought. From then its minutes and length can't change."
+                },
+                "sort": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "retired_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "prices": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Stable identifier (UUID)."
+                      },
+                      "currency": {
+                        "type": "string"
+                      },
+                      "cents": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "What the pack costs, paid once."
+                      },
+                      "provider_ref": {
+                        "description": "The provider's object that sells it, once linked: a Polar product or a Stripe price.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "retired_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "ISO 8601 timestamp in UTC."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "When it stopped being sold. Null for the live price. A retired price keeps its object, so packs bought through it are still recognized."
+                      },
+                      "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "currency",
+                      "cents",
+                      "provider_ref",
+                      "retired_at",
+                      "created_at",
+                      "updated_at"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Every price of the pack, the live one first."
+                }
+              },
+              "required": [
+                "code",
+                "status",
+                "names",
+                "voice_sec",
+                "days",
+                "sms_seg",
+                "calls_out",
+                "chat_units",
+                "kb_bytes",
+                "numbers",
+                "receptionists",
+                "terms_hash",
+                "frozen_at",
+                "sort",
+                "retired_at",
+                "created_at",
+                "updated_at",
+                "prices"
+              ],
+              "additionalProperties": false,
+              "description": "A prepaid pack: voice minutes paid for once, to use within its days of the payment."
+            },
+            "description": "Every prepaid pack, whatever its status, by sort then code. Empty when no applied file had packs."
+          },
           "polar": {
             "anyOf": [
               {
@@ -20423,12 +20643,14 @@
                                   "type": "string",
                                   "enum": [
                                     "billing_plans",
-                                    "billing_prices"
+                                    "billing_prices",
+                                    "billing_pack_plans",
+                                    "billing_pack_prices"
                                   ]
                                 },
                                 "key": {
                                   "type": "string",
-                                  "description": "A plan's code, or code/period/currency for a price."
+                                  "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                                 },
                                 "action": {
                                   "type": "string",
@@ -20460,7 +20682,7 @@
                                 },
                                 "lowers_allowance": {
                                   "type": "boolean",
-                                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                                 },
                                 "raises_price": {
                                   "type": "boolean",
@@ -20910,12 +21132,14 @@
                               "type": "string",
                               "enum": [
                                 "billing_plans",
-                                "billing_prices"
+                                "billing_prices",
+                                "billing_pack_plans",
+                                "billing_pack_prices"
                               ]
                             },
                             "key": {
                               "type": "string",
-                              "description": "A plan's code, or code/period/currency for a price."
+                              "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                             },
                             "action": {
                               "type": "string",
@@ -20947,7 +21171,7 @@
                             },
                             "lowers_allowance": {
                               "type": "boolean",
-                              "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                              "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                             },
                             "raises_price": {
                               "type": "boolean",
@@ -21240,6 +21464,7 @@
           "profile",
           "currency",
           "plans",
+          "packs",
           "polar",
           "provider"
         ],
@@ -22149,6 +22374,112 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "packs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "names": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "fr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "es": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "sr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        }
+                      },
+                      "required": [
+                        "en",
+                        "fr",
+                        "es",
+                        "sr"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minutes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    },
+                    "days": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1095
+                    },
+                    "priceCents": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000000
+                    },
+                    "included": {
+                      "type": "object",
+                      "properties": {
+                        "alertSmsSegments": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "outboundCallAttempts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "chatAiUnits": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000000
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "knowledgeStorageMb": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1024
+                        },
+                        "businessNumbers": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "receptionists": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "names",
+                    "minutes",
+                    "priceCents"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -22329,6 +22660,45 @@
             },
             "description": "Every sold plan that isn't retired, each with every live price."
           },
+          "packs": {
+            "description": "Every pack that isn't retired, each with the object that sells its live price. Required once the catalog has packs; left out, the link names none.",
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "description": "A pack that isn't retired."
+                },
+                "terms_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "The pack's terms_hash its provider object was made from. It must be the row's."
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[a-z]{3}$",
+                  "description": "The currency of the pack's live price."
+                },
+                "provider_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "description": "The provider's object that sells the pack's live price: a Polar product or a Stripe price."
+                }
+              },
+              "required": [
+                "code",
+                "terms_hash",
+                "currency",
+                "provider_ref"
+              ],
+              "additionalProperties": false
+            }
+          },
           "objects": {
             "description": "The provider's objects beyond plans and prices, which a Stripe link records: its meters, overage prices, billing portal configuration and webhook endpoint, with the endpoint secret's SHA-256. Not with provider polar.",
             "type": "object",
@@ -22440,12 +22810,14 @@
                   "type": "string",
                   "enum": [
                     "billing_plans",
-                    "billing_prices"
+                    "billing_prices",
+                    "billing_pack_plans",
+                    "billing_pack_prices"
                   ]
                 },
                 "key": {
                   "type": "string",
-                  "description": "A plan's code, or code/period/currency for a price."
+                  "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                 },
                 "action": {
                   "type": "string",
@@ -22477,7 +22849,7 @@
                 },
                 "lowers_allowance": {
                   "type": "boolean",
-                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                 },
                 "raises_price": {
                   "type": "boolean",

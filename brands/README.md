@@ -10,7 +10,7 @@ See [docs/branding.md](../docs/branding.md) for the fields and how a deployment 
 
 ## billing.json
 
-A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
+A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. It may also hold [prepaid packs](#prepaid-packs). `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
 
 It also holds the settings of the billing providers its deployments use: the `polar` block and the `stripe` block ([Stripe billing](../docs/providers/stripe.md)). An apply refuses a file without the block of its deployment's provider. Once a Stripe deployment is linked, an apply refuses a change to `stripe.overage` or `managedPayments` (`selling_mode_changed`): its customers' subscriptions were made that way. AlloPlace's and RealInfoBot's `stripe` blocks sell with Stripe as the merchant of record (`managedPayments`, with `overage` on the plan's checkout), so their Stripe deployments sell monthly prices only, while their Polar deployments sell the yearly ones too.
 
@@ -36,6 +36,30 @@ pnpm lobbystack billing catalog-apply alloplace --billing-file @brands/alloplace
 The preview changes nothing and lists every change, flagging any that lowers an allowance or raises a price. The first apply leaves out `--replaces-hash`, or passes `null` to stop if someone applied first. A change to a sold plan's terms, its prices included, sends the plan back to draft, and checkout stops selling it until Polar sells the new terms and a link records them, so for anything Polar sells, use `pnpm billing apply` (below), which does both in one run.
 
 Once applied, the standard plans' allowances, overage rates, knowledge storage and included numbers are what the deployment enforces and what the plan and Usage pages show; until the first apply, it uses those of the file its build carries (fork PR #88), though a number claim counts one number on Starter and Pro and none on Free. A change counts for the whole current month: usage already recorded this month is measured against the new allowance, so lowering one can block a business at once. A business holds one number at most, so `businessNumbers` is 0 or 1: 1 lets it claim one.
+
+### Prepaid packs
+
+A pack is voice minutes a business pays for once and uses within a number of days of the payment. Each size and length is one more key under `packs`, with a price of its own, so the file decides which sizes and lengths are on sale. A file without `packs` sells none, and its plans' rows and provider objects stay exactly as they are. AlloPlace and RealInfoBot sell nine: 250, 500 and 1,000 minutes, each for 90, 180 or 365 days.
+
+```json
+"pack_500_180": {
+  "names": { "en": "500 minutes, 180 days", "fr": "500 minutes, 180 jours", "es": "500 minutos, 180 días", "sr": "500 minuta, 180 dana" },
+  "minutes": 500,
+  "days": 180,
+  "priceCents": 9900,
+  "limits": { "knowledgeStorageMb": 20 }
+}
+```
+
+- The key is the pack's permanent code: 3 to 48 lowercase letters, digits, `_` and `-`, as a plan's. No plan may have it, whether in the file or only on the deployment, such as one made through the API, which an apply refuses as `code_taken`. A file holds at most 30 packs.
+- `priceCents` is paid once, in the file's `currency`, before tax. A pack has no overage rates.
+- `days` runs from the payment, 1 to 1,095. A pack without `days` never ends.
+- `included` (`alertSmsSegments`, `outboundCallAttempts`, `chatAiUnits`) and `limits` (`knowledgeStorageMb`, `businessNumbers`, `receptionists`) are what a business on the pack gets each month. Whatever a pack leaves out comes from the file's Starter.
+- Packs are listed by minutes, then length, a pack without `days` last.
+
+Once a pack has been bought, its minutes and length can't change: an apply refuses it (`plan_frozen`), so put new minutes or a new length under a new code. Its names, price and monthly allowances may change. A new price or allowance is new terms, which takes the pack off sale until `pnpm billing apply` has the provider sell them and links it again; a new name doesn't. To stop selling a pack, remove its entry: its row is retired, not deleted, and `pnpm billing apply` archives its provider object only with `--allow-archive`, refusing to run without it. Packs already bought keep their minutes, and a pack put back in the file gets its row, its price and its provider object back.
+
+`pnpm billing apply` makes each pack a product of its own at the provider, after everything the plans need, and links it: a one-time price on Stripe ([Stripe billing](../docs/providers/stripe.md)), a private one-time product on Polar ([Polar billing](../docs/providers/polar.md)). A pack is on sale once that link has made it active. `lobbystack billing catalog` lists the packs with the plans.
 
 ### Promo codes
 

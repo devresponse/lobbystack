@@ -29,6 +29,15 @@ Since fork PR #129 a business can have several receptionists, and each number na
 
 The reservation and purchase limits count per person across their businesses, or per business when a platform key claims for it. They live in the database functions from migration `0094`. The search limit is in `apps/admin/src/lib/phone-number-search-limit.ts`.
 
+## Know what happens when the last pack ends
+
+A business on prepaid minute packs holds its number while a pack has time left. When its last pack ends, on its end date or by a refund or a lost dispute, the `billing.expirePacks` job ([billing](../billing/README.md#know-what-runs-on-its-own)) sets the number to go back to Twilio 30 days after that pack ended:
+
+- **The number stops answering at once.** Calls are turned away (`live.incoming_closed_business` in the admin's log), and texts get no reply, as on a [canceled account](account-cancellation.md). Migration `0148` has `app.resolve_business_by_phone`, `app.resolve_receptionist_by_phone` and `app.is_closed_business_phone` read a number set to go for this reason (`reclaim_reason` `pack_ended`) as closed. A number set to go for a replacement or a cancellation answers as before.
+- **The worker's hourly `phone-number-reclaim` job releases it** once the 30 days are up.
+- **A new pack or a plan bought before then keeps the number,** and it answers again from the next call.
+- **Nothing is set to go while the business still has a number another way:** a live pack, a disputed pack with time left, or a plan that includes a number, such as Starter.
+
 ## Debug "Request failed" and "We couldn't get that number"
 
 Since fork PR #32 the dashboard says why a pick failed: an expired offer, a pick still in progress, a limit reached, or the plan. A real failure shows an Error ID.

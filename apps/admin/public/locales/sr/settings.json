@@ -1578,6 +1578,7 @@
       "appointments_read": "Čitanje zakazanih i slobodnih termina",
       "appointments_write": "Zakazivanje, otkazivanje i pomeranje termina",
       "messages_read": "Čitanje poruka koje je primio recepcioner",
+      "knowledge_read": "Čitanje pitanja na koja recepcioner nije znao da odgovori",
       "knowledge_write": "Dodavanje unosa u znanje i čestih pitanja"
     }
   }

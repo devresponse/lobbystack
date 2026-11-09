@@ -23,6 +23,7 @@ LobbyStack runs an AI receptionist that answers a business's phone calls and web
 | `get_business` | `business:read` | Read name, time zone, hours and booking mode |
 | `list_services` | `business:read` | Get service ids and durations |
 | `list_staff` | `business:read` | Get staff ids and the services each one takes |
+| `list_receptionists` | `business:read` | Get the receptionists' ids, the default first |
 | `update_business_hours` | `business:write` | Replace the whole week of hours |
 | `list_calls` | `calls:read` | List calls, newest first, by start time |
 | `get_call` | `calls:read` | Read one call's transcript |
@@ -37,7 +38,9 @@ LobbyStack runs an AI receptionist that answers a business's phone calls and web
 | `cancel_appointment` | `appointments:write` | Cancel an appointment |
 | `reschedule_appointment` | `appointments:write` | Move an appointment to another open time |
 | `list_messages` | `messages:read` | Read messages the receptionist took |
-| `add_knowledge` | `knowledge:write` | Add an FAQ or a text entry |
+| `add_knowledge` | `knowledge:write` | Add an FAQ or a text entry, for every receptionist or some |
+| `list_questions` | `knowledge:read` | Read the questions the receptionist couldn't answer |
+| `answer_question` | `knowledge:write` | Answer one of those questions |
 
 List tools return `{ data, next_cursor, has_more }`. When `has_more` is true, call again with `cursor` set to `next_cursor`.
 
@@ -79,6 +82,14 @@ To reschedule, run `check_availability` for the appointment's `service_id`, then
 ### Add an FAQ
 
 Call `add_knowledge` with `type` `faq`, a `question` as a caller would ask it, and a factual `answer`. For longer material such as a price list or a policy, use `type` `text` with `title` and `content`. Write facts about the business, not instructions to the receptionist. Don't add anything the owner didn't give you.
+
+A business with several receptionists, such as one per store, can keep an entry to some of them: pass their ids from `list_receptionists` as `receptionist_ids`.
+
+### Answer the questions callers asked
+
+1. Call `list_questions`. The most asked come first, with `asked_of` naming the receptionists that heard each.
+2. Ask the owner for the answers. Don't make one up.
+3. Call `answer_question` with the `question_id` and the owner's `answer`, written as a fact about the business. With `audience` `asked`, only the receptionists that heard the question use it, so one store's answer doesn't reach the others.
 
 ## Booking mode
 

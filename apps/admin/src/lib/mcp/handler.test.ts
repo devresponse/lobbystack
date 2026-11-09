@@ -11,7 +11,7 @@ vi.mock("../public-api/rate-limit", async (importOriginal) => ({ ...(await impor
 
 const idempotency = vi.hoisted(() => ({ store: new Map<string, { hash: string; response: { status: number; body: unknown } }>() }));
 // REST routes call these directly; the MCP tools get fakes through dependencies.
-const rest = vi.hoisted(() => ({ resolveApiKey: vi.fn(), createAppointmentForApi: vi.fn(), createContactForApi: vi.fn() }));
+const rest = vi.hoisted(() => ({ resolveApiKey: vi.fn(), createAppointmentForApi: vi.fn(), createContactForApi: vi.fn(), answerUnansweredQuestionForApi: vi.fn() }));
 vi.mock("@lobbystack/domain", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lobbystack/domain")>();
   return {
@@ -83,6 +83,8 @@ const contact = { id, name: "Ana", phone: "+14165550134", email: null, locale: "
 const appointment = { id, status: "confirmed", starts_at: at, ends_at: later, timezone: "America/Toronto", service_id: id, service_name: "Cleaning", staff_id: id, staff_name: "Sam", contact_id: id, contact_name: "Ana", contact_phone: "+14165550134", source: "api", calendar_sync_status: "pending", created_at: at, updated_at: at };
 const message = { id, receptionist_id: id, status: "open", title: "Callback", body: "Please call back.", caller_name: "Ana", callback_phone: "+14165550134", urgency: "normal", callback_window: null, channel: "voice", call_id: id, request: null, appointment_id: null, created_at: at, updated_at: at };
 const knowledge = { id, type: "faq", title: "Do you park?", content: "Yes, behind the building.", tags: [], priority: 0, active: true, audience: "everyone", receptionist_ids: [], created_at: at, updated_at: at };
+const receptionist = { id, name: "Front desk", description: "", handle: "front-desk", is_default: true, status: "active", locale: null, knowledge_scope: "all", listed: true, position: 0, phone_numbers: 1, widget_keys: 1, entry_links: 0, archived_at: null, created_at: at, updated_at: at };
+const question = { id, question: "Do you sell gift cards?", times_asked: 2, first_asked_at: at, last_asked_at: later, last_channel: "voice", last_call_id: id, last_conversation_id: null, asked_of: [{ receptionist_id: id, name: "Front desk", archived: false, times_asked: 2, last_asked_at: later }] };
 const page = <T>(data: T[]) => ({ data, next_cursor: null, has_more: false });
 
 function fakeOperations(): McpOperations {
@@ -105,6 +107,9 @@ function fakeOperations(): McpOperations {
     rescheduleAppointmentForApi: vi.fn(async () => appointment),
     listMessagesForApi: vi.fn(async () => page([message])),
     createKnowledgeEntryForApi: vi.fn(async () => knowledge),
+    listReceptionistsForApi: vi.fn(async () => [receptionist]),
+    listUnansweredQuestionsForApi: vi.fn(async () => page([question])),
+    answerUnansweredQuestionForApi: vi.fn(async () => ({ ...knowledge, type: "text", title: question.question })),
   } as unknown as McpOperations;
 }
 
@@ -288,7 +293,7 @@ describe("MCP tool listing", () => {
   it("serves the 2026-07-28 protocol as well as 2025-era clients", async () => {
     const client = await connect(keyWith(["business:read"]), "auto");
     const { tools } = await client.listTools();
-    expect(tools.map((entry) => entry.name).sort()).toEqual(["get_business", "list_services", "list_staff"]);
+    expect(tools.map((entry) => entry.name).sort()).toEqual(["get_business", "list_receptionists", "list_services", "list_staff"]);
     const result = await client.callTool({ name: "get_business", arguments: {} });
     expect(result.structuredContent).toMatchObject({ id: businessA, booking_mode: "instant" });
   });
@@ -314,6 +319,9 @@ const mappings: Array<{ tool: string; args: Record<string, unknown>; operation: 
   { tool: "reschedule_appointment", args: { appointment_id: id, starts_at: later }, operation: "rescheduleAppointmentForApi", expected: [id, { starts_at: later }] },
   { tool: "list_messages", args: { status: "open" }, operation: "listMessagesForApi", expected: [{ status: "open" }] },
   { tool: "add_knowledge", args: { type: "faq", question: "Do you park?", answer: "Yes, behind the building." }, operation: "createKnowledgeEntryForApi", expected: [{ type: "faq", question: "Do you park?", answer: "Yes, behind the building." }] },
+  { tool: "list_receptionists", args: {}, operation: "listReceptionistsForApi", expected: [] },
+  { tool: "list_questions", args: { limit: 10 }, operation: "listUnansweredQuestionsForApi", expected: [{ limit: 10 }] },
+  { tool: "answer_question", args: { question_id: id, answer: "Yes, at the front desk.", audience: "asked" }, operation: "answerUnansweredQuestionForApi", expected: [id, { answer: "Yes, at the front desk.", audience: "asked" }] },
 ];
 
 // Optional staff and contact filters reach the domain call when the model sends them.
@@ -322,6 +330,11 @@ const optionalArguments: Array<{ tool: string; args: Record<string, unknown>; op
   { tool: "list_appointments", args: { contact_id: id }, operation: "listAppointmentsForApi", expected: [{ contactId: id }] },
   { tool: "reschedule_appointment", args: { appointment_id: id, starts_at: later, staff_id: id }, operation: "rescheduleAppointmentForApi", expected: [id, { starts_at: later, staff_id: id }] },
   { tool: "book_appointment", args: { service_id: id, starts_at: at, contact_phone: "+14165550134", staff_id: id }, operation: "createAppointmentForApi", expected: [{ service_id: id, starts_at: at, contact_phone: "+14165550134", staff_id: id }] },
+  { tool: "list_calls", args: { receptionist_id: id }, operation: "listCallsForApi", expected: [{ receptionistId: id }] },
+  { tool: "list_messages", args: { receptionist_id: id }, operation: "listMessagesForApi", expected: [{ receptionistId: id }] },
+  { tool: "list_questions", args: { receptionist_id: id }, operation: "listUnansweredQuestionsForApi", expected: [{ receptionistId: id }] },
+  { tool: "add_knowledge", args: { type: "text", title: "Valet", content: "At the door.", receptionist_ids: [id] }, operation: "createKnowledgeEntryForApi", expected: [{ type: "text", title: "Valet", content: "At the door.", audience: "chosen", receptionist_ids: [id] }] },
+  { tool: "answer_question", args: { question_id: id, answer: "Yes.", audience: "chosen", receptionist_ids: [id] }, operation: "answerUnansweredQuestionForApi", expected: [id, { answer: "Yes.", audience: "chosen", receptionist_ids: [id] }] },
 ];
 
 describe("MCP tools call the v1 domain operations", () => {
@@ -446,7 +459,7 @@ describe("MCP idempotency", () => {
 
   it("maps every creating tool to the idempotent v1 operation it stands for", () => {
     const idempotent = Object.fromEntries(mcpTools.filter((entry) => entry.idempotent).map((entry) => [entry.name, entry.operation]));
-    expect(idempotent).toEqual({ create_contact: "createContact", book_appointment: "createAppointment", add_knowledge: "createKnowledgeEntry" });
+    expect(idempotent).toEqual({ create_contact: "createContact", book_appointment: "createAppointment", add_knowledge: "createKnowledgeEntry", answer_question: "answerUnansweredQuestion" });
     for (const entry of mcpTools) expect(entry.scope).toBe(apiOperations[entry.operation].scope);
   });
 });
@@ -500,6 +513,26 @@ describe("idempotency shared between REST and MCP", () => {
     const response = await v1.createContact(new Request("https://app.example.com/api/v1/contacts", { method: "POST", headers: { authorization: "Bearer lsk_aaaaaaaa_full", "content-type": "application/json", "idempotency-key": "shared-4" }, body: JSON.stringify({ phone: "+14165550137" }) }));
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({ error: { code: "idempotency_key_reused" } });
+  });
+
+  it("hashes an answer with its question's path, as REST does, so one key can't answer two questions", async () => {
+    rest.answerUnansweredQuestionForApi.mockResolvedValue({ ...knowledge, id: "22222222-3333-4444-8555-666666666666" });
+    const body = { answer: "Yes, at the front desk." };
+    const response = await v1.answerUnansweredQuestion(new Request(`https://app.example.com/api/v1/knowledge/questions/${id.toUpperCase()}/answer`, {
+      method: "POST",
+      headers: { authorization: "Bearer lsk_aaaaaaaa_full", "content-type": "application/json", "idempotency-key": "answer-1" },
+      body: JSON.stringify(body),
+    }), { params: Promise.resolve({ question_id: id.toUpperCase() }) });
+    expect(response.status).toBe(201);
+    const first = (await response.json()) as { data: unknown };
+    const client = await connect("lsk_aaaaaaaa_full");
+    // The same question, in any letter case, replays the REST answer.
+    const replayed = await client.callTool({ name: "answer_question", arguments: { question_id: id, ...body, idempotency_key: "answer-1" } });
+    expect(replayed.structuredContent).toEqual(first.data);
+    expect(operations.answerUnansweredQuestionForApi).not.toHaveBeenCalled();
+    // Another question with the same key and answer is another request.
+    const other = errorOf(await client.callTool({ name: "answer_question", arguments: { question_id: "8b9c0d1e-2f3a-4b4c-9d5e-6f7a8b9c0d1e", ...body, idempotency_key: "answer-1" } }));
+    expect(other.code).toBe("idempotency_key_reused");
   });
 
   it("keeps different operations and different keys apart", async () => {

@@ -12,7 +12,7 @@ import { DEFAULT_APP_NAME, apiOperations, type ApiErrorCode, type ApiKeyScope } 
 
 import { reportServerError } from "../error-reporting";
 import type { RateLimitDecision } from "../public-api/rate-limit";
-import { mcpOperations, toolsForScopes, type McpOperations, type McpTool } from "./tools";
+import { mcpOperations, type McpOperations, type McpTool, restPathFor, toolsForScopes } from "./tools";
 
 // Builds the MCP server for one request. Only the tools the credential's
 // scopes allow are registered, so tools/list shows exactly what it can call.
@@ -81,13 +81,13 @@ function rateLimitError(decision: Exclude<RateLimitDecision, { allowed: true }>)
 /**
  * Runs a creating tool under its idempotency_key, sharing the record with the
  * REST route for the same operation: same scope (API key, operation id, key)
- * and the same body hash. A retry on either transport replays the first
+ * and the same body hash, with the path when the path names something. A retry on either transport replays the first
  * response; the domain work and the record commit in one transaction.
  */
 async function runIdempotentTool(dependencies: { runIdempotent: typeof runIdempotent }, context: DomainContext, caller: ApiCaller, entry: McpTool, key: string, args: Record<string, unknown>, run: (transactional: DomainContext) => Promise<Record<string, unknown>>): Promise<Record<string, unknown>> {
   const scope = { businessId: caller.businessId, apiKeyId: callerPrincipalId(caller), operation: entry.operation, key };
   const status = apiOperations[entry.operation].status;
-  const outcome = await dependencies.runIdempotent(context, scope, idempotencyRequestHash(entry.restBody!(args)), async (transactional) => ({ status, body: JSON.stringify({ data: await run(transactional) }) }));
+  const outcome = await dependencies.runIdempotent(context, scope, idempotencyRequestHash(entry.restBody!(args), restPathFor(entry.operation, args)), async (transactional) => ({ status, body: JSON.stringify({ data: await run(transactional) }) }));
   // REST stores the response body as JSON text of the v1 envelope; the tool result is its data.
   const body = typeof outcome.response.body === "string" ? JSON.parse(outcome.response.body) as { data?: unknown } : outcome.response.body as { data?: unknown };
   if (!body || typeof body.data !== "object" || body.data === null) throw new Error("The stored idempotent response has no data.");

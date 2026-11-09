@@ -44,7 +44,7 @@ This catalog was written in the project's notes and moved into the repository on
 | Browser calls | 3 | 5 | 7 |
 | Dashboard API | 97 | 153 | 8 |
 | Public API (v1) | 92 (one catches unknown paths) | 126: 125 operations and the OpenAPI document | 9 |
-| MCP server | 1 | 3 (18 tools) | 10 |
+| MCP server | 1 | 3 (21 tools) | 10 |
 | OAuth discovery and redirects | 6 | 10 | 10 |
 | Sign-in service (Better Auth) | 2 | 20 in use, 21 served but unused, 20 turned off | 11 |
 | Inbound webhooks | 7 | 7 | 12 |
@@ -3069,8 +3069,9 @@ Each tool does what the v1 operation in **Same as** does.
 | `get_business` | Get business profile | GET `/api/v1/business` | `business:read` |
 | `list_services` | List services | GET `/api/v1/services` | `business:read` |
 | `list_staff` | List staff | GET `/api/v1/staff` | `business:read` |
+| `list_receptionists` | List receptionists | GET `/api/v1/receptionists` | `business:read` |
 | `update_business_hours` | Replace opening hours | PATCH `/api/v1/business` | `business:write` |
-| `list_calls` | List calls | GET `/api/v1/calls` | `calls:read` |
+| `list_calls` | List calls, with `receptionist_id` to keep one receptionist's | GET `/api/v1/calls` | `calls:read` |
 | `get_call` | Get a call with transcript | GET `/api/v1/calls/{call_id}` | `calls:read` |
 | `search_contacts` | Search contacts | GET `/api/v1/contacts` | `contacts:read` |
 | `get_contact` | Get a contact | GET `/api/v1/contacts/{contact_id}` | `contacts:read` |
@@ -3082,8 +3083,10 @@ Each tool does what the v1 operation in **Same as** does.
 | `book_appointment` | Book an appointment | POST `/api/v1/appointments` | `appointments:write` |
 | `cancel_appointment` | Cancel an appointment | POST `/api/v1/appointments/{appointment_id}/cancel` | `appointments:write` |
 | `reschedule_appointment` | Reschedule an appointment | POST `/api/v1/appointments/{appointment_id}/reschedule` | `appointments:write` |
-| `list_messages` | List messages | GET `/api/v1/messages` | `messages:read` |
-| `add_knowledge` | Add knowledge | POST `/api/v1/knowledge` | `knowledge:write` |
+| `list_messages` | List messages, with `receptionist_id` to keep one receptionist's | GET `/api/v1/messages` | `messages:read` |
+| `add_knowledge` | Add knowledge, for every receptionist or the ones `receptionist_ids` names | POST `/api/v1/knowledge` | `knowledge:write` |
+| `list_questions` | List unanswered questions | GET `/api/v1/knowledge/questions` | `knowledge:read` |
+| `answer_question` | Answer a question | POST `/api/v1/knowledge/questions/{question_id}/answer` | `knowledge:write` |
 
 ### OAuth discovery and redirects
 

@@ -1578,6 +1578,7 @@
       "appointments_read": "Leer citas y horarios disponibles",
       "appointments_write": "Reservar, cancelar y reprogramar citas",
       "messages_read": "Leer los mensajes que tomó la recepcionista",
+      "knowledge_read": "Leer las preguntas que la recepcionista no supo responder",
       "knowledge_write": "Agregar entradas de conocimiento y preguntas frecuentes"
     }
   }

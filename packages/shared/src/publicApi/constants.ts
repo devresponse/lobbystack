@@ -50,7 +50,7 @@ export function isBusinessApiKeyScope(value: unknown): value is BusinessApiKeySc
 }
 
 /** The scopes MCP tools use. */
-const mcpToolScopes = ["business:read", "business:write", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:write"] as const satisfies readonly ApiKeyScope[];
+const mcpToolScopes = ["business:read", "business:write", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:read", "knowledge:write"] as const satisfies readonly ApiKeyScope[];
 export type OAuthGrantableScope = (typeof mcpToolScopes)[number];
 
 /** Scopes an MCP client can be granted with OAuth. Scopes without MCP tools, such as webhooks:manage, are never offered. */

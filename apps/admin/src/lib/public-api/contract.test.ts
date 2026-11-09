@@ -91,8 +91,8 @@ describe("v1 contract", () => {
       expect(businessApiKeyScopes).not.toContain(scope);
       expect(oauthGrantableScopes).not.toContain(scope);
     }
-    // MCP has no tools for the onboarding scopes, so OAuth clients are offered the same scopes as before.
-    expect([...oauthGrantableScopes]).toEqual(["business:read", "business:write", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:write"]);
+    // MCP has no tools for the onboarding scopes; list_questions brought knowledge:read.
+    expect([...oauthGrantableScopes]).toEqual(["business:read", "business:write", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:read", "knowledge:write"]);
   });
 
   it("offers in Settings only per-business scopes an endpoint uses, each with a label", () => {

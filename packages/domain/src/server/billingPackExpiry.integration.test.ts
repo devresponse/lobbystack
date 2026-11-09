@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { auditLogs, billingAccounts, billingPackPlans, billingPacks, businessMemberships, businesses, createDatabaseClient, outboxMessages, phoneNumbers, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingPackPlans, billingPacks, businessMemberships, businesses, createDatabaseClient, outboxMessages, phoneNumbers, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
+import { setManagedPlanInTransaction } from "./billing";
 import { expireBusinessPacks } from "./billingPackExpiry";
 
 // The daily end of prepaid packs against PostgreSQL: packs whose end has
@@ -51,6 +52,9 @@ async function asWorkerLogin<T>(tx: DatabaseTransaction, run: (context: { db: Da
 }
 
 const expire = (tx: DatabaseTransaction, businessId: string, now: Date) => asWorkerLogin(tx, (context) => expireBusinessPacks(context, { businessId, appUrl, now }));
+
+/** Gives the business a managed plan as an operator's platform key does, through the worker's database. */
+const setManaged = (tx: DatabaseTransaction, businessId: string) => asWorkerLogin(tx, (context) => withBusinessTransaction(context.db, { businessId, actorType: "worker" }, (scoped) => setManagedPlanInTransaction(scoped, { businessId })));
 
 type AccountInput = { plan?: "free_cloud" | "starter"; subscriptionState?: string; replaced?: boolean; allowancesSince?: Date };
 
@@ -101,6 +105,12 @@ async function packRow(tx: DatabaseTransaction, id: string) {
 async function numberRow(tx: DatabaseTransaction, businessId: string) {
   const [row] = await tx.select({ at: phoneNumbers.reclaimScheduledAt, reason: phoneNumbers.reclaimReason }).from(phoneNumbers).where(eq(phoneNumbers.businessId, businessId));
   return row!;
+}
+
+/** The business a call to the number reaches, or null when app.resolve_business_by_phone turns it away. */
+async function reachedBusiness(tx: DatabaseTransaction, e164: string) {
+  const [row] = (await tx.execute<{ business_id: string | null }>(sql`select app.resolve_business_by_phone(${e164}) as business_id`)).rows;
+  return row?.business_id ?? null;
 }
 
 async function outbox(tx: DatabaseTransaction, businessId: string, topic?: string) {
@@ -225,6 +235,32 @@ describe.skipIf(!testUrl)("the daily end of prepaid packs against PostgreSQL", (
       expect(await packRow(tx, last.id)).toMatchObject({ status: "expired", notices: ["ended"] });
       expect(await numberRow(tx, businessId)).toEqual({ at: null, reason: null });
       expect((await audits(tx, businessId)).map((row) => row.eventType)).toEqual(["billing.pack_expired"]);
+    });
+  });
+
+  it("takes the number's release back when an operator gives the business a managed plan, and leaves a release set for another reason", async () => {
+    await rollbackTest(async (tx) => {
+      const now = new Date();
+      const { businessId, e164 } = await business(tx);
+      const last = await pack(tx, businessId, { paidAt: new Date(now.getTime() - 180 * DAY - 2 * HOUR) });
+      await expire(tx, businessId, now);
+      expect(await numberRow(tx, businessId)).toEqual({ at: new Date(last.endsAt!.getTime() + 30 * DAY), reason: "pack_ended" });
+      expect(await reachedBusiness(tx, e164)).toBeNull();
+
+      // Enterprise includes numbers, so the number answers again and stays, as when a subscription starts.
+      expect(await setManaged(tx, businessId)).toBe("set");
+      expect(await numberRow(tx, businessId)).toEqual({ at: null, reason: null });
+      expect(await reachedBusiness(tx, e164)).toBe(businessId);
+      // The pack was settled once, so a later run doesn't set the release again.
+      expect(await expire(tx, businessId, new Date(now.getTime() + DAY))).toEqual({ expired: 0, settled: 0, emails: 0, releaseAt: null });
+      expect(await numberRow(tx, businessId)).toEqual({ at: null, reason: null });
+
+      // A business that never bought a pack: its number, set to go for another reason, isn't written.
+      const other = await business(tx);
+      await tx.update(phoneNumbers).set({ reclaimScheduledAt: new Date(now.getTime() + 30 * DAY), reclaimReason: "replacement" }).where(eq(phoneNumbers.businessId, other.businessId));
+      const before = await tx.select().from(phoneNumbers).where(eq(phoneNumbers.businessId, other.businessId));
+      expect(await setManaged(tx, other.businessId)).toBe("set");
+      expect(await tx.select().from(phoneNumbers).where(eq(phoneNumbers.businessId, other.businessId))).toEqual(before);
     });
   });
 

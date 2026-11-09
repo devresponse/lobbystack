@@ -17,6 +17,7 @@ import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
 import { dateField, numberField, recordObject, stringField } from "./billingFields";
 import { applyPackEventInTransaction, applyStripePackRefundInTransaction, packsGiveWayToSubscriptionInTransaction, type PackEventInput } from "./billingPackEvents";
+import { clearPackNumberReleaseInTransaction } from "./billingPacks";
 import { limitsFor, polarProductLinks, readBillingCatalogSnapshot, readBillingPlanLimitBook } from "./billingPlans";
 import { readBillingDeployment } from "./billingProvider";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
@@ -302,6 +303,8 @@ export async function setManagedPlanInTransaction(tx: DatabaseTransaction, input
   await tx.update(billingCheckoutRequests).set({ status: "canceled", error: "The business moved to a managed plan.", updatedAt: now }).where(and(eq(billingCheckoutRequests.businessId, input.businessId), inArray(billingCheckoutRequests.status, ["pending", "processing", "error"])));
   // So do pack checkouts still being made.
   await tx.update(billingPackCheckouts).set({ status: "failed", error: "The business moved to a managed plan.", updatedAt: now }).where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.status, ["pending", "processing"])));
+  // Enterprise includes numbers, so a number set to go back to Twilio because the last prepaid pack ended stays, and answers again.
+  await clearPackNumberReleaseInTransaction(tx, input.businessId);
   await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `billing:${input.businessId}:managed:${now.getTime()}`, payload: { type: "billing.updated", entityId: input.businessId } });
   return "set";
 }
@@ -1269,8 +1272,10 @@ export async function reconcileBillingProviderEvent(
 
     // A Stripe refund of a prepaid pack's payment shrinks or ends the pack, matched on the PaymentIntent it names.
     // Stripe as merchant of record makes no invoice for a pack, so that payment keys the pack's order row too.
+    // A refund that ends a pack ends it when its event arrived: the event's occurredAt is the charge's own time,
+    // which is the payment's, and the number's release is counted from the pack's end.
     const refundPayment = kind === "refund" && event.provider === "stripe" ? stringField(payload, "paymentRef") : undefined;
-    const packRefund = refundPayment ? await applyStripePackRefundInTransaction(tx, { businessId: input.businessId, paymentRef: refundPayment, refundedCents: numberField(payload, "refundedAmount") ?? 0, at: dateField(payload, "occurredAt") ?? event.createdAt }) : null;
+    const packRefund = refundPayment ? await applyStripePackRefundInTransaction(tx, { businessId: input.businessId, paymentRef: refundPayment, refundedCents: numberField(payload, "refundedAmount") ?? 0, at: event.createdAt }) : null;
     const refundSource = input.refundInvoice ?? (packRefund ? refundPayment : undefined);
     // A Stripe refund names its payment, and the worker read back the invoice it paid: the invoice's order row
     // gets the refund, which only adds up, made first when the refund came before the payment.

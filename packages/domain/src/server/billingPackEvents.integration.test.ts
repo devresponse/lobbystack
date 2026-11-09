@@ -223,6 +223,26 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
     });
   });
 
+  it("ends a pack refunded in full when the refund arrived, not when the refunded charge was made", async () => {
+    await rollbackTest(async (tx) => {
+      await catalog(tx);
+      const businessId = await business(tx);
+      const paidAt = new Date(Date.now() - 45 * DAY);
+      await reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.completed", payload: stripeSession(businessId, { paymentRef: "pi_late_refund_1", occurredAt: paidAt }) }));
+      // stripe/events.ts dates a charge.refunded event by the charge's own created time, which is the payment's.
+      const refundedAt = new Date(Date.now() - 60_000);
+      const refund = { id: `ch_${randomUUID()}`, object: "charge", kind: "refund", paymentRef: "pi_late_refund_1", customerId: `cus_${businessId}`, amount: 5_500, refundedAmount: 5_500, currency: "cad", status: "refunded", occurredAt: paidAt.toISOString() };
+      await reconcile(tx, businessId, await store(tx, businessId, { eventType: "charge.refunded", payload: refund, createdAt: refundedAt }), null);
+
+      // The expiry job sets the number to go 30 days after this, so a pack refunded on its 45th day keeps the number 30 more days.
+      const [pack] = await tx.select({ status: billingPacks.status, endedAt: billingPacks.endedAt }).from(billingPacks).where(eq(billingPacks.businessId, businessId));
+      expect(pack).toEqual({ status: "refunded", endedAt: refundedAt });
+      // The payment's order row keeps the payment's time.
+      const [order] = await tx.select({ status: billingTransactions.status, occurredAt: billingTransactions.occurredAt }).from(billingTransactions).where(and(eq(billingTransactions.kind, "order"), eq(billingTransactions.sourceId, "pi_late_refund_1")));
+      expect(order).toEqual({ status: "refunded", occurredAt: paidAt });
+    });
+  });
+
   it("applies a refund that came before the pack's payment once the payment arrives", async () => {
     await rollbackTest(async (tx) => {
       await catalog(tx);

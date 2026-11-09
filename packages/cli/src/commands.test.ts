@@ -491,6 +491,35 @@ describe("billing catalog", () => {
     expect((await runCli(["billing", "catalog-link", "alloplace", "--data", body, "--idempotency-key", "link-2"], { fetch: api.fetch })).out).toBe(`Linked Stripe live account acct_1 with 0 changes in run ${run.id}.`);
   });
 
+  it("lists the packs under the plans with their minutes, length, price paid once and link, and no pack table for a deployment without packs or older than them", async () => {
+    const plans = [{ code: "starter", tier: "starter", status: "active", access: "public", sold: true, prices: [{ period: "monthly", currency: "cad", cents: 3000, polar_id: null, provider_ref: "price_1", retired_at: null }] }];
+    const provider = { id: "stripe", env: "sandbox", account: "acct_1", secret_sha256: null, objects: null, product_vars: null, last_link: null };
+    const base = { brand: "alloplace", code_hash: hash, hash, matches_code: true, last_run: run, plans, polar: null, provider };
+    const price = (cents: number, ref: string | null, retired: string | null = null) => ({ currency: "cad", cents, provider_ref: ref, retired_at: retired });
+    const packs = [
+      { code: "pack_250_90", status: "active", voice_sec: 15_000, days: 90, prices: [price(5_500, "price_p2"), price(5_000, "price_p1", "2026-11-01T00:00:00.000Z")] },
+      { code: "pack_1000_keep", status: "draft", voice_sec: 60_000, days: null, prices: [price(19_900, null)] },
+    ];
+    const api = fakeApi({
+      "GET /api/v1/billing/catalog": [
+        { body: { data: { ...base, packs } } },
+        { body: { data: { ...base, packs: [] } } },
+        { body: { data: base } },
+      ],
+    });
+    const shown = (await runCli(["billing", "catalog"], { fetch: api.fetch })).out;
+    expect(shown).toMatch(/pack_250_90 +active +250 +90 +55\.00 CAD once +yes/);
+    expect(shown).toMatch(/pack_1000_keep +draft +1000 +never ends +199\.00 CAD once +no/);
+    expect(shown).not.toContain("50.00 CAD");
+    // Between the plans and the line about the applied file.
+    expect(shown.indexOf("pack_250_90")).toBeGreaterThan(shown.indexOf("starter"));
+    expect(shown.indexOf("pack_250_90")).toBeLessThan(shown.indexOf("Applied "));
+    const plain = (await runCli(["billing", "catalog"], { fetch: api.fetch })).out;
+    expect(plain).not.toContain("MINUTES");
+    expect(plain).toContain("starter");
+    expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out).toBe(plain);
+  });
+
   it("links Polar's products from a file, with an Idempotency-Key, and says what it changed or what stops it", async () => {
     const linkRun = { ...run, kind: "polar", polar_env: "sandbox", polar_org: "org_test", provider: "polar", provider_env: "sandbox", provider_account: "org_test" };
     const priceChange = { table: "billing_prices", key: "pro/monthly/cad", action: "update", fields: { polar_id: { from: null, to: "prod_1" } }, lowers_allowance: false, raises_price: false };

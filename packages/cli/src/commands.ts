@@ -308,7 +308,25 @@ function providerLine(data: Row): string {
   return link ? `\nLinked to ${linkTarget(link)} ${String(link.started_at)}.` : `\n${name} ${String(provider.env)} account ${String(provider.account)}, not linked yet: run pnpm billing apply.`;
 }
 
-/** Every plan the deployment holds with its live prices and how many the billing provider sells, whether the applied file is the deployed one, and the provider account it's linked to. */
+/** The prepaid packs with their minutes, length, live price and whether the provider's object is linked; nothing on a deployment without packs, or older than them. */
+function packTable(data: Row): string {
+  const packs = (data.packs as Row[] | undefined) ?? [];
+  if (!packs.length) return "";
+  const rows = packs.map((pack) => {
+    const live = (pack.prices as Row[]).find((price) => price.retired_at === null);
+    return {
+      code: pack.code,
+      status: pack.status,
+      minutes: Math.round(Number(pack.voice_sec) / 60),
+      days: pack.days ?? "never ends",
+      price: live ? `${(Number(live.cents) / 100).toFixed(2)} ${String(live.currency).toUpperCase()} once` : "",
+      linked: live ? ((live.provider_ref ?? null) === null ? "no" : "yes") : "",
+    };
+  });
+  return `\n\n${formatTable(rows, columns("code", "status", "minutes", "days", "price", "linked"))}`;
+}
+
+/** Every plan the deployment holds with its live prices and how many the billing provider sells, its packs, whether the applied file is the deployed one, and the provider account it's linked to. */
 function catalogTables(data: Row): string {
   const plans = (data.plans as Row[]).map((plan) => {
     const live = (plan.prices as Row[]).filter((price) => price.retired_at === null);
@@ -319,7 +337,7 @@ function catalogTables(data: Row): string {
   const run = data.last_run as Row | null;
   if (!run) return `Nothing applied yet for ${String(data.brand)}. See what applying its file would change with lobbystack billing catalog-preview ${String(data.brand)} --billing-file @brands/${String(data.brand)}/billing.json.`;
   const matches = data.matches_code ? "the file the running code was built with" : data.code_hash ? "not the file the running code was built with: apply the deployed one" : "and the running code has no billing.json for this brand";
-  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "provider"))}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${providerLine(data)}`;
+  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "provider"))}${packTable(data)}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${providerLine(data)}`;
 }
 
 const changeTable = (changes: Row[]) => changes.length ? `${formatTable(changes.map((change) => ({ ...change, fields: Object.keys(change.fields as Row).join(", "), warns: [change.lowers_allowance ? "lowers an allowance" : "", change.raises_price ? "raises a price" : ""].filter(Boolean).join(", ") })), columns("action", "table", "key", "fields", "warns"))}\n\n` : "";

@@ -99,11 +99,12 @@ test("an owner publishes the business's public profile, where visitors read its 
     await page.getByLabel(settings.publicPage.details.city).fill("Toronto");
     await page.getByLabel(settings.publicPage.details.region).fill("ON");
     await page.getByLabel(settings.publicPage.details.country).selectOption("CA");
-    await page.getByRole("switch", { name: settings.publicPage.publish.label }).click();
+    // Publish page saves the edits with the page published, in one request.
     const saved = page.waitForResponse((response) => response.url().includes("/api/business-profile?") && response.request().method() === "PUT");
-    await page.getByRole("button", { name: settings.publicPage.save, exact: true }).click();
+    await page.getByRole("button", { name: settings.publicPage.publish.publishAction, exact: true }).click();
     expect((await saved).ok()).toBe(true);
     await expect(page.getByRole("status").filter({ hasText: settings.publicPage.saved })).toBeVisible();
+    await expect(page.getByRole("button", { name: settings.publicPage.publish.unpublishAction, exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("public-profile-settings.png"), fullPage: true });
 
     // Visitors now see the business, its hours, services and location, and chat with it in the page.
@@ -138,10 +139,10 @@ test("an owner publishes the business's public profile, where visitors read its 
     await expect(visitorPage.getByRole("heading", { name: frenchProfileCopy.hours.title })).toBeVisible();
 
     // Unpublishing takes the page down on the next request.
-    await page.getByRole("switch", { name: settings.publicPage.publish.label }).click();
     const unpublished = page.waitForResponse((response) => response.url().includes("/api/business-profile?") && response.request().method() === "PUT");
-    await page.getByRole("button", { name: settings.publicPage.save, exact: true }).click();
+    await page.getByRole("button", { name: settings.publicPage.publish.unpublishAction, exact: true }).click();
     expect((await unpublished).ok()).toBe(true);
+    await expect(page.getByRole("button", { name: settings.publicPage.publish.publishAction, exact: true })).toBeVisible();
     const gone = await visitorPage.goto(`/profile/${slug}`);
     expect(gone?.status()).toBe(404);
     // The widget no longer answers on the page's origin.

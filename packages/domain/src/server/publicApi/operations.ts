@@ -74,6 +74,10 @@ import {
   type ApiPublicProfile,
   type ApiPublicProfileUpdate,
   type ApiReceptionist,
+  type ApiReceptionistCreate,
+  type ApiReceptionistProfile,
+  type ApiReceptionistProfileUpdate,
+  type ApiReceptionistReorder,
   type ApiReceptionistUpdate,
   type ApiRule,
   type ApiRuleCreate,
@@ -126,7 +130,19 @@ import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "
 import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
+import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "../receptionistInput";
 import { loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch, type ReceptionistView } from "../receptionistProfile";
+import {
+  archiveReceptionistInTransaction,
+  createReceptionistInTransaction,
+  listReceptionistsInTransaction,
+  makeDefaultReceptionistInTransaction,
+  reorderReceptionistsInTransaction,
+  restoreReceptionistInTransaction,
+  setReceptionistStatusInTransaction,
+  updateReceptionistInTransaction,
+  type ReceptionistListItem,
+} from "../receptionists";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
 import { insertWidgetKeyInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "../widgetKeys";
 import { ianaTimeZone, insertBusinessInTransaction, insertInvitationInTransaction, invitationUrl, isSingleEmailAddress, lockBusinessTeam, removeMemberInTransaction, revokeInvitationInTransaction, updateBusinessInTransaction, updateMemberRoleInTransaction } from "../tenancy";
@@ -1387,6 +1403,161 @@ export async function updateReceptionistForApi(context: DomainContext, caller: A
     const fields = [...(Object.keys(patch) as Array<keyof ReceptionistProfilePatch>).map((field) => receptionistApiFields[field]), ...(regenerateSummary ? ["regenerate_summary"] : [])];
     await audit(tx, caller, { eventType: "api.receptionist.updated", entityType: "receptionist_profile", entityId: profile.id, payload: { fields } });
     return serializeReceptionist(profile);
+  });
+}
+
+// Receptionists
+
+const RECEPTIONIST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RECEPTIONIST_PAGE_SIZE = 50;
+
+/** A receptionist as the v1 API shows it, with how many numbers, widget keys and QR links open it. */
+function serializeReceptionistProfile(row: ReceptionistListItem): ApiReceptionistProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    handle: row.handle,
+    is_default: row.isDefault,
+    status: row.status,
+    listed: row.listed,
+    position: row.sortOrder,
+    locale: row.locale as ApiReceptionistProfile["locale"],
+    knowledge_scope: row.knowledgeScope,
+    phone_numbers: row.phoneNumbers,
+    widget_keys: row.widgetKeys,
+    entry_links: row.entryLinks,
+    archived_at: row.archivedAt ? row.archivedAt.toISOString() : null,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+async function loadReceptionistProfile(tx: DatabaseTransaction, businessId: string, receptionistId: string): Promise<ApiReceptionistProfile> {
+  if (!RECEPTIONIST_ID.test(receptionistId)) throw notFound("Receptionist");
+  const [row] = (await listReceptionistsInTransaction(tx, { businessId, receptionistId: receptionistId.toLowerCase(), pageSize: 1 })).receptionists;
+  if (!row) throw notFound("Receptionist");
+  return serializeReceptionistProfile(row);
+}
+
+async function listReceptionistProfiles(tx: DatabaseTransaction, businessId: string, archived: boolean): Promise<ApiReceptionistProfile[]> {
+  const rows: ReceptionistListItem[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await listReceptionistsInTransaction(tx, { businessId, view: archived ? "archived" : "current", page, pageSize: RECEPTIONIST_PAGE_SIZE });
+    rows.push(...result.receptionists);
+    if (!result.receptionists.length || rows.length >= result.total) break;
+  }
+  return rows.map(serializeReceptionistProfile);
+}
+
+/** The dashboard's refusals, such as the plan's limit, as the v1 API words a conflict. */
+async function asApiConflict<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof Error && (error as { status?: unknown }).status === 409) throw conflict(error.message);
+    throw error;
+  }
+}
+
+/** The receptionists that aren't archived, or the archived ones, the default first, then in the business's order. */
+export async function listReceptionistsForApi(context: DomainContext, caller: ApiCaller, options: { archived?: boolean | undefined } = {}): Promise<ApiReceptionistProfile[]> {
+  return await inBusiness(context, caller, async (tx) => await listReceptionistProfiles(tx, caller.businessId, options.archived === true));
+}
+
+export async function getReceptionistProfileForApi(context: DomainContext, caller: ApiCaller, receptionistId: string): Promise<ApiReceptionistProfile> {
+  return await inBusiness(context, caller, async (tx) => await loadReceptionistProfile(tx, caller.businessId, receptionistId));
+}
+
+/** Adds a receptionist within the plan's limit, as AI agents in the dashboard does. */
+export async function createReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistCreate): Promise<ApiReceptionistProfile> {
+  return await inBusiness(context, caller, async (tx) => {
+    const receptionist: ReceptionistCreateInput = {
+      name: input.name,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.handle ? { handle: input.handle } : {}),
+      ...(input.locale !== undefined ? { locale: input.locale } : {}),
+      ...(input.knowledge_scope ? { knowledgeScope: input.knowledge_scope } : {}),
+      ...(input.listed !== undefined ? { listed: input.listed } : {}),
+      ...(input.copy_from_id ? { copyFromId: input.copy_from_id.toLowerCase() } : {}),
+    };
+    const created = await asApiConflict(() => createReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionist }));
+    await audit(tx, caller, { eventType: "api.receptionist_profile.created", entityType: "receptionist_profile", entityId: created.id });
+    return await loadReceptionistProfile(tx, caller.businessId, created.id);
+  });
+}
+
+/** Changes the fields sent. Values the receptionist already has change nothing. */
+export async function updateReceptionistProfileForApi(context: DomainContext, caller: ApiCaller, receptionistId: string, input: ApiReceptionistProfileUpdate): Promise<ApiReceptionistProfile> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const current = await loadReceptionistProfile(tx, caller.businessId, receptionistId);
+    if (current.archived_at) throw conflict("Restore the receptionist before changing it.");
+    const patch: ReceptionistIdentityPatch = {};
+    if (input.name !== undefined && input.name !== current.name) patch.name = input.name;
+    if (input.description !== undefined && input.description !== current.description) patch.description = input.description;
+    if (input.handle !== undefined && input.handle !== current.handle) patch.handle = input.handle;
+    if (input.locale !== undefined && input.locale !== current.locale) patch.locale = input.locale;
+    if (input.knowledge_scope !== undefined && input.knowledge_scope !== current.knowledge_scope) patch.knowledgeScope = input.knowledge_scope;
+    if (input.listed !== undefined && input.listed !== current.listed) patch.listed = input.listed;
+    if (!Object.keys(patch).length) return current;
+    await asApiConflict(() => updateReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionistId: current.id, patch }));
+    await audit(tx, caller, { eventType: "api.receptionist_profile.updated", entityType: "receptionist_profile", entityId: current.id, payload: { fields: Object.keys(patch).sort() } });
+    return await loadReceptionistProfile(tx, caller.businessId, current.id);
+  });
+}
+
+export type ReceptionistAction = "pause" | "resume" | "archive" | "restore" | "make_default";
+
+/**
+ * Pauses, resumes, archives, restores or makes default a receptionist, with
+ * the dashboard's rules. Asking for the state it's already in changes
+ * nothing, so a retry is safe.
+ */
+export async function changeReceptionistForApi(context: DomainContext, caller: ApiCaller, receptionistId: string, action: ReceptionistAction): Promise<ApiReceptionistProfile> {
+  return await inBusiness(context, caller, async (tx) => {
+    const current = await loadReceptionistProfile(tx, caller.businessId, receptionistId);
+    const { businessId } = caller;
+    const actorUserId = callerAudit(caller).actorUserId;
+    const already = action === "archive" ? current.archived_at !== null
+      : action === "restore" ? current.archived_at === null
+        : action === "make_default" ? current.is_default
+          : current.archived_at === null && current.status === (action === "pause" ? "paused" : "active");
+    if (already) return current;
+    if (current.archived_at && action !== "restore") throw conflict("Restore the receptionist first.");
+    await asApiConflict(async () => {
+      if (action === "pause" || action === "resume") await setReceptionistStatusInTransaction(tx, { businessId, actorUserId, receptionistId: current.id, status: action === "pause" ? "paused" : "active" });
+      else if (action === "archive") await archiveReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });
+      else if (action === "restore") await restoreReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });
+      else await makeDefaultReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });
+    });
+    await audit(tx, caller, { eventType: `api.receptionist_profile.${action}`, entityType: "receptionist_profile", entityId: current.id });
+    return await loadReceptionistProfile(tx, businessId, current.id);
+  });
+}
+
+/** Puts every receptionist that isn't archived in the order sent. The order they already have changes nothing. */
+export async function reorderReceptionistsForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistReorder): Promise<ApiReceptionistProfile[]> {
+  return await inBusiness(context, caller, async (tx) => {
+    const receptionistIds = input.receptionist_ids.map((receptionistId) => receptionistId.toLowerCase());
+    const current = await listReceptionistProfiles(tx, caller.businessId, false);
+    const missing = current.filter((receptionist) => !receptionistIds.includes(receptionist.id)).map((receptionist) => receptionist.id);
+    const unknown = receptionistIds.filter((receptionistId) => !current.some((receptionist) => receptionist.id === receptionistId));
+    const repeated = new Set(receptionistIds).size !== receptionistIds.length;
+    if (missing.length || unknown.length || repeated) {
+      throw invalidRequest("Send every receptionist that isn't archived once, in the new order.", [
+        ...(missing.length ? [{ path: "receptionist_ids", message: `Missing: ${missing.join(", ")}.` }] : []),
+        ...(unknown.length ? [{ path: "receptionist_ids", message: `Not among the business's receptionists that aren't archived: ${unknown.join(", ")}.` }] : []),
+        ...(repeated ? [{ path: "receptionist_ids", message: "An id is sent more than once." }] : []),
+      ]);
+    }
+    // Lists put the default receptionist first; the order sent is the positions, which change nothing when they already match.
+    const byPosition = [...current].sort((first, second) => first.position - second.position);
+    const distinct = byPosition.every((receptionist, index) => index === 0 || receptionist.position > byPosition[index - 1]!.position);
+    if (distinct && receptionistIds.every((receptionistId, index) => byPosition[index]?.id === receptionistId)) return current;
+    await reorderReceptionistsInTransaction(tx, { businessId: caller.businessId, receptionistIds });
+    await audit(tx, caller, { eventType: "api.receptionists.reordered", entityType: "receptionist_profile", payload: { receptionistIds } });
+    return await listReceptionistProfiles(tx, caller.businessId, false);
   });
 }
 

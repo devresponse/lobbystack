@@ -5,6 +5,7 @@ import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingP
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
+import { MAX_RECEPTIONISTS_PER_REQUEST, RECEPTIONIST_DESCRIPTION_MAX_LENGTH, RECEPTIONIST_HANDLE_MAX_LENGTH, RECEPTIONIST_HANDLE_PATTERN, RECEPTIONIST_NAME_MAX_LENGTH, receptionistKnowledgeScopes, receptionistStatuses } from "../receptionists";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
@@ -160,6 +161,52 @@ export const apiReceptionistUpdateSchema = z.strictObject({
   appointment_change_policy: z.strictObject(appointmentChangePolicyFields).optional().describe("Send all four fields."),
   recording_notice: z.boolean().optional().describe("false stops calls from saying that the caller is speaking with an AI and the call is recorded and transcribed. Tell callers another way where the law asks for it."),
 }).refine((value) => value.summary === undefined || value.regenerate_summary === undefined, { message: "Send summary or regenerate_summary, not both.", path: ["regenerate_summary"] });
+
+const receptionistName = z.string().trim().min(1).max(RECEPTIONIST_NAME_MAX_LENGTH);
+const receptionistDescription = z.string().trim().max(RECEPTIONIST_DESCRIPTION_MAX_LENGTH).describe("What it helps with, which visitors read when they pick a receptionist.");
+const receptionistHandle = z.string().trim().toLowerCase().max(RECEPTIONIST_HANDLE_MAX_LENGTH).regex(RECEPTIONIST_HANDLE_PATTERN, "Use lower-case letters and digits, joined by single dashes.");
+
+export const apiReceptionistProfileSchema = z.object({
+  id,
+  name: z.string(),
+  description: z.string().describe("What it helps with, which visitors read when they pick a receptionist."),
+  handle: z.string().nullable().describe("Its page's address, /profile/<business slug>/<handle>. The default receptionist answers the business page itself."),
+  is_default: z.boolean().describe("The default receptionist answers the business page, the numbers, widget keys and links that name no receptionist, and those of a paused or archived one."),
+  status: z.enum(receptionistStatuses).describe("active answers. paused hands its calls and chats to the default receptionist."),
+  listed: z.boolean().describe("Whether visitors can pick it on the business page. The default receptionist is always listed."),
+  position: z.number().int().describe("Its place in the business's order, lowest first."),
+  locale: locale.nullable().describe("The language its calls open in. null uses the business's language, which the default receptionist always does."),
+  knowledge_scope: z.enum(receptionistKnowledgeScopes).describe("all: it answers from every knowledge entry. audience: from those for everyone and those given to it."),
+  phone_numbers: z.number().int().describe("Numbers that ring it."),
+  widget_keys: z.number().int().describe("Active widget keys that open it."),
+  entry_links: z.number().int().describe("QR links that open it, paused ones too."),
+  archived_at: nullableTimestamp,
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("One of the business's receptionists: who it is, its page and its state. GET /receptionist is the default receptionist's greeting and instructions.");
+
+export const apiReceptionistCreateSchema = z.strictObject({
+  name: receptionistName,
+  description: receptionistDescription.optional(),
+  handle: receptionistHandle.optional().describe("Its page's address. Made from the name when left out."),
+  locale: locale.nullable().optional().describe("The language its calls open in. Left out or null, the business's language."),
+  knowledge_scope: z.enum(receptionistKnowledgeScopes).optional().describe("Defaults to audience."),
+  listed: z.boolean().optional().describe("Defaults to true."),
+  copy_from_id: id.optional().describe("The receptionist whose greeting, instructions and booking it starts with. Defaults to the default receptionist."),
+});
+
+export const apiReceptionistProfileUpdateSchema = z.strictObject({
+  name: receptionistName.optional(),
+  description: receptionistDescription.optional(),
+  handle: receptionistHandle.optional(),
+  locale: locale.nullable().optional().describe("null uses the business's language. The default receptionist has no language of its own."),
+  knowledge_scope: z.enum(receptionistKnowledgeScopes).optional(),
+  listed: z.boolean().optional().describe("The default receptionist stays listed."),
+});
+
+export const apiReceptionistReorderSchema = z.strictObject({
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).describe("Every receptionist that isn't archived, once, in the new order."),
+});
 
 export const apiRuleSchema = z.object({
   id,
@@ -1372,6 +1419,10 @@ export type ApiUserCreate = z.infer<typeof apiUserCreateSchema>;
 export type ApiUser = z.infer<typeof apiUserSchema>;
 export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
 export type ApiReceptionist = z.infer<typeof apiReceptionistSchema>;
+export type ApiReceptionistProfile = z.infer<typeof apiReceptionistProfileSchema>;
+export type ApiReceptionistCreate = z.infer<typeof apiReceptionistCreateSchema>;
+export type ApiReceptionistProfileUpdate = z.infer<typeof apiReceptionistProfileUpdateSchema>;
+export type ApiReceptionistReorder = z.infer<typeof apiReceptionistReorderSchema>;
 export type ApiReceptionistUpdate = z.infer<typeof apiReceptionistUpdateSchema>;
 export type ApiRule = z.infer<typeof apiRuleSchema>;
 export type ApiRuleCreate = z.infer<typeof apiRuleCreateSchema>;

@@ -190,13 +190,14 @@ export function receptionistSearchPattern(search: string): string {
  */
 export async function listReceptionistsInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; view?: ReceptionistListView; status?: ReceptionistStatus | undefined; search?: string | undefined; page?: number | undefined; pageSize?: number | undefined },
+  input: { businessId: string; view?: ReceptionistListView; status?: ReceptionistStatus | undefined; search?: string | undefined; page?: number | undefined; pageSize?: number | undefined; receptionistId?: string | undefined },
 ): Promise<ReceptionistListPage> {
   const pageSize = Math.min(Math.max(Math.trunc(input.pageSize ?? DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE);
   const page = Math.max(Math.trunc(input.page ?? 1), 1);
   const conditions: Array<SQL | undefined> = [
     eq(receptionistProfiles.businessId, input.businessId),
-    input.view === "archived" ? isNotNull(receptionistProfiles.archivedAt) : isNull(receptionistProfiles.archivedAt),
+    // One receptionist by id, archived or not, as the v1 API reads it.
+    input.receptionistId ? eq(receptionistProfiles.id, input.receptionistId) : input.view === "archived" ? isNotNull(receptionistProfiles.archivedAt) : isNull(receptionistProfiles.archivedAt),
     input.status ? eq(receptionistProfiles.status, input.status) : undefined,
   ];
   const search = input.search?.trim();

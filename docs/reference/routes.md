@@ -2149,6 +2149,16 @@ Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/s
 |---|---|---|---|---|---|---|
 | GET | `https://demo.alloplace.com/api/v1/receptionist` | `getReceptionist` | Get the receptionist settings | `business:read` | | `apps/admin/app/api/v1/receptionist/route.ts` |
 | PATCH | `https://demo.alloplace.com/api/v1/receptionist` | `updateReceptionist` | Update the receptionist settings | `business:write` | | `apps/admin/app/api/v1/receptionist/route.ts` |
+| GET | `https://demo.alloplace.com/api/v1/receptionists` | `listReceptionists` | List receptionists | `business:read` | `?archived=true` for the archived ones | `apps/admin/app/api/v1/receptionists/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/receptionists` | `createReceptionist` | Add a receptionist | `business:write` | `Idempotency-Key` optional; answers 201 | `apps/admin/app/api/v1/receptionists/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/receptionists/reorder` | `reorderReceptionists` | Put the receptionists in order | `business:write` |  | `apps/admin/app/api/v1/receptionists/reorder/route.ts` |
+| GET | `https://demo.alloplace.com/api/v1/receptionists/{receptionist_id}` | `getReceptionistProfile` | Get a receptionist | `business:read` |  | `apps/admin/app/api/v1/receptionists/[receptionist_id]/route.ts` |
+| PATCH | `https://demo.alloplace.com/api/v1/receptionists/{receptionist_id}` | `updateReceptionistProfile` | Update a receptionist | `business:write` |  | `apps/admin/app/api/v1/receptionists/[receptionist_id]/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/receptionists/{receptionist_id}/pause` | `pauseReceptionist` | Pause a receptionist | `business:write` |  | `apps/admin/app/api/v1/receptionists/[receptionist_id]/pause/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/receptionists/{receptionist_id}/resume` | `resumeReceptionist` | Resume a receptionist | `business:write` |  | `apps/admin/app/api/v1/receptionists/[receptionist_id]/resume/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/receptionists/{receptionist_id}/archive` | `archiveReceptionist` | Archive a receptionist | `business:write` |  | `apps/admin/app/api/v1/receptionists/[receptionist_id]/archive/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/receptionists/{receptionist_id}/restore` | `restoreReceptionist` | Restore a receptionist | `business:write` |  | `apps/admin/app/api/v1/receptionists/[receptionist_id]/restore/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/receptionists/{receptionist_id}/make-default` | `makeDefaultReceptionist` | Make a receptionist the default | `business:write` |  | `apps/admin/app/api/v1/receptionists/[receptionist_id]/make-default/route.ts` |
 | GET | `https://demo.alloplace.com/api/v1/rules` | `listRules` | List rules | `business:read` | | `apps/admin/app/api/v1/rules/route.ts` |
 | POST | `https://demo.alloplace.com/api/v1/rules` | `createRule` | Add a rule | `business:write` | `Idempotency-Key` optional; answers 201 | `apps/admin/app/api/v1/rules/route.ts` |
 | PATCH | `https://demo.alloplace.com/api/v1/rules/{rule_id}` | `updateRule` | Update a rule | `business:write` | | `apps/admin/app/api/v1/rules/[rule_id]/route.ts` |
@@ -2166,6 +2176,35 @@ Public API (v1) endpoint for the receptionist settings: greeting, tone, summary,
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/receptionistProfile.ts`, `packages/domain/src/server/publicApi/resources.ts`.
 
+**`apps/admin/app/api/v1/receptionists/route.ts`**
+
+Public API (v1) endpoint for the business's receptionists: list them and add one. The `lobbystack` CLI uses it in `receptionists list` and `receptionists add`.
+
+- `GET /api/v1/receptionists`: Needs `business:read`. `booleanParam` reads `archived`. `listReceptionistsForApi` (`packages/domain/src/server/publicApi/operations.ts`) reads every page of `listReceptionistsInTransaction` (`packages/domain/src/server/receptionists.ts`): those that aren't archived, or the archived ones, the default first, then by `sort_order`, each with how many numbers, widget keys and QR links open it. Answers 200 `{ data, next_cursor: null, has_more: false }`.
+- `POST /api/v1/receptionists`: Needs `business:write`; `Idempotency-Key` optional. `readApiBody` checks `apiReceptionistCreateSchema` (`name`, `description`, `handle`, `locale`, `knowledge_scope`, `listed`, `copy_from_id`). `createReceptionistForApi` calls `createReceptionistInTransaction`, the dashboard's own, which takes the receptionists lock and answers 409 `conflict` when the plan's active receptionists are all in use, the business keeps the deployment's cap, or the page address is taken. An `api.receptionist_profile.created` audit row follows the dashboard's `receptionist.created`. Answers 201 with the receptionist.
+
+Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/receptionists.ts`.
+
+**`apps/admin/app/api/v1/receptionists/reorder/route.ts`**
+
+Public API (v1) endpoint that puts the receptionists in a new order. The `lobbystack` CLI calls it in `receptionists reorder`.
+
+- `POST /api/v1/receptionists/reorder`: Needs `business:write`. `readApiBody` checks `{ receptionist_ids }` (`apiReceptionistReorderSchema`). `reorderReceptionistsForApi` answers 400 with details unless the list names every receptionist that isn't archived once, changes nothing when the positions already match, and otherwise calls `reorderReceptionistsInTransaction`. Answers 200 with the receptionists as `GET /receptionists` lists them, the default first.
+
+**`apps/admin/app/api/v1/receptionists/[receptionist_id]/route.ts`**
+
+Public API (v1) endpoint for one receptionist: read it, archived ones too, and change its name, what it helps with, page address, language, knowledge or listing. The `lobbystack` CLI uses it in `receptionists get` and `receptionists update`.
+
+- `GET /api/v1/receptionists/{receptionist_id}`: Needs `business:read`. `uuidParam` checks the id; `getReceptionistProfileForApi` answers 404 for another business's.
+- `PATCH /api/v1/receptionists/{receptionist_id}`: Needs `business:write`. `readApiBody` checks `apiReceptionistProfileUpdateSchema`. `updateReceptionistProfileForApi` answers 400 for an empty body and 409 for an archived receptionist, drops unchanged fields, and calls `updateReceptionistInTransaction`, which answers 409 when the default would be unlisted or given a language, or the page address is taken. An `api.receptionist_profile.updated` audit row names the fields.
+
+**`apps/admin/app/api/v1/receptionists/[receptionist_id]/pause/route.ts`**, **`resume`**, **`archive`**, **`restore`** and **`make-default`**
+
+Public API (v1) endpoints that pause, resume, archive, restore or make default one receptionist. The `lobbystack` CLI calls them in `receptionists pause`, `resume`, `archive`, `restore` and `make-default`.
+
+- `POST /api/v1/receptionists/{receptionist_id}/<action>`: Needs `business:write`. `changeReceptionistForApi` returns the receptionist unchanged when it's already in that state, answers 409 for an archived one until it's restored, and otherwise calls the dashboard's `setReceptionistStatusInTransaction`, `archiveReceptionistInTransaction`, `restoreReceptionistInTransaction` or `makeDefaultReceptionistInTransaction`, whose refusals answer 409 `conflict`: the default can't be paused or archived, a resume or restore needs room in the plan, and a paused receptionist can't be the default. An `api.receptionist_profile.<action>` audit row follows.
+
+Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/receptionists.ts`.
 **`apps/admin/app/api/v1/rules/route.ts`**
 
 Public API (v1) endpoint for the instructions the receptionist follows on calls and in chats: list them in order and add new ones. The `lobbystack` CLI uses it in `rules list`, `rules add` and `lobbystack onboard`.

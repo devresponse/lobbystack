@@ -403,6 +403,18 @@ export const groups: Record<string, Group> = Object.fromEntries([
     get: { operation: "getReceptionist" },
     set: { operation: "updateReceptionist", files: ["summary", "booking_policy", "voice_instructions", "sms_instructions", "chat_instructions"] },
   }),
+  group("receptionists", "The business's receptionists: add, change, pause, archive and order them.", {
+    list: { operation: "listReceptionists", columns: columns("id", "name", "status", "is_default", "listed", "handle") },
+    get: { operation: "getReceptionistProfile" },
+    add: { operation: "createReceptionist", args: ["name"] },
+    update: { operation: "updateReceptionistProfile" },
+    pause: { operation: "pauseReceptionist" },
+    resume: { operation: "resumeReceptionist" },
+    archive: { operation: "archiveReceptionist" },
+    restore: { operation: "restoreReceptionist" },
+    "make-default": { operation: "makeDefaultReceptionist" },
+    reorder: { operation: "reorderReceptionists", args: ["...receptionist_ids"], columns: columns("id", "name", "status", "is_default") },
+  }),
   group("services", "The services customers can book.", {
     list: { operation: "listServices", columns: columns("id", "name", "duration_minutes", "active", "staff_ids") },
     add: { operation: "createService", args: ["name"] },

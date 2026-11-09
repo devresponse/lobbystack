@@ -5,7 +5,7 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
@@ -17,7 +17,7 @@ import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
 import { searchKnowledgeForApi } from "./knowledgeSearch";
-import { cancelAppointmentForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -656,6 +656,62 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await expectApiError(createRuleForApi(context, b.caller, { title: "One too many", content: "Be kind." }), 409, "conflict");
     } finally {
       await admin!.db.delete(agentRules).where(eq(agentRules.businessId, b.businessId));
+    }
+  });
+
+  it("adds, changes, pauses, archives, restores, orders and makes default receptionists, within the plan's limit", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("receptionists");
+    const { caller } = fixture;
+    try {
+      // A Pro plan allows 5 active receptionists.
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      expect(front).toMatchObject({ is_default: true, status: "active", listed: true, phone_numbers: 0, widget_keys: 0, entry_links: 0, archived_at: null });
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic", description: "Our clinic on West 4th", locale: "fr" });
+      expect(kits).toMatchObject({ name: "Kitsilano clinic", description: "Our clinic on West 4th", handle: "kitsilano-clinic", is_default: false, status: "active", locale: "fr", knowledge_scope: "audience", listed: true });
+      expect(apiReceptionistProfileSchema.safeParse(kits).success).toBe(true);
+      expect(await getReceptionistProfileForApi(context, caller, kits.id)).toEqual(kits);
+      await expectApiError(createReceptionistForApi(context, caller, { name: "Another", handle: "kitsilano-clinic" }), 409, "conflict");
+
+      // Values it already has change nothing; a new name keeps the page address.
+      expect(await updateReceptionistProfileForApi(context, caller, kits.id, { name: "Kitsilano clinic" })).toEqual(kits);
+      expect(await updateReceptionistProfileForApi(context, caller, kits.id, { name: "West 4th clinic", listed: false })).toMatchObject({ name: "West 4th clinic", handle: "kitsilano-clinic", listed: false });
+      await expectApiError(updateReceptionistProfileForApi(context, caller, front!.id, { listed: false }), 409, "conflict");
+
+      // Pausing twice changes nothing; the default can't be paused, nor a paused one made the default.
+      expect(await changeReceptionistForApi(context, caller, kits.id, "pause")).toMatchObject({ status: "paused" });
+      expect(await changeReceptionistForApi(context, caller, kits.id, "pause")).toMatchObject({ status: "paused" });
+      await expectApiError(changeReceptionistForApi(context, caller, front!.id, "pause"), 409, "conflict");
+      await expectApiError(changeReceptionistForApi(context, caller, kits.id, "make_default"), 409, "conflict");
+      expect(await changeReceptionistForApi(context, caller, kits.id, "resume")).toMatchObject({ status: "active" });
+      expect(await changeReceptionistForApi(context, caller, kits.id, "make_default")).toMatchObject({ is_default: true, locale: null, knowledge_scope: "all" });
+      expect(await getReceptionistProfileForApi(context, caller, front!.id)).toMatchObject({ is_default: false });
+
+      // An archived receptionist lists apart and takes no change until it's restored.
+      expect(await changeReceptionistForApi(context, caller, front!.id, "archive")).toMatchObject({ archived_at: expect.any(String) });
+      expect(await changeReceptionistForApi(context, caller, front!.id, "archive")).toMatchObject({ archived_at: expect.any(String) });
+      expect((await listReceptionistsForApi(context, caller)).map((receptionist) => receptionist.id)).toEqual([kits.id]);
+      expect((await listReceptionistsForApi(context, caller, { archived: true })).map((receptionist) => receptionist.id)).toEqual([front!.id]);
+      await expectApiError(updateReceptionistProfileForApi(context, caller, front!.id, { name: "Back" }), 409, "conflict");
+      await expectApiError(changeReceptionistForApi(context, caller, front!.id, "pause"), 409, "conflict");
+      expect(await changeReceptionistForApi(context, caller, front!.id, "restore")).toMatchObject({ archived_at: null, status: "active" });
+
+      // The order names every receptionist that isn't archived, once.
+      // Lists put the default receptionist first; the positions keep the order sent.
+      const reordered = await reorderReceptionistsForApi(context, caller, { receptionist_ids: [front!.id, kits.id] });
+      expect(reordered.map((receptionist) => receptionist.id)).toEqual([kits.id, front!.id]);
+      expect(reordered[1]!.position).toBeLessThan(reordered[0]!.position);
+      await expectApiError(reorderReceptionistsForApi(context, caller, { receptionist_ids: [kits.id] }), 400, "invalid_request");
+      await expectApiError(getReceptionistProfileForApi(context, b.caller, kits.id), 404, "not_found");
+
+      // The plan's 5 active receptionists: a sixth is refused.
+      for (const name of ["Gastown", "Yaletown", "Kerrisdale"]) await createReceptionistForApi(context, caller, { name });
+      await expectApiError(createReceptionistForApi(context, caller, { name: "Main Street" }), 409, "conflict");
+      expect(await listReceptionistsForApi(context, caller)).toHaveLength(5);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
     }
   });
 

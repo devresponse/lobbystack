@@ -6,6 +6,7 @@ import { hasLinkedPackPrice, polarProductLinks, readBillingCatalogSnapshot, stor
 import { BillingWebhookRefusal, type BillingWebhookRefusalReason } from "@lobbystack/providers/billing/errors";
 import { createBillingProvider, readBillingProviderId } from "@lobbystack/providers/billing/factory";
 import type { BillingProviderId, BillingWebhook } from "@lobbystack/providers/billing/types";
+import { STRIPE_PACK_WEBHOOK_EVENTS } from "@lobbystack/shared";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { runAfterResponse } from "@/lib/after-response";
 import { getDispatcherDatabase, getWorkerDatabase } from "@/lib/api-helpers";
@@ -82,6 +83,10 @@ export async function handleBillingWebhook(request: Request, webhookFor: () => B
     const links = await withBusinessTransaction(getWorkerDatabase().db, { actorType: "worker" }, (tx) => readBillingCatalogSnapshot(tx), { accessMode: "read only" });
     const normalized = webhook.normalize(delivery, polarProductLinks(links, process.env));
     if (!normalized) return NextResponse.json({ accepted: true, ignored: true }, { status: 202 });
+    // An event only prepaid packs need reaches a deployment that never linked a pack's price only from an
+    // endpoint that takes every event. That deployment sold no pack, so it ignores the event, as before packs.
+    const packEvent = webhook.provider === "stripe" && (STRIPE_PACK_WEBHOOK_EVENTS as readonly string[]).includes(delivery.type);
+    if (packEvent && !(await packPriceLinked())) return NextResponse.json({ accepted: true, ignored: true }, { status: 202 });
     // The live Polar organization also serves staging. UUID references are safe
     // everywhere; legacy Convex references are resolved only during production
     // cutover when the environment explicitly enables compatibility routing.
@@ -89,11 +94,12 @@ export async function handleBillingWebhook(request: Request, webhookFor: () => B
     // A Stripe charge names only its customer, whose metadata names the business: the provider reads it back.
     // A dispute names neither, only its payment: a prepaid pack's payment names the business, and any other stays unattributed.
     // A deployment that never linked a pack's price sold no pack, so it asks Stripe nothing about a dispute, as before packs.
+    // A pack's event got this far only once a pack's price was linked, so that isn't read again.
     const customerId = normalized.fields.customerId;
     const disputedPayment = normalized.kind === "dispute" ? normalized.fields.paymentRef : undefined;
     const resolvedBusinessId = normalized.businessId
       ?? (customerId ? await createBillingProvider(process.env)?.businessOfCustomer?.(customerId) : null)
-      ?? (disputedPayment && await packPriceLinked() ? await createBillingProvider(process.env)?.businessOfPackPayment?.(disputedPayment) : null)
+      ?? (disputedPayment && (packEvent || await packPriceLinked()) ? await createBillingProvider(process.env)?.businessOfPackPayment?.(disputedPayment) : null)
       ?? null;
     const condition = resolvedBusinessId
       ? eq(businesses.id, resolvedBusinessId)

@@ -198,6 +198,7 @@ export async function listStaffResources(tx: DatabaseTransaction, businessId: st
 
 const callColumns = {
   id: calls.id,
+  receptionistId: calls.receptionistId,
   transport: calls.transport,
   disposition: calls.disposition,
   startedAt: calls.startedAt,
@@ -215,7 +216,7 @@ const callColumns = {
   recordingRetentionUntil: storageObjects.retentionUntil,
 };
 
-type CallRow = { id: string; transport: string; disposition: string | null; startedAt: Date; endedAt: Date | null; createdAt: Date; providerDurationSeconds: number | null; contactId: string | null; contactName: string | null; contactPhone: string | null; conversationSummary: string | null; currentIntent: string | null; persistedOutcome: Record<string, unknown> | null; recordingObjectId: string | null; recordingStatus: string | null; recordingRetentionUntil: Date | null };
+type CallRow = { id: string; receptionistId: string; transport: string; disposition: string | null; startedAt: Date; endedAt: Date | null; createdAt: Date; providerDurationSeconds: number | null; contactId: string | null; contactName: string | null; contactPhone: string | null; conversationSummary: string | null; currentIntent: string | null; persistedOutcome: Record<string, unknown> | null; recordingObjectId: string | null; recordingStatus: string | null; recordingRetentionUntil: Date | null };
 
 function callQuery(tx: DatabaseTransaction, where: SQL | undefined) {
   return tx.select(callColumns).from(calls)
@@ -233,6 +234,7 @@ export function serializeCall(row: CallRow): ApiCall {
   const measured = row.endedAt ? Math.max(0, Math.round((row.endedAt.getTime() - row.startedAt.getTime()) / 1000)) : null;
   return {
     id: row.id,
+    receptionist_id: row.receptionistId,
     channel: row.transport.includes("web") ? "web" : "phone",
     status: row.endedAt ? "completed" : "in_progress",
     outcome: outcome.kind === "booked" ? "appointment_booked" : outcome.kind === "booking_in_progress" ? "booking_incomplete" : outcome.kind === "message_taking" ? "message_taken" : outcome.kind === "summary" ? "conversation" : "none",
@@ -254,12 +256,14 @@ export async function loadCallResource(tx: DatabaseTransaction, businessId: stri
   return row ? serializeCall(row) : null;
 }
 
-export async function listCallResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { startedAfter?: Date | undefined; startedBefore?: Date | undefined }): Promise<Page<ApiCall>> {
+export async function listCallResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { startedAfter?: Date | undefined; startedBefore?: Date | undefined; receptionistId?: string | undefined }): Promise<Page<ApiCall>> {
   const limit = pageSize(request.limit);
   const rows = await callQuery(tx, and(
     eq(calls.businessId, businessId),
     request.startedAfter ? gte(calls.startedAt, request.startedAfter) : undefined,
     request.startedBefore ? lt(calls.startedAt, request.startedBefore) : undefined,
+    // Every call names the receptionist that answered (migration 0143), so the filter is plain equality.
+    request.receptionistId ? eq(calls.receptionistId, request.receptionistId) : undefined,
     afterCursor(calls.startedAt, calls.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(calls.startedAt, calls.id)).limit(limit + 1);
   return toPage(rows, limit, serializeCall, (row) => ({ at: row.startedAt, id: row.id }));
@@ -426,6 +430,7 @@ const messageExpired = sql<boolean>`(${inboxItems.contentRetentionStatus} = 'scr
 
 const messageColumns = {
   id: inboxItems.id,
+  receptionistId: inboxItems.receptionistId,
   status: inboxItems.status,
   title: inboxItems.title,
   body: inboxItems.body,
@@ -436,7 +441,7 @@ const messageColumns = {
   updatedAt: inboxItems.updatedAt,
 };
 
-type MessageRow = { id: string; status: string; title: string; body: string; metadata: Record<string, unknown> | null; relatedCallId: string | null; expired: boolean; createdAt: Date; updatedAt: Date };
+type MessageRow = { id: string; receptionistId: string; status: string; title: string; body: string; metadata: Record<string, unknown> | null; relatedCallId: string | null; expired: boolean; createdAt: Date; updatedAt: Date };
 
 const urgencies = new Set(["low", "normal", "urgent"]);
 const messageChannels = new Set(["voice", "web_voice", "web_chat", "sms"]);
@@ -455,6 +460,7 @@ export function serializeMessage(row: MessageRow): ApiMessage {
   const appointmentId = text(metadata.appointmentId);
   return {
     id: row.id,
+    receptionist_id: row.receptionistId,
     status: row.status === "done" ? "done" : "open",
     title: row.expired ? EXPIRED_FOLLOW_UP_TITLE : row.title,
     body: row.expired ? "[Expired by the retention policy]" : row.body,
@@ -476,12 +482,13 @@ export async function loadMessageResource(tx: DatabaseTransaction, businessId: s
   return row ? serializeMessage(row) : null;
 }
 
-export async function listMessageResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { status?: "open" | "done" | undefined }): Promise<Page<ApiMessage>> {
+export async function listMessageResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { status?: "open" | "done" | undefined; receptionistId?: string | undefined }): Promise<Page<ApiMessage>> {
   const limit = pageSize(request.limit);
   const rows = await tx.select(messageColumns).from(inboxItems).where(and(
     eq(inboxItems.businessId, businessId),
     eq(inboxItems.kind, "voice_message"),
     request.status ? eq(inboxItems.status, request.status) : undefined,
+    request.receptionistId ? eq(inboxItems.receptionistId, request.receptionistId) : undefined,
     afterCursor(inboxItems.createdAt, inboxItems.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(inboxItems.createdAt, inboxItems.id)).limit(limit + 1);
   return toPage(rows, limit, serializeMessage, (row) => ({ at: row.createdAt, id: row.id }));

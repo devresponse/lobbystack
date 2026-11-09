@@ -9619,6 +9619,15 @@
             }
           },
           {
+            "name": "receptionist_id",
+            "in": "query",
+            "description": "Only the calls this receptionist answered, from GET /receptionists.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "name": "LobbyStack-Business",
             "in": "header",
             "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
@@ -11819,6 +11828,15 @@
                 "open",
                 "done"
               ]
+            }
+          },
+          {
+            "name": "receptionist_id",
+            "in": "query",
+            "description": "Only the messages, from the calls and chats this receptionist answered, from GET /receptionists.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -15959,6 +15977,11 @@
             "format": "uuid",
             "description": "Stable identifier (UUID)."
           },
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist that answered."
+          },
           "channel": {
             "type": "string",
             "enum": [
@@ -16062,6 +16085,7 @@
         },
         "required": [
           "id",
+          "receptionist_id",
           "channel",
           "status",
           "outcome",
@@ -16085,6 +16109,11 @@
             "type": "string",
             "format": "uuid",
             "description": "Stable identifier (UUID)."
+          },
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist that answered."
           },
           "channel": {
             "type": "string",
@@ -16219,6 +16248,7 @@
         },
         "required": [
           "id",
+          "receptionist_id",
           "channel",
           "status",
           "outcome",
@@ -17326,6 +17356,11 @@
             "format": "uuid",
             "description": "Stable identifier (UUID)."
           },
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist whose call or chat took the message."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -17441,6 +17476,7 @@
         },
         "required": [
           "id",
+          "receptionist_id",
           "status",
           "title",
           "body",
@@ -26063,6 +26099,11 @@
                 "format": "uuid",
                 "description": "Stable identifier (UUID)."
               },
+              "receptionist_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The receptionist that answered."
+              },
               "channel": {
                 "type": "string",
                 "enum": [
@@ -26166,6 +26207,7 @@
             },
             "required": [
               "id",
+              "receptionist_id",
               "channel",
               "status",
               "outcome",
@@ -26653,6 +26695,11 @@
                 "format": "uuid",
                 "description": "Stable identifier (UUID)."
               },
+              "receptionist_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The receptionist whose call or chat took the message."
+              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -26768,6 +26815,7 @@
             },
             "required": [
               "id",
+              "receptionist_id",
               "status",
               "title",
               "body",

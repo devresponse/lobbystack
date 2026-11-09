@@ -37,6 +37,7 @@ const samples = {
   },
   call: {
     id: '7e2d4c6a-1b3f-4a5e-8d9c-0f1e2d3c4b5a',
+    receptionist_id: '8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c5d',
     channel: 'phone',
     status: 'completed',
     outcome: 'appointment_booked',
@@ -84,6 +85,7 @@ const samples = {
   },
   message: {
     id: '2b4d6f8a-0c1e-4a3b-9d5f-7e9a1c3b5d7f',
+    receptionist_id: '8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c5d',
     status: 'open',
     title: 'Callback about an invoice',
     body: 'Sam Rivera asked about the invoice from their last visit. Please call back this afternoon.',
@@ -114,6 +116,7 @@ const samples = {
 const outputFields = {
   call: [
     { key: 'id', label: 'Call ID', type: 'string' },
+    { key: 'receptionist_id', label: 'Receptionist ID', type: 'string' },
     { key: 'channel', label: 'Channel', type: 'string' },
     { key: 'status', label: 'Status', type: 'string' },
     { key: 'outcome', label: 'Outcome', type: 'string' },
@@ -163,6 +166,7 @@ const outputFields = {
   ],
   message: [
     { key: 'id', label: 'Message ID', type: 'string' },
+    { key: 'receptionist_id', label: 'Receptionist ID', type: 'string' },
     { key: 'status', label: 'Status', type: 'string' },
     { key: 'title', label: 'Title', type: 'string' },
     { key: 'body', label: 'Message', type: 'string' },

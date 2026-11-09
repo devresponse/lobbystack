@@ -125,9 +125,9 @@ describe("cursor pagination", () => {
 describe("v1 resource serializers match the published schemas", () => {
   const now = new Date("2026-09-27T15:00:00.000Z");
   it("serializes calls", () => {
-    const call = serializeCall({ id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", transport: "web_voice", disposition: "caller_hangup", startedAt: now, endedAt: new Date(now.getTime() + 95_000), createdAt: now, providerDurationSeconds: null, contactId: null, contactName: null, contactPhone: null, conversationSummary: null, currentIntent: null, persistedOutcome: { kind: "booked", serviceName: "Cut", startsAt: now.toISOString() }, recordingObjectId: null, recordingStatus: null, recordingRetentionUntil: null });
+    const call = serializeCall({ id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", receptionistId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", transport: "web_voice", disposition: "caller_hangup", startedAt: now, endedAt: new Date(now.getTime() + 95_000), createdAt: now, providerDurationSeconds: null, contactId: null, contactName: null, contactPhone: null, conversationSummary: null, currentIntent: null, persistedOutcome: { kind: "booked", serviceName: "Cut", startsAt: now.toISOString() }, recordingObjectId: null, recordingStatus: null, recordingRetentionUntil: null });
     expect(apiCallSchema.parse(call)).toEqual(call);
-    expect(call).toMatchObject({ channel: "web", status: "completed", outcome: "appointment_booked", duration_seconds: 95, recording_available: false });
+    expect(call).toMatchObject({ receptionist_id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", channel: "web", status: "completed", outcome: "appointment_booked", duration_seconds: 95, recording_available: false });
   });
 
   it("serializes appointments with the public status names", () => {
@@ -159,10 +159,10 @@ describe("v1 resource serializers match the published schemas", () => {
   });
 
   it("withholds expired message content", () => {
-    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", status: "open", title: "Voice message from Ada", body: "Call me", metadata: { callerName: "Ada", callbackPhone: "+14165550134", urgency: "urgent", channel: "voice" }, relatedCallId: null, createdAt: now, updatedAt: now };
+    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", receptionistId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", status: "open", title: "Voice message from Ada", body: "Call me", metadata: { callerName: "Ada", callbackPhone: "+14165550134", urgency: "urgent", channel: "voice" }, relatedCallId: null, createdAt: now, updatedAt: now };
     const message = serializeMessage({ ...base, expired: false });
     expect(apiMessageSchema.parse(message)).toEqual(message);
-    expect(message).toMatchObject({ caller_name: "Ada", urgency: "urgent", channel: "voice" });
+    expect(message).toMatchObject({ receptionist_id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", caller_name: "Ada", urgency: "urgent", channel: "voice" });
     const expired = serializeMessage({ ...base, expired: true });
     expect(expired).toMatchObject({ caller_name: null, callback_phone: null, body: "[Expired by the retention policy]" });
     expect(message).toMatchObject({ request: null, appointment_id: null });
@@ -170,7 +170,7 @@ describe("v1 resource serializers match the published schemas", () => {
 
   it("shows a cancellation request with the appointment it matched", () => {
     const appointmentId = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5c";
-    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", status: "open", title: "Voice message from Ada", body: "Cancellation request: Cut", relatedCallId: null, expired: false, createdAt: now, updatedAt: now };
+    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", receptionistId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", status: "open", title: "Voice message from Ada", body: "Cancellation request: Cut", relatedCallId: null, expired: false, createdAt: now, updatedAt: now };
     const request = serializeMessage({ ...base, metadata: { callerName: "Ada", channel: "voice", request: "appointment_cancellation", appointmentId } });
     expect(apiMessageSchema.parse(request)).toEqual(request);
     expect(request).toMatchObject({ request: "appointment_cancellation", appointment_id: appointmentId });

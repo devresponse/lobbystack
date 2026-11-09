@@ -5,6 +5,11 @@
     "label": "Message ID"
   },
   {
+    "name": "receptionist_id",
+    "type": "text",
+    "label": "Receptionist ID"
+  },
+  {
     "name": "status",
     "type": "text",
     "label": "Status"

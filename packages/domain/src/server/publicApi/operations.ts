@@ -2129,7 +2129,7 @@ export async function rescheduleAppointmentForApi(context: DomainContext, caller
 
 // Messages and knowledge
 
-export async function listMessagesForApi(context: DomainContext, caller: ApiCaller, request: PageRequest & { status?: "open" | "done" | undefined }): Promise<Page<ApiMessage>> {
+export async function listMessagesForApi(context: DomainContext, caller: ApiCaller, request: Parameters<typeof listMessageResources>[2]): Promise<Page<ApiMessage>> {
   return await inBusiness(context, caller, async (tx) => await listMessageResources(tx, caller.businessId, request));
 }
 

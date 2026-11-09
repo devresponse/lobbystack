@@ -1000,6 +1000,7 @@ export const apiStaffSchema = z.object({
 
 export const apiCallSchema = z.object({
   id,
+  receptionist_id: id.describe("The receptionist that answered."),
   channel: z.enum(["phone", "web"]).describe("phone: a phone call. web: a browser call from the website or dashboard."),
   status: z.enum(["in_progress", "completed"]),
   outcome: z.enum(["appointment_booked", "booking_incomplete", "message_taken", "conversation", "none"]),
@@ -1164,6 +1165,7 @@ const messageRequests = ["appointment_cancellation"] as const;
 
 export const apiMessageSchema = z.object({
   id,
+  receptionist_id: id.describe("The receptionist whose call or chat took the message."),
   status: z.enum(["open", "done"]),
   title: z.string(),
   body: z.string().describe("The full message as the team sees it."),

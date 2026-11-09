@@ -7,7 +7,7 @@ import { businessIdOrThrow } from "../jobInput";
 /**
  * billing.expirePacks: ends the business's packs whose end date has come, settles each pack that ended
  * once, sends the reminders due, and sets its number's release once its last pack ended. It runs daily
- * and whenever a call, a refund or a lost dispute queues it; every run does the same, so the payload is
+ * and whenever a call, a refund or a dispute that ends a pack queues it; every run does the same, so the payload is
  * ignored. No billing provider is needed: a pack's end is LobbyStack's to keep.
  */
 export async function expireBillingPacks(job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {

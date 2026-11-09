@@ -288,7 +288,7 @@ const hasPaidPlan = (billing: Billing) => billing.managed || paidPlans.has(billi
 
 /**
  * Whether the manifest's checkout plan is one a checkout can still get: any
- * plan for a free business or one on a prepaid pack, whose live packs end
+ * plan for a free business or one on a prepaid pack, whose packs end
  * when the plan starts, and Pro for a Starter one, which changes the Starter
  * subscription.
  */

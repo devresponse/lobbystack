@@ -12,16 +12,17 @@ import { loadBusinessPlanLimits } from "./usage";
 
 // The end of a business's prepaid packs (billing.expirePacks,
 // docs/features/prepaid-packs.md). The worker runs it once a day for every
-// business, and at once when a call takes the live balance to a fifth or to
-// nothing, or a refund or a lost dispute ends a pack. One transaction:
+// business, 35 minutes after a call takes the live balance to a fifth or to
+// nothing, and at once when a refund or a dispute ends a pack. One transaction:
 //
 // 1. Ends each pack whose end date has come, live or frozen, keeping the
 //    minutes it still held for the accounts.
-// 2. Settles each pack that ended by its date, a refund or a lost dispute,
+// 2. Settles each pack that ended by its date, a refund or a dispute,
 //    once. When no pack is left that could still count, the business's last
 //    pack has ended: receptionists past the plan's number pause, and on a plan
 //    without a number the number stops answering and goes back to Twilio 30
-//    days after the pack ended, unless a new pack or a plan takes that back.
+//    days after the pack ended, unless a new pack, a subscription or a
+//    managed plan takes that back.
 //    A pack a subscription replaced is never settled here: the business moved
 //    to a plan, and reconcile handled it.
 // 3. Emails the owners the reminders due: at a fifth of the balance left, at
@@ -136,7 +137,7 @@ async function expireDuePacks(tx: DatabaseTransaction, businessId: string, now: 
 }
 
 /**
- * Settles, once, each pack that ended by its date, a refund or a lost dispute.
+ * Settles, once, each pack that ended by its date, a refund or a dispute.
  * When the business has no live pack left, nor a frozen one a won dispute
  * could bring back, its last pack has ended: the receptionist check runs, and
  * a plan in force without a number sets the number's release 30 days after

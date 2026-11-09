@@ -208,8 +208,9 @@ function UserMenu({ user }: Pick<DashboardShellProps, "user">) {
   const openUpgradePlanDialog = useOpenUpgradePlanDialog();
   const signOut = useSignOut();
   const { business } = useActiveBusiness();
-  const billing = useQuery({ queryKey: ["billing", business?.businessId], enabled: Boolean(business?.businessId), queryFn: () => requestJson<{ account: { plan: string | null } | null; permissions: BillingPermissions; availableCheckoutPlans: Array<"starter" | "pro">; availableCheckoutIntervals: Record<"starter" | "pro", string[]> }>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`) });
-  const showUpgradeToPro = billing.data?.permissions.hasCheckoutAccess === true && (billing.data.account?.plan ?? "free_cloud") === "free_cloud" && (billing.data.availableCheckoutPlans ?? []).some(plan => billing.data?.availableCheckoutIntervals[plan].length);
+  const billing = useQuery({ queryKey: ["billing", business?.businessId], enabled: Boolean(business?.businessId), queryFn: () => requestJson<{ account: { plan: string | null } | null; effectivePlan?: string; permissions: BillingPermissions; availableCheckoutPlans: Array<"starter" | "pro">; availableCheckoutIntervals: Record<"starter" | "pro", string[]> }>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`) });
+  // A business on a pack can start a plan too, even beside the subscription the pack replaced.
+  const showUpgradeToPro = billing.data?.permissions.hasCheckoutAccess === true && (billing.data.effectivePlan === "prepaid" || (billing.data.account?.plan ?? "free_cloud") === "free_cloud") && (billing.data.availableCheckoutPlans ?? []).some(plan => billing.data?.availableCheckoutIntervals[plan].length);
   return <NavUser user={user} onSignOut={() => void signOut()} onUpgradeToPro={openUpgradePlanDialog} showUpgradeToPro={showUpgradeToPro} />;
 }
 

@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
+import { intlLocale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 import {
   type BillingInterval,
@@ -50,6 +51,7 @@ export function UpgradePlanDialog({
   changesPlan = false,
   currentPlan,
   leavesPromoPlan = null,
+  leavesPacks = null,
   loading,
   loadingPlan,
   locale,
@@ -70,6 +72,8 @@ export function UpgradePlanDialog({
   currentPlan: BillingPlanSlug;
   /** The name of the promo plan the business is on, which changing plan ends. */
   leavesPromoPlan?: string | null;
+  /** The minutes left on the business's prepaid packs, which starting a plan ends. */
+  leavesPacks?: { minutesLeft: number } | null;
   loading: "checkout" | null;
   loadingPlan: HostedUpgradePlan | null;
   locale: string;
@@ -118,6 +122,11 @@ export function UpgradePlanDialog({
           {changesPlan && leavesPromoPlan ? (
             <p className="text-sm text-amber-700 dark:text-amber-400">
               {t("billing.upgradeDialog.leavesPromo", { plan: leavesPromoPlan })}
+            </p>
+          ) : null}
+          {leavesPacks ? (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              {t("billing.upgradeDialog.endsPacks", { count: leavesPacks.minutesLeft, minutes: leavesPacks.minutesLeft.toLocaleString(intlLocale(locale)) })}
             </p>
           ) : null}
         </DialogHeader>

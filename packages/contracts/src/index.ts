@@ -261,6 +261,7 @@ export const queueForJobType = {
   "billing.createCheckout": "critical",
   "billing.endPromoPlan": "default",
   "billing.revokeSubscription": "critical",
+  "billing.endPlanForPack": "critical",
   "billing.ensureOverage": "critical",
   "billing.changeSubscription": "critical",
   "billing.checkUsageTotals": "maintenance",

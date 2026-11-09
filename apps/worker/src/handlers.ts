@@ -727,6 +727,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     case "billing.createCheckout":
     case "billing.endPromoPlan":
     case "billing.revokeSubscription":
+    case "billing.endPlanForPack":
     case "billing.ensureOverage":
     case "billing.changeSubscription":
     case "billing.checkUsageTotals":

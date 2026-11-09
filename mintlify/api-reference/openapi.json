@@ -19824,7 +19824,7 @@
                 "type": "null"
               }
             ],
-            "description": "What became of the pack the payment added. active, or frozen while a dispute holds its payment: the business has it. expired: its days ran out. replaced: a plan the business subscribed to ended it; when the plan started before the payment arrived, the pack ended at once and the operator refunds the payment. refunded: its payment was refunded or charged back. Null until the payment arrives, and for a checkout paid before LobbyStack kept the link."
+            "description": "What became of the pack the payment added. active, or frozen while a dispute holds its payment: the business has it. expired: its days ran out. replaced: a plan the business subscribed to ended it; when the plan started before the payment arrived, the pack ended at once and the operator refunds the payment. refunded: its payment was refunded or charged back. Null until the payment arrives, and for a checkout paid before the link was kept."
           },
           "checkout_url": {
             "description": "The billing provider's page where the customer pays once for the pack. Send it to them. Null unless status is ready.",

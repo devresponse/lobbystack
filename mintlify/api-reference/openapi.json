@@ -12641,7 +12641,7 @@
       "post": {
         "operationId": "createKnowledgeEntry",
         "summary": "Add a knowledge entry",
-        "description": "Adds a text entry or an FAQ that the receptionist can use to answer callers.",
+        "description": "Adds a text entry or an FAQ that the receptionist can use to answer callers: every receptionist, unless audience chosen names some. An unknown receptionist is a 404, an archived one a 409.",
         "tags": [
           "Knowledge"
         ],
@@ -12897,7 +12897,7 @@
       "patch": {
         "operationId": "updateKnowledgeEntry",
         "summary": "Update a knowledge entry",
-        "description": "Changes an entry's text, labels or priority, or turns it off or back on. An FAQ stays an FAQ: its title is the question and its content the answer.",
+        "description": "Changes an entry's text, labels, priority or who it's for, or turns it off or back on. An FAQ stays an FAQ: its title is the question and its content the answer. Values it already has change nothing.",
         "tags": [
           "Knowledge"
         ],
@@ -13554,8 +13554,8 @@
       },
       "patch": {
         "operationId": "updateKnowledgeSource",
-        "summary": "Turn a knowledge source off or on",
-        "description": "Turning a website off leaves the pages its crawl read as they are: each page is its own source.",
+        "summary": "Update a knowledge source",
+        "description": "Turns a website, page or file off or back on, or changes who it's for. Turning a website off, or changing who it's for, leaves the pages its crawl read as they are: each page is its own source. Values it already has change nothing.",
         "tags": [
           "Knowledge"
         ],
@@ -14188,7 +14188,7 @@
       "post": {
         "operationId": "completeKnowledgeUpload",
         "summary": "Finish a file upload",
-        "description": "Checks the uploaded file against the upload request and queues it to be read. Returns the new file source. Completing an upload again returns the same source. A file that hasn't arrived yet is a 409 conflict: send it to upload_url, or start a new upload if upload_url has expired. A file that doesn't match the request is a 400. A business whose plan has no room for more knowledge text gets a 409 plan_limit_reached. Send {} to keep the file name as its title.",
+        "description": "Checks the uploaded file against the upload request and queues it to be read. Returns the new file source. Completing an upload again returns the same source. A file that hasn't arrived yet is a 409 conflict: send it to upload_url, or start a new upload if upload_url has expired. A file that doesn't match the request is a 400. A business whose plan has no room for more knowledge text gets a 409 plan_limit_reached. audience chosen makes the file for the receptionists named. Send {} to keep the file name as its title, for everyone.",
         "tags": [
           "Knowledge"
         ],
@@ -14367,6 +14367,518 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/KnowledgeSource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/audience": {
+      "post": {
+        "operationId": "changeKnowledgeAudience",
+        "summary": "Change who knowledge is for",
+        "description": "Changes who up to 500 entries and sources are for at once, as the Knowledge page's selection does. Those the business doesn't have are skipped, and the answer counts the rest. An unknown receptionist is a 404; choosing an archived one, except to remove it, is a 409.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeAudienceChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeAudienceChangeResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/website-rules": {
+      "get": {
+        "operationId": "listWebsiteRules",
+        "summary": "List website rules",
+        "description": "The rules giving a website's pages under a path to one receptionist, by site and path, all in one page, each with the pages it has given.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WebsiteRule"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWebsiteRule",
+        "summary": "Add a website rule",
+        "description": "Gives a website's pages under a path to a receptionist, the pages already read and every crawl's. A 404 for a source or receptionist the business doesn't have, a 400 for a source that isn't a website with a crawl of its own, and a 409 for a rule the site already has or an archived receptionist.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebsiteRuleCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WebsiteRule"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/website-rules/{rule_id}": {
+      "delete": {
+        "operationId": "deleteWebsiteRule",
+        "summary": "Delete a website rule",
+        "description": "Deletes a rule and the choices it made. A page it left chosen for nobody goes back to everyone; receptionists someone chose for a page stay.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "description": "The website rule id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Deleted"
                     }
                   }
                 }
@@ -25460,6 +25972,23 @@
             "type": "boolean",
             "description": "Whether the receptionist answers from it."
           },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "everyone",
+              "chosen"
+            ],
+            "description": "Who may use it. everyone: every receptionist, the default. chosen: the receptionists in receptionist_ids, and any whose knowledge_scope is all, as the default receptionist's is. One chosen only for archived receptionists is left to the default receptionist."
+          },
+          "receptionist_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            },
+            "description": "The receptionists chosen for it, archived ones included. Empty when audience is everyone."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -25479,6 +26008,8 @@
           "tags",
           "priority",
           "active",
+          "audience",
+          "receptionist_ids",
           "created_at",
           "updated_at"
         ],
@@ -25503,6 +26034,25 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 20000
+              },
+              "audience": {
+                "description": "Who may use it: everyone, or the receptionists in receptionist_ids. Leave it out to keep who it's for, or everyone for a new one.",
+                "type": "string",
+                "enum": [
+                  "everyone",
+                  "chosen"
+                ]
+              },
+              "receptionist_ids": {
+                "description": "With audience chosen: the receptionists that may use it, from GET /receptionists, none archived. They replace those chosen before.",
+                "minItems": 1,
+                "maxItems": 500,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Stable identifier (UUID)."
+                }
               }
             },
             "required": [
@@ -25528,6 +26078,25 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 20000
+              },
+              "audience": {
+                "description": "Who may use it: everyone, or the receptionists in receptionist_ids. Leave it out to keep who it's for, or everyone for a new one.",
+                "type": "string",
+                "enum": [
+                  "everyone",
+                  "chosen"
+                ]
+              },
+              "receptionist_ids": {
+                "description": "With audience chosen: the receptionists that may use it, from GET /receptionists, none archived. They replace those chosen before.",
+                "minItems": 1,
+                "maxItems": 500,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Stable identifier (UUID)."
+                }
               }
             },
             "required": [
@@ -25572,6 +26141,25 @@
           "active": {
             "description": "false stops the receptionist answering from the entry without deleting it.",
             "type": "boolean"
+          },
+          "audience": {
+            "description": "Who may use it: everyone, or the receptionists in receptionist_ids. Leave it out to keep who it's for, or everyone for a new one.",
+            "type": "string",
+            "enum": [
+              "everyone",
+              "chosen"
+            ]
+          },
+          "receptionist_ids": {
+            "description": "With audience chosen: the receptionists that may use it, from GET /receptionists, none archived. They replace those chosen before.",
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            }
           }
         },
         "additionalProperties": false
@@ -25625,6 +26213,23 @@
             "type": "boolean",
             "description": "Whether the receptionist answers from it. An inactive source stays indexed but unused."
           },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "everyone",
+              "chosen"
+            ],
+            "description": "Who may use it, as for an entry. A website's is its own; each page its crawl read has its own, which website rules can give to a receptionist."
+          },
+          "receptionist_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            },
+            "description": "The receptionists chosen for it, archived ones included. Empty when audience is everyone."
+          },
           "page_limit": {
             "anyOf": [
               {
@@ -25671,6 +26276,8 @@
           "status",
           "error",
           "active",
+          "audience",
+          "receptionist_ids",
           "page_limit",
           "content_type",
           "tags",
@@ -25704,13 +26311,29 @@
         "type": "object",
         "properties": {
           "active": {
-            "type": "boolean",
-            "description": "false stops the receptionist answering from the source without deleting it."
+            "description": "false stops the receptionist answering from the source without deleting it.",
+            "type": "boolean"
+          },
+          "audience": {
+            "description": "Who may use it: everyone, or the receptionists in receptionist_ids. Leave it out to keep who it's for, or everyone for a new one.",
+            "type": "string",
+            "enum": [
+              "everyone",
+              "chosen"
+            ]
+          },
+          "receptionist_ids": {
+            "description": "With audience chosen: the receptionists that may use it, from GET /receptionists, none archived. They replace those chosen before.",
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            }
           }
         },
-        "required": [
-          "active"
-        ],
         "additionalProperties": false
       },
       "KnowledgeUpload": {
@@ -25818,6 +26441,25 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 255
+            }
+          },
+          "audience": {
+            "description": "Who may use it: everyone, or the receptionists in receptionist_ids. Leave it out to keep who it's for, or everyone for a new one.",
+            "type": "string",
+            "enum": [
+              "everyone",
+              "chosen"
+            ]
+          },
+          "receptionist_ids": {
+            "description": "With audience chosen: the receptionists that may use it, from GET /receptionists, none archived. They replace those chosen before.",
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
             }
           }
         },
@@ -26536,6 +27178,164 @@
         ],
         "additionalProperties": false,
         "description": "One knowledge search, the way a call or chat runs it."
+      },
+      "KnowledgeAudienceChange": {
+        "type": "object",
+        "properties": {
+          "entry_ids": {
+            "description": "Text entries and FAQs to change.",
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            }
+          },
+          "source_ids": {
+            "description": "Websites, pages and files to change.",
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            }
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "everyone",
+              "chosen"
+            ],
+            "description": "everyone opens them to every receptionist. chosen changes the receptionists chosen for them, as mode says."
+          },
+          "mode": {
+            "description": "With audience chosen. replace, the default, makes them for exactly receptionist_ids. add gives receptionist_ids the ones already chosen for some receptionists; those for everyone stay for everyone. remove takes receptionist_ids off them; one for everyone becomes chosen for every other receptionist that isn't archived.",
+            "type": "string",
+            "enum": [
+              "add",
+              "remove",
+              "replace"
+            ]
+          },
+          "receptionist_ids": {
+            "description": "With audience chosen: the receptionists, none archived unless mode is remove.",
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            }
+          }
+        },
+        "required": [
+          "audience"
+        ],
+        "additionalProperties": false,
+        "description": "Up to 500 entries and sources together, and who they're for."
+      },
+      "KnowledgeAudienceChangeResult": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The entries it covered: those named that the business has."
+          },
+          "sources": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The sources it covered: those named that the business has."
+          }
+        },
+        "required": [
+          "entries",
+          "sources"
+        ],
+        "additionalProperties": false,
+        "description": "How many entries and sources the change covered."
+      },
+      "WebsiteRule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The website it applies to, from GET /knowledge/sources."
+          },
+          "site_url": {
+            "type": "string",
+            "description": "The website's address."
+          },
+          "path_prefix": {
+            "type": "string",
+            "description": "The path its pages are under, such as /stores/kitsilano/, encoded, with a slash at each end."
+          },
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist its pages go to."
+          },
+          "pages": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The pages it has given to its receptionist."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "site_url",
+          "path_prefix",
+          "receptionist_id",
+          "pages",
+          "created_at"
+        ],
+        "additionalProperties": false,
+        "description": "A rule giving a website's pages under a path to one receptionist, on every crawl. Each page under it becomes chosen for that receptionist, keeping any chosen for it before."
+      },
+      "WebsiteRuleCreate": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A website the business added, with a crawl of its own: type website in GET /knowledge/sources."
+          },
+          "path_prefix": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "A path on the site, such as /stores/kitsilano/, or a full address on it. It's saved encoded, with a slash at each end, in up to 300 characters."
+          },
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A receptionist that isn't archived."
+          }
+        },
+        "required": [
+          "source_id",
+          "path_prefix",
+          "receptionist_id"
+        ],
+        "additionalProperties": false
       },
       "WebhookEndpoint": {
         "type": "object",

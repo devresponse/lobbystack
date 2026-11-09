@@ -39,6 +39,20 @@
     "label": "Active"
   },
   {
+    "name": "audience",
+    "type": "text",
+    "label": "Audience"
+  },
+  {
+    "name": "receptionist_ids",
+    "type": "array",
+    "label": "Receptionist IDs",
+    "spec": {
+      "type": "text",
+      "label": "Receptionist ID"
+    }
+  },
+  {
     "name": "created_at",
     "type": "date",
     "label": "Created at"

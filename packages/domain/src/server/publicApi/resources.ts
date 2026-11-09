@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-import { agentRules, appointments, businessHours, businesses, calls, contactPasscodes, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, appointments, businessHours, businesses, calls, contactPasscodes, contacts, conversations, conversationSessions, inboxItems, knowledgeDocumentReceptionists, knowledgeDocuments, knowledgeSnippetReceptionists, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
@@ -499,8 +499,40 @@ export async function listMessageResources(tx: DatabaseTransaction, businessId: 
 /** An FAQ is a snippet with this tag; the API shows it as the entry's type, not as a label. */
 export const FAQ_TAG = "faq";
 
-export function serializeKnowledgeEntry(row: Pick<typeof knowledgeSnippets.$inferSelect, "id" | "title" | "content" | "tags" | "priority" | "active" | "createdAt" | "updatedAt">): ApiKnowledgeEntry {
-  return { id: row.id, type: row.tags.includes(FAQ_TAG) ? "faq" : "text", title: row.title, content: row.content, tags: row.tags.filter((tag) => tag !== FAQ_TAG), priority: row.priority, active: row.active, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+/** Who an article is for: chosen ones list their receptionists, archived ones too; those for everyone list none. */
+function audienceOf(audience: string, receptionistIds: readonly string[] | undefined): Pick<ApiKnowledgeEntry, "audience" | "receptionist_ids"> {
+  return audience === "chosen" ? { audience: "chosen", receptionist_ids: [...(receptionistIds ?? [])] } : { audience: "everyone", receptionist_ids: [] };
+}
+
+/** The ids of the rows chosen for some receptionists, the only ones with links to read. */
+function chosenIds(rows: ReadonlyArray<{ id: string; audience: string }>): string[] {
+  return rows.filter((row) => row.audience === "chosen").map((row) => row.id);
+}
+
+function groupLinks(rows: ReadonlyArray<{ articleId: string; receptionistId: string }>): Map<string, string[]> {
+  const links = new Map<string, string[]>();
+  for (const row of rows) links.set(row.articleId, [...(links.get(row.articleId) ?? []), row.receptionistId]);
+  return links;
+}
+
+/** The receptionists chosen for each text entry named, in the order they were chosen, as the Knowledge page shows them. */
+export async function knowledgeEntryReceptionists(tx: DatabaseTransaction, businessId: string, entryIds: string[]): Promise<Map<string, string[]>> {
+  if (!entryIds.length) return new Map();
+  return groupLinks(await tx.select({ articleId: knowledgeSnippetReceptionists.snippetId, receptionistId: knowledgeSnippetReceptionists.receptionistId }).from(knowledgeSnippetReceptionists)
+    .where(and(eq(knowledgeSnippetReceptionists.businessId, businessId), inArray(knowledgeSnippetReceptionists.snippetId, entryIds)))
+    .orderBy(asc(knowledgeSnippetReceptionists.createdAt), asc(knowledgeSnippetReceptionists.receptionistId)));
+}
+
+/** The receptionists chosen for each website, page or file named, including those website rules chose. */
+export async function knowledgeSourceReceptionists(tx: DatabaseTransaction, businessId: string, documentIds: string[]): Promise<Map<string, string[]>> {
+  if (!documentIds.length) return new Map();
+  return groupLinks(await tx.select({ articleId: knowledgeDocumentReceptionists.documentId, receptionistId: knowledgeDocumentReceptionists.receptionistId }).from(knowledgeDocumentReceptionists)
+    .where(and(eq(knowledgeDocumentReceptionists.businessId, businessId), inArray(knowledgeDocumentReceptionists.documentId, documentIds)))
+    .orderBy(asc(knowledgeDocumentReceptionists.createdAt), asc(knowledgeDocumentReceptionists.receptionistId)));
+}
+
+export function serializeKnowledgeEntry(row: Pick<typeof knowledgeSnippets.$inferSelect, "id" | "title" | "content" | "tags" | "priority" | "active" | "audience" | "createdAt" | "updatedAt">, receptionistIds?: readonly string[]): ApiKnowledgeEntry {
+  return { id: row.id, type: row.tags.includes(FAQ_TAG) ? "faq" : "text", title: row.title, content: row.content, tags: row.tags.filter((tag) => tag !== FAQ_TAG), priority: row.priority, active: row.active, ...audienceOf(row.audience, receptionistIds), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 function isFaq(): SQL {
@@ -514,15 +546,17 @@ export async function listKnowledgeEntryResources(tx: DatabaseTransaction, busin
     request.type === "faq" ? isFaq() : request.type === "text" ? not(isFaq()) : undefined,
     afterCursor(knowledgeSnippets.createdAt, knowledgeSnippets.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(knowledgeSnippets.createdAt, knowledgeSnippets.id)).limit(limit + 1);
-  return toPage(rows, limit, serializeKnowledgeEntry, (row) => ({ at: row.createdAt, id: row.id }));
+  const links = await knowledgeEntryReceptionists(tx, businessId, chosenIds(rows));
+  return toPage(rows, limit, (row) => serializeKnowledgeEntry(row, links.get(row.id)), (row) => ({ at: row.createdAt, id: row.id }));
 }
 
 export async function loadKnowledgeEntryResource(tx: DatabaseTransaction, businessId: string, entryId: string): Promise<ApiKnowledgeEntry | null> {
   const [row] = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.id, entryId))).limit(1);
-  return row ? serializeKnowledgeEntry(row) : null;
+  if (!row) return null;
+  return serializeKnowledgeEntry(row, (await knowledgeEntryReceptionists(tx, businessId, chosenIds([row]))).get(row.id));
 }
 
-type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "mimeType" | "tags" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
+type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "mimeType" | "tags" | "status" | "error" | "active" | "audience" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
 
 /** A website added as a source has a crawl job; a page its crawl read has none. Anything else is a file. */
 export function knowledgeSourceType(row: Pick<KnowledgeSourceRow, "sourceType" | "jobId">): ApiKnowledgeSource["type"] {
@@ -530,22 +564,23 @@ export function knowledgeSourceType(row: Pick<KnowledgeSourceRow, "sourceType" |
   return row.jobId ? "website" : "page";
 }
 
-export function serializeKnowledgeSource(row: KnowledgeSourceRow): ApiKnowledgeSource {
+export function serializeKnowledgeSource(row: KnowledgeSourceRow, receptionistIds?: readonly string[]): ApiKnowledgeSource {
   const type = knowledgeSourceType(row);
   const tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : [];
-  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status: row.status, error: row.status === "error" ? row.error : null, active: row.active, page_limit: type === "website" ? row.pageLimit : null, content_type: type === "file" ? row.mimeType : null, tags, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status: row.status, error: row.status === "error" ? row.error : null, active: row.active, ...audienceOf(row.audience, receptionistIds), page_limit: type === "website" ? row.pageLimit : null, content_type: type === "file" ? row.mimeType : null, tags, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 function selectKnowledgeSourceRows(tx: DatabaseTransaction, businessId: string) {
   return tx
-    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, mimeType: knowledgeDocuments.mimeType, tags: knowledgeDocuments.tags, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
+    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, mimeType: knowledgeDocuments.mimeType, tags: knowledgeDocuments.tags, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, audience: knowledgeDocuments.audience, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
     .from(knowledgeDocuments)
     .leftJoin(websiteIngestionJobs, and(eq(websiteIngestionJobs.rootDocumentId, knowledgeDocuments.id), eq(websiteIngestionJobs.businessId, businessId)));
 }
 
 export async function loadKnowledgeSourceResource(tx: DatabaseTransaction, businessId: string, documentId: string): Promise<ApiKnowledgeSource | null> {
   const [row] = await selectKnowledgeSourceRows(tx, businessId).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.id, documentId))).limit(1);
-  return row ? serializeKnowledgeSource(row) : null;
+  if (!row) return null;
+  return serializeKnowledgeSource(row, (await knowledgeSourceReceptionists(tx, businessId, chosenIds([row]))).get(row.id));
 }
 
 function knowledgeSourceTypeCondition(type: ApiKnowledgeSource["type"] | undefined): SQL | undefined {
@@ -567,7 +602,8 @@ export async function listKnowledgeSourceResources(tx: DatabaseTransaction, busi
     knowledgeSourceStatusCondition(request.status),
     afterCursor(knowledgeDocuments.createdAt, knowledgeDocuments.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(knowledgeDocuments.createdAt, knowledgeDocuments.id)).limit(limit + 1);
-  return toPage(rows, limit, serializeKnowledgeSource, (row) => ({ at: row.createdAt, id: row.id }));
+  const links = await knowledgeSourceReceptionists(tx, businessId, chosenIds(rows));
+  return toPage(rows, limit, (row) => serializeKnowledgeSource(row, links.get(row.id)), (row) => ({ at: row.createdAt, id: row.id }));
 }
 
 // Phone numbers. The API names the worker's reclaim steps for what they do:

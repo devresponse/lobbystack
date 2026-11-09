@@ -5,7 +5,7 @@ import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingP
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
-import { ENTRY_LINK_LABEL_MAX_LENGTH, entryLinkStatuses, MAX_RECEPTIONISTS_PER_REQUEST, RECEPTIONIST_DESCRIPTION_MAX_LENGTH, RECEPTIONIST_HANDLE_MAX_LENGTH, RECEPTIONIST_HANDLE_PATTERN, RECEPTIONIST_NAME_MAX_LENGTH, receptionistKnowledgeScopes, receptionistStatuses } from "../receptionists";
+import { ENTRY_LINK_LABEL_MAX_LENGTH, entryLinkStatuses, knowledgeAudiences, MAX_ARTICLES_PER_AUDIENCE_CHANGE, MAX_RECEPTIONISTS_PER_REQUEST, WEBSITE_RULE_PATH_MAX_LENGTH, RECEPTIONIST_DESCRIPTION_MAX_LENGTH, RECEPTIONIST_HANDLE_MAX_LENGTH, RECEPTIONIST_HANDLE_PATTERN, RECEPTIONIST_NAME_MAX_LENGTH, receptionistKnowledgeScopes, receptionistStatuses } from "../receptionists";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
@@ -1213,6 +1213,15 @@ export const apiMessageSchema = z.object({
   updated_at: timestamp,
 });
 
+const knowledgeAudience = z.enum(knowledgeAudiences).describe("Who may use it. everyone: every receptionist, the default. chosen: the receptionists in receptionist_ids, and any whose knowledge_scope is all, as the default receptionist's is. One chosen only for archived receptionists is left to the default receptionist.");
+const knowledgeReceptionistIds = z.array(id).describe("The receptionists chosen for it, archived ones included. Empty when audience is everyone.");
+
+/** Who a new or changed entry or source is for. The operation checks that receptionist_ids goes with chosen. */
+const knowledgeAudienceInput = {
+  audience: z.enum(knowledgeAudiences).optional().describe("Who may use it: everyone, or the receptionists in receptionist_ids. Leave it out to keep who it's for, or everyone for a new one."),
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).optional().describe("With audience chosen: the receptionists that may use it, from GET /receptionists, none archived. They replace those chosen before."),
+};
+
 export const apiKnowledgeEntrySchema = z.object({
   id,
   type: z.enum(["text", "faq"]),
@@ -1221,6 +1230,8 @@ export const apiKnowledgeEntrySchema = z.object({
   tags: z.array(z.string()).describe("Your own labels for the entry."),
   priority: z.number().int().describe("Entries with higher numbers come first when the receptionist picks the entries it keeps ready on every call. Defaults to 0."),
   active: z.boolean().describe("Whether the receptionist answers from it."),
+  audience: knowledgeAudience,
+  receptionist_ids: knowledgeReceptionistIds,
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A text entry or FAQ the receptionist answers from.");
@@ -1231,12 +1242,13 @@ export const apiKnowledgeEntryUpdateSchema = z.strictObject({
   tags: z.array(z.string().trim().min(1).max(255)).max(100).optional().describe("Replaces the entry's labels. faq is reserved, because it marks an FAQ, so it is ignored here: an entry keeps its type."),
   priority: z.number().int().min(-100).max(100).optional(),
   active: z.boolean().optional().describe("false stops the receptionist answering from the entry without deleting it."),
+  ...knowledgeAudienceInput,
 });
 
 // Zod 4 reports an unknown type as "Invalid discriminator value. ..."; keep the v1 detail message "Invalid input".
 export const apiKnowledgeEntryCreateSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("text"), title: z.string().trim().min(1).max(300), content: z.string().trim().min(1).max(20_000) }),
-  z.strictObject({ type: z.literal("faq"), question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000) }),
+  z.strictObject({ type: z.literal("text"), title: z.string().trim().min(1).max(300), content: z.string().trim().min(1).max(20_000), ...knowledgeAudienceInput }),
+  z.strictObject({ type: z.literal("faq"), question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000), ...knowledgeAudienceInput }),
 ], { error: (issue) => (issue.code === "invalid_union" ? "Invalid input" : undefined) });
 
 export const apiKnowledgeSourceSchema = z.object({
@@ -1247,6 +1259,8 @@ export const apiKnowledgeSourceSchema = z.object({
   status: z.enum(["pending", "processing", "indexed", "error", "cancelled"]).describe("pending: a file waits its turn. processing: it is being read. indexed: the receptionist can use it. error or cancelled: reading stopped."),
   error: z.string().nullable().describe("Why reading failed, when status is error."),
   active: z.boolean().describe("Whether the receptionist answers from it. An inactive source stays indexed but unused."),
+  audience: knowledgeAudience.describe("Who may use it, as for an entry. A website's is its own; each page its crawl read has its own, which website rules can give to a receptionist."),
+  receptionist_ids: knowledgeReceptionistIds,
   page_limit: z.number().int().nullable().describe("How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."),
   content_type: z.string().nullable().describe("A file's type, such as application/pdf. Null for a website or a page, and for a file whose type wasn't recorded."),
   tags: z.array(z.string()).describe("The tags given when a file's upload was completed. Empty for a website or a page."),
@@ -1255,7 +1269,8 @@ export const apiKnowledgeSourceSchema = z.object({
 }).describe("A website, page or file the receptionist learns from.");
 
 export const apiKnowledgeSourceUpdateSchema = z.strictObject({
-  active: z.boolean().describe("false stops the receptionist answering from the source without deleting it."),
+  active: z.boolean().optional().describe("false stops the receptionist answering from the source without deleting it."),
+  ...knowledgeAudienceInput,
 });
 
 export const apiKnowledgeSourceCreateSchema = z.strictObject({
@@ -1291,6 +1306,36 @@ export const apiKnowledgeUploadSchema = z.object({
 export const apiKnowledgeUploadCompleteSchema = z.strictObject({
   title: z.string().trim().min(1).max(1_000).optional().describe("Defaults to the file name."),
   tags: z.array(z.string().trim().min(1).max(255)).max(100).optional(),
+  ...knowledgeAudienceInput,
+});
+
+export const apiKnowledgeAudienceChangeSchema = z.strictObject({
+  entry_ids: z.array(id).max(MAX_ARTICLES_PER_AUDIENCE_CHANGE).optional().describe("Text entries and FAQs to change."),
+  source_ids: z.array(id).max(MAX_ARTICLES_PER_AUDIENCE_CHANGE).optional().describe("Websites, pages and files to change."),
+  audience: z.enum(knowledgeAudiences).describe("everyone opens them to every receptionist. chosen changes the receptionists chosen for them, as mode says."),
+  mode: z.enum(["add", "remove", "replace"]).optional().describe("With audience chosen. replace, the default, makes them for exactly receptionist_ids. add gives receptionist_ids the ones already chosen for some receptionists; those for everyone stay for everyone. remove takes receptionist_ids off them; one for everyone becomes chosen for every other receptionist that isn't archived."),
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).optional().describe("With audience chosen: the receptionists, none archived unless mode is remove."),
+}).describe(`Up to ${MAX_ARTICLES_PER_AUDIENCE_CHANGE} entries and sources together, and who they're for.`);
+
+export const apiKnowledgeAudienceChangeResultSchema = z.object({
+  entries: z.number().int().describe("The entries it covered: those named that the business has."),
+  sources: z.number().int().describe("The sources it covered: those named that the business has."),
+}).describe("How many entries and sources the change covered.");
+
+export const apiWebsiteRuleSchema = z.object({
+  id,
+  source_id: id.describe("The website it applies to, from GET /knowledge/sources."),
+  site_url: z.string().describe("The website's address."),
+  path_prefix: z.string().describe("The path its pages are under, such as /stores/kitsilano/, encoded, with a slash at each end."),
+  receptionist_id: id.describe("The receptionist its pages go to."),
+  pages: z.number().int().describe("The pages it has given to its receptionist."),
+  created_at: timestamp,
+}).describe("A rule giving a website's pages under a path to one receptionist, on every crawl. Each page under it becomes chosen for that receptionist, keeping any chosen for it before.");
+
+export const apiWebsiteRuleCreateSchema = z.strictObject({
+  source_id: id.describe("A website the business added, with a crawl of its own: type website in GET /knowledge/sources."),
+  path_prefix: z.string().trim().min(1).max(2_000).describe(`A path on the site, such as /stores/kitsilano/, or a full address on it. It's saved encoded, with a slash at each end, in up to ${WEBSITE_RULE_PATH_MAX_LENGTH} characters.`),
+  receptionist_id: id.describe("A receptionist that isn't archived."),
 });
 
 // POST /knowledge/search: the receptionist's knowledge search, stage by stage, for
@@ -1554,6 +1599,10 @@ export type ApiKnowledgeSourceUpdate = z.infer<typeof apiKnowledgeSourceUpdateSc
 export type ApiKnowledgeUpload = z.infer<typeof apiKnowledgeUploadSchema>;
 export type ApiKnowledgeUploadCreate = z.infer<typeof apiKnowledgeUploadCreateSchema>;
 export type ApiKnowledgeUploadComplete = z.infer<typeof apiKnowledgeUploadCompleteSchema>;
+export type ApiKnowledgeAudienceChange = z.infer<typeof apiKnowledgeAudienceChangeSchema>;
+export type ApiKnowledgeAudienceChangeResult = z.infer<typeof apiKnowledgeAudienceChangeResultSchema>;
+export type ApiWebsiteRule = z.infer<typeof apiWebsiteRuleSchema>;
+export type ApiWebsiteRuleCreate = z.infer<typeof apiWebsiteRuleCreateSchema>;
 export type ApiKnowledgeSearch = z.infer<typeof apiKnowledgeSearchSchema>;
 export type ApiKnowledgeSearchResult = z.infer<typeof apiKnowledgeSearchResultSchema>;
 export type ApiWebhookEndpoint = z.infer<typeof apiWebhookEndpointSchema>;

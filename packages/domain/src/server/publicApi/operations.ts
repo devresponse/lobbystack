@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notExists, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPlans, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPlans, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocumentReceptionists, knowledgeDocuments, knowledgeSnippetReceptionists, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   CONTACT_PASSCODE_DEFAULT_LENGTH,
   CONTACT_PASSCODE_MAX_LENGTH,
@@ -50,6 +50,12 @@ import {
   type ApiContactPasscodesUpdate,
   type ApiContactUpdate,
   type ApiGeneratedContactPasscodes,
+  MAX_ARTICLES_PER_AUDIENCE_CHANGE,
+  normalizeWebsiteRulePath,
+  type ApiKnowledgeAudienceChange,
+  type ApiKnowledgeAudienceChangeResult,
+  type ApiWebsiteRule,
+  type ApiWebsiteRuleCreate,
   type ApiKnowledgeEntry,
   type ApiKnowledgeEntryCreate,
   type ApiKnowledgeEntryUpdate,
@@ -125,6 +131,7 @@ import { NUMBER_BEING_REPLACED_MESSAGE, schedulePhoneNumberReleaseInTransaction 
 import { hashContactPasscodes, removeContactPasscodesInTransaction, saveContactPasscodesInTransaction } from "../contactPasscodes";
 import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
+import { changeKnowledgeAudienceInTransaction, createWebsiteRuleInTransaction, deleteWebsiteRuleInTransaction, listWebsiteRulesInTransaction, setKnowledgeArticleAudienceInTransaction, type KnowledgeArticleKind, type KnowledgeAudienceChoice, type WebsiteRule } from "../knowledgeAudience";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
 import { normalizeOnboardingStage, resolveOnboardingStageForPlan, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
@@ -183,7 +190,7 @@ import {
   pageSize,
   serializeCalendarConnection,
   serializeContact,
-  serializeKnowledgeEntry,
+  knowledgeEntryReceptionists,
   serializeNotificationPreferences,
   serializePublicProfile,
   serializeReceptionist,
@@ -1674,6 +1681,56 @@ export async function updateQrLinkForApi(context: DomainContext, caller: ApiCall
   });
 }
 
+// Who knowledge is for, and website rules
+
+/**
+ * Changes who the entries and sources named are for, as the Knowledge page's
+ * selection does. Those the business doesn't have are skipped; the answer
+ * counts the rest. One audit entry covers the change.
+ */
+export async function changeKnowledgeAudienceForApi(context: DomainContext, caller: ApiCaller, input: ApiKnowledgeAudienceChange): Promise<ApiKnowledgeAudienceChangeResult> {
+  const snippetIds = [...new Set((input.entry_ids ?? []).map((entryId) => entryId.toLowerCase()))];
+  const documentIds = [...new Set((input.source_ids ?? []).map((sourceId) => sourceId.toLowerCase()))];
+  if (!snippetIds.length && !documentIds.length) throw invalidRequest("Name at least one entry or source.", [{ path: "entry_ids", message: "Send entry_ids, source_ids or both." }]);
+  if (snippetIds.length + documentIds.length > MAX_ARTICLES_PER_AUDIENCE_CHANGE) throw invalidRequest(`Change up to ${MAX_ARTICLES_PER_AUDIENCE_CHANGE} entries and sources at once.`);
+  if (input.audience === "everyone" && input.mode !== undefined) throw invalidRequest("mode goes with audience chosen.", [{ path: "mode", message: "Leave it out when audience is everyone." }]);
+  const choice = audienceChoice(input);
+  const change = choice?.audience === "chosen"
+    ? { documentIds, snippetIds, audience: "chosen" as const, mode: input.mode ?? "replace", receptionistIds: choice.receptionistIds }
+    : { documentIds, snippetIds, audience: "everyone" as const };
+  return await inBusiness(context, caller, async (tx) => {
+    const covered = await asApiErrors(() => changeKnowledgeAudienceInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, change }));
+    await audit(tx, caller, { eventType: "api.knowledge.audience_changed", entityType: "knowledge", payload: { audience: change.audience, ...(change.audience === "chosen" ? { mode: change.mode } : {}), entries: covered.snippets, sources: covered.documents } });
+    return { entries: covered.snippets, sources: covered.documents };
+  });
+}
+
+function serializeWebsiteRule(rule: WebsiteRule): ApiWebsiteRule {
+  return { id: rule.id, source_id: rule.rootDocumentId, site_url: rule.siteUrl, path_prefix: rule.pathPrefix, receptionist_id: rule.receptionistId, pages: rule.pages, created_at: rule.createdAt.toISOString() };
+}
+
+export async function listWebsiteRulesForApi(context: DomainContext, caller: ApiCaller): Promise<ApiWebsiteRule[]> {
+  return await inBusiness(context, caller, async (tx) => (await listWebsiteRulesInTransaction(tx, { businessId: caller.businessId })).map(serializeWebsiteRule));
+}
+
+/** Adds a rule with the Knowledge page's checks, and gives it the pages already read. */
+export async function createWebsiteRuleForApi(context: DomainContext, caller: ApiCaller, input: ApiWebsiteRuleCreate): Promise<ApiWebsiteRule> {
+  const pathPrefix = normalizeWebsiteRulePath(input.path_prefix);
+  if (!pathPrefix) throw invalidRequest("Enter a path on the site, such as /stores/kitsilano/.", [{ path: "path_prefix", message: "Use a path or an address on the site, without ? or #." }]);
+  return await inBusiness(context, caller, async (tx) => {
+    const rule = await asApiErrors(() => createWebsiteRuleInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, rule: { rootDocumentId: input.source_id.toLowerCase(), pathPrefix, receptionistId: input.receptionist_id.toLowerCase() } }));
+    await audit(tx, caller, { eventType: "api.website_rule.created", entityType: "knowledge_website_rule", entityId: rule.id });
+    return serializeWebsiteRule(rule);
+  });
+}
+
+export async function deleteWebsiteRuleForApi(context: DomainContext, caller: ApiCaller, ruleId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    if (!await deleteWebsiteRuleInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, ruleId: ruleId.toLowerCase() })) throw notFound("Website rule");
+    await audit(tx, caller, { eventType: "api.website_rule.deleted", entityType: "knowledge_website_rule", entityId: ruleId.toLowerCase() });
+  });
+}
+
 // Businesses, for platform keys
 
 /**
@@ -2209,13 +2266,59 @@ export async function listMessagesForApi(context: DomainContext, caller: ApiCall
   return await inBusiness(context, caller, async (tx) => await listMessageResources(tx, caller.businessId, request));
 }
 
+/**
+ * Who an entry or source is for, from audience and receptionist_ids, as the
+ * Knowledge page sets it; undefined when neither is sent. receptionist_ids
+ * goes with chosen, and chosen needs at least one.
+ */
+function audienceChoice(input: { audience?: "everyone" | "chosen" | undefined; receptionist_ids?: string[] | undefined }): KnowledgeAudienceChoice | undefined {
+  if (input.audience === undefined) {
+    if (input.receptionist_ids !== undefined) throw invalidRequest("Send audience chosen with receptionist_ids.", [{ path: "audience", message: "chosen makes it for the receptionists in receptionist_ids." }]);
+    return undefined;
+  }
+  if (input.audience === "everyone") {
+    if (input.receptionist_ids !== undefined) throw invalidRequest("receptionist_ids goes with audience chosen.", [{ path: "receptionist_ids", message: "Leave it out when audience is everyone." }]);
+    return { audience: "everyone" };
+  }
+  if (!input.receptionist_ids?.length) throw invalidRequest("Choose at least one receptionist.", [{ path: "receptionist_ids", message: "Name the receptionists, from GET /receptionists." }]);
+  return { audience: "chosen", receptionistIds: [...new Set(input.receptionist_ids.map((receptionistId) => receptionistId.toLowerCase()))] };
+}
+
+/**
+ * Whether an article is already for exactly who choice names. A link a
+ * website rule made counts as a change, since choosing makes it someone's
+ * choice, which stays when the rule goes.
+ */
+async function hasAudience(tx: DatabaseTransaction, businessId: string, article: { kind: KnowledgeArticleKind; id: string; audience: string }, choice: KnowledgeAudienceChoice): Promise<boolean> {
+  if (choice.audience === "everyone") return article.audience !== "chosen";
+  if (article.audience !== "chosen") return false;
+  const links = article.kind === "snippet"
+    ? (await tx.select({ receptionistId: knowledgeSnippetReceptionists.receptionistId }).from(knowledgeSnippetReceptionists).where(and(eq(knowledgeSnippetReceptionists.businessId, businessId), eq(knowledgeSnippetReceptionists.snippetId, article.id)))).map((row) => ({ ...row, websiteRuleId: null }))
+    : await tx.select({ receptionistId: knowledgeDocumentReceptionists.receptionistId, websiteRuleId: knowledgeDocumentReceptionists.websiteRuleId }).from(knowledgeDocumentReceptionists).where(and(eq(knowledgeDocumentReceptionists.businessId, businessId), eq(knowledgeDocumentReceptionists.documentId, article.id)));
+  const wanted = new Set(choice.receptionistIds);
+  return links.length === wanted.size && links.every((link) => link.websiteRuleId === null && wanted.has(link.receptionistId));
+}
+
+/** Sets who an article is for with the Knowledge page's rules: an unknown receptionist is a 404, an archived one a 409. */
+async function setAudience(tx: DatabaseTransaction, caller: ApiCaller, kind: KnowledgeArticleKind, articleId: string, choice: KnowledgeAudienceChoice): Promise<void> {
+  await asApiErrors(() => setKnowledgeArticleAudienceInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, kind, articleId, choice }));
+}
+
+async function requireKnowledgeEntry(tx: DatabaseTransaction, businessId: string, entryId: string): Promise<ApiKnowledgeEntry> {
+  const entry = await loadKnowledgeEntryResource(tx, businessId, entryId);
+  if (!entry) throw notFound("Knowledge entry");
+  return entry;
+}
+
 export async function createKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, input: ApiKnowledgeEntryCreate): Promise<ApiKnowledgeEntry> {
+  const choice = audienceChoice(input);
   return await inBusiness(context, caller, async (tx) => {
     const snippet = await createKnowledgeSnippetInTransaction(tx, input.type === "faq"
       ? { businessId: caller.businessId, title: input.question, content: input.answer, tags: [FAQ_TAG] }
       : { businessId: caller.businessId, title: input.title, content: input.content });
-    await audit(tx, caller, { eventType: "api.knowledge.created", entityType: "knowledge_snippet", entityId: snippet.id, payload: { type: input.type } });
-    return serializeKnowledgeEntry(snippet);
+    if (choice?.audience === "chosen") await setAudience(tx, caller, "snippet", snippet.id, choice);
+    await audit(tx, caller, { eventType: "api.knowledge.created", entityType: "knowledge_snippet", entityId: snippet.id, payload: { type: input.type, ...(choice?.audience === "chosen" ? { audience: "chosen" } : {}) } });
+    return await requireKnowledgeEntry(tx, caller.businessId, snippet.id);
   });
 }
 
@@ -2238,6 +2341,7 @@ export async function getKnowledgeEntryForApi(context: DomainContext, caller: Ap
  */
 export async function updateKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, entryId: string, input: ApiKnowledgeEntryUpdate): Promise<ApiKnowledgeEntry> {
   if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  const choice = audienceChoice(input);
   return await inBusiness(context, caller, async (tx) => {
     const [current] = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, caller.businessId), eq(knowledgeSnippets.id, entryId))).limit(1).for("update");
     if (!current) throw notFound("Knowledge entry");
@@ -2249,11 +2353,12 @@ export async function updateKnowledgeEntryForApi(context: DomainContext, caller:
       ...(input.priority !== undefined && input.priority !== current.priority ? { priority: input.priority } : {}),
       ...(input.active !== undefined && input.active !== current.active ? { active: input.active } : {}),
     };
-    if (!Object.keys(changes).length) return serializeKnowledgeEntry(current);
-    const snippet = await updateKnowledgeSnippetInTransaction(tx, { businessId: caller.businessId, snippetId: entryId, ...changes });
-    if (!snippet) throw notFound("Knowledge entry");
-    await audit(tx, caller, { eventType: "api.knowledge.updated", entityType: "knowledge_snippet", entityId: entryId, payload: { fields: Object.keys(changes) } });
-    return serializeKnowledgeEntry(snippet);
+    const audienceChanged = choice !== undefined && !await hasAudience(tx, caller.businessId, { kind: "snippet", id: current.id, audience: current.audience }, choice);
+    if (!Object.keys(changes).length && !audienceChanged) return await requireKnowledgeEntry(tx, caller.businessId, current.id);
+    if (Object.keys(changes).length && !await updateKnowledgeSnippetInTransaction(tx, { businessId: caller.businessId, snippetId: current.id, ...changes })) throw notFound("Knowledge entry");
+    if (audienceChanged) await setAudience(tx, caller, "snippet", current.id, choice);
+    await audit(tx, caller, { eventType: "api.knowledge.updated", entityType: "knowledge_snippet", entityId: current.id, payload: { fields: [...Object.keys(changes), ...(audienceChanged ? ["audience"] : [])] } });
+    return await requireKnowledgeEntry(tx, caller.businessId, current.id);
   });
 }
 
@@ -2381,14 +2486,19 @@ export async function getKnowledgeSourceForApi(context: DomainContext, caller: A
   });
 }
 
-/** Turns a website, page or file off or back on. Sending its current state changes nothing. */
+/** Turns a website, page or file off or back on, or changes who it's for. Values it already has change nothing. */
 export async function updateKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string, input: ApiKnowledgeSourceUpdate): Promise<ApiKnowledgeSource> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  const choice = audienceChoice(input);
   return await inBusiness(context, caller, async (tx) => {
-    const [current] = await tx.select({ active: knowledgeDocuments.active }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.id, documentId))).limit(1).for("update");
+    const [current] = await tx.select({ id: knowledgeDocuments.id, active: knowledgeDocuments.active, audience: knowledgeDocuments.audience }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.id, documentId))).limit(1).for("update");
     if (!current) throw notFound("Knowledge source");
-    if (current.active !== input.active) {
-      await setKnowledgeDocumentActiveInTransaction(tx, { businessId: caller.businessId, documentId, active: input.active });
-      await audit(tx, caller, { eventType: "api.knowledge_source.updated", entityType: "knowledge_document", entityId: documentId, payload: { active: input.active } });
+    const activeChanged = input.active !== undefined && current.active !== input.active;
+    if (activeChanged) await setKnowledgeDocumentActiveInTransaction(tx, { businessId: caller.businessId, documentId: current.id, active: input.active! });
+    const audienceChanged = choice !== undefined && !await hasAudience(tx, caller.businessId, { kind: "document", id: current.id, audience: current.audience }, choice);
+    if (audienceChanged) await setAudience(tx, caller, "document", current.id, choice);
+    if (activeChanged || audienceChanged) {
+      await audit(tx, caller, { eventType: "api.knowledge_source.updated", entityType: "knowledge_document", entityId: current.id, payload: { fields: [...(activeChanged ? ["active"] : []), ...(audienceChanged ? ["audience"] : [])], ...(activeChanged ? { active: input.active } : {}) } });
     }
     const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
     if (!source) throw notFound("Knowledge source");
@@ -2433,6 +2543,7 @@ async function completedUpload(context: DomainContext, caller: ApiCaller, upload
  * source queued to be read. Completing again returns the same source.
  */
 export async function completeKnowledgeUploadForApi(context: DomainContext, caller: ApiCaller, uploadId: string, input: ApiKnowledgeUploadComplete, storage: StorageProvider): Promise<ApiKnowledgeSource> {
+  const choice = audienceChoice(input);
   const object = await inBusiness(context, caller, async (tx) => (await tx.select().from(storageObjects).where(and(eq(storageObjects.id, uploadId), eq(storageObjects.businessId, caller.businessId), eq(storageObjects.purpose, "knowledge"))).limit(1))[0]);
   if (!object) throw notFound("Upload");
   if (object.status === "ready") return await completedUpload(context, caller, uploadId);
@@ -2446,6 +2557,7 @@ export async function completeKnowledgeUploadForApi(context: DomainContext, call
     return await inBusiness(context, caller, async (tx) => {
       const documentId = await completeUploadInTransaction(tx, { businessId: caller.businessId, objectId: uploadId, purpose: "knowledge", fileName: object.fileName, metadata, title: input.title, tags: input.tags });
       if (!documentId) throw new Error("The knowledge upload made no document.");
+      if (choice?.audience === "chosen") await setAudience(tx, caller, "document", documentId, choice);
       await audit(tx, caller, { eventType: "api.knowledge_upload.completed", entityType: "knowledge_document", entityId: documentId, payload: { uploadId } });
       const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
       if (!source) throw new Error("The file source could not be read back.");

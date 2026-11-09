@@ -97,13 +97,15 @@ const hoursSet = (path: string): Command => {
 };
 
 const knowledgeUpload = (path: string): Command => {
-  const usage = `lobbystack ${path} <file> [--title <title>] [--tags <tag,tag>] [--wait]`;
+  const usage = `lobbystack ${path} <file> [--title <title>] [--tags <tag,tag>] [--audience chosen --receptionist-ids <id,id>] [--wait]`;
   return {
     summary: "Upload a document the receptionist can answer from: PDF, Word, text, Markdown or an image, up to 25 MB.",
     usage,
     options: {
       title: { type: "string", placeholder: "<title>", description: "Defaults to the file's name." },
       tags: { type: "string", multiple: true, placeholder: "<tag>", description: "Repeat the flag or separate with commas." },
+      audience: { type: "string", placeholder: "<everyone|chosen>", description: "Who may use it: everyone, the default, or the receptionists in --receptionist-ids." },
+      "receptionist-ids": { type: "string", multiple: true, placeholder: "<id>", description: "With --audience chosen. Repeat the flag or separate with commas." },
       wait: { type: "boolean", description: "Wait until it's read, checking every few seconds. A failure exits with 1." },
     },
     operations: ["createKnowledgeUpload", "completeKnowledgeUpload", "getKnowledgeSource"],
@@ -114,7 +116,8 @@ const knowledgeUpload = (path: string): Command => {
       const file = await readUploadFile(path);
       const { client, connection } = await context.connect();
       const tags = values.tags === undefined ? undefined : (Array.isArray(values.tags) ? values.tags : [String(values.tags)]).flatMap((tag) => tag.split(",")).map((tag) => tag.trim()).filter(Boolean);
-      let source = await uploadKnowledgeFile(client, { baseUrl: connection.url, fetch: io.fetch ?? fetch, file, title: typeof values.title === "string" ? values.title : undefined, tags });
+      const receptionistIds = values["receptionist-ids"] === undefined ? undefined : (Array.isArray(values["receptionist-ids"]) ? values["receptionist-ids"] : [String(values["receptionist-ids"])]).flatMap((id) => id.split(",")).map((id) => id.trim()).filter(Boolean);
+      let source = await uploadKnowledgeFile(client, { baseUrl: connection.url, fetch: io.fetch ?? fetch, file, title: typeof values.title === "string" ? values.title : undefined, tags, audience: typeof values.audience === "string" ? values.audience : undefined, receptionistIds });
       if (values.wait === true) source = await waitUntilDone(client, sourceWait, source, io.sleep ?? defaultSleep);
       print(output, source, () => showRecord(source));
       const failure = values.wait === true ? sourceWait.failed(source) : undefined;
@@ -436,7 +439,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     reorder: { operation: "reorderRules", args: ["...rule_ids"], columns: columns("id", "title", "active") },
   }),
   group("knowledge", "What the receptionist answers from: text, FAQs, websites and documents.", {
-    list: { operation: "listKnowledgeEntries", columns: columns("id", "type", "title", "active", "updated_at") },
+    list: { operation: "listKnowledgeEntries", columns: columns("id", "type", "title", "active", "audience", "updated_at") },
     get: { operation: "getKnowledgeEntry" },
     "add-text": { operation: "createKnowledgeEntry", summary: "Add text the receptionist can answer from.", fixed: { type: "text" }, files: ["content"] },
     "add-faq": { operation: "createKnowledgeEntry", summary: "Add a question and its answer.", fixed: { type: "faq" }, files: ["answer"] },
@@ -444,7 +447,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     remove: { operation: "deleteKnowledgeEntry" },
     "add-website": { operation: "createKnowledgeSource", args: ["url"], fixed: { type: "website" }, wait: sourceWait },
     upload: knowledgeUpload,
-    sources: { operation: "listKnowledgeSources", columns: columns("id", "type", "title", "status", "active", "url") },
+    sources: { operation: "listKnowledgeSources", columns: columns("id", "type", "title", "status", "active", "audience", "url") },
     source: { operation: "getKnowledgeSource" },
     "source-update": { operation: "updateKnowledgeSource" },
     "source-remove": { operation: "deleteKnowledgeSource" },
@@ -452,6 +455,10 @@ export const groups: Record<string, Group> = Object.fromEntries([
     retry: { operation: "retryKnowledgeSource", wait: sourceWait },
     cancel: { operation: "cancelKnowledgeSource" },
     search: knowledgeSearch,
+    audience: { operation: "changeKnowledgeAudience", show: (data) => `Changed ${String(data.entries)} entries and ${String(data.sources)} sources.` },
+    rules: { operation: "listWebsiteRules", columns: columns("id", "site_url", "path_prefix", "receptionist_id", "pages") },
+    "add-rule": { operation: "createWebsiteRule" },
+    "remove-rule": { operation: "deleteWebsiteRule" },
   }),
   group("billing", "The plan, its checkout, cancelling and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
     status: { operation: "getBilling" },

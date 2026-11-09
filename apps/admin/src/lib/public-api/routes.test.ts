@@ -429,8 +429,8 @@ describe("knowledge sources", () => {
     const updated = await v1.updateKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "PATCH", body: JSON.stringify({ active: false }) }), { params: Promise.resolve({ source_id: sourceId }) });
     expect(updated.status).toBe(200);
     expect(domain.updateKnowledgeSourceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), sourceId, { active: false });
-    // Only active can change on a source.
-    for (const bad of [{ title: "Prices" }, {}]) {
+    // Only whether it's on and who it's for can change on a source; an empty change reaches the domain, which refuses it.
+    for (const bad of [{ title: "Prices" }, { audience: "some" }, { receptionist_ids: [] }]) {
       expect((await v1.updateKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "PATCH", body: JSON.stringify(bad) }), { params: Promise.resolve({ source_id: sourceId }) })).status).toBe(400);
     }
     const deleted = await v1.deleteKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "DELETE" }), { params: Promise.resolve({ source_id: sourceId }) });

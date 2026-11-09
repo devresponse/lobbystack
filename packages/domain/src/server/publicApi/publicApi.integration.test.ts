@@ -5,7 +5,7 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, entryLinkDailyScans, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiQrLinkDetailSchema, apiQrLinkSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiQrLinkDetailSchema, apiQrLinkSchema, apiReceptionistSchema, apiWebsiteRuleSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
@@ -17,7 +17,7 @@ import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
 import { searchKnowledgeForApi } from "./knowledgeSearch";
-import { cancelAppointmentForApi, createQrLinkForApi, getQrLinkForApi, listQrLinksForApi, updateQrLinkForApi, listCallsForApi, updatePhoneNumberForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, changeKnowledgeAudienceForApi, createWebsiteRuleForApi, deleteWebsiteRuleForApi, listWebsiteRulesForApi, createQrLinkForApi, getQrLinkForApi, listQrLinksForApi, updateQrLinkForApi, listCallsForApi, updatePhoneNumberForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -810,6 +810,98 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await expectApiError(getQrLinkForApi(context, b.caller, door.id, options), 404, "not_found");
       await expectApiError(updateQrLinkForApi(context, b.caller, door.id, { label: "Mine" }, options), 404, "not_found");
       expect(await listQrLinksForApi(context, b.caller, {}, options)).toEqual([]);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
+    }
+  });
+
+  it("chooses who knowledge is for, one at a time or in bulk, and gives a website's pages under a path to a receptionist", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("audience");
+    const { caller } = fixture;
+    try {
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic" });
+      const valet = await createReceptionistForApi(context, caller, { name: "Valet" });
+      const archived = await createReceptionistForApi(context, caller, { name: "Old store" });
+      await changeReceptionistForApi(context, caller, archived.id, "archive");
+
+      // An entry is for everyone unless audience chosen names receptionists, in any letter case.
+      const parking = await createKnowledgeEntryForApi(context, caller, { type: "text", title: "Parking", content: "Valet at the door.", audience: "chosen", receptionist_ids: [valet.id.toUpperCase()] });
+      expect(parking).toMatchObject({ audience: "chosen", receptionist_ids: [valet.id] });
+      expect(apiKnowledgeEntrySchema.safeParse(parking).success).toBe(true);
+      const hours = await createKnowledgeEntryForApi(context, caller, { type: "faq", question: "When are you open?", answer: "Daily." });
+      expect(hours).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "chosen" }), 400, "invalid_request");
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", receptionist_ids: [kits.id] }), 400, "invalid_request");
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "everyone", receptionist_ids: [kits.id] }), 400, "invalid_request");
+      // A refused receptionist leaves no entry behind.
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "chosen", receptionist_ids: [randomUUID()] }), 404, "not_found");
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "chosen", receptionist_ids: [archived.id] }), 409, "conflict");
+      expect((await listKnowledgeEntriesForApi(context, caller, {})).data.map((entry) => [entry.id, entry.audience, entry.receptionist_ids])).toEqual([[hours.id, "everyone", []], [parking.id, "chosen", [valet.id]]]);
+
+      // Who an entry is for changes like its other fields: the same choice again writes nothing.
+      expect((await updateKnowledgeEntryForApi(context, caller, parking.id, { audience: "chosen", receptionist_ids: [kits.id, valet.id] })).receptionist_ids.sort()).toEqual([kits.id, valet.id].sort());
+      expect((await updateKnowledgeEntryForApi(context, caller, parking.id, { audience: "chosen", receptionist_ids: [valet.id, kits.id] })).receptionist_ids.sort()).toEqual([kits.id, valet.id].sort());
+      expect(await updateKnowledgeEntryForApi(context, caller, parking.id, { audience: "everyone" })).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+      const entryAudits = await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.entityId, parking.id), eq(auditLogs.eventType, "api.knowledge.updated")));
+      expect(entryAudits.map((row) => (row.payload as { fields: string[] }).fields)).toEqual([["audience"], ["audience"]]);
+
+      // Sources: a website, the pages its crawl read, and who each is for.
+      const site = await createKnowledgeSourceForApi(context, caller, { type: "website", url: "https://maple-audience.example" });
+      expect(site).toMatchObject({ type: "website", audience: "everyone", receptionist_ids: [] });
+      const [kitsPage, aboutPage, valetPage] = await admin!.db.insert(knowledgeDocuments).values([
+        { businessId: fixture.businessId, sourceType: "website", title: "Kitsilano hours", sourceUrl: "https://maple-audience.example/stores/kitsilano/hours", status: "indexed" },
+        { businessId: fixture.businessId, sourceType: "website", title: "About", sourceUrl: "https://maple-audience.example/about", status: "indexed" },
+        { businessId: fixture.businessId, sourceType: "website", title: "Valet desk", sourceUrl: "https://maple-audience.example/valet/desk", status: "indexed" },
+      ]).returning({ id: knowledgeDocuments.id });
+      expect(await updateKnowledgeSourceForApi(context, caller, aboutPage!.id, { audience: "chosen", receptionist_ids: [kits.id] })).toMatchObject({ type: "page", active: true, audience: "chosen", receptionist_ids: [kits.id] });
+      expect(apiKnowledgeSourceSchema.safeParse(await getKnowledgeSourceForApi(context, caller, aboutPage!.id)).success).toBe(true);
+      await expectApiError(updateKnowledgeSourceForApi(context, caller, aboutPage!.id, {}), 400, "invalid_request");
+
+      // In bulk: replace by default; add only to those already chosen; remove from one for everyone leaves the rest.
+      expect(await changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id, randomUUID()], source_ids: [site.id], audience: "chosen", receptionist_ids: [valet.id] })).toEqual({ entries: 1, sources: 1 });
+      expect(await getKnowledgeEntryForApi(context, caller, hours.id)).toMatchObject({ audience: "chosen", receptionist_ids: [valet.id] });
+      expect(await changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id, parking.id], audience: "chosen", mode: "add", receptionist_ids: [kits.id] })).toEqual({ entries: 2, sources: 0 });
+      expect((await getKnowledgeEntryForApi(context, caller, hours.id)).receptionist_ids.sort()).toEqual([kits.id, valet.id].sort());
+      expect(await getKnowledgeEntryForApi(context, caller, parking.id)).toMatchObject({ audience: "everyone" });
+      await changeKnowledgeAudienceForApi(context, caller, { entry_ids: [parking.id], audience: "chosen", mode: "remove", receptionist_ids: [valet.id] });
+      expect((await getKnowledgeEntryForApi(context, caller, parking.id)).receptionist_ids.sort()).toEqual([front!.id, kits.id].sort());
+      expect(await changeKnowledgeAudienceForApi(context, caller, { source_ids: [site.id], audience: "everyone" })).toEqual({ entries: 0, sources: 1 });
+      await expectApiError(changeKnowledgeAudienceForApi(context, caller, { audience: "everyone" }), 400, "invalid_request");
+      await expectApiError(changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id], audience: "everyone", mode: "add" }), 400, "invalid_request");
+      await expectApiError(changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id], audience: "chosen", mode: "add", receptionist_ids: [archived.id] }), 409, "conflict");
+      // Another business's key changes nothing of this one's.
+      expect(await changeKnowledgeAudienceForApi(context, b.caller, { entry_ids: [hours.id], audience: "everyone" })).toEqual({ entries: 0, sources: 0 });
+      expect(await getKnowledgeEntryForApi(context, caller, hours.id)).toMatchObject({ audience: "chosen" });
+
+      // A website rule gives the site's pages under a path to a receptionist, now and on every crawl.
+      const rule = await createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "stores/kitsilano", receptionist_id: kits.id });
+      expect(rule).toMatchObject({ source_id: site.id, path_prefix: "/stores/kitsilano/", receptionist_id: kits.id, pages: 1 });
+      expect(apiWebsiteRuleSchema.safeParse(rule).success).toBe(true);
+      expect(await getKnowledgeSourceForApi(context, caller, kitsPage!.id)).toMatchObject({ audience: "chosen", receptionist_ids: [kits.id] });
+      const valetRule = await createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "https://maple-audience.example/valet/", receptionist_id: valet.id });
+      expect(valetRule).toMatchObject({ path_prefix: "/valet/", pages: 1 });
+      expect(await listWebsiteRulesForApi(context, caller)).toEqual([rule, valetRule]);
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "/stores/kitsilano/", receptionist_id: kits.id }), 409, "conflict");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "/stores/", receptionist_id: archived.id }), 409, "conflict");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: aboutPage!.id, path_prefix: "/", receptionist_id: kits.id }), 400, "invalid_request");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "/stores?id=1", receptionist_id: kits.id }), 400, "invalid_request");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: randomUUID(), path_prefix: "/", receptionist_id: kits.id }), 404, "not_found");
+      await expectApiError(createWebsiteRuleForApi(context, b.caller, { source_id: site.id, path_prefix: "/", receptionist_id: kits.id }), 404, "not_found");
+
+      // Choosing the rule's receptionist makes the choice someone's own, which stays when the rule goes;
+      // a page only the rule chose goes back to everyone.
+      expect(await updateKnowledgeSourceForApi(context, caller, kitsPage!.id, { audience: "chosen", receptionist_ids: [kits.id] })).toMatchObject({ receptionist_ids: [kits.id] });
+      expect(await deleteWebsiteRuleForApi(context, caller, rule.id)).toBeUndefined();
+      expect(await getKnowledgeSourceForApi(context, caller, kitsPage!.id)).toMatchObject({ audience: "chosen", receptionist_ids: [kits.id] });
+      await deleteWebsiteRuleForApi(context, caller, valetRule.id);
+      expect(await getKnowledgeSourceForApi(context, caller, valetPage!.id)).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+      expect(await listWebsiteRulesForApi(context, caller)).toEqual([]);
+      await expectApiError(deleteWebsiteRuleForApi(context, caller, rule.id), 404, "not_found");
+      expect(await listWebsiteRulesForApi(context, b.caller)).toEqual([]);
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));

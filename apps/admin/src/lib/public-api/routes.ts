@@ -24,7 +24,11 @@ import {
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
   changeReceptionistForApi,
+  changeKnowledgeAudienceForApi,
   createQrLinkForApi,
+  createWebsiteRuleForApi,
+  deleteWebsiteRuleForApi,
+  listWebsiteRulesForApi,
   createReceptionistForApi,
   createRuleForApi,
   createServiceForApi,
@@ -160,7 +164,9 @@ import {
   apiKnowledgeSourceUpdateSchema,
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
+  apiKnowledgeAudienceChangeSchema,
   apiQrLinkCreateSchema,
+  apiWebsiteRuleCreateSchema,
   apiQrLinkUpdateSchema,
   apiReceptionistCreateSchema,
   apiReceptionistProfileUpdateSchema,
@@ -541,6 +547,14 @@ export const v1 = {
   updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => {
     const receptionistId = receptionistQuery(request);
     return { body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema), { receptionistId })) };
+  }),
+  changeKnowledgeAudience: (request: Request) => handleApiRequest(request, "changeKnowledgeAudience", async ({ context, caller }) => ({ body: data(await changeKnowledgeAudienceForApi(context, caller, await readApiBody(request, apiKnowledgeAudienceChangeSchema))) })),
+  listWebsiteRules: (request: Request) => handleApiRequest(request, "listWebsiteRules", async ({ context, caller }) => ({ body: { data: await listWebsiteRulesForApi(context, caller), next_cursor: null, has_more: false } })),
+  createWebsiteRule: (request: Request) => handleApiRequest(request, "createWebsiteRule", async ({ context, caller }) => ({ body: data(await createWebsiteRuleForApi(context, caller, await readApiBody(request, apiWebsiteRuleCreateSchema))) })),
+  deleteWebsiteRule: (request: Request, { params }: Params<"rule_id">) => handleApiRequest(request, "deleteWebsiteRule", async ({ context, caller }) => {
+    const ruleId = uuidParam((await params).rule_id, "rule_id");
+    await deleteWebsiteRuleForApi(context, caller, ruleId);
+    return { body: data({ id: ruleId, deleted: true }) };
   }),
   listQrLinks: (request: Request) => handleApiRequest(request, "listQrLinks", async ({ context, caller }) => ({ body: { data: await listQrLinksForApi(context, caller, { receptionistId: receptionistQuery(request), status: enumParam(request, "status", ["active", "paused"] as const) }, { appOrigin: appOrigin(request) }), next_cursor: null, has_more: false } })),
   createQrLink: (request: Request) => handleApiRequest(request, "createQrLink", async ({ context, caller }) => ({ body: data(await createQrLinkForApi(context, caller, await readApiBody(request, apiQrLinkCreateSchema), { appOrigin: appOrigin(request) })) })),

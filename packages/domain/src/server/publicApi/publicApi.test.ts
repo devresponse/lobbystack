@@ -56,7 +56,7 @@ describe("API keys", () => {
 
 describe("knowledge sources", () => {
   const at = new Date("2026-10-11T12:00:00.000Z");
-  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, mimeType: "application/pdf", tags: ["prices"], status: "pending" as const, error: null, active: true, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
+  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, mimeType: "application/pdf", tags: ["prices"], status: "pending" as const, error: null, active: true, audience: "everyone" as const, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
 
   it("serializes files, websites and the pages their crawls read to the published schema", () => {
     const file = serializeKnowledgeSource(row);
@@ -75,11 +75,23 @@ describe("knowledge sources", () => {
   });
 
   it("shows an FAQ's type instead of the tag that marks it", () => {
-    const snippet = { id: row.id, title: "Do you park?", content: "Behind the building.", tags: ["faq", "parking"], priority: 2, active: false, createdAt: at, updatedAt: at };
+    const snippet = { id: row.id, title: "Do you park?", content: "Behind the building.", tags: ["faq", "parking"], priority: 2, active: false, audience: "everyone" as const, createdAt: at, updatedAt: at };
     const faq = serializeKnowledgeEntry(snippet);
-    expect(faq).toEqual({ id: row.id, type: "faq", title: "Do you park?", content: "Behind the building.", tags: ["parking"], priority: 2, active: false, created_at: at.toISOString(), updated_at: at.toISOString() });
+    expect(faq).toEqual({ id: row.id, type: "faq", title: "Do you park?", content: "Behind the building.", tags: ["parking"], priority: 2, active: false, audience: "everyone", receptionist_ids: [], created_at: at.toISOString(), updated_at: at.toISOString() });
     expect(apiKnowledgeEntrySchema.safeParse(faq).success).toBe(true);
     expect(serializeKnowledgeEntry({ ...snippet, tags: [] }).type).toBe("text");
+  });
+
+  it("lists the receptionists chosen for an entry or source, and none for one that's for everyone", () => {
+    const receptionist = "9b1f3c5e-7d2a-4e6b-8c0d-1a2b3c4d5e6f";
+    const snippet = { id: row.id, title: "Valet", content: "Ask at the door.", tags: [], priority: 0, active: true, createdAt: at, updatedAt: at };
+    expect(serializeKnowledgeEntry({ ...snippet, audience: "chosen" }, [receptionist])).toMatchObject({ audience: "chosen", receptionist_ids: [receptionist] });
+    // Chosen for nobody: left to the default receptionist.
+    expect(serializeKnowledgeEntry({ ...snippet, audience: "chosen" })).toMatchObject({ audience: "chosen", receptionist_ids: [] });
+    expect(serializeKnowledgeEntry({ ...snippet, audience: "everyone" }, [receptionist])).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+    const page = serializeKnowledgeSource({ ...row, audience: "chosen", sourceType: "website", sourceUrl: "https://maple.example/stores/" }, [receptionist]);
+    expect(page).toMatchObject({ type: "page", audience: "chosen", receptionist_ids: [receptionist] });
+    expect(apiKnowledgeSourceSchema.safeParse(page).success).toBe(true);
   });
 
   it("shows an error only for a failed source", () => {

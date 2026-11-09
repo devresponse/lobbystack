@@ -523,10 +523,10 @@ export async function schedulePackNumberReleaseInTransaction(tx: DatabaseTransac
 }
 
 /**
- * Takes back the release a pack's end set, when a new pack or a subscription
- * brings the number back into the business's plan. Releases set for any other
- * reason keep their date, and a number Twilio is already taking back can't be
- * kept. Returns how many numbers it kept.
+ * Takes back the release a pack's end set, when a new pack, a subscription or
+ * an operator's managed plan brings the number back into the business's plan.
+ * Releases set for any other reason keep their date, and a number Twilio is
+ * already taking back can't be kept. Returns how many numbers it kept.
  */
 export async function clearPackNumberReleaseInTransaction(tx: DatabaseTransaction, businessId: string): Promise<number> {
   // Read first, so a business that never had a pack has nothing written.

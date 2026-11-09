@@ -31,6 +31,10 @@ describe("the billing provider contract: a pack's checkout", () => {
       await polar.billing.createPackCheckout({ ...base, customer: { id: null, billingKey: "business:b1" }, price: { ref: "product-pack-500-90" } });
       expect(polar.requests[0]?.body).toEqual({ products: ["product-pack-500-90"], customer_email: "owner@example.com", external_customer_id: "business:b1", success_url: base.successUrl, return_url: base.cancelUrl, allow_discount_codes: false, metadata: tagged });
     });
+
+    it("has no call to close a page, so a page left open stays payable until its own expiry", () => {
+      expect(polarHarness().billing.closePackCheckout).toBeUndefined();
+    });
   });
 
   describe("on Stripe", () => {
@@ -82,6 +86,21 @@ describe("the billing provider contract: a pack's checkout", () => {
       expect(payment.metadata).toEqual(tagged);
       expect(stripe.state.invoices.size).toBe(0);
       await expect(billing.invoiceOfPayment(payment.id)).resolves.toBeNull();
+    });
+
+    it("closes an open page, so nobody can pay on it, and takes a page already paid, expired or unknown as closed", async () => {
+      const { billing, stripe } = withPack();
+      const open = await billing.createPackCheckout({ ...base, customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_pack_500_90" } });
+      await expect(billing.closePackCheckout!({ checkoutId: open.id })).resolves.toBe("closed");
+      expect(stripe.requests.at(-1)).toEqual({ call: "checkout.sessions.expire", params: { id: open.id }, idempotencyKey: null });
+      expect(stripe.state.checkoutSessions.get(open.id)).toMatchObject({ status: "expired" });
+      // Stripe refuses to expire a session that isn't open; read back, it was closed already.
+      await expect(billing.closePackCheckout!({ checkoutId: open.id })).resolves.toBe("already_closed");
+      const paid = await billing.createPackCheckout({ ...base, checkoutId: "pack-checkout-2", customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_pack_500_90" } });
+      stripe.completePaymentCheckout(paid.id);
+      await expect(billing.closePackCheckout!({ checkoutId: paid.id })).resolves.toBe("already_closed");
+      expect(stripe.state.checkoutSessions.get(paid.id)).toMatchObject({ status: "complete", payment_status: "paid" });
+      await expect(billing.closePackCheckout!({ checkoutId: "cs_unknown" })).resolves.toBe("already_closed");
     });
 
     it("never makes a subscription, and sells no plan's parameters in payment mode", async () => {

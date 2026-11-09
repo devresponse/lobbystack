@@ -660,7 +660,10 @@
         "failed": "Your payment didn't go through, so no pack was added.",
         "processing": "Your payment is processing. Your pack shows here once it arrives.",
         "checkoutFailed": "Unable to open the payment page. Try again.",
-        "checkoutExpired": "The payment page expired. Try again."
+        "checkoutExpired": "The payment page expired. Try again.",
+        "gaveWay": "A plan started before this payment arrived, so no pack was added. The payment will be refunded.",
+        "refundedFirst": "This payment was refunded or charged back, so no pack was added.",
+        "closedForPlan": "A plan started for this business, so the pack's payment page closed."
       }
     },
     "transactions": {

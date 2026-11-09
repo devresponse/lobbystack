@@ -86,3 +86,20 @@ export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerD
     throw error;
   }
 }
+
+/**
+ * billing.closePackCheckout: asks the provider to close a pack's payment page
+ * that a plan's start closed (decision 6), so nobody pays for a pack that
+ * would end at once. A provider with no such call (Polar), or a worker
+ * without billing, leaves the page to its own expiry: a pack paid on it
+ * anyway gives way to the plan, and ops.billing.pack_gave_way names the
+ * payment to refund.
+ */
+export async function closePackCheckout(job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {
+  businessIdOrThrow(job);
+  const checkoutId = String(job.payload.checkoutId ?? "");
+  const providerCheckoutId = String(job.payload.providerCheckoutId ?? "");
+  if (!providerCheckoutId || !dependencies.billing?.closePackCheckout) return { status: "skipped", entityId: checkoutId };
+  const closed = await dependencies.billing.closePackCheckout({ checkoutId: providerCheckoutId });
+  return { status: closed === "closed" ? "completed" : "skipped", entityId: checkoutId };
+}

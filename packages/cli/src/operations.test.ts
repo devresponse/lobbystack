@@ -122,6 +122,13 @@ describe("one command per endpoint", () => {
     expect((await runCli(["billing", "buy-pack", "pack_250_90"], { fetch: queued.fetch })).out).toContain(`lobbystack billing pack-status ${otherId}`);
     expect(JSON.parse((await runCli(["billing", "pack-status", otherId, "--json"], { fetch: queued.fetch })).out)).toMatchObject({ status: "paid", paid: true });
 
+    // A checkout already paid says what came of the pack: added, or ended as it arrived.
+    for (const [packStatus, sentence] of [["active", "The pack is paid, and the business has it."], ["replaced", "a plan the business bought started first, so the pack ended at once"], ["refunded", "refunded or charged back before it arrived"]] as const) {
+      const paid = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: checkout("paid", { paid: packStatus === "active", pack_status: packStatus }) });
+      const result = await runCli(["billing", "buy-pack", "pack_250_90", "--wait"], { fetch: paid.fetch });
+      expect(result.out).toContain(sentence);
+    }
+
     for (const [status, error, message] of [["failed", "Polar checkout creation failed.", "The billing provider couldn't make the pack's checkout page: Polar checkout creation failed. Start another checkout."], ["expired", "This request waited too long to run.", "The pack's checkout expired: This request waited too long to run. Start another checkout."]] as const) {
       const ended = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: checkout(status, { error }) });
       const result = await runCli(["billing", "buy-pack", "pack_250_90", "--wait", "--json"], { fetch: ended.fetch });

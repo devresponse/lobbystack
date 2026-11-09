@@ -154,7 +154,9 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       // The dashboard's request, under the app's row-level security.
       const id = await as(tx, "lobbystack_app", (context) => createPackCheckoutRequest(context, { userId, businessId, pack: sold.code, checkLimit }));
       const made = await row(tx, id);
-      expect(made).toMatchObject({ businessId, requestedByUserId: userId, pack: sold.code, priceId: sold.priceId, status: "pending", checkoutId: null, checkoutUrl: null, billingEmail: null });
+      expect(made).toMatchObject({ businessId, requestedByUserId: userId, pack: sold.code, priceId: sold.priceId, status: "pending", checkoutId: null, checkoutUrl: null, billingEmail: null, packId: null });
+      // The terms the business saw, which its payment adds the pack with whatever the catalog says by then.
+      expect(made.terms).toEqual({ voiceSec: 30_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1 });
       expect(made.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 15 * MINUTE - 1_000);
       expect(made.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 15 * MINUTE + 1_000);
       expect(await outbox(tx, id)).toEqual([{ topic: "billing.createPackCheckout", aggregateType: "billing_pack_checkout", dedupeKey: `billing-pack-checkout:${id}`, payload: { checkoutId: id } }]);
@@ -352,13 +354,28 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       expect(ready.expiresAt.getTime()).toBeGreaterThanOrEqual(before + PACK_CHECKOUT_PAGE_MS - 1_000);
       expect(ready.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + PACK_CHECKOUT_PAGE_MS + 1_000);
 
-      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "ready", checkoutUrl: "https://polar.test/checkout/1", error: null });
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "ready", checkoutUrl: "https://polar.test/checkout/1", error: null, packStatus: null });
       // Left unpaid past its expiry, the page reads as expired, as nobody can pay on it.
       expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id }, new Date(ready.expiresAt.getTime() + 1_000))).toMatchObject({ status: "expired", checkoutUrl: null, error: "This payment page expired." });
       expect((await row(tx, id)).status).toBe("ready");
       // Another business's, or no such checkout.
       expect(await readPackCheckoutInTransaction(tx, { businessId: await business(tx), checkoutId: id })).toBeNull();
       expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: "not-a-checkout" })).toBeNull();
+    });
+  });
+
+  it("says what became of the pack a paid checkout added, once its payment named it", async () => {
+    await rollbackTest(async (tx) => {
+      const sold = await pack(tx);
+      const businessId = await business(tx);
+      const userId = await person(tx);
+      const id = await checkoutRow(tx, { businessId, userId, pack: sold, status: "paid" });
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "paid", packStatus: null });
+      // A plan bought while the page was open started first, so the pack ended as it arrived.
+      const paidAt = new Date(Date.now() - 60_000);
+      const [added] = await tx.insert(billingPacks).values({ businessId, pack: sold.code, days: 90, provider: "stripe", providerRef: `pi_${randomUUID()}`, amountCents: 9900, currency: "cad", secondsTotal: 30_000, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, paidAt, endsAt: new Date(paidAt.getTime() + 90 * 86_400_000), status: "replaced", endedAt: new Date(), unusedSeconds: 30_000 }).returning({ id: billingPacks.id });
+      await tx.update(billingPackCheckouts).set({ packId: added!.id }).where(eq(billingPackCheckouts.id, id));
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "paid", packStatus: "replaced" });
     });
   });
 

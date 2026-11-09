@@ -58,7 +58,7 @@ export function createQueue(
   });
 }
 
-const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "billing.expirePacks", "conversation.finalizeSession", "billing.revokeSubscription", "billing.endPlanForPack", "billing.ensureOverage", "billing.changeSubscription", "phoneNumber.releaseDeleted", "privacy.deleteStoredObjects"]);
+const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "billing.expirePacks", "conversation.finalizeSession", "billing.revokeSubscription", "billing.endPlanForPack", "billing.closePackCheckout", "billing.ensureOverage", "billing.changeSubscription", "phoneNumber.releaseDeleted", "privacy.deleteStoredObjects"]);
 
 export async function enqueueJob(
   queue: Queue<JobEnvelope>,

@@ -6,7 +6,7 @@ import { reportWarning } from "@lobbystack/telemetry/node";
 import { BillingProviderError } from "../billing/errors";
 import type { BillingEnv, BillingProvider, BillingRefusal, CustomerRef, OverageKind, PlanChangeProration, PlanChangeResult, PriceRef, ProviderSubscription } from "../billing/types";
 import { cancelStripePlan, endStripePlanForPack, keepStripePlan, resumeStripePlan } from "./cancel";
-import { createStripeCheckout, createStripePackCheckout } from "./checkout";
+import { closeStripePackCheckout, createStripeCheckout, createStripePackCheckout } from "./checkout";
 import { stripeLocale, type StripeApi } from "./client";
 import { isStripeAlreadyCanceled, isStripeMissing, stripeRefusalFor } from "./errors";
 import { endStripeOverage, ensureStripeOverage } from "./overage";
@@ -81,6 +81,10 @@ export class StripeBilling implements BillingProvider {
 
   async createPackCheckout(input: Parameters<BillingProvider["createPackCheckout"]>[0]): Promise<{ id: string; url: string; expiresAt: Date | null }> {
     return await createStripePackCheckout(this.api, input);
+  }
+
+  async closePackCheckout(input: { checkoutId: string }): Promise<"closed" | "already_closed"> {
+    return await closeStripePackCheckout(this.api, input);
   }
 
   /** The subscription with its schedule, discounts and latest invoice, or null when Stripe has none by that ID. */

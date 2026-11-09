@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 
 import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, enqueueOutbox, type DatabaseTransaction } from "@lobbystack/db";
-import { billingErrorCodes, isBillingPlanSlug, isUuid, liveSubscriptionStates, MAX_PHONE_CALL_MS, PHONE_RESERVATION_SLICE_SECONDS, type BillingPlanLimits, type BillingPlanLimitTable, type BillingPlanSlug } from "@lobbystack/shared";
+import { billingErrorCodes, isBillingPlanSlug, isReplacedSubscription, isUuid, liveSubscriptionStates, MAX_PHONE_CALL_MS, PHONE_RESERVATION_SLICE_SECONDS, type BillingPlanLimits, type BillingPlanLimitTable, type BillingPlanSlug } from "@lobbystack/shared";
 
 import { lockBusinessPacks, packBalance, readLivePacks, setPackDraw, type PackBalance } from "./billingPacks";
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
@@ -212,7 +212,7 @@ export async function loadBillingContext(tx: DatabaseTransaction, businessId: st
   const [business] = await tx.select({ deploymentMode: businesses.deploymentMode }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode, subscriptionState: billingAccounts.subscriptionState, overageSpendingCapCents: billingAccounts.overageSpendingCapCents, billingInterval: billingAccounts.billingInterval, source: billingAccounts.source, overageSubscriptionId: billingAccounts.overageSubscriptionId, subscriptionId: billingAccounts.subscriptionId, allowancesSince: billingAccounts.allowancesSince, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   // A subscription a prepaid pack replaced counts as ended while the provider confirms it (decision 6).
-  const replaced = Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
+  const replaced = isReplacedSubscription(account);
   const subscriptionState = replaced ? null : account?.subscriptionState ?? null;
   const deploymentMode = business?.deploymentMode ?? "cloud";
   const tier = effectiveBillingPlan({ deploymentMode, accountPlan: account?.plan ?? null, subscriptionState });
@@ -266,12 +266,14 @@ function countedEvents(events: ReplayEvent[], billing: Pick<BillingContext, "pla
 /**
  * The events a row recorded at createdAt counts with: those in the same part
  * of the period, before or after the switch, so a call or a late correction
- * stays in the part it started in. A Starter or Pro row never counts a pack's.
+ * stays in the part it started in. A row that isn't a pack's never counts a
+ * pack's, as countedEvents counts them only on the prepaid tier: a Free call
+ * running when a pack comes back or another is bought keeps Free's allowance.
  */
 function segmentEvents(events: ReplayEvent[], billing: Pick<BillingContext, "allowancesSince">, periodKey: string, row: Pick<ReplayEvent, "createdAt" | "planAtRecordTime">): ReplayEvent[] {
   const start = windowStart(billing, periodKey);
-  const subscription = row.planAtRecordTime === "starter" || row.planAtRecordTime === "pro";
-  return events.filter((event) => (start === null || (event.createdAt >= start) === (row.createdAt >= start)) && !(subscription && event.planAtRecordTime === "prepaid"));
+  const offPack = row.planAtRecordTime !== "prepaid";
+  return events.filter((event) => (start === null || (event.createdAt >= start) === (row.createdAt >= start)) && !(offPack && event.planAtRecordTime === "prepaid"));
 }
 
 /** Whether a row recorded at createdAt is in a part of the period before the latest switch. */

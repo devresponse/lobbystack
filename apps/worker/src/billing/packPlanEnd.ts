@@ -21,7 +21,7 @@
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { claimBillingSubscription, isLiveSubscriptionState, loadPlanEndForPackWork } from "@lobbystack/domain";
 import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
-import { billingProviderNames, billingProviderOf, MAX_PHONE_CALL_MS } from "@lobbystack/shared";
+import { billingProviderNames, billingProviderOf, isYearlyBillingInterval, MAX_PHONE_CALL_MS } from "@lobbystack/shared";
 import { reportError } from "@lobbystack/telemetry/node";
 import type { JobResult, WorkerDependencies } from "../handlers";
 import { businessIdOrThrow } from "../jobInput";
@@ -61,8 +61,8 @@ async function endReplacedPlan(dependencies: WorkerDependencies, input: { busine
   // The account no longer names the subscription as replaced.
   if (!work) return { status: "skipped", entityId: businessId };
   // Reconcile never replaces these; checkout refuses a pack beside them (decisions 6a and 6b).
-  if (work.current && (work.billingInterval === "annual" || work.subscriptionState === "past_due")) {
-    const kind = work.billingInterval === "annual" ? "a yearly" : "a past-due";
+  if (work.current && (isYearlyBillingInterval(work.billingInterval) || work.subscriptionState === "past_due")) {
+    const kind = isYearlyBillingInterval(work.billingInterval) ? "a yearly" : "a past-due";
     await reportError(new Error(`A prepaid pack replaced ${kind} subscription, which checkout refuses, so ${billingProviderNames[billing.id]} isn't asked to end it. Settle with the business what becomes of the plan.`), { operation, businessId });
     return { status: "skipped", entityId: businessId };
   }

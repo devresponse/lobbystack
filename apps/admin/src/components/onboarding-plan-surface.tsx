@@ -9,6 +9,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { brandLinks, contactEmailFor, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "@/components/billing-email-form";
 import { PackEndsPlanDialog, PackPicker } from "@/components/billing-packs";
@@ -17,7 +18,7 @@ import { FieldError } from "@/components/ui/field";
 import { OnboardingPlanComparison } from "@/components/onboarding-plan-comparison";
 import { PromoCodeEntry } from "@/components/promo-code-entry";
 import { useTelemetry } from "@/components/product-analytics";
-import { usePackCheckout, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
+import { paidPackToastKey, usePackCheckout, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import type { BillingPackOfferViewModel, PackCheckoutViewModel } from "@/lib/page-view-models";
 import { cn } from "@/lib/utils";
@@ -26,7 +27,7 @@ type BillingInterval = "monthly" | "annual";
 type Plan = "free_cloud" | "starter" | "pro" | "enterprise";
 type Checkout = { id: string; status: string; checkoutUrl: string | null; error: string | null; refusal: PlanChangeRefusal | null };
 type CheckoutInput = { target: "starter" | "pro"; billingEmail?: string };
-type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList; packOffers?: BillingPackOfferViewModel[]; packCheckout?: PackCheckoutViewModel | null };
+type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList; packOffers?: BillingPackOfferViewModel[]; packCheckout?: PackCheckoutViewModel | null; limits?: { includedBusinessNumbers: number | null } };
 
 const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
   { slug: "free_cloud", features: ["voiceMinutes", "receptionists", "bookingContacts", "support"] },
@@ -76,7 +77,8 @@ export function OnboardingPlanSurface() {
   const packReturnAttempt = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
   const [chosenPack, setChosenPack] = useState<string | null>(null);
   const [confirmingPack, setConfirmingPack] = useState(false);
-  const [packReturnFailed, setPackReturnFailed] = useState(false);
+  // A pack's payment that came back failed, or refunded before it arrived: the plans to choose from again, with why.
+  const [packReturnFailed, setPackReturnFailed] = useState<"failed" | "refunded" | null>(null);
   const { business } = useActiveBusiness();
   const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<BillingStatus>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business) });
   const checkout = useQuery({
@@ -90,9 +92,12 @@ export function OnboardingPlanSurface() {
     onSuccess: () => navigate("/onboarding/attribution"),
     meta: { inlineError: true },
   });
+  // A plan in force without a number, such as a promo plan or a pack the operator gave none, has no number step: the
+  // server sends that step back here, so Continue goes on past it.
+  const keepPlanSkipsNumber = billing.data?.limits?.includedBusinessNumbers === 0;
   const keepPlan = useMutation({
-    mutationFn: () => requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: "phone_number" }) }),
-    onSuccess: () => navigate("/onboarding/number"),
+    mutationFn: () => requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: keepPlanSkipsNumber ? "attribution" : "phone_number" }) }),
+    onSuccess: () => navigate(keepPlanSkipsNumber ? "/onboarding/attribution" : "/onboarding/number"),
     meta: { inlineError: true },
   });
   const startCheckout = useMutation({
@@ -131,9 +136,11 @@ export function OnboardingPlanSurface() {
   const packReturn = usePackCheckoutReturn(business?.businessId, packReturnId);
   useEffect(() => {
     const key = `${business?.businessId}:pack:${packReturnId}`;
-    if (!business || !packReturnId || packReturn.outcome !== "paid") return;
+    // A pack that gave way to a plan the business bought meanwhile leaves it on that plan, which moves on as a paid one does.
+    if (!business || !packReturnId || (packReturn.outcome !== "paid" && packReturn.outcome !== "replaced")) return;
     if (packReturnAttempt.current?.key !== key) {
-      if (!hasReportedCheckout(key)) {
+      if (packReturn.outcome === "replaced") toast.error(billingT(paidPackToastKey("replaced")));
+      else if (!hasReportedCheckout(key)) {
         markCheckoutReported(key);
         telemetry.track("web.onboarding.plan_checkout_completed", { businessId: business.businessId, plan: "prepaid" });
       }
@@ -144,11 +151,11 @@ export function OnboardingPlanSurface() {
       if (!cancelled) router.replace("/onboarding/number");
     }).catch(() => { if (!cancelled) packReturnAttempt.current = null; });
     return () => { cancelled = true; };
-  }, [business, packReturnId, packReturn.outcome, router, telemetry]);
+  }, [billingT, business, packReturnId, packReturn.outcome, router, telemetry]);
   useEffect(() => {
-    // A payment that failed leaves the plans to choose from again, under a clean address.
-    if (packReturn.outcome !== "failed") return;
-    setPackReturnFailed(true);
+    // A payment that failed, or went back before it arrived, leaves the plans to choose from again, under a clean address.
+    if (packReturn.outcome !== "failed" && packReturn.outcome !== "refunded") return;
+    setPackReturnFailed(packReturn.outcome);
     router.replace("/onboarding/plan");
   }, [packReturn.outcome, router]);
   const lastCheckout = startCheckout.variables;
@@ -185,7 +192,7 @@ export function OnboardingPlanSurface() {
     setCheckoutError(null);
     setEmailPrompt(null);
     packCheckout.dismissEmailPrompt();
-    setPackReturnFailed(false);
+    setPackReturnFailed(null);
     telemetry.track("web.onboarding.plan_selected", { businessId: business.businessId, plan });
     if (plan === "free_cloud") selectFree.mutate();
     else if (plan === "starter" || plan === "pro") {
@@ -210,7 +217,7 @@ export function OnboardingPlanSurface() {
     if (!business || pendingPlan || !selectedPack?.checkoutAvailable) return;
     setCheckoutError(null);
     setEmailPrompt(null);
-    setPackReturnFailed(false);
+    setPackReturnFailed(null);
     telemetry.track("web.onboarding.plan_selected", { businessId: business.businessId, plan: "prepaid" });
     if (packEndsSubscription) setConfirmingPack(true);
     else startPack(selectedPack.code);
@@ -248,7 +255,7 @@ export function OnboardingPlanSurface() {
     <div className="flex flex-col gap-12">
       {packReturnId && packReturn.outcome === "waiting" ? <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{t("plan.packs.waiting")}</p> : null}
       {packReturnId && packReturn.outcome === "processing" ? <div className="flex flex-col items-center gap-3 text-center" role="status"><p className="max-w-md text-sm leading-relaxed text-muted-foreground">{t("plan.packs.processing")}</p><Button className="rounded-full" onClick={packReturn.checkAgain} size="sm" type="button" variant="outline">{t("plan.packs.checkAgain")}</Button></div> : null}
-      {packReturnFailed ? <FieldError className="text-center">{t("plan.packs.failed")}</FieldError> : null}
+      {packReturnFailed ? <FieldError className="text-center">{t(packReturnFailed === "refunded" ? "plan.packs.refunded" : "plan.packs.failed")}</FieldError> : null}
 
       <div className="flex justify-center">
         {/* On a narrow phone the Annual tab puts its badge under its name, and wraps it if need be, rather than overflow the screen. */}

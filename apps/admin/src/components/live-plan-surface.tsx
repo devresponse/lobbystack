@@ -7,7 +7,7 @@ import { ArrowUpRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
-import { usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
+import { paidPackToastKey, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
 import type { BillingPermissions } from "./billing-past-due-banner";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
@@ -111,6 +111,7 @@ export function LivePlanSurface() {
     announcedPackReturn.current = key;
     if (outcome === "paid") toast.success(t("billing.packs.toast.added"));
     else if (outcome === "failed") toast.error(t("billing.packs.toast.failed"));
+    else if (outcome === "replaced" || outcome === "refunded") toast.error(t(paidPackToastKey(outcome)));
     else toast(t("billing.packs.toast.processing"));
     void queryClient.invalidateQueries({ queryKey: ["billing", business.businessId] });
     router.replace("/settings/plan");
@@ -183,10 +184,12 @@ export function LivePlanSurface() {
   const planActions = billing.data.planActions === true && paid;
   const planActionPending = planActionMutation.isPending || planAction?.businessId === business.businessId;
   const changeWaits = Boolean(billing.data.nextChange && !billing.data.cancelsAt && !promoPlan?.ends);
-  // Anyone who could buy a plan here can enter a code, except on a plan billed outside Polar.
-  const canEnterCode = permissions?.hasCheckoutAccess === true && (plan === "free_cloud" || plan === "starter" || plan === "pro");
+  // Anyone who could buy a plan here can enter a code, a business on a pack too, except on a plan billed outside the provider.
+  const canEnterCode = permissions?.hasCheckoutAccess === true && (plan === "free_cloud" || plan === "prepaid" || plan === "starter" || plan === "pro");
   const packOffers = billing.data.packOffers ?? [];
   const packs = billing.data.packs ?? [];
+  // A code's plan bought from Free or a pack starts a subscription, which ends every pack held, frozen ones too, as the plan dialog warns.
+  const packMinutesLeft = plan === "free_cloud" || plan === "prepaid" ? Math.floor(packs.reduce((seconds, pack) => seconds + pack.secondsLeft, 0) / 60) : 0;
   // On the prepaid tier the usage status says what the live packs hold: their minutes left, and when the last of them ends.
   const packUsage = plan === "prepaid" ? billing.data.usageStatus?.pack ?? null : null;
   const prepaidMinutesLeft = Math.floor((packUsage?.secondsLeft ?? 0) / 60);
@@ -286,7 +289,7 @@ export function LivePlanSurface() {
               </div>
             </div>}
           </div>
-          {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} /> : null}
+          {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null} /> : null}
           {(canUpgrade || canManage || paymentActionUrl || planActions) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {paymentActionUrl && (

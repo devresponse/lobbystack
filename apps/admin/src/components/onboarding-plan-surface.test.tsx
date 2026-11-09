@@ -289,6 +289,23 @@ describe("prepaid packs during onboarding", () => {
     expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
   });
 
+  it("goes on to the number step without the pack when a plan bought meanwhile came first, and says the pack wasn't added", async () => {
+    const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "starter");
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/api/onboarding/stage?")).map(([, init]) => init?.body)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    // The plan's own checkout reported its purchase; the pack's never arrived as one.
+    expect(telemetryRef.current!.events.filter((event) => event.name === "web.onboarding.plan_checkout_completed")).toHaveLength(0);
+  });
+
+  it("says a pack's payment was refunded before it arrived and shows the plans again", async () => {
+    renderReturn({ status: "paid", packStatus: "refunded", synced: false });
+    expect(await screen.findByText("plan.packs.refunded")).toBeTruthy();
+    expect(screen.queryByText("plan.packs.failed")).toBeNull();
+    expect(route.router.replace).toHaveBeenCalledWith("/onboarding/plan");
+    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+  });
+
   it("says a payment that hasn't arrived is processing, and checks again when asked", async () => {
     const fetchMock = renderReturn({ status: "expired", error: "This payment page expired." });
     expect(await screen.findByText("plan.packs.processing")).toBeTruthy();
@@ -307,5 +324,13 @@ describe("prepaid packs during onboarding", () => {
     await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
     await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/number"));
     expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "phone_number" }) }));
+  });
+
+  it("goes past the number step from Continue when the plan in force includes no number, as the server would send that step back", async () => {
+    const fetchMock = setup(false, false, "prepaid", builtInBillingPlanList(), { limits: { includedBusinessNumbers: 0 } });
+    await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/attribution"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "attribution" }) }));
+    expect(route.router.push).not.toHaveBeenCalledWith("/onboarding/number");
   });
 });

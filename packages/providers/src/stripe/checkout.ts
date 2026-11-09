@@ -1,7 +1,8 @@
-import type Stripe from "stripe";
+import Stripe from "stripe";
 
 import type { BillingProvider } from "../billing/types";
 import { stripeLocale, type StripeApi } from "./client";
+import { isStripeMissing } from "./errors";
 import { stripeOveragePrices } from "./overage";
 
 // Checkout Sessions for the plan subscription (the Stripe plan's step 13):
@@ -89,4 +90,23 @@ export async function createStripePackCheckout(api: StripeApi, input: Parameters
   const session = await api.checkout.sessions.create(params, { idempotencyKey: `pack-checkout:${input.checkoutId}:${expiresAt}` });
   if (!session.url) throw new Error("Stripe made the checkout without a page to pay on.");
   return { id: session.id, url: session.url, expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : null };
+}
+
+/**
+ * Expires a pack's Checkout Session, so nobody can pay on it. Stripe expires
+ * only an open session: one already paid or expired, or one Stripe doesn't
+ * know, is already closed.
+ */
+export async function closeStripePackCheckout(api: StripeApi, input: { checkoutId: string }): Promise<"closed" | "already_closed"> {
+  try {
+    await api.checkout.sessions.expire(input.checkoutId);
+    return "closed";
+  } catch (error) {
+    if (isStripeMissing(error)) return "already_closed";
+    if (!(error instanceof Stripe.errors.StripeInvalidRequestError)) throw error;
+    // Read it back rather than match the refusal's words: a session no longer open was closed already.
+    const session = await api.checkout.sessions.retrieve(input.checkoutId);
+    if (session.status !== "open") return "already_closed";
+    throw error;
+  }
 }

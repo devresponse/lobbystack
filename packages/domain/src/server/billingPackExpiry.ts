@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, enqueueOutbox, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingPlanName, normalizeInterfaceLocale } from "@lobbystack/shared";
+import { billingPlanName, isReplacedSubscription, normalizeInterfaceLocale } from "@lobbystack/shared";
 
 import { isLiveSubscriptionState, lockBillingAccount } from "./billing";
 import { expirePackInTransaction, lockBusinessPacks, newestLivePack, PACK_LOW_BALANCE_SHARE, PACK_NOTICE_RUN_DELAY_MS, PACK_RECLAIM_REASON, packBalance, packSecondsLeft, readLivePacks, schedulePackNumberReleaseInTransaction, type LivePack, type PackBalance } from "./billingPacks";
@@ -25,9 +25,9 @@ import { loadBusinessPlanLimits } from "./usage";
 //    managed plan takes that back.
 //    A pack a subscription replaced is never settled here: the business moved
 //    to a plan, and reconcile handled it.
-// 3. Emails the owners the reminders due: at a fifth of the balance left, at
-//    none, both read without what calls still running hold, and 30 and 7
-//    days before a pack ends.
+// 3. Emails the owners the reminders due while a pack is the plan in force:
+//    at a fifth of the balance left, at none, both read without what calls
+//    still running hold, and 30 and 7 days before a pack ends.
 // 4. Asks the provider again to end a subscription a pack replaced while it
 //    still shows it live (decision 6).
 //
@@ -178,11 +178,15 @@ type Recipient = { user_id: string; email: string; preferred_locale: string | nu
  * them on their packs in the same transaction. A reminder no owner can get is
  * recorded all the same, as a promo plan's ending is. A canceled business
  * gets none: nobody can open it, and its owners hear again if it comes back.
- * Returns the emails queued.
+ * Neither does one whose packs wait beside a managed, yearly or past-due plan:
+ * what the emails say about calls and the number holds only while a pack is
+ * the plan in force. Nothing is recorded then, so the reminders still due come
+ * once a pack is the plan again. Returns the emails queued.
  */
 async function sendDueReminders(tx: DatabaseTransaction, input: { businessId: string; now: Date; live: readonly LivePack[]; appUrl: string }): Promise<number> {
   const { businessId, live } = input;
   if (!live.length) return 0;
+  if ((await loadBusinessPlanLimits(tx, businessId)).plan !== "prepaid") return 0;
   const noticeRows = await tx.select({ id: billingPacks.id, notices: billingPacks.notices }).from(billingPacks)
     .where(and(eq(billingPacks.businessId, businessId), inArray(billingPacks.id, live.map((pack) => pack.id))));
   const noticesOf = new Map(noticeRows.map((row) => [row.id, row.notices]));
@@ -273,7 +277,7 @@ async function withoutOpenReservations(tx: DatabaseTransaction, input: { busines
 async function askAgainToEndReplacedPlan(tx: DatabaseTransaction, businessId: string, now: Date): Promise<void> {
   const [account] = await tx.select({ subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, replacedSubscriptionId: billingAccounts.replacedSubscriptionId, allowancesSince: billingAccounts.allowancesSince })
     .from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
-  if (!account?.subscriptionId || account.replacedSubscriptionId !== account.subscriptionId || !isLiveSubscriptionState(account.subscriptionState)) return;
+  if (!account?.subscriptionId || !isReplacedSubscription(account) || !isLiveSubscriptionState(account.subscriptionState)) return;
   await enqueueOutbox(tx, {
     topic: "billing.endPlanForPack",
     businessId,

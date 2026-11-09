@@ -347,10 +347,11 @@ export const apiPackCheckoutCreateSchema = z.strictObject({
 export const apiPackCheckoutSchema = z.object({
   id,
   pack: z.string().describe("The pack's code."),
-  status: z.enum(packCheckoutStatuses).describe("pending or processing: the billing provider is making the page. ready: checkout_url is set until expires_at. paid: the payment arrived and the business has the pack. failed: the provider made no page, or the business moved to a managed plan; error says why, and another checkout can be started. expired: the checkout waited too long to run, or its page expired unpaid; another can be started."),
+  status: z.enum(packCheckoutStatuses).describe("pending or processing: the billing provider is making the page. ready: checkout_url is set until expires_at. paid: the payment arrived, and pack_status says what became of the pack. failed: the provider made no page, the business moved to a managed plan, or a plan it bought started first; error says why, and another checkout can be started. expired: the checkout waited too long to run, its page expired unpaid, or a plan the business bought started while the page was open; another can be started."),
+  pack_status: z.enum(billingPackStatuses).nullable().describe("What became of the pack the payment added. active, or frozen while a dispute holds its payment: the business has it. expired: its days ran out. replaced: a plan the business subscribed to ended it; when the plan started before the payment arrived, the pack ended at once and the operator refunds the payment. refunded: its payment was refunded or charged back. Null until the payment arrives, and for a checkout paid before LobbyStack kept the link."),
   checkout_url: z.string().nullable().describe("The billing provider's page where the customer pays once for the pack. Send it to them. Null unless status is ready."),
   error: z.string().nullable(),
-  paid: z.boolean().describe("true once the payment arrived and the business has the pack."),
+  paid: z.boolean().describe("true once the payment arrived; pack_status says whether the business still has the pack."),
   expires_at: timestamp.describe("When the checkout stops being open: 15 minutes after it was asked for while the provider makes the page, then when the page expires."),
   created_at: timestamp,
   updated_at: timestamp,

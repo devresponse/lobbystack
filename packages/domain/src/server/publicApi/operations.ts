@@ -124,7 +124,7 @@ import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } f
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
-import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
+import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { listBusinessPacks } from "../billingPacks";
 import { createPackCheckoutRequestInTransaction, readPackCheckoutInTransaction } from "../billingPackCheckout";
@@ -382,7 +382,7 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
   const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   // A subscription a prepaid pack replaced counts as ended while the provider ends it, whatever its own state, end date or next change says.
-  const replaced = Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
+  const replaced = isReplacedSubscription(account);
   // A promo plan's end, and what its renewal does; a plan that keeps going has neither.
   const [promo] = planCode ? await tx.select({ ends: billingPlans.ends }).from(billingPlans).where(eq(billingPlans.code, planCode)).limit(1) : [];
   const planEndsWith = planCode && account?.planEnds ? promoPlanEnding(account.endWith, promo?.ends) : null;
@@ -561,7 +561,7 @@ export async function getCheckoutForApi(context: DomainContext, caller: ApiCalle
   return await inBusiness(context, caller, async (tx) => await loadCheckout(tx, caller.businessId, checkoutId));
 }
 
-/** A prepaid pack's checkout as the API shows it; paid once billing.reconcile added the pack. */
+/** A prepaid pack's checkout as the API shows it; paid once billing.reconcile recorded its payment, and pack_status says what became of the pack. */
 async function loadPackCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiPackCheckout> {
   const checkout = await readPackCheckoutInTransaction(tx, { businessId, checkoutId });
   if (!checkout) throw notFound("Pack checkout");
@@ -569,6 +569,7 @@ async function loadPackCheckout(tx: DatabaseTransaction, businessId: string, che
     id: checkout.id,
     pack: checkout.pack,
     status: checkout.status,
+    pack_status: checkout.packStatus,
     checkout_url: checkout.checkoutUrl,
     error: checkout.error,
     paid: checkout.status === "paid",

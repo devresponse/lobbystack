@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
-import { billingPackDraws, billingPackPlans, billingPacks, enqueueOutbox, phoneNumbers, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingPackDraws, billingPackPlans, billingPacks, enqueueOutbox, phoneNumbers, type BillingPackCheckoutTerms, type DatabaseTransaction } from "@lobbystack/db";
 import { isBillingPackStatus, MAX_PHONE_CALL_MS, packCapacitySeconds, packEndsAt, type BillingPackHolding, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
 
 import { isSharedSmsSender } from "./smsSender";
@@ -66,6 +66,9 @@ const livePackColumns = {
   numbers: billingPacks.numbers,
   receptionists: billingPacks.receptionists,
 };
+
+/** Why a pack checkout a plan's start closed: a pack paid after the plan started would end at once (billingPackEvents.ts). */
+export const PACK_CHECKOUT_CLOSED_FOR_PLAN = "A plan started for this business, so this pack's checkout closed.";
 
 /** The pack statuses that have ended: an ended pack never comes back. */
 export const endedPackStatuses = ["expired", "replaced", "refunded"] as const satisfies readonly BillingPackStatus[];
@@ -334,6 +337,26 @@ export async function readPackPlan(tx: DatabaseTransaction, code: string): Promi
   return row ? { ...row, kbBytes: Number(row.kbBytes) } : null;
 }
 
+/** The terms a pack checkout keeps (0149), from a pack's terms as an offer or the catalog has them. */
+export function packCheckoutTerms(terms: Omit<PackPlanTerms, "code">): BillingPackCheckoutTerms {
+  return { voiceSec: terms.voiceSec, days: terms.days, smsSeg: terms.smsSeg, callsOut: terms.callsOut, chatUnits: terms.chatUnits, kbBytes: Number(terms.kbBytes), numbers: terms.numbers, receptionists: terms.receptionists };
+}
+
+const wholeCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * The terms a pack checkout kept for its payment, or null on a row from
+ * before 0149 or one whose terms don't read as a pack's, which the caller
+ * then takes from the catalog.
+ */
+export function readPackCheckoutTerms(code: string, terms: unknown): PackPlanTerms | null {
+  if (!terms || typeof terms !== "object" || Array.isArray(terms)) return null;
+  const kept = terms as Record<string, unknown>;
+  const counts = [kept.voiceSec, kept.smsSeg, kept.callsOut, kept.chatUnits, kept.kbBytes, kept.numbers, kept.receptionists];
+  if (!counts.every(wholeCount) || (kept.voiceSec as number) <= 0 || !(kept.days === null || (wholeCount(kept.days) && kept.days > 0))) return null;
+  return { code, voiceSec: kept.voiceSec as number, days: kept.days as number | null, smsSeg: kept.smsSeg as number, callsOut: kept.callsOut as number, chatUnits: kept.chatUnits as number, kbBytes: kept.kbBytes as number, numbers: kept.numbers as number, receptionists: kept.receptionists as number };
+}
+
 /** A payment for a pack, as the provider's event reports it. */
 export type PackPurchase = {
   businessId: string;
@@ -455,12 +478,20 @@ export async function freezePackInTransaction(tx: DatabaseTransaction, input: { 
  * Closes a frozen pack's dispute: won, it is live again, or expired if its end
  * date passed meanwhile; lost, the payment went back, so it ends refunded,
  * also when the dispute's opening never reached LobbyStack and the pack was
- * still live.
+ * still live. A lost dispute of a pack that ended meanwhile, by its date or a
+ * subscription, is recorded as a whole refund is: the pack keeps why it ended,
+ * and its refunded amount and unused seconds say the payment went back.
  */
 export async function closePackDisputeInTransaction(tx: DatabaseTransaction, input: { businessId: string; provider: "polar" | "stripe"; providerRef: string; won: boolean; at: Date }): Promise<PackChange | null> {
   await lockBusinessPacks(tx, input.businessId);
   const pack = await packByPayment(tx, input.businessId, input.provider, input.providerRef);
   if (!pack) return null;
+  if (!input.won && (endedPackStatuses as readonly string[]).includes(pack.status)) {
+    if (pack.refundedCents < pack.amountCents) {
+      await tx.update(billingPacks).set({ refundedCents: pack.amountCents, unusedSeconds: packSecondsLeft({ ...pack, refundedCents: pack.amountCents }), updatedAt: new Date() }).where(eq(billingPacks.id, pack.id));
+    }
+    return { packId: pack.id, status: pack.status, previous: pack.status };
+  }
   const lostWhileLive = !input.won && pack.status === "active";
   if (pack.status !== "frozen" && !lostWhileLive) return { packId: pack.id, status: pack.status, previous: pack.status };
   if (!input.won) {
@@ -489,22 +520,30 @@ export async function expirePackInTransaction(tx: DatabaseTransaction, input: { 
   return { packId: pack.id, status: "expired", previous: pack.status as BillingPackStatus };
 }
 
+/** A pack a subscription ended, with the seconds it still held. */
+export type ReplacedPack = { id: string; pack: string; unusedSeconds: number };
+
 /**
  * Ends every live or frozen pack of the business because a subscription
  * started (decision 6): their unused seconds are lost, kept on each row for
- * the accounts. Returns the packs it ended.
+ * the accounts, with an audit row each, as an expired pack gets. Returns the
+ * packs it ended.
  */
-export async function replaceLivePacksInTransaction(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<string[]> {
+export async function replaceLivePacksInTransaction(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<ReplacedPack[]> {
   await lockBusinessPacks(tx, input.businessId);
   // A pack whose end has come is the expiry job's: it ends expired, as it would have anyway.
-  const packs = await tx.select({ id: billingPacks.id, secondsTotal: billingPacks.secondsTotal, secondsUsed: billingPacks.secondsUsed, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents })
+  const packs = await tx.select({ id: billingPacks.id, pack: billingPacks.pack, secondsTotal: billingPacks.secondsTotal, secondsUsed: billingPacks.secondsUsed, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents })
     .from(billingPacks)
     .where(and(eq(billingPacks.businessId, input.businessId), inArray(billingPacks.status, ["active", "frozen"]), or(isNull(billingPacks.endsAt), gt(billingPacks.endsAt, input.at))))
     .for("update");
+  const replaced: ReplacedPack[] = [];
   for (const pack of packs) {
-    await tx.update(billingPacks).set(endedColumns(pack, "replaced", input.at, pack.refundedCents)).where(eq(billingPacks.id, pack.id));
+    const columns = endedColumns(pack, "replaced", input.at, pack.refundedCents);
+    await tx.update(billingPacks).set(columns).where(eq(billingPacks.id, pack.id));
+    await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.pack_replaced", entityType: "billing_pack", entityId: pack.id, payload: { pack: pack.pack, unusedSeconds: columns.unusedSeconds } });
+    replaced.push({ id: pack.id, pack: pack.pack, unusedSeconds: columns.unusedSeconds });
   }
-  return packs.map((pack) => pack.id);
+  return replaced;
 }
 
 /** Why a business's number goes back to Twilio once its last pack ended, as phone_numbers.reclaim_reason. */

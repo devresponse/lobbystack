@@ -684,7 +684,10 @@
         "failed": "Su pago no se completó, así que no se agregó ningún paquete de minutos.",
         "processing": "Su pago se está procesando. Su paquete de minutos aparecerá aquí en cuanto llegue.",
         "checkoutFailed": "No se pudo abrir la página de pago. Inténtelo de nuevo.",
-        "checkoutExpired": "La página de pago caducó. Inténtelo de nuevo."
+        "checkoutExpired": "La página de pago caducó. Inténtelo de nuevo.",
+        "gaveWay": "Un plan comenzó antes de que llegara este pago, así que no se agregó ningún paquete de minutos. Se le reembolsará el pago.",
+        "refundedFirst": "Este pago se reembolsó o se anuló por un contracargo, así que no se agregó ningún paquete de minutos.",
+        "closedForPlan": "Comenzó un plan para este negocio, así que se cerró la página de pago del paquete de minutos."
       }
     },
     "transactions": {

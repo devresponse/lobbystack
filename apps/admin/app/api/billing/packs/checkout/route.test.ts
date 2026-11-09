@@ -1,7 +1,7 @@
 import { planChangeRefusals } from "@lobbystack/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ create: vi.fn(), read: vi.fn(), limit: vi.fn(async () => undefined), transaction: vi.fn() }));
+const fixture = vi.hoisted(() => ({ create: vi.fn(), read: vi.fn(), limit: vi.fn(async () => undefined), transaction: vi.fn(), configured: vi.fn(() => true) }));
 vi.mock("@/lib/api-helpers", () => ({
   asApiResponse: (error: { status?: number; message?: string; code?: string }) => Response.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status ?? 500 }),
   businessIdFromRequest: () => null,
@@ -9,7 +9,7 @@ vi.mock("@/lib/api-helpers", () => ({
   requireApiSession: async () => ({ user: { id: "user" } }),
   withOperatorTransaction: fixture.transaction,
 }));
-vi.mock("@lobbystack/domain", () => ({ createPackCheckoutRequest: fixture.create, readPackCheckoutInTransaction: fixture.read }));
+vi.mock("@lobbystack/domain", () => ({ createPackCheckoutRequest: fixture.create, readPackCheckoutInTransaction: fixture.read, packCheckoutConfigured: fixture.configured, PACK_CHECKOUT_CLOSED_FOR_PLAN: "A plan started for this business, so this pack's checkout closed." }));
 vi.mock("@/lib/domain-context", () => ({ createDomainContext: () => ({}) }));
 vi.mock("@/lib/billing-limit", () => ({ assertBillingCallAllowed: fixture.limit }));
 
@@ -21,6 +21,7 @@ const get = async (query: string) => await GET(new Request(`http://localhost:300
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  fixture.configured.mockReturnValue(true);
 });
 
 describe("buying a pack from the dashboard", () => {
@@ -50,6 +51,15 @@ describe("buying a pack from the dashboard", () => {
     expect((await post({ businessId: "business", pack: "minutes_500_90" })).status).toBe(429);
   });
 
+  it("refuses at once, as the plan screens and the API do, when the deployment's provider isn't set up", async () => {
+    fixture.configured.mockReturnValue(false);
+    const response = await post({ businessId: "business", pack: "minutes_500_90" });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "Packs can't be bought here right now.", code: "pack_not_on_sale" });
+    expect(fixture.create).not.toHaveBeenCalled();
+    expect(fixture.limit).not.toHaveBeenCalled();
+  });
+
   it("refuses a request without a pack, or with a billing email that isn't one, and queues nothing", async () => {
     for (const body of [[], null, { pack: "minutes_500_90" }, { businessId: "business" }, { businessId: "business", pack: " " }, { businessId: "business", pack: 7 }, { businessId: "business", pack: "x".repeat(49) }]) {
       expect((await post(body)).status, JSON.stringify(body)).toBe(400);
@@ -64,7 +74,7 @@ describe("buying a pack from the dashboard", () => {
 });
 
 describe("reading a pack checkout from the dashboard", () => {
-  const view = { id: "checkout", pack: "minutes_500_90", status: "ready", checkoutUrl: "https://checkout.stripe.com/c/pay/cs_1", error: null, expiresAt: new Date("2026-11-09T13:00:00Z"), createdAt: new Date("2026-11-09T12:00:00Z"), updatedAt: new Date("2026-11-09T12:00:05Z") };
+  const view = { id: "checkout", pack: "minutes_500_90", status: "ready", packStatus: null, checkoutUrl: "https://checkout.stripe.com/c/pay/cs_1", error: null, expiresAt: new Date("2026-11-09T13:00:00Z"), createdAt: new Date("2026-11-09T12:00:00Z"), updatedAt: new Date("2026-11-09T12:00:05Z") };
 
   function inBusiness() {
     fixture.transaction.mockImplementation(async (_request: Request, callback: (input: { businessId: string; tx: unknown }) => Promise<unknown>, options: unknown) => {
@@ -79,11 +89,28 @@ describe("reading a pack checkout from the dashboard", () => {
     fixture.read.mockResolvedValueOnce(view);
     const ready = await get("?checkoutId=checkout");
     expect(ready.status).toBe(200);
-    expect(await ready.json()).toEqual({ id: "checkout", pack: "minutes_500_90", status: "ready", checkoutUrl: "https://checkout.stripe.com/c/pay/cs_1", error: null, expiresAt: "2026-11-09T13:00:00.000Z", synced: false, refusal: null, providerName: "Stripe" });
+    expect(await ready.json()).toEqual({ id: "checkout", pack: "minutes_500_90", status: "ready", checkoutUrl: "https://checkout.stripe.com/c/pay/cs_1", error: null, expiresAt: "2026-11-09T13:00:00.000Z", packStatus: null, synced: false, closedForPlan: false, refusal: null, providerName: "Stripe" });
     expect(fixture.read).toHaveBeenCalledWith("tx", { businessId: "business", checkoutId: "checkout" });
 
-    fixture.read.mockResolvedValueOnce({ ...view, status: "paid", checkoutUrl: null });
-    expect(await (await get("?checkoutId=checkout")).json()).toMatchObject({ status: "paid", checkoutUrl: null, synced: true });
+    fixture.read.mockResolvedValueOnce({ ...view, status: "paid", packStatus: "active", checkoutUrl: null });
+    expect(await (await get("?checkoutId=checkout")).json()).toMatchObject({ status: "paid", packStatus: "active", checkoutUrl: null, synced: true });
+  });
+
+  it("says a paid checkout's pack isn't the business's when a plan started first or the payment went back first", async () => {
+    inBusiness();
+    for (const packStatus of ["replaced", "refunded"]) {
+      fixture.read.mockResolvedValueOnce({ ...view, status: "paid", packStatus, checkoutUrl: null });
+      expect(await (await get("?checkoutId=checkout")).json()).toMatchObject({ status: "paid", packStatus, synced: false });
+    }
+    // Frozen while a dispute holds its payment, the pack is still the business's.
+    fixture.read.mockResolvedValueOnce({ ...view, status: "paid", packStatus: "frozen", checkoutUrl: null });
+    expect(await (await get("?checkoutId=checkout")).json()).toMatchObject({ synced: true });
+  });
+
+  it("says when a plan the business bought closed the checkout", async () => {
+    inBusiness();
+    fixture.read.mockResolvedValueOnce({ ...view, status: "expired", checkoutUrl: null, error: "A plan started for this business, so this pack's checkout closed." });
+    expect(await (await get("?checkoutId=checkout")).json()).toMatchObject({ status: "expired", closedForPlan: true, synced: false });
   });
 
   it("names the refusal of a checkout whose billing email the provider wouldn't take, so the page asks for another", async () => {

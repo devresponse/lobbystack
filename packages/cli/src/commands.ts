@@ -11,6 +11,13 @@ import { readUploadFile, uploadKnowledgeFile } from "./upload";
 import { userAgent, version } from "./version";
 import { checkoutWait, claimWait, packCheckoutWait, sourceWait, subscriptionChangeWait } from "./waits";
 
+/** What a paid pack checkout came to: the business has the pack, unless a plan started first or the payment went back. */
+function packPaidSentence(packStatus: unknown): string {
+  if (packStatus === "replaced") return "The pack is paid, but a plan the business bought started first, so the pack ended at once. The operator refunds its payment.";
+  if (packStatus === "refunded") return "The pack's payment was refunded or charged back before it arrived, so the business doesn't have the pack.";
+  return "The pack is paid, and the business has it.";
+}
+
 // The command groups. Most commands are specs for operationCommand; the few
 // that need more than one call, or a file, are written out below.
 
@@ -497,7 +504,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
     checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : data.status === "changed" ? `The business already paid for a plan, so Polar moved that subscription to ${String(data.plan)} ${String(data.interval)} and charged any difference to the saved payment method. No page is needed.` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
     "checkout-status": { operation: "getCheckout" },
-    "buy-pack": { operation: "createPackCheckout", args: ["pack"], wait: packCheckoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays for the pack: ${String(data.checkout_url)}` : data.status === "paid" ? "The pack is paid, and the business has it." : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing pack-status ${String(data.id)}.` },
+    "buy-pack": { operation: "createPackCheckout", args: ["pack"], wait: packCheckoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays for the pack: ${String(data.checkout_url)}` : data.status === "paid" ? packPaidSentence(data.pack_status) : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing pack-status ${String(data.id)}.` },
     "pack-status": { operation: "getPackCheckout" },
     cancel: { operation: "cancelBillingPlan", wait: subscriptionChangeWait },
     resume: { operation: "resumeBillingPlan", wait: subscriptionChangeWait },

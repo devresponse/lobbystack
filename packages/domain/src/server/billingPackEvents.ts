@@ -1,7 +1,7 @@
-import { and, eq, inArray, min, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, min, sql } from "drizzle-orm";
 
-import { billingAccounts, billingPackCheckouts, billingPackPrices, billingTransactions, enqueueOutbox, providerEvents, type DatabaseTransaction } from "@lobbystack/db";
-import { isPaidSubscription, isUuid } from "@lobbystack/shared";
+import { auditLogs, billingAccounts, billingPackCheckouts, billingPackPrices, billingTransactions, enqueueOutbox, providerEvents, type DatabaseTransaction } from "@lobbystack/db";
+import { isPaidSubscription, isReplacedSubscription, isUuid, isYearlyBillingInterval } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 
@@ -11,12 +11,15 @@ import {
   applyPackRefundInTransaction,
   clearPackNumberReleaseInTransaction,
   closePackDisputeInTransaction,
+  endedPackStatuses,
   freezePackInTransaction,
   readLivePacks,
+  readPackCheckoutTerms,
   readPackPlan,
   recordPackPurchaseInTransaction,
   replaceLivePacksInTransaction,
   lockBusinessPacks,
+  PACK_CHECKOUT_CLOSED_FOR_PLAN,
   type PackChange,
   type PackPlanTerms,
 } from "./billingPacks";
@@ -38,6 +41,10 @@ import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 //   went back. Stripe names the PaymentIntent; Polar reports an order's refunds
 //   on the order. A Stripe dispute freezes the pack until it closes: won, the
 //   pack is live again; lost, it ends. Polar has no dispute event.
+// - A payment already wholly refunded, or whose dispute was lost, before it
+//   arrived adds its pack as ended, and switches the business onto nothing.
+// - The pack gets the terms its checkout kept from when the business asked for
+//   it (0149), so a catalog change meanwhile never gives less than was paid for.
 // - Decision 6, subscription to pack: a payment that finds a live monthly Starter
 //   or Pro subscription marks it replaced, which LobbyStack treats as ended from
 //   then on, starts the pack's allowances, and queues billing.endPlanForPack to
@@ -46,6 +53,11 @@ import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 //   waits beside it and ops.billing.pack_beside_subscription reports it.
 // - Decision 6, pack to subscription: a subscription that starts ends the live
 //   packs (packsGiveWayToSubscriptionInTransaction) and starts its allowances.
+//   It also closes the business's open pack checkouts, since a pack paid after
+//   the plan started would end at once. A pack paid anyway, on a page the
+//   provider couldn't close or by a payment that settled later, gives way to
+//   the plan: LobbyStack refunds nothing on its own (decision 5), so
+//   ops.billing.pack_gave_way and an audit row name the payment to refund.
 // - Everything here acts on rows that name a pack, so an event about no pack
 //   changes nothing, and a business that never bought one sees no change.
 
@@ -75,7 +87,7 @@ export type PackEventInput = {
   order?: { transactionId: string; orderId: string; status: string; amountCents: number; refundedCents: number; currency: string; occurredAt: Date; productId: string | undefined; metadata: Record<string, unknown>; checkoutId: string | undefined } | undefined;
 };
 
-/** Which pack a payment bought: the catalog's terms now, and the price it was sold at. */
+/** Which pack a payment bought: the terms its checkout kept, else the catalog's now, and the price it was sold at. */
 type BoughtPack = { terms: PackPlanTerms; priceId: string | null };
 
 /**
@@ -109,6 +121,7 @@ export async function applyStripePackRefundInTransaction(tx: DatabaseTransaction
  * Decision 6, pack to subscription: a subscription that went live ends the
  * business's live packs, their unused minutes recorded, and the month's
  * allowances count from now. A number set to go once the last pack ended stays.
+ * The business's open pack checkouts close too (closePackCheckoutsForPlan).
  * Returns the packs it ended; none for a business without a live pack.
  */
 export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<string[]> {
@@ -116,9 +129,31 @@ export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransa
   await clearPackNumberReleaseInTransaction(tx, input.businessId);
   if (replaced.length) {
     await tx.update(billingAccounts).set({ allowancesSince: input.at, updatedAt: input.at }).where(eq(billingAccounts.businessId, input.businessId));
-    for (const packId of replaced) await publishPackUpdate(tx, input.businessId, packId, "replaced");
+    for (const pack of replaced) await publishPackUpdate(tx, input.businessId, pack.id, "replaced");
   }
-  return replaced;
+  await closePackCheckoutsForPlan(tx, input);
+  return replaced.map((pack) => pack.id);
+}
+
+/**
+ * Closes the business's pack checkouts still open when a subscription went
+ * live: one still being made fails, so no page is made for it, and a page
+ * already made, until its expiry, expires, and billing.closePackCheckout asks
+ * the provider to close it (Stripe expires its Checkout Session; Polar has no
+ * such call, so its page stays payable until its own expiry). Their pages
+ * hear of it. A business that never bought a pack has none.
+ */
+async function closePackCheckoutsForPlan(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<void> {
+  const closed = await tx.update(billingPackCheckouts)
+    .set({ status: sql`case when ${billingPackCheckouts.status} = 'ready' then 'expired' else 'failed' end`, error: PACK_CHECKOUT_CLOSED_FOR_PLAN, updatedAt: input.at })
+    .where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.status, ["pending", "processing", "ready"]), gt(billingPackCheckouts.expiresAt, input.at)))
+    .returning({ id: billingPackCheckouts.id, status: billingPackCheckouts.status, checkoutId: billingPackCheckouts.checkoutId });
+  for (const checkout of closed) {
+    if (checkout.status === "expired" && checkout.checkoutId) {
+      await enqueueOutbox(tx, { topic: "billing.closePackCheckout", businessId: input.businessId, aggregateType: "billing_pack_checkout", aggregateId: checkout.id, dedupeKey: `billing-pack-checkout:${checkout.id}:close`, payload: { checkoutId: checkout.id, providerCheckoutId: checkout.checkoutId } });
+    }
+    await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_pack_checkout", aggregateId: checkout.id, dedupeKey: `billing-pack-checkout:${checkout.id}:${checkout.status}`, payload: { type: "billing.updated", entityId: checkout.id } });
+  }
 }
 
 async function applyStripePackCheckout(tx: DatabaseTransaction, input: PackEventInput): Promise<void> {
@@ -142,25 +177,31 @@ async function applyStripePackCheckout(tx: DatabaseTransaction, input: PackEvent
   // Refunds and disputes Stripe sent before this event found no pack; they apply now.
   const history = await stripePaymentHistory(tx, input.businessId, paymentRef);
   const invoiceRef = stringField(payload, "invoiceRef");
+  const customerId = stringField(payload, "customerId");
   const transactionId = invoiceRef
-    ? await orderRowOf(tx, invoiceRef)
-    : await recordStripePackOrder(tx, { businessId: input.businessId, paymentRef, amountCents, refundedCents: Math.min(history.refundedCents, amountCents), currency, customerId: stringField(payload, "customerId"), occurredAt: paidAt });
-  await recordPurchase(tx, input, { bought, providerRef: paymentRef, amountCents, currency, paidAt, transactionId, boughtAt: checkoutStartedAt(payload) ?? paidAt, history });
+    ? await invoiceOrderRow(tx, { businessId: input.businessId, invoiceRef, amountCents, currency, customerId, occurredAt: paidAt })
+    : await recordStripePackOrder(tx, { businessId: input.businessId, paymentRef, amountCents, refundedCents: Math.min(history.refundedCents, amountCents), currency, customerId, occurredAt: paidAt });
+  await recordPurchase(tx, input, { bought, providerRef: paymentRef, amountCents, currency, paidAt, transactionId, boughtAt: checkoutStartedAt(payload) ?? paidAt, history, checkoutId: checkoutId && isUuid(checkoutId) ? checkoutId : undefined });
 }
 
 async function applyPolarPackOrder(tx: DatabaseTransaction, input: PackEventInput, order: NonNullable<PackEventInput["order"]>): Promise<boolean> {
   if (!order.productId || !["paid", "partially_refunded", "refunded"].includes(order.status)) return false;
   // The order names Polar's product, which the catalog's link keeps as the price's provider_ref. A Polar product id
   // is a uuid, as LobbyStack's own price ids are, so it is matched on provider_ref only.
-  const bought = await packOfPrice(tx, { providerRef: order.productId });
-  if (!bought) return false;
-  const checkoutId = stringField(order.metadata, "lobbystack_pack_checkout") ?? await packCheckoutOf(tx, input.businessId, order.checkoutId);
+  const byPrice = await packOfPrice(tx, { providerRef: order.productId });
+  if (!byPrice) return false;
+  const named = stringField(order.metadata, "lobbystack_pack_checkout");
+  const checkoutId = (named && isUuid(named) ? named : undefined) ?? await packCheckoutOf(tx, input.businessId, order.checkoutId);
+  // The terms the checkout kept from when the business asked, for the pack the order paid for, else the catalog's.
+  const kept = checkoutId ? await packOfCheckout(tx, input.businessId, checkoutId) : null;
+  const bought = kept?.terms.code === byPrice.terms.code ? kept : byPrice;
   if (checkoutId) await settlePackCheckout(tx, { businessId: input.businessId, checkoutId, status: "paid" });
   // As on Stripe, the pack is ordered against a subscription from when the business asked for its checkout, so a
   // subscription bought while the payment page was open is the later choice and wins.
   const boughtAt = (checkoutId ? await packCheckoutCreatedAt(tx, input.businessId, checkoutId) : undefined) ?? order.occurredAt;
-  // The order carries its refunds, so whichever of its events comes first adds the pack and applies them.
-  await recordPurchase(tx, input, { bought, providerRef: order.orderId, amountCents: order.amountCents, currency: order.currency, paidAt: order.occurredAt, transactionId: order.transactionId, boughtAt, history: { refundedCents: 0, dispute: null } });
+  // The order carries its refunds, so whichever of its events comes first adds the pack with them, and a pack whose
+  // payment went back wholly before it arrived switches nothing.
+  await recordPurchase(tx, input, { bought, providerRef: order.orderId, amountCents: order.amountCents, currency: order.currency, paidAt: order.occurredAt, transactionId: order.transactionId, boughtAt, history: { refundedCents: order.refundedCents, dispute: null }, checkoutId });
   const refund = await applyPackRefundInTransaction(tx, { businessId: input.businessId, provider: "polar", providerRef: order.orderId, refundedCents: order.refundedCents, at: input.eventCreatedAt });
   if (refund) await afterPackChange(tx, input.businessId, refund);
   return true;
@@ -204,9 +245,19 @@ type Purchase = {
   /** When the business started buying it, which orders it against a subscription bought meanwhile. */
   boughtAt: Date;
   history: PaymentHistory;
+  /** The pack checkout the payment settled, which names the pack once it's added. */
+  checkoutId: string | undefined;
 };
 
-/** Adds the pack once, and on the first delivery switches the business onto it. */
+/** The payment a pack came with, as ops.billing.pack_gave_way names it for a refund. */
+type PackPayment = { pack: string; provider: "polar" | "stripe"; providerRef: string; amountCents: number; currency: string };
+
+/**
+ * Adds the pack once, and on the first delivery switches the business onto
+ * it. A payment wholly refunded, or whose dispute was lost, before it arrived
+ * adds the pack as ended: the expiry job settles it, and the business stays on
+ * the plan it has, with its allowances and number as they are.
+ */
 async function recordPurchase(tx: DatabaseTransaction, input: PackEventInput, purchase: Purchase): Promise<void> {
   const provider = input.provider === "polar" ? "polar" : "stripe";
   await lockBusinessPacks(tx, input.businessId);
@@ -223,18 +274,26 @@ async function recordPurchase(tx: DatabaseTransaction, input: PackEventInput, pu
     paidAt: purchase.paidAt,
     transactionId: purchase.transactionId,
   });
+  if (purchase.checkoutId) await linkPackCheckout(tx, { businessId: input.businessId, checkoutId: purchase.checkoutId, packId: recorded.packId });
   if (!recorded.created) return;
-  if (purchase.history.refundedCents > 0) await applyPackRefundInTransaction(tx, { businessId: input.businessId, provider, providerRef: purchase.providerRef, refundedCents: purchase.history.refundedCents, at: now });
+  let status: PackChange["status"] = "active";
+  if (purchase.history.refundedCents > 0) status = (await applyPackRefundInTransaction(tx, { businessId: input.businessId, provider, providerRef: purchase.providerRef, refundedCents: purchase.history.refundedCents, at: now }))?.status ?? status;
   if (purchase.history.dispute) {
-    await freezePackInTransaction(tx, { businessId: input.businessId, provider, providerRef: purchase.providerRef });
-    if (purchase.history.dispute !== "opened") await applyDispute(tx, input.businessId, purchase.providerRef, purchase.history.dispute, now);
+    status = (await freezePackInTransaction(tx, { businessId: input.businessId, provider, providerRef: purchase.providerRef }))?.status ?? status;
+    if (purchase.history.dispute !== "opened") status = (await applyDispute(tx, input.businessId, purchase.providerRef, purchase.history.dispute, now))?.status ?? status;
   }
-  const switched = await switchToPack(tx, { businessId: input.businessId, packId: recorded.packId, account: input.account, hadLivePacks, boughtAt: purchase.boughtAt, now });
+  if ((endedPackStatuses as readonly string[]).includes(status)) {
+    // The payment went back before it arrived: nothing to switch onto, so the account, its allowances and the number stay.
+    await afterPackChange(tx, input.businessId, { packId: recorded.packId, status, previous: "active" });
+    return;
+  }
+  const payment: PackPayment = { pack: purchase.bought.terms.code, provider, providerRef: purchase.providerRef, amountCents: purchase.amountCents, currency: purchase.currency };
+  const switched = await switchToPack(tx, { businessId: input.businessId, packId: recorded.packId, account: input.account, hadLivePacks, boughtAt: purchase.boughtAt, now, payment });
   // The number a business keeps through a pack stays when another pack comes before its release.
   if (switched !== "gave_way") await clearPackNumberReleaseInTransaction(tx, input.businessId);
   // A pack's receptionist allowance can be below the plan it replaces: the newest receptionists past it pause.
   await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_pack");
-  await publishPackUpdate(tx, input.businessId, recorded.packId, "active");
+  await publishPackUpdate(tx, input.businessId, recorded.packId, switched === "gave_way" ? "replaced" : "active");
   await recordProductEventInTransaction(tx, {
     name: "billing.pack_purchased",
     distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
@@ -257,26 +316,26 @@ type Switch = "replaced" | "beside" | "gave_way" | "started" | "topped_up";
  * counts as ended and billing.endPlanForPack ends it at the provider. beside: a
  * yearly, past-due or managed plan stays in force, which the checkout refuses,
  * so it is reported. gave_way: the business subscribed after it started buying
- * the pack, so the subscription is its latest choice and the pack ends at once.
- * started: from Free, the pack's allowances count from now. topped_up: another
- * pack was live, so nothing changes.
+ * the pack, so the subscription is its latest choice and the pack ends at once;
+ * nothing refunds it (decision 5), so it is reported with the payment to
+ * refund. started: from Free, the pack's allowances count from now.
+ * topped_up: another pack was live, so nothing changes.
  */
-async function switchToPack(tx: DatabaseTransaction, input: { businessId: string; packId: string; account: PackSwitchAccount | undefined; hadLivePacks: boolean; boughtAt: Date; now: Date }): Promise<Switch> {
+async function switchToPack(tx: DatabaseTransaction, input: { businessId: string; packId: string; account: PackSwitchAccount | undefined; hadLivePacks: boolean; boughtAt: Date; now: Date; payment: PackPayment }): Promise<Switch> {
   const account = input.account;
   if (account?.managed) {
     logEvent("warn", "ops.billing.pack_beside_subscription", { businessId: input.businessId, packId: input.packId, reason: "managed" });
     return "beside";
   }
-  const replacedAlready = Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
   const subscriptionId = account?.subscriptionId ?? null;
-  if (account && subscriptionId && !replacedAlready && isPaidSubscription(account.plan, account.subscriptionState)) {
+  if (account && subscriptionId && !isReplacedSubscription(account) && isPaidSubscription(account.plan, account.subscriptionState)) {
     if (await subscribedSince(tx, input.businessId, subscriptionId, input.boughtAt)) {
       await replaceLivePacksInTransaction(tx, { businessId: input.businessId, at: input.now });
-      logEvent("info", "ops.billing.pack_gave_way", { businessId: input.businessId, packId: input.packId, subscriptionId });
+      await reportPackGaveWay(tx, { businessId: input.businessId, packId: input.packId, subscriptionId, payment: input.payment });
       return "gave_way";
     }
-    if (account.billingInterval === "annual" || account.subscriptionState === "past_due") {
-      logEvent("warn", "ops.billing.pack_beside_subscription", { businessId: input.businessId, packId: input.packId, reason: account.billingInterval === "annual" ? "annual" : "past_due" });
+    if (isYearlyBillingInterval(account.billingInterval) || account.subscriptionState === "past_due") {
+      logEvent("warn", "ops.billing.pack_beside_subscription", { businessId: input.businessId, packId: input.packId, reason: isYearlyBillingInterval(account.billingInterval) ? "annual" : "past_due" });
       return "beside";
     }
     // The plan, its state and its subscription stay as the provider reports them, so no later event reads as a new start.
@@ -288,6 +347,25 @@ async function switchToPack(tx: DatabaseTransaction, input: { businessId: string
   if (input.hadLivePacks) return "topped_up";
   await tx.update(billingAccounts).set({ allowancesSince: input.now, updatedAt: input.now }).where(eq(billingAccounts.businessId, input.businessId));
   return "started";
+}
+
+/**
+ * ops.billing.pack_gave_way: a pack paid after its business subscribed ended
+ * at once, and its payment stays with LobbyStack's operator, who refunds it in
+ * the provider's dashboard; the refund's event then lands on the ended pack.
+ * A warning log line, the ops event and an audit row, each naming the payment.
+ */
+async function reportPackGaveWay(tx: DatabaseTransaction, input: { businessId: string; packId: string; subscriptionId: string; payment: PackPayment }): Promise<void> {
+  const { businessId, packId, subscriptionId, payment } = input;
+  logEvent("warn", "ops.billing.pack_gave_way", { businessId, packId, subscriptionId, ...payment });
+  await tx.insert(auditLogs).values({ businessId, eventType: "billing.pack_gave_way", entityType: "billing_pack", entityId: packId, payload: { ...payment, subscriptionId } });
+  await recordProductEventInTransaction(tx, {
+    name: "ops.billing.pack_gave_way",
+    distinctId: getPostHogDistinctIdForBusinessSystem(businessId),
+    businessId,
+    actorType: "worker",
+    properties: { provider: payment.provider, pack: payment.pack, providerRef: payment.providerRef, amountCents: payment.amountCents, currency: payment.currency },
+  });
 }
 
 /**
@@ -323,13 +401,8 @@ async function stripePaymentHistory(tx: DatabaseTransaction, businessId: string,
 /** The pack a Stripe checkout bought: the pack checkout it names, else the price, else the pack's code. */
 async function packOfStripeCheckout(tx: DatabaseTransaction, businessId: string, payload: Record<string, unknown>): Promise<BoughtPack | null> {
   const checkoutId = stringField(payload, "packCheckoutId");
-  // A uuid column compared with anything else fails the statement, and the event would never apply.
-  if (checkoutId && isUuid(checkoutId)) {
-    const [checkout] = await tx.select({ pack: billingPackCheckouts.pack, priceId: billingPackCheckouts.priceId }).from(billingPackCheckouts)
-      .where(and(eq(billingPackCheckouts.id, checkoutId), eq(billingPackCheckouts.businessId, businessId))).limit(1);
-    const terms = checkout ? await readPackPlan(tx, checkout.pack) : null;
-    if (checkout && terms) return { terms, priceId: checkout.priceId };
-  }
+  const byCheckout = checkoutId ? await packOfCheckout(tx, businessId, checkoutId) : null;
+  if (byCheckout) return byCheckout;
   // The worker puts LobbyStack's own price id on the payment, and a Stripe price id is never a uuid.
   const priceRef = stringField(payload, "packPriceRef");
   const byPrice = priceRef ? await packOfPrice(tx, isUuid(priceRef) ? { id: priceRef } : { providerRef: priceRef }) : null;
@@ -349,6 +422,28 @@ async function packOfPrice(tx: DatabaseTransaction, reference: { id: string } | 
     .where("id" in reference ? eq(billingPackPrices.id, reference.id) : eq(billingPackPrices.providerRef, reference.providerRef)).limit(1);
   const terms = price ? await readPackPlan(tx, price.pack) : null;
   return price && terms ? { terms, priceId: price.id } : null;
+}
+
+/**
+ * The pack a pack checkout of the business sold: the terms it kept when the
+ * business asked for it (0149), else the catalog's for a row from before
+ * them. Null for a checkout the business doesn't have.
+ */
+async function packOfCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<BoughtPack | null> {
+  // A uuid column compared with anything else fails the statement, and the event would never apply.
+  if (!isUuid(checkoutId)) return null;
+  const [checkout] = await tx.select({ pack: billingPackCheckouts.pack, priceId: billingPackCheckouts.priceId, terms: billingPackCheckouts.terms }).from(billingPackCheckouts)
+    .where(and(eq(billingPackCheckouts.id, checkoutId), eq(billingPackCheckouts.businessId, businessId))).limit(1);
+  if (!checkout) return null;
+  const terms = readPackCheckoutTerms(checkout.pack, checkout.terms) ?? await readPackPlan(tx, checkout.pack);
+  return terms ? { terms, priceId: checkout.priceId } : null;
+}
+
+/** Names on a pack checkout the pack its payment added, so its page can tell what became of it. */
+async function linkPackCheckout(tx: DatabaseTransaction, input: { businessId: string; checkoutId: string; packId: string }): Promise<void> {
+  if (!isUuid(input.checkoutId)) return;
+  await tx.update(billingPackCheckouts).set({ packId: input.packId, updatedAt: new Date() })
+    .where(and(eq(billingPackCheckouts.id, input.checkoutId), eq(billingPackCheckouts.businessId, input.businessId), isNull(billingPackCheckouts.packId)));
 }
 
 /** The pack checkout a Polar checkout belongs to. */
@@ -396,6 +491,32 @@ async function settlePackCheckout(tx: DatabaseTransaction, input: { businessId: 
 async function orderRowOf(tx: DatabaseTransaction, sourceId: string): Promise<string | null> {
   const [row] = await tx.select({ id: billingTransactions.id }).from(billingTransactions).where(and(eq(billingTransactions.kind, "order"), eq(billingTransactions.sourceId, sourceId))).limit(1);
   return row?.id ?? null;
+}
+
+/**
+ * The order row of the invoice Stripe directly makes for a pack's payment.
+ * Stripe sends the invoice's events and the checkout's in any order, so when
+ * the invoice's own event hasn't made the row yet, it is made here, paid, for
+ * the pack to name. The invoice's event then fills in the rest on the same
+ * row, by its status's rank, and records the commission, as for any invoice.
+ */
+async function invoiceOrderRow(tx: DatabaseTransaction, input: { businessId: string; invoiceRef: string; amountCents: number; currency: string; customerId: string | undefined; occurredAt: Date }): Promise<string | null> {
+  const existing = await orderRowOf(tx, input.invoiceRef);
+  if (existing) return existing;
+  await tx.insert(billingTransactions).values({
+    businessId: input.businessId,
+    kind: "order",
+    sourceId: input.invoiceRef,
+    orderId: input.invoiceRef,
+    status: "paid",
+    amountCents: input.amountCents,
+    refundedAmountCents: 0,
+    currency: input.currency,
+    ...(input.customerId ? { providerCustomerId: input.customerId } : {}),
+    occurredAt: input.occurredAt,
+    lastSyncedAt: new Date(),
+  }).onConflictDoNothing({ target: [billingTransactions.kind, billingTransactions.sourceId] });
+  return await orderRowOf(tx, input.invoiceRef);
 }
 
 /**

@@ -684,7 +684,10 @@
         "failed": "Votre paiement n'a pas abouti, donc aucun pack de minutes n'a été ajouté.",
         "processing": "Votre paiement est en cours de traitement. Votre pack de minutes s'affichera ici dès son arrivée.",
         "checkoutFailed": "Impossible d'ouvrir la page de paiement. Réessayez.",
-        "checkoutExpired": "La page de paiement a expiré. Réessayez."
+        "checkoutExpired": "La page de paiement a expiré. Réessayez.",
+        "gaveWay": "Un forfait a démarré avant l'arrivée de ce paiement, donc aucun pack de minutes n'a été ajouté. Le paiement vous sera remboursé.",
+        "refundedFirst": "Ce paiement a été remboursé ou a fait l'objet d'une rétrofacturation, donc aucun pack de minutes n'a été ajouté.",
+        "closedForPlan": "Un forfait a démarré pour cette entreprise, donc la page de paiement du pack de minutes a été fermée."
       }
     },
     "transactions": {

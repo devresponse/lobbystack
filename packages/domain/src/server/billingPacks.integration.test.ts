@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, calls, createDatabaseClient, outboxMessages, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, calls, createDatabaseClient, outboxMessages, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { correctAlertSmsUsage, getBillingUsageStatus, reserveAlertSmsUsage } from "./billing";
 import { applyPackRefundInTransaction, closePackDisputeInTransaction, expirePackInTransaction, freezePackInTransaction, listBusinessPacks, PACK_NOTICE_RUN_DELAY_MS, replaceLivePacksInTransaction } from "./billingPacks";
@@ -203,6 +203,32 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
     });
   });
 
+  it("records a lost dispute of a pack that already ended as a whole refund, keeping why it ended", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      const expired = await pack(tx, businessId, { seconds: 3_000, amountCents: 10_000 });
+      const replaced = await pack(tx, businessId, { seconds: 1_200, amountCents: 4_000 });
+      await tx.update(billingPacks).set({ endsAt: new Date(Date.now() - 1_000) }).where(eq(billingPacks.id, expired.id));
+      await inBusiness(tx, businessId, (scoped) => expirePackInTransaction(scoped, { businessId, packId: expired.id }));
+      expect(await packRow(tx, expired.id)).toMatchObject({ status: "expired", refundedCents: 0, unusedSeconds: 3_000 });
+      await inBusiness(tx, businessId, (scoped) => replaceLivePacksInTransaction(scoped, { businessId, at: new Date() }));
+      expect(await packRow(tx, replaced.id)).toMatchObject({ status: "replaced", refundedCents: 0, unusedSeconds: 1_200 });
+
+      const close = (ref: string, won: boolean) => inBusiness(tx, businessId, (scoped) => closePackDisputeInTransaction(scoped, { businessId, provider: "stripe", providerRef: ref, won, at: new Date() }));
+      // A won dispute changes nothing on an ended pack.
+      await expect(close(expired.ref, true)).resolves.toEqual({ packId: expired.id, status: "expired", previous: "expired" });
+      expect(await packRow(tx, expired.id)).toMatchObject({ status: "expired", refundedCents: 0, unusedSeconds: 3_000 });
+      // A lost one says the payment went back: nothing of it is left unused, and the pack keeps why it ended.
+      await expect(close(expired.ref, false)).resolves.toEqual({ packId: expired.id, status: "expired", previous: "expired" });
+      expect(await packRow(tx, expired.id)).toMatchObject({ status: "expired", refundedCents: 10_000, unusedSeconds: 0 });
+      await expect(close(replaced.ref, false)).resolves.toEqual({ packId: replaced.id, status: "replaced", previous: "replaced" });
+      expect(await packRow(tx, replaced.id)).toMatchObject({ status: "replaced", refundedCents: 4_000, unusedSeconds: 0 });
+      // Delivered again, it changes nothing more.
+      await close(replaced.ref, false);
+      expect(await packRow(tx, replaced.id)).toMatchObject({ status: "replaced", refundedCents: 4_000, unusedSeconds: 0 });
+    });
+  });
+
   it("starts the month's texts, transfers and chats afresh at a switch to a pack and again when it ends", async () => {
     await rollbackTest(async (tx) => {
       const businessId = await business(tx);
@@ -235,6 +261,42 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
       // A new call is the pack's.
       const next = await asWorker(tx, (context) => startLivePhoneCall(context, call(businessId, "+14165550135")));
       expect(await draws(tx, next.callId)).toEqual({ [bought.id]: 300 });
+    });
+  });
+
+  it("keeps Free's allowance for a call that began on Free when a frozen pack comes back mid-call, without counting what the pack's calls used", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      const disputed = await pack(tx, businessId, { seconds: 6_000 });
+      await tx.update(billingAccounts).set({ allowancesSince: new Date(Date.now() - 10 * 60_000) }).where(eq(billingAccounts.businessId, businessId));
+      // The pack's calls used as many seconds as Free gives in a month.
+      await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `voice:seed:${businessId}`, usageKind: "voice_seconds", quantity: 1_800, planAtRecordTime: "prepaid", isFinal: true, syncStatus: "skipped", createdAt: new Date(Date.now() - 5 * 60_000) });
+      // A dispute freezes the pack, so the business is on Free when the call begins.
+      await inBusiness(tx, businessId, (scoped) => freezePackInTransaction(scoped, { businessId, provider: "stripe", providerRef: disputed.ref }));
+      const started = await asWorker(tx, (context) => startLivePhoneCall(context, call(businessId, "+14165550134")));
+      expect(started.maxDurationMs).toBe(300_000);
+      // Won mid-call, the pack is the plan again, and the call runs on under Free's terms.
+      await inBusiness(tx, businessId, (scoped) => closePackDisputeInTransaction(scoped, { businessId, provider: "stripe", providerRef: disputed.ref, won: true, at: new Date() }));
+      await expect(asWorker(tx, (context) => extendLiveCallReservation(context, { businessId, callId: started.callId }))).resolves.toBe(300);
+      expect(await draws(tx, started.callId)).toEqual({});
+    });
+  });
+
+  it("keeps Free's allowance for a call that began on Free after a pack ended when another pack is bought mid-call", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      // A pack bought earlier this month whose end came: its calls used as many seconds as Free gives in a month.
+      await pack(tx, businessId, { seconds: 3_000, days: 1, paidDaysAgo: 2 });
+      await tx.update(billingAccounts).set({ allowancesSince: new Date(Date.now() - 10 * 60_000) }).where(eq(billingAccounts.businessId, businessId));
+      await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `voice:seed:${businessId}`, usageKind: "voice_seconds", quantity: 1_800, planAtRecordTime: "prepaid", isFinal: true, syncStatus: "skipped", createdAt: new Date(Date.now() - 5 * 60_000) });
+      const started = await asWorker(tx, (context) => startLivePhoneCall(context, call(businessId, "+14165550134")));
+      expect(started.maxDurationMs).toBe(300_000);
+      // Another pack's payment starts its allowances mid-call.
+      const bought = await pack(tx, businessId, { seconds: 3_000 });
+      await tx.update(billingAccounts).set({ allowancesSince: new Date() }).where(eq(billingAccounts.businessId, businessId));
+      await expect(asWorker(tx, (context) => extendLiveCallReservation(context, { businessId, callId: started.callId }))).resolves.toBe(300);
+      expect(await draws(tx, started.callId)).toEqual({});
+      expect((await packRow(tx, bought.id)).secondsUsed).toBe(0);
     });
   });
 
@@ -326,8 +388,13 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
       const forever = await pack(tx, businessId, { seconds: 600, days: null });
       const over = await pack(tx, businessId, { seconds: 600, days: 1, paidDaysAgo: 2 });
       const replaced = await inBusiness(tx, businessId, (scoped) => replaceLivePacksInTransaction(scoped, { businessId, at: new Date() }));
-      expect(replaced.sort()).toEqual([live.id, forever.id].sort());
+      expect(replaced.map((ended) => ended.id).sort()).toEqual([live.id, forever.id].sort());
+      expect(replaced.find((ended) => ended.id === live.id)).toEqual({ id: live.id, pack: "pack_test", unusedSeconds: 3_000 });
       expect(await packRow(tx, live.id)).toMatchObject({ status: "replaced", unusedSeconds: 3_000 });
+      // Each ended pack leaves an audit row with the seconds it still held, as an expired one does.
+      const audits = await tx.select({ entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "billing.pack_replaced")));
+      expect(audits).toHaveLength(2);
+      expect(audits).toContainEqual({ entityId: forever.id, payload: { pack: "pack_test", unusedSeconds: 600 } });
       // A pack whose end already came is left to the expiry job.
       expect((await packRow(tx, over.id)).status).toBe("active");
       expect((await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }))).plan).toBe("free_cloud");

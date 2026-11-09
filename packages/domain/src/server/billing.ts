@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingPackCheckouts, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
+import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isReplacedSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 
@@ -263,14 +263,8 @@ function paysThroughPolar(account: { source: string | null; subscriptionState: s
   return Boolean(account?.subscriptionId) && account?.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account?.subscriptionState) && !isReplacedSubscription(account) && (account?.plan === "starter" || account?.plan === "pro");
 }
 
-/**
- * Whether the account's subscription is the one a prepaid pack replaced,
- * which LobbyStack treats as ended while the provider confirms its end. False
- * for every business that never switched to a pack.
- */
-export function isReplacedSubscription(account: { subscriptionId: string | null; replacedSubscriptionId?: string | null } | null | undefined): boolean {
-  return Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
-}
+// Whether the account's subscription is the one a prepaid pack replaced: in @lobbystack/shared, so the pack modules this one imports use it too.
+export { isReplacedSubscription };
 
 /** Whether a billing account is on a managed plan now. An ended managed plan keeps its source, for the finance export, but isn't live. */
 export function isManagedBillingAccount(account: { source?: string | null; subscriptionState: string | null } | null | undefined): boolean {
@@ -1016,7 +1010,7 @@ export async function loadOverageWork(context: DomainContext, input: { businessI
     const { replacedSubscriptionId, ...account } = row;
     const catalog = await readBillingCatalogSnapshot(tx);
     // A subscription a prepaid pack replaced counts as ended (decision 6): it gets no new overage, and its own ends with its month.
-    const replaced = replacedSubscriptionId !== null && replacedSubscriptionId === account.subscriptionId;
+    const replaced = isReplacedSubscription({ subscriptionId: account.subscriptionId, replacedSubscriptionId });
     return { ...account, ...(replaced ? { subscriptionState: "canceled" } : {}), currency: catalog.prices.find((price) => !price.retired)?.currency ?? null };
   }, { accessMode: "read only" });
 }
@@ -1263,7 +1257,7 @@ export async function reconcileBillingProviderEvent(
           properties: { provider: "stripe", overageSubscriptionId },
         });
       }
-    } else if (event.provider === "stripe" && overageSubscriptionId && existing?.source === "stripe" && existing.subscriptionId && !existing.overageSubscriptionId && isLiveSubscriptionState(existing.subscriptionState) && existing.subscriptionId !== existing.replacedSubscriptionId) {
+    } else if (event.provider === "stripe" && overageSubscriptionId && existing?.source === "stripe" && existing.subscriptionId && !existing.overageSubscriptionId && isLiveSubscriptionState(existing.subscriptionState) && !isReplacedSubscription(existing)) {
       // An overage subscription live again once its invoice is paid, or the invoice of one Stripe ended paid, voided
       // or marked uncollectible, while the plan pays on without one: billing.ensureOverage records the live one, or
       // makes a new one, so overage is billed again without waiting for the plan's next event, a year off for some.

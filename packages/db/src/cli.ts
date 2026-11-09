@@ -207,11 +207,12 @@ async function main(): Promise<void> {
             ,('lobbystack_readonly', 'billing_pack_offers', 'SELECT')
             ,('lobbystack_app', 'billing_pack_checkouts', 'INSERT')
             ,('lobbystack_worker', 'billing_pack_checkouts', 'UPDATE')
-            ,('lobbystack_app', 'billing_packs', 'UPDATE')
+            ,('lobbystack_app', 'billing_packs', 'SELECT')
             ,('lobbystack_worker', 'billing_packs', 'INSERT')
             ,('lobbystack_worker', 'billing_packs', 'UPDATE')
-            ,('lobbystack_app', 'billing_pack_draws', 'INSERT')
+            ,('lobbystack_app', 'billing_pack_draws', 'SELECT')
             ,('lobbystack_worker', 'billing_pack_draws', 'INSERT')
+            ,('lobbystack_worker', 'billing_pack_draws', 'UPDATE')
           ) as expected(role_name, table_name, privilege_type)
           where not has_table_privilege(expected.role_name, 'public.' || expected.table_name, expected.privilege_type)
         `);
@@ -220,7 +221,8 @@ async function main(): Promise<void> {
         }
         // The billing catalog, the pack catalog and its codes are retired or revoked, never deleted, a code's
         // uses and a business's packs go only with their business; the app never reads a code or a use but
-        // through app.billing_code_offers; and the views read with each caller's own policies.
+        // through app.billing_code_offers, and only reads packs and their draws, which the worker writes;
+        // and the views read with each caller's own policies.
         const billingCatalogFailures = await migrator.db.execute<{ failure: string }>(sql`
           select role_name || ':' || table_name || ':DELETE' as failure
           from unnest(array['lobbystack_app', 'lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
@@ -231,6 +233,10 @@ async function main(): Promise<void> {
           select 'lobbystack_app:' || table_name || ':SELECT'
           from unnest(array['billing_codes', 'billing_code_redemptions']) as table_name
           where has_table_privilege('lobbystack_app', 'public.' || table_name, 'SELECT')
+          union all
+          select 'lobbystack_app:' || privilege.table_name || ':' || privilege.privilege_type
+          from (values ('billing_packs', 'INSERT'), ('billing_packs', 'UPDATE'), ('billing_pack_draws', 'INSERT'), ('billing_pack_draws', 'UPDATE')) as privilege(table_name, privilege_type)
+          where has_table_privilege('lobbystack_app', 'public.' || privilege.table_name, privilege.privilege_type)
           union all
           select role_name || ':app.billing_code_offers(text):EXECUTE'
           from unnest(array['lobbystack_app', 'lobbystack_worker']) as role_name

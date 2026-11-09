@@ -1738,6 +1738,9 @@ export const billingPackPrices = pgTable(
   ],
 );
 
+/** A pack's terms as a pack checkout keeps them from when it was asked for (0149): what its payment adds the pack with. */
+export type BillingPackCheckoutTerms = { voiceSec: number; days: number | null; smsSeg: number; callsOut: number; chatUnits: number; kbBytes: number; numbers: number; receptionists: number };
+
 export const billingPackCheckouts = pgTable(
   "billing_pack_checkouts",
   {
@@ -1756,6 +1759,10 @@ export const billingPackCheckouts = pgTable(
     billingEmail: varchar("billing_email", { length: 320 }),
     /** When the checkout stops being open, whatever its status. */
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** The pack's terms when the checkout was asked for, which its payment adds the pack with; null on a row from before 0149. */
+    terms: jsonb("terms").$type<BillingPackCheckoutTerms>(),
+    /** The pack the checkout's payment added, once it arrived. */
+    packId: uuid("pack_id").references(() => billingPacks.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (table) => [

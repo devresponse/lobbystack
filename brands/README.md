@@ -39,7 +39,7 @@ Once applied, the standard plans' allowances, overage rates, knowledge storage a
 
 ### Prepaid packs
 
-A pack is voice minutes a business pays for once and uses within a number of days of the payment. Each size and length is one more key under `packs`, with a price of its own, so the file decides which sizes and lengths are on sale. A file without `packs` sells none, and its plans' rows and provider objects stay exactly as they are. AlloPlace and RealInfoBot sell nine: 250, 500 and 1,000 minutes, each for 90, 180 or 365 days.
+A pack is voice minutes a business pays for once and uses within a number of days of the payment. Each size and length is one more key under `packs`, with a price of its own, so the file decides which sizes and lengths are on sale. A file without `packs` sells none, and its plans' rows and provider objects stay exactly as they are. AlloPlace and RealInfoBot sell nine: 250, 500 and 1,000 minutes, each for 90, 180 or 365 days. [Prepaid packs](../docs/features/prepaid-packs.md) says what a business on a pack gets, how it buys one and when a pack ends.
 
 ```json
 "pack_500_180": {
@@ -52,14 +52,14 @@ A pack is voice minutes a business pays for once and uses within a number of day
 ```
 
 - The key is the pack's permanent code: 3 to 48 lowercase letters, digits, `_` and `-`, as a plan's. No plan may have it, whether in the file or only on the deployment, such as one made through the API, which an apply refuses as `code_taken`. A file holds at most 30 packs.
-- `priceCents` is paid once, in the file's `currency`, before tax. A pack has no overage rates.
+- Each pack needs `names` in all four languages, up to 60 characters each, `minutes` from 1 to 100,000, and `priceCents` up to 10,000,000, which is paid once, in the file's `currency`; on Stripe it's the price before tax. A pack has no overage rates.
 - `days` runs from the payment, 1 to 1,095. A pack without `days` never ends.
-- `included` (`alertSmsSegments`, `outboundCallAttempts`, `chatAiUnits`) and `limits` (`knowledgeStorageMb`, `businessNumbers`, `receptionists`) are what a business on the pack gets each month. Whatever a pack leaves out comes from the file's Starter.
+- `included` (`alertSmsSegments` and `outboundCallAttempts` up to 100,000, `chatAiUnits` up to 1,000,000) is what a business on the pack gets each UTC month, and `limits` (`knowledgeStorageMb` up to 1,024, `businessNumbers` 0 or 1, `receptionists` 1 to 50) what it may have while the pack lasts. Whatever a pack leaves out comes from the file's Starter, so changing that in Starter changes the pack's terms too.
 - Packs are listed by minutes, then length, a pack without `days` last.
 
-Once a pack has been bought, its minutes and length can't change: an apply refuses it (`plan_frozen`), so put new minutes or a new length under a new code. Its names, price and monthly allowances may change. A new price or allowance is new terms, which takes the pack off sale until `pnpm billing apply` has the provider sell them and links it again; a new name doesn't. To stop selling a pack, remove its entry: its row is retired, not deleted, and `pnpm billing apply` archives its provider object only with `--allow-archive`, refusing to run without it. Packs already bought keep their minutes, and a pack put back in the file gets its row, its price and its provider object back.
+Once a pack has been bought, its minutes and length can't change: an apply refuses it (`plan_frozen`), so put new minutes or a new length under a new code. Its names, price, monthly allowances and limits may change. Any change but a name is new terms, which takes the pack off sale until `pnpm billing apply` has the provider sell them and links it again. Stripe never changes a price, so there new terms make a new price, and a pack already linked needs `--allow-archive` for the old price and `--allow-replace` to link the new one ([Stripe billing](../docs/providers/stripe.md#know-what-apply-makes-for-packs)); Polar keeps the pack's own product, with a new price on it when the price changes ([Polar billing](../docs/providers/polar.md#create-the-hosted-products)). To stop selling a pack, remove its entry: its row is retired, not deleted, and `pnpm billing apply` archives its provider object only with `--allow-archive`, refusing to run without it. Packs already bought keep their minutes, and a pack put back in the file gets its row, its price and its provider object back.
 
-`pnpm billing apply` makes each pack a product of its own at the provider, after everything the plans need, and links it: a one-time price on Stripe ([Stripe billing](../docs/providers/stripe.md)), a private one-time product on Polar ([Polar billing](../docs/providers/polar.md)). A pack is on sale once that link has made it active. `lobbystack billing catalog` lists the packs with the plans.
+`pnpm billing apply` makes each pack a product of its own at the provider, after everything the plans need, and links it: a one-time price on Stripe ([Stripe billing](../docs/providers/stripe.md#know-what-apply-makes-for-packs)), a private one-time product on Polar ([Polar billing](../docs/providers/polar.md#create-the-hosted-products)). A pack is on sale once that link has made it active. Deploy the code first: an instance built before migration `0148` refuses a file with `packs`. `lobbystack billing catalog` lists the packs with the plans.
 
 ### Promo codes
 

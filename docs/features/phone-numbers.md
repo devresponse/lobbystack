@@ -35,7 +35,7 @@ A business on prepaid minute packs holds its number while a pack has time left. 
 
 - **The number stops answering at once.** Calls are turned away (`live.incoming_closed_business` in the admin's log), and texts get no reply, as on a [canceled account](account-cancellation.md). Migration `0148` has `app.resolve_business_by_phone`, `app.resolve_receptionist_by_phone` and `app.is_closed_business_phone` read a number set to go for this reason (`reclaim_reason` `pack_ended`) as closed. A number set to go for a replacement or a cancellation answers as before.
 - **The worker's hourly `phone-number-reclaim` job releases it** once the 30 days are up.
-- **A new pack or a plan bought before then keeps the number,** and it answers again from the next call.
+- **A new pack, a plan bought or a managed plan an operator gives before then keeps the number,** and it answers again from the next call.
 - **Nothing is set to go while the business still has a number another way:** a live pack, a disputed pack with time left, or a plan that includes a number, such as Starter.
 
 ## Debug "Request failed" and "We couldn't get that number"

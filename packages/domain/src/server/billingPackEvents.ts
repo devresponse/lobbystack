@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNull, lte, min, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, min, or, sql } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingPackCheckouts, billingPackPrices, billingPacks, billingTransactions, enqueueOutbox, providerEvents, type DatabaseTransaction } from "@lobbystack/db";
 import { isPaidSubscription, isReplacedSubscription, isUuid, isYearlyBillingInterval, liveSubscriptionStates } from "@lobbystack/shared";
@@ -122,9 +122,12 @@ export async function applyStripePackRefundInTransaction(tx: DatabaseTransaction
  * business's live packs, their unused minutes recorded, and the month's
  * allowances count from now. A number set to go once the last pack ended stays.
  * The business's open pack checkouts close too (closePackCheckoutsForPlan).
- * A pack paid after the subscription went live gave way to it, as switchToPack
- * says when the subscription's events come first: it is reported with the
- * payment to refund, whichever events LobbyStack applied first.
+ * A pack paid after the subscription went live gave way to it, and is
+ * reported with the payment to refund, as switchToPack reports one whose
+ * payment arrives once the subscription is live. One paid before was in force
+ * until the plan started, so it ends as decision 6 says, unreported; a
+ * payment from before the plan went live that arrives after its start is
+ * reported by switchToPack all the same, since that pack was never in force.
  * Returns the packs it ended; none for a business without a live pack.
  */
 export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransaction, input: { businessId: string; at: Date; subscription?: { id: string; liveSince: Date } }): Promise<string[]> {
@@ -147,18 +150,33 @@ export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransa
 
 /**
  * When a subscription that just started went live, by the provider's clock,
- * which a pack's paid_at is compared with: the time of the event that started
- * it, or for a subscription new to the account its start at the provider when
- * that is earlier, so the answer holds whichever of its events came first.
- * Stripe stamps seconds (start_date, created), Polar ISO times (started_at,
- * created_at). LobbyStack's own receipt time when the event names none.
+ * which a pack's paid_at is compared with. The event as the provider sent it
+ * says, not as a read-back merged it, whose time is only when LobbyStack
+ * looked: the event's own time when it shows the subscription live, else
+ * when LobbyStack read it back live, else when LobbyStack received the event.
+ * For a subscription new to the account, its start at the provider when that
+ * is earlier, so the answer holds whichever of its events came first. Stripe
+ * stamps seconds (start_date, created), Polar ISO times (started_at,
+ * created_at).
  */
-export function subscriptionLiveSince(payload: Record<string, unknown>, input: { eventCreatedAt: Date; newToAccount: boolean }): Date {
-  const eventAt = dateField(payload, "subscriptionModifiedAt") ?? dateField(payload, "occurredAt") ?? input.eventCreatedAt;
+export function subscriptionLiveSince(event: Record<string, unknown>, input: { eventCreatedAt: Date; readAt?: Date | undefined; newToAccount: boolean }): Date {
+  const eventAt = (showsLive(event) ? dateField(event, "subscriptionModifiedAt") ?? dateField(event, "occurredAt") : undefined) ?? input.readAt ?? input.eventCreatedAt;
   if (!input.newToAccount) return eventAt;
-  const providerStart = [unixSeconds(payload.start_date), unixSeconds(payload.created), dateField(payload, "started_at"), dateField(payload, "created_at")]
+  const providerStart = [unixSeconds(event.start_date), unixSeconds(event.created), dateField(event, "started_at"), dateField(event, "created_at")]
     .filter((at): at is Date => at !== undefined);
   return new Date(Math.min(eventAt.getTime(), ...providerStart.map((at) => at.getTime())));
+}
+
+/**
+ * Whether an event, as sent, shows its subscription live: in a live state, or
+ * a paid payment, such as the invoice that paid an unpaid subscription. One
+ * sent before then and applied late says nothing of when it went live.
+ */
+function showsLive(event: Record<string, unknown>): boolean {
+  const kind = stringField(event, "kind");
+  const state = stringField(event, "subscriptionState") ?? (kind === "subscription" ? stringField(event, "status") : undefined);
+  if (state !== undefined) return (liveSubscriptionStates as readonly string[]).includes(state);
+  return kind === "payment" && stringField(event, "status") === "paid";
 }
 
 function unixSeconds(value: unknown): Date | undefined {
@@ -279,7 +297,7 @@ type Purchase = {
   currency: string;
   paidAt: Date;
   transactionId: string | null;
-  /** When the business started buying it, which orders it against a subscription bought meanwhile. */
+  /** When the business started buying it, which orders it against a subscription bought meanwhile when its checkout kept no record of the one live then. */
   boughtAt: Date;
   history: PaymentHistory;
   /** The pack checkout the payment settled, which names the pack once it's added. */
@@ -328,7 +346,8 @@ async function recordPurchase(tx: DatabaseTransaction, input: PackEventInput, pu
     return;
   }
   const payment: PackPayment = { pack: purchase.bought.terms.code, provider, providerRef: purchase.providerRef, amountCents: purchase.amountCents, currency: purchase.currency };
-  const switched = await switchToPack(tx, { businessId: input.businessId, packId: recorded.packId, account: input.account, hadLivePacks, boughtAt: purchase.boughtAt, now, payment });
+  const asked = await subscriptionWhenAsked(tx, input.businessId, purchase.checkoutId);
+  const switched = await switchToPack(tx, { businessId: input.businessId, packId: recorded.packId, account: input.account, hadLivePacks, boughtAt: purchase.boughtAt, asked, now, payment });
   // The number a business keeps through a pack stays when another pack comes before its release.
   if (switched !== "gave_way") await clearPackNumberReleaseInTransaction(tx, input.businessId);
   // A pack's receptionist allowance can be below the plan it replaces: the newest receptionists past it pause.
@@ -361,7 +380,7 @@ type Switch = "replaced" | "beside" | "gave_way" | "started" | "topped_up";
  * refund. started: from Free, the pack's allowances count from now.
  * topped_up: another pack was live, so nothing changes.
  */
-async function switchToPack(tx: DatabaseTransaction, input: { businessId: string; packId: string; account: PackSwitchAccount | undefined; hadLivePacks: boolean; boughtAt: Date; now: Date; payment: PackPayment }): Promise<Switch> {
+async function switchToPack(tx: DatabaseTransaction, input: { businessId: string; packId: string; account: PackSwitchAccount | undefined; hadLivePacks: boolean; boughtAt: Date; asked: SubscriptionWhenAsked | undefined; now: Date; payment: PackPayment }): Promise<Switch> {
   const account = input.account;
   if (account?.managed) {
     logEvent("warn", "ops.billing.pack_beside_subscription", { businessId: input.businessId, packId: input.packId, reason: "managed" });
@@ -369,7 +388,7 @@ async function switchToPack(tx: DatabaseTransaction, input: { businessId: string
   }
   const subscriptionId = account?.subscriptionId ?? null;
   if (account && subscriptionId && !isReplacedSubscription(account) && isPaidSubscription(account.plan, account.subscriptionState)) {
-    if (await subscribedSince(tx, input.businessId, subscriptionId, input.boughtAt)) {
+    if (await subscribedSince(tx, { businessId: input.businessId, subscriptionId, since: input.boughtAt, asked: input.asked })) {
       await replaceLivePacksInTransaction(tx, { businessId: input.businessId, at: input.now });
       await reportPackGaveWay(tx, { businessId: input.businessId, packId: input.packId, subscriptionId, payment: input.payment });
       return "gave_way";
@@ -409,23 +428,38 @@ async function reportPackGaveWay(tx: DatabaseTransaction, input: { businessId: s
 }
 
 /**
- * Whether the subscription went live after the business started buying the
- * pack, which makes it the business's latest choice. The last snapshot of it
- * stored before then says: one not live then, such as an unpaid subscription
- * the business paid since, went live after. Without one that names a state,
- * the first event LobbyStack stored about it is later. False without any event, so a
- * subscription LobbyStack knew no event of is treated as the older.
+ * Whether the business subscribed after it started buying the pack, which
+ * makes the subscription its latest choice. The pack's checkout says, from
+ * 0149: it names the subscription live when the business asked for it, so a
+ * live one it doesn't name, a new one or one not live then, such as an unpaid
+ * subscription paid since, came later, whatever order the subscription's
+ * events arrived in. Without it, for a payment that names no checkout of the
+ * business or a checkout from before 0149, the first event LobbyStack stored
+ * about the subscription is later. False without any, so a subscription
+ * LobbyStack knew no event of is treated as the older.
  */
-async function subscribedSince(tx: DatabaseTransaction, businessId: string, subscriptionId: string, since: Date): Promise<boolean> {
-  const naming = and(eq(providerEvents.businessId, businessId), eq(providerEvents.status, "processed"), sql`${providerEvents.payload}->>'subscriptionId' = ${subscriptionId}`);
-  const [before] = await tx.select({ state: sql<string | null>`coalesce(${providerEvents.payload}->>'subscriptionState', ${providerEvents.payload}->>'status')` }).from(providerEvents)
-    .where(and(naming, sql`${providerEvents.payload}->>'kind' = 'subscription'`, lte(providerEvents.createdAt, since)))
-    .orderBy(desc(providerEvents.createdAt))
-    .limit(1);
-  if (before?.state) return !(liveSubscriptionStates as readonly string[]).includes(before.state);
-  const [first] = await tx.select({ at: min(providerEvents.createdAt) }).from(providerEvents).where(naming);
+async function subscribedSince(tx: DatabaseTransaction, input: { businessId: string; subscriptionId: string; since: Date; asked: SubscriptionWhenAsked | undefined }): Promise<boolean> {
+  if (input.asked) return input.asked.subscriptionId !== input.subscriptionId;
+  const [first] = await tx.select({ at: min(providerEvents.createdAt) }).from(providerEvents)
+    .where(and(eq(providerEvents.businessId, input.businessId), eq(providerEvents.status, "processed"), sql`${providerEvents.payload}->>'subscriptionId' = ${input.subscriptionId}`));
   const at = first?.at ? new Date(first.at) : null;
-  return at !== null && at > since;
+  return at !== null && at > input.since;
+}
+
+/** The subscription a pack checkout found live when the business asked for it, which its payment replaces; null when it found none. */
+type SubscriptionWhenAsked = { subscriptionId: string | null };
+
+/**
+ * What a pack checkout of the business kept of the subscription live when it
+ * was asked for (0149). Undefined without one to read: no checkout, or a row
+ * from before 0149, which kept no terms either.
+ */
+async function subscriptionWhenAsked(tx: DatabaseTransaction, businessId: string, checkoutId: string | undefined): Promise<SubscriptionWhenAsked | undefined> {
+  // A uuid column compared with anything else fails the statement, and the event would never apply.
+  if (!checkoutId || !isUuid(checkoutId)) return undefined;
+  const [checkout] = await tx.select({ terms: billingPackCheckouts.terms, subscriptionId: billingPackCheckouts.subscriptionId }).from(billingPackCheckouts)
+    .where(and(eq(billingPackCheckouts.id, checkoutId), eq(billingPackCheckouts.businessId, businessId))).limit(1);
+  return checkout && checkout.terms !== null ? { subscriptionId: checkout.subscriptionId } : undefined;
 }
 
 type PaymentHistory = { refundedCents: number; dispute: "opened" | "won" | "lost" | null };

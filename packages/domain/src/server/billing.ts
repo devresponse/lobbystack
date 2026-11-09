@@ -1220,9 +1220,10 @@ export async function reconcileBillingProviderEvent(
       // own so nothing about receptionists can hold up the payment.
       if (polarFields.plan || polarFields.subscriptionState) await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_reconcile");
       // Decision 6, pack to subscription: a subscription that starts ends the live prepaid packs in this transaction,
-      // and a pack paid after it went live is reported for a refund, whichever event came first.
+      // and a pack paid after it went live is reported for a refund, whichever event came first. When it went live is
+      // read from the event as stored, since a read-back's time is only when LobbyStack looked.
       if (startedSubscription) {
-        const subscription = subscriptionId ? { id: subscriptionId, liveSince: subscriptionLiveSince(payload, { eventCreatedAt: event.createdAt, newToAccount: subscriptionId !== existing?.subscriptionId }) } : undefined;
+        const subscription = subscriptionId ? { id: subscriptionId, liveSince: subscriptionLiveSince(stored, { eventCreatedAt: event.createdAt, readAt: fresh?.readAt, newToAccount: subscriptionId !== existing?.subscriptionId }) } : undefined;
         await packsGiveWayToSubscriptionInTransaction(tx, { businessId: input.businessId, at: new Date(), ...(subscription ? { subscription } : {}) });
       }
       // On Stripe, overage is a subscription of its own (the Stripe plan's step 13). billing.ensureOverage gives a

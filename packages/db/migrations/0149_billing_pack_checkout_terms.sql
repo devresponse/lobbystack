@@ -12,7 +12,14 @@
 -- 2. A pack checkout names the pack its payment added, so the page that waits
 --    for the payment can tell a pack the business has from one that ended at
 --    once, as when a plan bought while the page was open came first.
--- 3. app.billing_code_offers no longer counts a subscription a pack's payment
+-- 3. A pack checkout keeps the subscription live on the account when the
+--    business asked for it, which its payment replaces. A live subscription
+--    the payment finds that it doesn't name, a new one or one that wasn't
+--    live then, is the business's later choice, so the pack gives way to it,
+--    whatever order the subscription's events arrived in. A row from before
+--    this migration has none, and its payment is ordered by the
+--    subscription's first event, as before.
+-- 4. app.billing_code_offers no longer counts a subscription a pack's payment
 --    replaced as live on a code's plan, as it doesn't once the provider ends
 --    it: until then, a code the business already used would show its old
 --    plan as the one it is on, or sell it again. Only a pack's payment sets
@@ -32,7 +39,8 @@ SET LOCAL statement_timeout = '120s';
 
 ALTER TABLE public.billing_pack_checkouts
   ADD COLUMN IF NOT EXISTS terms jsonb,
-  ADD COLUMN IF NOT EXISTS pack_id uuid REFERENCES public.billing_packs(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS pack_id uuid REFERENCES public.billing_packs(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS subscription_id text;
 
 ALTER TABLE public.billing_pack_checkouts DROP CONSTRAINT IF EXISTS billing_pack_checkouts_terms_object;
 ALTER TABLE public.billing_pack_checkouts ADD CONSTRAINT billing_pack_checkouts_terms_object
@@ -40,6 +48,7 @@ ALTER TABLE public.billing_pack_checkouts ADD CONSTRAINT billing_pack_checkouts_
 
 COMMENT ON COLUMN public.billing_pack_checkouts.terms IS 'The pack''s terms when the checkout was asked for (voiceSec, days, smsSeg, callsOut, chatUnits, kbBytes, numbers, receptionists), which its payment adds the pack with. Null on a row from before 0149.';
 COMMENT ON COLUMN public.billing_pack_checkouts.pack_id IS 'The pack the checkout''s payment added, once it arrived.';
+COMMENT ON COLUMN public.billing_pack_checkouts.subscription_id IS 'The subscription live on the account when the checkout was asked for, which its payment replaces; null when none was. Read only on a row with terms: a row from before 0149 has neither.';
 
 -- 0147's function, with the replaced subscription left out of the exception
 -- that finds a used code for the business on its plan.

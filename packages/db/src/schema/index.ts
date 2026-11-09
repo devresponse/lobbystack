@@ -1763,6 +1763,8 @@ export const billingPackCheckouts = pgTable(
     terms: jsonb("terms").$type<BillingPackCheckoutTerms>(),
     /** The pack the checkout's payment added, once it arrived. */
     packId: uuid("pack_id").references(() => billingPacks.id, { onDelete: "set null" }),
+    /** The subscription live on the account when the checkout was asked for, which its payment replaces; null when none was. Read only on a row with terms: a row from before 0149 has neither. */
+    subscriptionId: text("subscription_id"),
     ...timestamps,
   },
   (table) => [

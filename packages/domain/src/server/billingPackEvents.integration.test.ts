@@ -4,6 +4,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { auditLogs, billingAccounts, billingPackCheckouts, billingPackPlans, billingPackPrices, billingPacks, billingTransactions, businesses, createDatabaseClient, outboxMessages, phoneNumbers, productEvents, providerEvents, users, withBusinessTransaction, type BillingPackCheckoutTerms, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
+import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
+
 import { reconcileBillingProviderEvent } from "./billing";
 import { readPackCheckoutInTransaction } from "./billingPackCheckout";
 import { expireBusinessPacks } from "./billingPackExpiry";
@@ -74,17 +76,24 @@ async function business(tx: DatabaseTransaction, account: Account = {}) {
   return businessId;
 }
 
+/** The catalog's terms for the Stripe test pack, as a checkout keeps them; the Polar one lasts 180 days. */
+const KEPT_TERMS: BillingPackCheckoutTerms = { voiceSec: 15_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1 };
+
 /**
  * A pack checkout the business asked for, a Stripe one unless it names a Polar
  * pack and checkout; createdAt is when it asked. A ready page by default; one
- * still being made has no page. terms are those it kept when it was asked for.
+ * still being made has no page. terms are those it kept when it was asked for,
+ * and liveWhenAsked the subscription it found live then (null for none), as a
+ * checkout since 0149 keeps both; without either, a row from before 0149.
  */
-async function packCheckout(tx: DatabaseTransaction, businessId: string, priceId: string, options: { pack?: string; providerCheckoutId?: string; createdAt?: Date; status?: "pending" | "processing" | "ready" | "paid"; expiresAt?: Date; terms?: BillingPackCheckoutTerms } = {}) {
+async function packCheckout(tx: DatabaseTransaction, businessId: string, priceId: string, options: { pack?: string; providerCheckoutId?: string; createdAt?: Date; status?: "pending" | "processing" | "ready" | "paid"; expiresAt?: Date; terms?: BillingPackCheckoutTerms; liveWhenAsked?: string | null } = {}) {
   const userId = randomUUID();
   await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
   const status = options.status ?? "ready";
   const page = status === "pending" || status === "processing" ? {} : { checkoutId: options.providerCheckoutId ?? `cs_${randomUUID()}`, checkoutUrl: "https://checkout.stripe.test/pay" };
-  const [row] = await tx.insert(billingPackCheckouts).values({ businessId, requestedByUserId: userId, pack: options.pack ?? "pack_events_stripe", priceId, status, ...page, expiresAt: options.expiresAt ?? new Date(Date.now() + DAY), ...(options.createdAt ? { createdAt: options.createdAt } : {}), ...(options.terms ? { terms: options.terms } : {}) }).returning({ id: billingPackCheckouts.id });
+  const since0149 = options.terms !== undefined || options.liveWhenAsked !== undefined;
+  const kept = since0149 ? { terms: options.terms ?? { ...KEPT_TERMS, days: options.pack === "pack_events_polar" ? 180 : 90 }, subscriptionId: options.liveWhenAsked ?? null } : {};
+  const [row] = await tx.insert(billingPackCheckouts).values({ businessId, requestedByUserId: userId, pack: options.pack ?? "pack_events_stripe", priceId, status, ...page, expiresAt: options.expiresAt ?? new Date(Date.now() + DAY), ...(options.createdAt ? { createdAt: options.createdAt } : {}), ...kept }).returning({ id: billingPackCheckouts.id });
   return row!.id;
 }
 
@@ -105,6 +114,20 @@ async function reconcile(tx: DatabaseTransaction, businessId: string, providerEv
   await tx.execute(sql`set local role lobbystack_worker`);
   try {
     return await reconcileBillingProviderEvent({ db: tx as unknown as Database }, { businessId, providerEventId, ...(refundInvoice !== undefined ? { refundInvoice } : {}) });
+  } finally {
+    await tx.execute(sql`reset role`);
+  }
+}
+
+/** The Stripe price the read-backs name, which the plan links map to monthly Starter. */
+const READ_BACK_ENV = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "price_starter_month" };
+
+/** Applies a stored Stripe event after reading its subscription back, live at readAt, as the job does on Stripe. */
+async function reconcileReadBack(tx: DatabaseTransaction, businessId: string, providerEventId: string, read: { subscriptionId: string; readAt: Date }) {
+  const fresh: ProviderSubscription = { id: read.subscriptionId, customerId: `cus_${businessId}`, state: "active", priceRef: "price_starter_month", interval: "monthly", discountRef: null, periodStart: new Date(read.readAt.getTime() - 10 * DAY), periodEnd: new Date(read.readAt.getTime() + 20 * DAY), cancelAt: null, endedAt: null, next: null, pendingPayment: null, metadata: {}, readAt: read.readAt };
+  await tx.execute(sql`set local role lobbystack_worker`);
+  try {
+    return await reconcileBillingProviderEvent({ db: tx as unknown as Database }, { businessId, providerEventId, fresh }, READ_BACK_ENV);
   } finally {
     await tx.execute(sql`reset role`);
   }
@@ -635,7 +658,8 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
       const { stripePriceId } = await catalog(tx);
       const businessId = await business(tx, { plan: "starter", state: "active", interval: "monthly", subscriptionId: "sub_gave_way_1", telemetry: true });
       const startedBuying = new Date(Date.now() - 2 * DAY);
-      const checkoutId = await packCheckout(tx, businessId, stripePriceId, { createdAt: startedBuying });
+      // The checkout found no live subscription when the business asked for it.
+      const checkoutId = await packCheckout(tx, businessId, stripePriceId, { createdAt: startedBuying, liveWhenAsked: null });
       await subscribedAt(tx, businessId, "sub_gave_way_1", new Date(Date.now() - DAY));
 
       await reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.async_payment_succeeded", payload: stripeSession(businessId, { paymentRef: "pi_gave_way_1", checkoutId, createdAt: startedBuying }) }));
@@ -681,7 +705,7 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
     });
   });
 
-  it("ends a pack at once, and keeps the plan, when the subscription it found was unpaid as the business started buying and was paid since", async () => {
+  it("ends a pack at once, and keeps the plan, when the subscription was unpaid as the business asked for the pack and was paid since", async () => {
     await rollbackTest(async (tx) => {
       const { stripePriceId } = await catalog(tx);
       const businessId = await business(tx, { plan: "starter", state: "active", interval: "monthly", subscriptionId: "sub_restarted_1", telemetry: true });
@@ -693,7 +717,8 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
       await snapshot("active", new Date(Date.now() - 60 * DAY));
       await snapshot("unpaid", new Date(Date.now() - 10 * DAY));
       const startedBuying = new Date(Date.now() - 2 * DAY);
-      const checkoutId = await packCheckout(tx, businessId, stripePriceId, { createdAt: startedBuying });
+      // Unpaid isn't live, so the checkout found no live subscription.
+      const checkoutId = await packCheckout(tx, businessId, stripePriceId, { createdAt: startedBuying, liveWhenAsked: null });
       await snapshot("active", new Date(Date.now() - DAY));
 
       await reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.async_payment_succeeded", payload: stripeSession(businessId, { paymentRef: "pi_restarted_1", checkoutId, createdAt: startedBuying }) }));
@@ -702,6 +727,84 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
       expect(await planInForce(tx, businessId)).toBe("starter");
       expect((await outbox(tx, businessId)).map((message) => message.topic)).not.toContain("billing.endPlanForPack");
       expect(await auditsOf(tx, businessId, "billing.pack_gave_way")).toHaveLength(1);
+    });
+  });
+
+  it("replaces a monthly plan whose first event, received after a later one, said it was incomplete, with or without the checkout's record", async () => {
+    await rollbackTest(async (tx) => {
+      const { stripePriceId } = await catalog(tx);
+      for (const recorded of [true, false]) {
+        const subscriptionId = `sub_${randomUUID()}`;
+        const businessId = await business(tx, { plan: "starter", state: "active", interval: "monthly", subscriptionId, telemetry: true });
+        const snapshot = async (eventType: string, state: string, at: Date) => {
+          const id = await store(tx, businessId, { eventType, payload: { kind: "subscription", subscriptionId, subscriptionState: state }, createdAt: at });
+          await tx.update(providerEvents).set({ status: "processed" }).where(eq(providerEvents.id, id));
+        };
+        // Two weeks ago Stripe made the plan incomplete while its first payment was confirmed, then active, and
+        // delivered the second event first; nothing about the plan has arrived since.
+        await snapshot("customer.subscription.updated", "active", new Date(Date.now() - 14 * DAY));
+        await snapshot("customer.subscription.created", "incomplete", new Date(Date.now() - 14 * DAY + 60_000));
+        const askedAt = new Date(Date.now() - 2 * 60 * 60_000);
+        // A checkout since 0149 names the plan it found live; a payment naming none is ordered by the plan's first event.
+        const checkoutId = recorded ? await packCheckout(tx, businessId, stripePriceId, { createdAt: askedAt, liveWhenAsked: subscriptionId }) : undefined;
+        await reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.completed", payload: stripeSession(businessId, { paymentRef: `pi_${subscriptionId}`, createdAt: askedAt, ...(checkoutId ? { checkoutId } : {}) }) }));
+        expect((await packsOf(tx, businessId))[0]?.status).toBe("active");
+        expect((await accountOf(tx, businessId)).replacedSubscriptionId).toBe(subscriptionId);
+        expect(await planInForce(tx, businessId)).toBe("prepaid");
+        expect((await outbox(tx, businessId)).map((message) => message.topic)).toContain("billing.endPlanForPack");
+        expect(await auditsOf(tx, businessId, "billing.pack_gave_way")).toEqual([]);
+      }
+    });
+  });
+
+  it("reports a pack paid after an unpaid plan was paid again when the plan's event, read back, is applied after the pack, by the time the event was sent", async () => {
+    await rollbackTest(async (tx) => {
+      const { stripePriceId } = await catalog(tx);
+      const now = Date.now();
+      const askedAt = new Date(now - 60 * 60_000);
+      const payPack = async (subscriptionId: string, paidAt: Date) => {
+        const businessId = await business(tx, { plan: "starter", state: "unpaid", interval: "monthly", subscriptionId, telemetry: true });
+        const checkoutId = await packCheckout(tx, businessId, stripePriceId, { createdAt: askedAt, liveWhenAsked: null });
+        await reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.completed", payload: stripeSession(businessId, { paymentRef: `pi_${subscriptionId}`, checkoutId, createdAt: askedAt, occurredAt: paidAt }) }));
+        // Applied first, the pack finds the plan unpaid and goes live.
+        expect((await packsOf(tx, businessId))[0]?.status).toBe("active");
+        return businessId;
+      };
+      // The business paid the plan's open invoice 40 minutes ago, then the pack, on a page opened before, 30 minutes
+      // ago. Stripe's event that the plan is active again is read back and applied only now.
+      const paidAfter = await payPack("sub_paid_again_1", new Date(now - 30 * 60_000));
+      const active = stripeSubscription(paidAfter, { subscriptionId: "sub_paid_again_1", startedAt: new Date(now - 60 * DAY), eventAt: new Date(now - 40 * 60_000) });
+      await expect(reconcileReadBack(tx, paidAfter, await store(tx, paidAfter, { eventType: "customer.subscription.updated", payload: active }), { subscriptionId: "sub_paid_again_1", readAt: new Date(now) })).resolves.toBe("processed");
+      expect((await packsOf(tx, paidAfter))[0]).toMatchObject({ status: "replaced" });
+      expect(await planInForce(tx, paidAfter)).toBe("starter");
+      const [report] = await auditsOf(tx, paidAfter, "billing.pack_gave_way");
+      expect(report?.payload).toMatchObject({ providerRef: "pi_sub_paid_again_1", subscriptionId: "sub_paid_again_1" });
+
+      // A pack paid while the plan was still unpaid, which was paid again after it: the first of the plan's events
+      // applied was sent before, still unpaid, so only the read-back says it is live, and the pack ends unreported.
+      const paidBefore = await payPack("sub_paid_again_2", new Date(now - 50 * 60_000));
+      const unpaid = stripeSubscription(paidBefore, { subscriptionId: "sub_paid_again_2", state: "unpaid", startedAt: new Date(now - 60 * DAY), eventAt: new Date(now - 55 * 60_000) });
+      await expect(reconcileReadBack(tx, paidBefore, await store(tx, paidBefore, { eventType: "customer.subscription.updated", payload: unpaid }), { subscriptionId: "sub_paid_again_2", readAt: new Date(now) })).resolves.toBe("processed");
+      expect((await packsOf(tx, paidBefore))[0]).toMatchObject({ status: "replaced" });
+      expect(await auditsOf(tx, paidBefore, "billing.pack_gave_way")).toEqual([]);
+    });
+  });
+
+  it("reports a pack paid before a plan went live whose payment arrives after the plan's start, since that pack was never in force", async () => {
+    await rollbackTest(async (tx) => {
+      const { stripePriceId } = await catalog(tx);
+      const now = Date.now();
+      const businessId = await business(tx, { telemetry: true });
+      const askedAt = new Date(now - 3 * 60 * 60_000);
+      const checkoutId = await packCheckout(tx, businessId, stripePriceId, { createdAt: askedAt, liveWhenAsked: null });
+      // The pack was paid two hours ago and Starter bought 90 minutes ago, whose start LobbyStack applied first.
+      const plan = stripeSubscription(businessId, { subscriptionId: "sub_plan_first_1", startedAt: new Date(now - 90 * 60_000), eventAt: new Date(now - 90 * 60_000) });
+      await expect(reconcile(tx, businessId, await store(tx, businessId, { eventType: "customer.subscription.created", payload: plan }))).resolves.toBe("processed");
+      await reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.completed", payload: stripeSession(businessId, { paymentRef: "pi_plan_first_1", checkoutId, createdAt: askedAt, occurredAt: new Date(now - 2 * 60 * 60_000) }) }));
+      expect((await packsOf(tx, businessId))[0]).toMatchObject({ status: "replaced" });
+      expect(await planInForce(tx, businessId)).toBe("starter");
+      expect(await auditsOf(tx, businessId, "billing.pack_gave_way")).toHaveLength(1);
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId })).toMatchObject({ status: "paid", packStatus: "replaced" });
     });
   });
 

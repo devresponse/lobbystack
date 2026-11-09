@@ -155,7 +155,7 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       // The dashboard's request, under the app's row-level security.
       const id = await as(tx, "lobbystack_app", (context) => createPackCheckoutRequest(context, { userId, businessId, pack: sold.code, checkLimit }));
       const made = await row(tx, id);
-      expect(made).toMatchObject({ businessId, requestedByUserId: userId, pack: sold.code, priceId: sold.priceId, status: "pending", checkoutId: null, checkoutUrl: null, billingEmail: null, packId: null });
+      expect(made).toMatchObject({ businessId, requestedByUserId: userId, pack: sold.code, priceId: sold.priceId, status: "pending", checkoutId: null, checkoutUrl: null, billingEmail: null, packId: null, subscriptionId: null });
       // The terms the business saw, which its payment adds the pack with whatever the catalog says by then.
       expect(made.terms).toEqual({ voiceSec: 30_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1 });
       expect(made.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 15 * MINUTE - 1_000);
@@ -206,6 +206,15 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       expect((await buy(tx, { userId, businessId: prepaid, pack: sold.code })).created).toBe(true);
       // An ended subscription is Free.
       expect(await allowed({ plan: "starter", state: "canceled", interval: "annual" })).toBe(true);
+      // Each checkout keeps the subscription its payment replaces: the monthly plan's, and none on Free or an ended plan.
+      const kept = async (account: AccountInput | null) => {
+        const businessId = await business(tx, { account });
+        return { businessId, subscriptionId: (await row(tx, (await buy(tx, { userId, businessId, pack: sold.code })).id)).subscriptionId };
+      };
+      const monthly = await kept({ plan: "starter" });
+      expect(monthly.subscriptionId).toBe(`sub_${monthly.businessId}`);
+      expect((await kept({ plan: "starter", state: "canceled", interval: "annual" })).subscriptionId).toBeNull();
+      expect((await kept(null)).subscriptionId).toBeNull();
 
       const yearly = await business(tx, { account: { plan: "starter", interval: "annual" } });
       expect(await refusal(buy(tx, { userId, businessId: yearly, pack: sold.code }))).toEqual({ status: 409, code: "pack_yearly_plan", message: "This business pays for a yearly plan. Set it to end at its renewal, and buy a pack once it ends." });
@@ -224,7 +233,10 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       const sold = await pack(tx);
       const userId = await person(tx);
       const yearly = await business(tx, { account: { plan: "starter", interval: "annual", replaced: true } });
-      expect((await buy(tx, { userId, businessId: yearly, pack: sold.code })).created).toBe(true);
+      const made = await buy(tx, { userId, businessId: yearly, pack: sold.code });
+      expect(made.created).toBe(true);
+      // Its payment replaces no plan, so the checkout keeps none.
+      expect((await row(tx, made.id)).subscriptionId).toBeNull();
       const pastDue = await business(tx, { account: { plan: "pro", state: "past_due", replaced: true } });
       expect((await buy(tx, { userId, businessId: pastDue, pack: sold.code })).created).toBe(true);
     });

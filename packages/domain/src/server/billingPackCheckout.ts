@@ -134,6 +134,8 @@ export async function createPackCheckoutRequestInTransaction(
     priceId: offer.priceId,
     // The terms the business sees now, which its payment adds the pack with, whatever the catalog says by then.
     terms: packCheckoutTerms(offer),
+    // The subscription the payment replaces: one live when it arrives that this doesn't name came later, so the pack gives way.
+    subscriptionId,
     status: "pending",
     // The job's 15 minutes; the page's own expiry replaces it once the provider makes one.
     expiresAt: new Date(now + BILLING_CHECKOUT_EXPIRES_MS),

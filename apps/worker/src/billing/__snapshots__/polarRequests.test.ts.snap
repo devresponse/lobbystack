@@ -96,6 +96,75 @@ exports[`the requests Polar receives > a checkout > with a billing email 1`] = `
 ]
 `;
 
+exports[`the requests Polar receives > a pack's checkout > for a customer Polar has, from onboarding 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/customers/external/business%3A00000000-0000-4000-8000-0000000000b1",
+  },
+  {
+    "body": {
+      "allow_discount_codes": false,
+      "customer_id": "cus-known",
+      "metadata": {
+        "lobbystack_business": "00000000-0000-4000-8000-0000000000b1",
+        "lobbystack_pack": "minutes_500_90",
+        "lobbystack_pack_checkout": "00000000-0000-4000-8000-0000000000d1",
+        "lobbystack_pack_price": "00000000-0000-4000-8000-0000000000e1",
+        "lobbystack_role": "pack",
+      },
+      "products": [
+        "product-pack-500-90",
+      ],
+      "return_url": "https://app.example/onboarding/plan",
+      "success_url": "https://app.example/onboarding/plan?pack=success&packCheckoutId=00000000-0000-4000-8000-0000000000d1",
+    },
+    "method": "POST",
+    "path": "/v1/checkouts/",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a pack's checkout > for a new customer 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/customers/external/business%3A00000000-0000-4000-8000-0000000000b1",
+  },
+  {
+    "body": {
+      "email": "owner@example.com",
+      "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      "name": "Allo Salon",
+    },
+    "method": "POST",
+    "path": "/v1/customers/",
+  },
+  {
+    "body": {
+      "allow_discount_codes": false,
+      "customer_id": "cus-new",
+      "metadata": {
+        "lobbystack_business": "00000000-0000-4000-8000-0000000000b1",
+        "lobbystack_pack": "minutes_500_90",
+        "lobbystack_pack_checkout": "00000000-0000-4000-8000-0000000000d1",
+        "lobbystack_pack_price": "00000000-0000-4000-8000-0000000000e1",
+        "lobbystack_role": "pack",
+      },
+      "products": [
+        "product-pack-500-90",
+      ],
+      "return_url": "https://app.example/settings/plan",
+      "success_url": "https://app.example/settings/plan?pack=success&packCheckoutId=00000000-0000-4000-8000-0000000000d1",
+    },
+    "method": "POST",
+    "path": "/v1/checkouts/",
+  },
+]
+`;
+
 exports[`the requests Polar receives > a plan change > a downgrade from the next period 1`] = `
 [
   {

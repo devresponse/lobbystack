@@ -12,10 +12,12 @@
 -- three phone resolvers (app.resolve_business_by_phone and
 -- app.is_closed_business_phone from 0130, app.resolve_receptionist_by_phone
 -- from 0137) gain one condition for a number whose business's last pack
--- ended, which no number has until the expiry job sets it. No other existing
--- column, constraint or function changes. Undoing this file drops the five
--- tables, the view and the two columns, and restores the four functions from
--- 0112, 0130 and 0137.
+-- ended, which no number has until the expiry job sets it. The billing
+-- sweep's app.list_billing_sweep_work (0146) gains a fourth branch for pack
+-- checkouts, its first three unchanged. No other existing column, constraint
+-- or function changes. Undoing this file drops the five tables, the view and
+-- the two columns, and restores the five functions from 0112, 0130, 0137 and
+-- 0146.
 
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '120s';
@@ -391,3 +393,98 @@ BEGIN
   RETURN CASE plan_tier WHEN 'free_cloud' THEN 0 WHEN 'starter' THEN 1 WHEN 'pro' THEN 1 ELSE NULL END;
 END $$;
 REVOKE ALL ON FUNCTION app.business_included_numbers(uuid) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------------
+-- Pack checkouts in the billing sweep
+-- ---------------------------------------------------------------------------
+-- A pack checkout waits for its job as a plan's checkout request does, so the
+-- billing sweep queues one no job finished, and expires one that waited too
+-- long. This section replaces app.list_billing_sweep_work with 0146's
+-- function plus a fourth branch for billing_pack_checkouts, whose rows come
+-- back as kind pack_checkout under the same rules as checkout_request, and
+-- adds the index that branch reads. The first three branches, the arguments
+-- and the grants are 0146's, unchanged, so the sweep finds exactly what it
+-- found before for a business that never starts a pack checkout. Undoing this
+-- section restores 0146's function and drops the index.
+CREATE INDEX IF NOT EXISTS billing_pack_checkouts_open_idx
+  ON public.billing_pack_checkouts (updated_at)
+  WHERE status IN ('pending', 'processing');
+
+CREATE OR REPLACE FUNCTION app.list_billing_sweep_work(
+  p_events_before timestamptz,
+  p_usage_before timestamptz,
+  p_checkouts_before timestamptz,
+  p_checkouts_expired_before timestamptz,
+  p_hour bigint,
+  p_limit integer
+)
+RETURNS TABLE (kind text, business_id uuid, entity_id uuid, created_at timestamptz, updated_at timestamptz)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+  (
+    SELECT 'provider_event'::text, e.business_id, e.id, e.created_at, e.updated_at
+    FROM public.provider_events e
+    WHERE e.status = 'received'
+      AND e.provider IN ('polar', 'stripe')
+      AND e.business_id IS NOT NULL
+      AND e.created_at < p_events_before
+      AND NOT EXISTS (SELECT 1 FROM public.outbox_messages o WHERE o.dedupe_key = 'billing-sweep:provider_event:' || e.id::text || ':' || p_hour::text)
+      AND session_user = 'lobbystack_worker'
+      AND NULLIF(current_setting('app.actor_type', true), '') = 'worker'
+    ORDER BY e.created_at
+    LIMIT p_limit
+  )
+  UNION ALL
+  (
+    SELECT 'usage_event'::text, u.business_id, u.id, u.created_at, u.updated_at
+    FROM public.billing_usage_events u
+    JOIN public.billing_accounts a ON a.business_id = u.business_id
+    WHERE u.sync_status = 'pending'
+      AND u.is_final
+      AND u.usage_kind IN ('voice_seconds', 'alert_sms_segments', 'outbound_call_attempts')
+      AND coalesce(u.plan_at_record_time, a.plan) IN ('starter', 'pro')
+      AND a.customer_id IS NOT NULL
+      AND u.updated_at < p_usage_before
+      AND NOT EXISTS (SELECT 1 FROM public.outbox_messages o WHERE o.dedupe_key = 'billing-sweep:usage_event:' || u.id::text || ':' || p_hour::text)
+      AND session_user = 'lobbystack_worker'
+      AND NULLIF(current_setting('app.actor_type', true), '') = 'worker'
+    ORDER BY u.updated_at
+    LIMIT p_limit
+  )
+  UNION ALL
+  (
+    SELECT 'checkout_request'::text, r.business_id, r.id, r.created_at, r.updated_at
+    FROM public.billing_checkout_requests r
+    WHERE r.status IN ('pending', 'processing')
+      AND r.updated_at < p_checkouts_before
+      AND (
+        r.created_at < p_checkouts_expired_before
+        OR NOT EXISTS (SELECT 1 FROM public.outbox_messages o WHERE o.dedupe_key = 'billing-sweep:checkout_request:' || r.id::text || ':' || p_hour::text)
+      )
+      AND session_user = 'lobbystack_worker'
+      AND NULLIF(current_setting('app.actor_type', true), '') = 'worker'
+    ORDER BY r.updated_at
+    LIMIT p_limit
+  )
+  UNION ALL
+  (
+    SELECT 'pack_checkout'::text, c.business_id, c.id, c.created_at, c.updated_at
+    FROM public.billing_pack_checkouts c
+    WHERE c.status IN ('pending', 'processing')
+      AND c.updated_at < p_checkouts_before
+      AND (
+        c.created_at < p_checkouts_expired_before
+        OR NOT EXISTS (SELECT 1 FROM public.outbox_messages o WHERE o.dedupe_key = 'billing-sweep:pack_checkout:' || c.id::text || ':' || p_hour::text)
+      )
+      AND session_user = 'lobbystack_worker'
+      AND NULLIF(current_setting('app.actor_type', true), '') = 'worker'
+    ORDER BY c.updated_at
+    LIMIT p_limit
+  )
+$$;
+
+REVOKE ALL ON FUNCTION app.list_billing_sweep_work(timestamptz, timestamptz, timestamptz, timestamptz, bigint, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.list_billing_sweep_work(timestamptz, timestamptz, timestamptz, timestamptz, bigint, integer) TO lobbystack_worker;

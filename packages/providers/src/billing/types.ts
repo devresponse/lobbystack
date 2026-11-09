@@ -84,6 +84,16 @@ export interface BillingProvider {
    * sells it with Stripe as the merchant of record (Managed Payments).
    */
   createCheckout(input: { customer: CustomerRef; email: string; price: PriceRef; businessId: string; requestId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; overageOnCheckout?: { currency: string }; merchantOfRecord?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
+  /**
+   * A one-time payment page for a prepaid pack, made out to the customer, or
+   * else to the email and billing key: Stripe Checkout in payment mode, or a
+   * Polar checkout for the pack's one-time product. price is the pack's price
+   * or product, and checkoutId the pack checkout's own ID, which the page's
+   * metadata carries back with the payment, beside the role pack. On Stripe,
+   * merchantOfRecord sells it with Stripe as the merchant of record (Managed
+   * Payments). expiresAt is null when the provider doesn't say.
+   */
+  createPackCheckout(input: { customer: CustomerRef; email: string; price: Pick<PriceRef, "ref">; businessId: string; checkoutId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; merchantOfRecord?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
   /** The subscription, or null when the provider doesn't know it. */
   getSubscription(id: string): Promise<ProviderSubscription | null>;
 

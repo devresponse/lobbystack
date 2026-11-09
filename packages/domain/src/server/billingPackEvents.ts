@@ -348,6 +348,7 @@ function checkoutStartedAt(payload: Record<string, unknown>): Date | undefined {
  */
 async function settlePackCheckout(tx: DatabaseTransaction, input: { businessId: string; checkoutId: string; status: "paid" | "failed" | "expired" }): Promise<void> {
   if (!isUuid(input.checkoutId)) return;
+  // Paid as markPackCheckoutPaidInTransaction marks it, without importing it: billingPackCheckout imports billing, which imports this module.
   const from = input.status === "paid" ? ["pending", "processing", "ready", "failed", "expired"] : ["pending", "processing", "ready"];
   const [settled] = await tx.update(billingPackCheckouts)
     .set({ status: input.status, error: input.status === "failed" ? "The payment didn't go through." : null, updatedAt: new Date() })

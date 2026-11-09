@@ -259,6 +259,7 @@ export const queueForJobType = {
   "billing.reconcile": "default",
   "billing.refreshUnitEconomics": "maintenance",
   "billing.createCheckout": "critical",
+  "billing.createPackCheckout": "critical",
   "billing.endPromoPlan": "default",
   "billing.expirePacks": "default",
   "billing.revokeSubscription": "critical",

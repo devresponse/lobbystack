@@ -4,7 +4,7 @@ import { billingAccounts, billingCheckoutRequests, enqueueOutbox, withBusinessTr
 import { billingProviderNames, billingSubscriptionActions, inAppPlanActions, type BillingSubscriptionAction } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
-import { BILLING_CHECKOUT_EXPIRES_MS, isLiveSubscriptionState, isManagedBillingAccount, lockBillingAccount, type BillingCheckoutLimit } from "./billing";
+import { BILLING_CHECKOUT_EXPIRES_MS, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, lockBillingAccount, OPEN_PURCHASE_REFUSAL, openPackCheckout, type BillingCheckoutLimit } from "./billing";
 import { readBillingDeployment } from "./billingProvider";
 import type { DomainContext } from "./context";
 
@@ -29,9 +29,10 @@ type ChangeableAccount = { subscriptionId: string | null; subscriptionState: str
  * billing portal (Polar), on a managed plan, when the subscription has
  * nothing to change (cancel one already ending, resume one that renews, keep
  * a plan with no change waiting), and while another change or checkout of the
- * business is open; with 404 without a live subscription. The person's open
- * request for the same change comes back instead of a new one. checkLimit
- * runs only before a new request is made.
+ * business is open, a pack checkout too; with 404 without a live
+ * subscription, which one a prepaid pack replaced no longer is. The person's
+ * open request for the same change comes back instead of a new one.
+ * checkLimit runs only before a new request is made.
  */
 export async function createBillingSubscriptionRequestInTransaction(
   tx: DatabaseTransaction,
@@ -41,10 +42,11 @@ export async function createBillingSubscriptionRequestInTransaction(
   const provider = readBillingDeployment(env, { withSecret: false }).provider;
   if (!inAppPlanActions(provider)) throw refused(409, "conflict", `Plans are cancelled and resumed in ${billingProviderNames[provider]}'s billing portal on this deployment.`);
   await lockBillingAccount(tx, input.businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, billingInterval: billingAccounts.billingInterval })
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, replacedSubscriptionId: billingAccounts.replacedSubscriptionId, subscriptionState: billingAccounts.subscriptionState, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, billingInterval: billingAccounts.billingInterval })
     .from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
   if (isManagedBillingAccount(account)) throw refused(409, "conflict", "This business is on a managed plan, billed directly by the operator.");
-  if (!account?.subscriptionId || !isLiveSubscriptionState(account.subscriptionState)) throw refused(404, "not_found", "This business has no live subscription.");
+  // One a prepaid pack replaced is being ended at the provider, so there's nothing left to cancel, resume or keep.
+  if (!account?.subscriptionId || isReplacedSubscription(account) || !isLiveSubscriptionState(account.subscriptionState)) throw refused(404, "not_found", "This business has no live subscription.");
   const nothing = nothingToChange(account, input.action);
   if (nothing) throw refused(409, "conflict", nothing);
   // Under the lock, so two clicks at once make one request.
@@ -56,6 +58,7 @@ export async function createBillingSubscriptionRequestInTransaction(
   const same = open.find((request) => request.target === input.action && request.requestedByUserId === input.userId);
   if (same) return { id: same.id, created: false };
   if (open.length) throw refused(409, "plan_change_pending", "Another plan change for this business is in progress. Try again in a minute.");
+  if (await openPackCheckout(tx, input.businessId)) throw refused(409, "plan_change_pending", OPEN_PURCHASE_REFUSAL);
   await input.checkLimit?.({ businessId: input.businessId, userId: input.userId });
   const [request] = await tx.insert(billingCheckoutRequests).values({
     businessId: input.businessId,

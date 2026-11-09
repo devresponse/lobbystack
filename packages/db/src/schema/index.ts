@@ -1758,7 +1758,11 @@ export const billingPackCheckouts = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     ...timestamps,
   },
-  (table) => [index("billing_pack_checkouts_business_idx").on(table.businessId, table.status, table.createdAt)],
+  (table) => [
+    index("billing_pack_checkouts_business_idx").on(table.businessId, table.status, table.createdAt),
+    // The billing sweep's open pack checkouts (0148's sweep section).
+    index("billing_pack_checkouts_open_idx").on(table.updatedAt).where(sql`${table.status} in ('pending', 'processing')`),
+  ],
 );
 
 export const billingPacks = pgTable(

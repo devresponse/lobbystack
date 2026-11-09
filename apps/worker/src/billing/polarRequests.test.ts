@@ -4,7 +4,7 @@
 // not change it; a later change to it says why in its commit.
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { PolarBillingProvider } from "@lobbystack/providers/polar/polarBilling";
-import { claimBillingCheckoutRequest, claimBillingUsageSync, confirmBillingUsageSync, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPlanChangeProration, loadPromoEndWork, markBillingCheckoutCreated, markBillingPlanChanged, polarProductLinks, readPolarProductLinks, recordDeletedBusinessPlanEnded, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
+import { claimBillingCheckoutRequest, claimBillingUsageSync, claimPackCheckout, confirmBillingUsageSync, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPackCheckoutRequest, loadPlanChangeProration, loadPromoEndWork, markBillingCheckoutCreated, markBillingPlanChanged, markPackCheckoutReady, polarProductLinks, readPolarProductLinks, recordDeletedBusinessPlanEnded, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lobbystack/shared", async (importOriginal) => (await import("./testing")).mockShared(importOriginal));
@@ -94,6 +94,37 @@ describe("the requests Polar receives", () => {
       answer("POST", "/v1/customers/", { id: "cus-billing", external_id: `business:${businessId}` }, 201);
       answer("POST", "/v1/checkouts/", { id: "checkout-3", url: "https://polar.test/checkout/3" }, 201);
       await expect(handleJob(job("billing.createCheckout", { requestId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
+      expect(recorded).toMatchSnapshot();
+    });
+  });
+
+  // A prepaid pack's one-time checkout, which the plans' requests above leave as they were.
+  describe("a pack's checkout", () => {
+    const checkoutId = "00000000-0000-4000-8000-0000000000d1";
+
+    beforeEach(() => {
+      vi.mocked(claimPackCheckout).mockResolvedValue({ claimed: true });
+      vi.mocked(markPackCheckoutReady).mockResolvedValue(true);
+    });
+
+    function packCheckout(extra: Record<string, unknown> = {}) {
+      return { id: checkoutId, businessId, pack: "minutes_500_90", priceId: "00000000-0000-4000-8000-0000000000e1", status: "processing", priceRef: "product-pack-500-90", customerEmail: "owner@example.com", billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: null, businessName: "Allo Salon", onboardingStage: "complete", ...extra };
+    }
+
+    it("for a new customer", async () => {
+      vi.mocked(loadPackCheckoutRequest).mockResolvedValue(packCheckout());
+      answer("GET", `/v1/customers/external/business%3A${businessId}`, { detail: "Not found" }, 404);
+      answer("POST", "/v1/customers/", { id: "cus-new", external_id: `business:${businessId}` }, 201);
+      answer("POST", "/v1/checkouts/", { id: "checkout-4", url: "https://polar.test/checkout/4" }, 201);
+      await expect(handleJob(job("billing.createPackCheckout", { checkoutId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
+      expect(recorded).toMatchSnapshot();
+    });
+
+    it("for a customer Polar has, from onboarding", async () => {
+      vi.mocked(loadPackCheckoutRequest).mockResolvedValue(packCheckout({ billingEmail: "billing@example.com", onboardingStage: "plan" }));
+      answer("GET", `/v1/customers/external/business%3A${businessId}`, { id: "cus-known", external_id: `business:${businessId}` });
+      answer("POST", "/v1/checkouts/", { id: "checkout-5", url: "https://polar.test/checkout/5" }, 201);
+      await expect(handleJob(job("billing.createPackCheckout", { checkoutId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
       expect(recorded).toMatchSnapshot();
     });
   });

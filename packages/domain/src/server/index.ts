@@ -8,6 +8,7 @@ export * from "./billingUsageTotals";
 export * from "./billingAccess";
 export * from "./billingCatalog";
 export * from "./billingCodes";
+export * from "./billingPackCheckout";
 export * from "./billingPacks";
 export * from "./billingPackExpiry";
 export * from "./billingPlans";

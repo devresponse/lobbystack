@@ -725,6 +725,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     case "billing.reconcile":
     case "billing.refreshUnitEconomics":
     case "billing.createCheckout":
+    case "billing.createPackCheckout":
     case "billing.endPromoPlan":
     case "billing.expirePacks":
     case "billing.revokeSubscription":

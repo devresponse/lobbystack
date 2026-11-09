@@ -93,7 +93,7 @@ describe("billing jobs: reconcile and the sweep", () => {
 
   describe("the billing sweep", () => {
     const job: JobEnvelope = { jobId: randomUUID(), type: "billing.sweep", queue: "maintenance", businessId: null, payload: {}, trace: {}, idempotencyKey: "billing-sweep", scheduled: true };
-    const counts = (values: Partial<Record<"provider_event" | "usage_event" | "checkout_request", number>> = {}) => ({ provider_event: 0, usage_event: 0, checkout_request: 0, ...values });
+    const counts = (values: Partial<Record<"provider_event" | "usage_event" | "checkout_request" | "pack_checkout", number>> = {}) => ({ provider_event: 0, usage_event: 0, checkout_request: 0, pack_checkout: 0, ...values });
     const lines = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
 
     it("does nothing out loud when no billing work waits", async () => {
@@ -136,6 +136,27 @@ describe("billing jobs: reconcile and the sweep", () => {
       await expect(handleJob(job, { domain: { db: undefined as never } })).rejects.toBe(failure);
       expect(lines(warn)).toEqual([expect.objectContaining({ message: "ops.billing.sweep", usageQueued: 3, failed: 1 })]);
       warn.mockRestore();
+    });
+
+    it("counts pack checkouts beside plan checkouts, and names them in the log only when a sweep found some", async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.mocked(sweepBillingWork).mockResolvedValueOnce({ queued: counts({ checkout_request: 1, pack_checkout: 2 }), overdue: counts({ pack_checkout: 1 }), failed: 0 });
+
+      expect(await handleJob(job, { domain: { db: undefined as never } })).toEqual({ status: "completed", entityId: "3:1" });
+      expect(lines(warn)).toEqual([expect.objectContaining({ message: "ops.billing.sweep", checkoutsQueued: 1, checkoutsExpired: 0, packCheckoutsQueued: 2, packCheckoutsExpired: 1 })]);
+      // A pack checkout that waited too long is someone who couldn't pay, as a plan's is.
+      expect(lines(error)).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/\] exception: Billing work waited longer than it should\.$/), operation: "job.billing.sweep", packCheckoutsExpired: 1 }));
+
+      // A sweep without pack checkouts logs what it logged before packs.
+      vi.mocked(sweepBillingWork).mockResolvedValueOnce({ queued: counts({ checkout_request: 1 }), overdue: counts(), failed: 0 });
+      expect(await handleJob(job, { domain: { db: undefined as never } })).toEqual({ status: "completed", entityId: "1:0" });
+      expect(Object.keys(lines(info)[0]!)).not.toContain("packCheckoutsQueued");
+      expect(Object.keys(lines(info)[0]!)).not.toContain("packCheckoutsExpired");
+      info.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
     });
   });
 });

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
-import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingPackCheckouts, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
@@ -169,7 +169,9 @@ export type BillingCheckoutLimit = (subject: { businessId: string; userId: strin
  * click or a retry asks Polar for nothing; created says which. A business that
  * pays through Polar changes plan one request at a time, so two admins at once
  * can't both change its subscription: another open request is a 409
- * plan_change_pending. checkLimit runs only before a new request is made.
+ * plan_change_pending. So is a pack checkout still being made, for any
+ * business (openPackCheckout). checkLimit runs only before a new request is
+ * made.
  */
 export async function createBillingCheckoutRequestInTransaction(
   tx: DatabaseTransaction,
@@ -178,7 +180,7 @@ export async function createBillingCheckoutRequestInTransaction(
 ): Promise<{ id: string; created: boolean }> {
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId, plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId, replacedSubscriptionId: billingAccounts.replacedSubscriptionId, plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
   if (isManagedBillingAccount(account)) throw Object.assign(new Error("This business is on a managed plan, billed directly by the operator."), { status: 409 });
   if (!input.promo && !standardCheckoutAllowed((await loadBillingContext(tx, input.businessId)).plan, input.target)) throw Object.assign(new Error(PAID_PLAN_CHECKOUT_REFUSAL), { status: 409 });
   // Under the lock, so two clicks at once make one request. One older than its 15 minutes fails rather than runs.
@@ -202,6 +204,8 @@ export async function createBillingCheckoutRequestInTransaction(
     )).limit(1);
     if (other) throw Object.assign(new Error("Another plan change for this business is in progress. Try again in a minute."), { status: 409, code: "plan_change_pending" });
   }
+  // One purchase at a time across plans and packs: a pack checkout still being made holds the business too.
+  if (await openPackCheckout(tx, input.businessId)) throw Object.assign(new Error(OPEN_PURCHASE_REFUSAL), { status: 409, code: "plan_change_pending" });
   await input.checkLimit?.({ businessId: input.businessId, userId: input.userId });
   // The account the subscription will land on, billed through the deployment's provider.
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}`, source: readBillingDeployment(env, { withSecret: false }).provider }).onConflictDoNothing({ target: billingAccounts.businessId });
@@ -228,11 +232,12 @@ export async function createBillingCheckoutRequestInTransaction(
 
 /**
  * Whether a business can buy a plan without a promo code: any plan while it is
- * free, and Pro from Starter, as the plan screens offer. Other changes to a
- * paid plan happen in Polar's billing portal.
+ * free or on a prepaid pack, which the subscription then replaces, and Pro
+ * from Starter, as the plan screens offer. Other changes to a paid plan
+ * happen in Polar's billing portal.
  */
 export function standardCheckoutAllowed(current: BillingPlanSlug, target: BillingCheckoutTarget): boolean {
-  return current === "free_cloud" || (current === "starter" && target === "pro");
+  return current === "free_cloud" || current === "prepaid" || (current === "starter" && target === "pro");
 }
 
 export const PAID_PLAN_CHECKOUT_REFUSAL = "This business already pays for a plan. Change it in the billing portal.";
@@ -248,9 +253,22 @@ export function isLiveSubscriptionState(state: string | null | undefined): boole
   return (liveSubscriptionStates as readonly string[]).includes(state ?? "");
 }
 
-/** Whether a business pays for Starter or Pro with a live Polar subscription, which a checkout request then changes instead of starting another. */
-function paysThroughPolar(account: { source: string | null; subscriptionState: string | null; subscriptionId: string | null; plan: string | null } | undefined): account is { source: string | null; subscriptionState: string; subscriptionId: string; plan: "starter" | "pro" } {
-  return Boolean(account?.subscriptionId) && account?.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account?.subscriptionState) && (account?.plan === "starter" || account?.plan === "pro");
+/**
+ * Whether a business pays for Starter or Pro with a live Polar subscription,
+ * which a checkout request then changes instead of starting another. One a
+ * prepaid pack replaced counts as ended while the provider confirms it.
+ */
+function paysThroughPolar(account: { source: string | null; subscriptionState: string | null; subscriptionId: string | null; replacedSubscriptionId: string | null; plan: string | null } | undefined): account is { source: string | null; subscriptionState: string; subscriptionId: string; replacedSubscriptionId: string | null; plan: "starter" | "pro" } {
+  return Boolean(account?.subscriptionId) && account?.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account?.subscriptionState) && !isReplacedSubscription(account) && (account?.plan === "starter" || account?.plan === "pro");
+}
+
+/**
+ * Whether the account's subscription is the one a prepaid pack replaced,
+ * which LobbyStack treats as ended while the provider confirms its end. False
+ * for every business that never switched to a pack.
+ */
+export function isReplacedSubscription(account: { subscriptionId: string | null; replacedSubscriptionId?: string | null } | null | undefined): boolean {
+  return Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
 }
 
 /** Whether a billing account is on a managed plan now. An ended managed plan keeps its source, for the finance export, but isn't live. */
@@ -282,6 +300,8 @@ export async function setManagedPlanInTransaction(tx: DatabaseTransaction, input
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}`, ...managed }).onConflictDoUpdate({ target: billingAccounts.businessId, set: { ...managed, updatedAt: now } });
   // Checkouts Polar hasn't made a page for yet would sell a plan the operator now bills, so they stop here.
   await tx.update(billingCheckoutRequests).set({ status: "canceled", error: "The business moved to a managed plan.", updatedAt: now }).where(and(eq(billingCheckoutRequests.businessId, input.businessId), inArray(billingCheckoutRequests.status, ["pending", "processing", "error"])));
+  // So do pack checkouts still being made.
+  await tx.update(billingPackCheckouts).set({ status: "failed", error: "The business moved to a managed plan.", updatedAt: now }).where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.status, ["pending", "processing"])));
   await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `billing:${input.businessId}:managed:${now.getTime()}`, payload: { type: "billing.updated", entityId: input.businessId } });
   return "set";
 }
@@ -353,6 +373,7 @@ export async function loadBillingCheckoutRequest(
       currentPlanCode: billingAccounts.planCode,
       currentInterval: billingAccounts.billingInterval,
       subscriptionState: billingAccounts.subscriptionState,
+      replacedSubscriptionId: billingAccounts.replacedSubscriptionId,
       source: billingAccounts.source,
       businessName: businesses.name,
       onboardingStage: businesses.onboardingStage,
@@ -363,8 +384,8 @@ export async function loadBillingCheckoutRequest(
       .where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId)))
       .limit(1))[0];
     if (!row || !isBillingCheckoutTarget(row.target) || !isBillingInterval(row.billingInterval)) return null;
-    const { billingKey, subscriptionId, plan, currentPlanCode, currentInterval, subscriptionState, source, ...request } = row;
-    const account = { subscriptionId, plan, subscriptionState, source };
+    const { billingKey, subscriptionId, plan, currentPlanCode, currentInterval, subscriptionState, replacedSubscriptionId, source, ...request } = row;
+    const account = { subscriptionId, plan, subscriptionState, replacedSubscriptionId, source };
     return {
       ...request,
       target: row.target,
@@ -388,6 +409,25 @@ export const BILLING_CHECKOUT_CLAIM_STALE_MS = 5 * 60_000;
  * request fails instead, and they can ask again.
  */
 export const BILLING_CHECKOUT_EXPIRES_MS = 15 * 60_000;
+
+/** A business's purchases go one at a time, across plan checkouts, subscription changes and pack checkouts. */
+export const OPEN_PURCHASE_REFUSAL = "Another purchase or plan change for this business is in progress. Try again in a minute.";
+
+/**
+ * Whether the business has a pack checkout still pending or processing, and
+ * younger than BILLING_CHECKOUT_EXPIRES_MS, which holds its plan checkouts
+ * and subscription changes (billingPackCheckout.ts makes them). A page
+ * already made doesn't count, so one left unpaid holds nothing. A business
+ * that never bought a pack has none.
+ */
+export async function openPackCheckout(tx: DatabaseTransaction, businessId: string): Promise<boolean> {
+  const [open] = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts).where(and(
+    eq(billingPackCheckouts.businessId, businessId),
+    inArray(billingPackCheckouts.status, ["pending", "processing"]),
+    gte(billingPackCheckouts.createdAt, new Date(Date.now() - BILLING_CHECKOUT_EXPIRES_MS)),
+  )).limit(1);
+  return Boolean(open);
+}
 
 /**
  * A claimed request, or one this run can't work on: retryAt says when the

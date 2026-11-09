@@ -10,7 +10,8 @@ import { stripeOveragePrices } from "./overage";
 // address and tax ID it needs. Promotion codes stay off: codes are
 // LobbyStack's own, sold through a plan's coupon. Sold with Stripe as the
 // merchant of record, overage is on the plan's own checkout: its three metered
-// prices go beside the plan's, and Managed Payments is on.
+// prices go beside the plan's, and Managed Payments is on. A prepaid pack
+// sells on a checkout of its own, in payment mode.
 
 /** How long a checkout page stays open. */
 export const STRIPE_CHECKOUT_TTL_SECONDS = 60 * 60;
@@ -48,6 +49,44 @@ export async function createStripeCheckout(api: StripeApi, input: Parameters<Bil
     ...(input.merchantOfRecord ? { managed_payments: { enabled: true } } : {}),
   };
   const session = await api.checkout.sessions.create(params, { idempotencyKey: `checkout:${input.requestId}:${expiresAt}` });
+  if (!session.url) throw new Error("Stripe made the checkout without a page to pay on.");
+  return { id: session.id, url: session.url, expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : null };
+}
+
+/**
+ * A one-time payment page for a prepaid pack: Checkout in payment mode for the
+ * pack's price, on the business's customer when it has one. Its metadata names
+ * the business, the pack checkout and the role pack, on the session and on
+ * the PaymentIntent Stripe makes for it, whose refunds and disputes name only
+ * the payment. Stripe directly computes the tax with Stripe Tax, from the
+ * address and tax ID it asks for, and sends an invoice. As the merchant of
+ * record, Stripe does both, and its guide leaves out automatic_tax,
+ * tax_id_collection, customer_update and invoice_creation. The expiry and
+ * idempotency key work as the plan checkout's.
+ */
+export async function createStripePackCheckout(api: StripeApi, input: Parameters<BillingProvider["createPackCheckout"]>[0], now = new Date()): ReturnType<BillingProvider["createPackCheckout"]> {
+  const metadata = { ...input.metadata, lobbystack_business: input.businessId, lobbystack_pack_checkout: input.checkoutId, lobbystack_role: "pack" };
+  const locale = stripeLocale(input.locale);
+  const expiresAt = (Math.floor(now.getTime() / 60_000) + 1) * 60 + STRIPE_CHECKOUT_TTL_SECONDS;
+  // The SDK's types don't name managed_payments yet; the API takes it.
+  const params: Stripe.Checkout.SessionCreateParams & { managed_payments?: { enabled: boolean } } = {
+    mode: "payment",
+    line_items: [{ price: input.price.ref, quantity: 1 }],
+    // Stripe directly keeps the address on the customer, where Stripe Tax reads it.
+    ...(input.customer.id ? { customer: input.customer.id, ...(input.merchantOfRecord ? {} : { customer_update: { address: "auto" as const, name: "auto" as const } }) } : { customer_email: input.email }),
+    client_reference_id: input.checkoutId,
+    metadata,
+    payment_intent_data: { metadata },
+    expires_at: expiresAt,
+    success_url: input.successUrl,
+    cancel_url: input.cancelUrl,
+    ...(locale ? { locale: locale as Stripe.Checkout.SessionCreateParams.Locale } : {}),
+    billing_address_collection: "required",
+    ...(input.merchantOfRecord
+      ? { managed_payments: { enabled: true } }
+      : { automatic_tax: { enabled: true }, tax_id_collection: { enabled: true }, invoice_creation: { enabled: true, invoice_data: { metadata } } }),
+  };
+  const session = await api.checkout.sessions.create(params, { idempotencyKey: `pack-checkout:${input.checkoutId}:${expiresAt}` });
   if (!session.url) throw new Error("Stripe made the checkout without a page to pay on.");
   return { id: session.id, url: session.url, expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : null };
 }

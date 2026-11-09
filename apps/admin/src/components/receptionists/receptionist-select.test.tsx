@@ -246,3 +246,40 @@ describe("for owners and admins", () => {
     expect(screen.getByRole("status")).toBeTruthy();
   });
 });
+
+describe("its open list", () => {
+  it("is drawn over the page, so a card that clips or scrolls neither cuts it off nor holds it", async () => {
+    const onChange = vi.fn();
+    render(<div data-testid="card" style={{ overflow: "auto" }}><Harness onChange={onChange} /></div>);
+    await userEvent.click(combobox());
+    const list = screen.getByRole("listbox");
+    expect(screen.getByTestId("card").contains(list)).toBe(false);
+    expect(list.parentElement!.className).toContain("fixed");
+    // A press inside the list isn't a click elsewhere.
+    fireEvent.pointerDown(options()[1]!);
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    await userEvent.click(options()[1]!);
+    expect(onChange).toHaveBeenCalledWith(KITSILANO.id);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("stays under the button inside a dialog, which handles its focus and clicks", async () => {
+    render(<div aria-label="Edit" data-testid="dialog" role="dialog"><Harness /></div>);
+    await userEvent.click(combobox());
+    expect(screen.getByTestId("dialog").contains(screen.getByRole("listbox"))).toBe(true);
+  });
+
+  it("leaves its search box with Tab for what follows the dropdown, and with Shift+Tab for the button", async () => {
+    render(<Harness receptionists={STORES} />);
+    await userEvent.click(combobox());
+    const search = screen.getByRole("combobox", { name: "Search receptionists" });
+    expect(document.activeElement).toBe(search);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(combobox());
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    await userEvent.click(search);
+    await userEvent.tab();
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next field" }));
+  });
+});

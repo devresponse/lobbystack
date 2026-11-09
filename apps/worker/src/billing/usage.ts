@@ -15,20 +15,28 @@ import { isMeteredUsageKind, overageKindOf } from "@lobbystack/providers/billing
  */
 export const METER_RESEND_WITHIN_MS = 20 * 60 * 60_000;
 
-/**
- * billing.syncUsage: sends a usage row's next event to the billing provider.
- * On a money meter (Stripe) the event carries the row's price, from its rate
- * as first claimed, and is dated by the grace rule (meterEventTime). Stripe
- * takes one event at a time per customer and meter, and answers another
- * with 429, which the job retries.
- */
+/** billing.syncUsage: sends a usage row's next event to the billing provider (sendBillingUsageEvent). */
 export async function syncBillingUsage(job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {
-  if (!dependencies.billing) {
-    return { status: "skipped", entityId: String(job.payload.usageEventId ?? "") };
-  }
   const usageEventId = String(job.payload.usageEventId ?? "");
+  if (!dependencies.billing) return { status: "skipped", entityId: usageEventId };
   if (!usageEventId) return { status: "skipped" };
-  const event = await loadBillingUsageEvent(dependencies.domain, { businessId: businessIdOrThrow(job), usageEventId });
+  return await sendBillingUsageEvent(dependencies, { businessId: businessIdOrThrow(job), usageEventId });
+}
+
+/**
+ * Sends a usage row's next event to the billing provider: billing.syncUsage
+ * for each final row, and billing.endPlanForPack for the rows still pending
+ * before it ends a subscription a prepaid pack replaced. On a money meter
+ * (Stripe) the event carries the row's price, from its rate as first claimed,
+ * and is dated by the grace rule (meterEventTime). Stripe takes one event at
+ * a time per customer and meter, and answers another with 429, which throws
+ * so the job retries.
+ */
+export async function sendBillingUsageEvent(dependencies: WorkerDependencies, input: { businessId: string; usageEventId: string }): Promise<JobResult> {
+  const { usageEventId } = input;
+  const billing = dependencies.billing;
+  if (!billing) return { status: "skipped", entityId: usageEventId };
+  const event = await loadBillingUsageEvent(dependencies.domain, { businessId: input.businessId, usageEventId });
   if (!event) return { status: "skipped", entityId: usageEventId };
   if (event.syncStatus === "synced" || event.syncStatus === "succeeded") return { status: "completed", entityId: event.id };
   if (event.syncStatus === "skipped" || !event.customerId || !event.isFinal) return { status: "skipped", entityId: event.id };
@@ -36,7 +44,7 @@ export async function syncBillingUsage(job: JobEnvelope, dependencies: WorkerDep
   const usageKind = isMeteredUsageKind(event.usageKind) ? event.usageKind : undefined;
   if (!usageKind) return { status: "skipped", entityId: event.id };
   // The row's next event: its billable quantity first, then each correction's difference.
-  const meterMoney = dependencies.billing.can.meterMoney;
+  const meterMoney = billing.can.meterMoney;
   const send = await claimBillingUsageSync(dependencies.domain, { businessId: event.businessId, usageEventId: event.id, ...(meterMoney ? { resendWithinMs: METER_RESEND_WITHIN_MS } : {}) });
   if (!send) return { status: "completed", entityId: event.id };
   const amountCents = meterMoney ? priceUsage(usageKind, send.quantity, send.rateCents ?? 0) : null;
@@ -53,7 +61,7 @@ export async function syncBillingUsage(job: JobEnvelope, dependencies: WorkerDep
     occurredAt = meterEventTime(event.createdAt, new Date(), selling.usageGraceHours, period);
   }
   try {
-    await dependencies.billing.reportUsage({
+    await billing.reportUsage({
       customer: { id: event.customerId, billingKey: event.billingKey },
       businessId: event.businessId,
       kind: overageKindOf(usageKind),

@@ -1334,6 +1334,8 @@ export async function reorderRulesForApi(context: DomainContext, caller: ApiCall
 
 // Receptionist settings
 
+const RECEPTIONIST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiReceptionistUpdate> = {
   greeting: "greeting",
   tone: "tone",
@@ -1350,19 +1352,20 @@ const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiRec
 };
 
 /**
- * The business's default receptionist, which the v1 receptionist resource is,
- * with the settings every receptionist shares. Every business has one from
- * the moment it exists (migration 0143), so none means the business is out of
- * sight.
+ * The receptionist the v1 receptionist resource is, with the settings every
+ * receptionist shares: the default one, or receptionistId's when it isn't
+ * archived. Every business has a default from the moment it exists
+ * (migration 0143), so none means the business is out of sight.
  */
-async function loadDefaultReceptionist(tx: DatabaseTransaction, businessId: string, lock: boolean): Promise<ReceptionistView> {
-  const receptionist = await loadReceptionistView(tx, { businessId, lock });
-  if (!receptionist) throw notFound("Business");
+async function loadSettingsReceptionist(tx: DatabaseTransaction, businessId: string, lock: boolean, receptionistId?: string | undefined): Promise<ReceptionistView> {
+  if (receptionistId !== undefined && !RECEPTIONIST_ID.test(receptionistId)) throw notFound("Receptionist");
+  const receptionist = await loadReceptionistView(tx, { businessId, lock, ...(receptionistId ? { receptionistId: receptionistId.toLowerCase() } : {}) });
+  if (!receptionist) throw notFound(receptionistId ? "Receptionist" : "Business");
   return receptionist;
 }
 
-export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller): Promise<ApiReceptionist> {
-  return await inBusiness(context, caller, async (tx) => serializeReceptionist(await loadDefaultReceptionist(tx, caller.businessId, false)));
+export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller, options: { receptionistId?: string | undefined } = {}): Promise<ApiReceptionist> {
+  return await inBusiness(context, caller, async (tx) => serializeReceptionist(await loadSettingsReceptionist(tx, caller.businessId, false, options.receptionistId)));
 }
 
 /**
@@ -1371,10 +1374,10 @@ export async function getReceptionistForApi(context: DomainContext, caller: ApiC
  * summary makes it the business's own, so AI won't replace it, even when the
  * text is the same.
  */
-export async function updateReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistUpdate): Promise<ApiReceptionist> {
+export async function updateReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistUpdate, options: { receptionistId?: string | undefined } = {}): Promise<ApiReceptionist> {
   if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    const current = await loadDefaultReceptionist(tx, caller.businessId, true);
+    const current = await loadSettingsReceptionist(tx, caller.businessId, true, options.receptionistId);
     const policy = input.appointment_change_policy;
     const requested: ReceptionistProfilePatch = {
       ...(input.greeting !== undefined ? { greeting: input.greeting } : {}),
@@ -1398,7 +1401,7 @@ export async function updateReceptionistForApi(context: DomainContext, caller: A
     const patch = Object.fromEntries(Object.entries(requested).filter(([field]) => !unchanged(field as keyof ReceptionistProfilePatch))) as ReceptionistProfilePatch;
     const regenerateSummary = input.regenerate_summary === true;
     if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(current);
-    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, patch, regenerateSummary });
+    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, receptionistId: current.id, patch, regenerateSummary });
     if (!profile) throw new Error("The receptionist settings could not be saved.");
     const fields = [...(Object.keys(patch) as Array<keyof ReceptionistProfilePatch>).map((field) => receptionistApiFields[field]), ...(regenerateSummary ? ["regenerate_summary"] : [])];
     await audit(tx, caller, { eventType: "api.receptionist.updated", entityType: "receptionist_profile", entityId: profile.id, payload: { fields } });
@@ -1408,7 +1411,6 @@ export async function updateReceptionistForApi(context: DomainContext, caller: A
 
 // Receptionists
 
-const RECEPTIONIST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RECEPTIONIST_PAGE_SIZE = 50;
 
 /** A receptionist as the v1 API shows it, with how many numbers, widget keys and QR links open it. */

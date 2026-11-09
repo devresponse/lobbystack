@@ -720,13 +720,14 @@ export function serializeCalendarConnection(row: { id: string; provider: string;
 const summarySources = ["placeholder", "generated", "operator"] as const;
 
 // The receptionist's own settings, with the ones every receptionist shares, which the business keeps.
-type ReceptionistRow = Pick<typeof receptionistProfiles.$inferSelect, "greeting" | "tone" | "bookingPolicy" | "voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferMode" | "transferNumber" | "bookingMode" | "updatedAt">
+type ReceptionistRow = Pick<typeof receptionistProfiles.$inferSelect, "id" | "greeting" | "tone" | "bookingPolicy" | "voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferMode" | "transferNumber" | "bookingMode" | "updatedAt">
   & Pick<typeof businesses.$inferSelect, "summary" | "summarySource" | "appointmentChangePolicy" | "recordingNotice">;
 
 /** Shows the settings as calls use them: a transfer mode, booking mode or policy calls don't know reads as what they fall back to. */
 export function serializeReceptionist(row: ReceptionistRow): ApiReceptionist {
   const policy = normalizeAppointmentChangePolicy(row.appointmentChangePolicy);
   return {
+    receptionist_id: row.id,
     greeting: row.greeting,
     tone: row.tone,
     summary: row.summary,

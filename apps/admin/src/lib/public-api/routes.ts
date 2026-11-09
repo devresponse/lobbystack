@@ -330,6 +330,12 @@ function textParam(request: Request, name: string, maxLength: number): string | 
   return value;
 }
 
+/** ?receptionist_id=, a receptionist the request is about; absent means the default one. */
+function receptionistQuery(request: Request): string | undefined {
+  const value = queryParam(request, "receptionist_id");
+  return value === undefined ? undefined : uuidParam(value, "receptionist_id");
+}
+
 function booleanParam(request: Request, name: string): boolean | undefined {
   const value = queryParam(request, name);
   if (value === undefined) return undefined;
@@ -512,8 +518,11 @@ export const v1 = {
     return { body: data({ id: ruleId, deleted: true }) };
   }),
   reorderRules: (request: Request) => handleApiRequest(request, "reorderRules", async ({ context, caller }) => ({ body: { data: await reorderRulesForApi(context, caller, await readApiBody(request, apiRuleReorderSchema)), next_cursor: null, has_more: false } })),
-  getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller)) })),
-  updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => ({ body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema))) })),
+  getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller, { receptionistId: receptionistQuery(request) })) })),
+  updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => {
+    const receptionistId = receptionistQuery(request);
+    return { body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema), { receptionistId })) };
+  }),
   listReceptionists: (request: Request) => handleApiRequest(request, "listReceptionists", async ({ context, caller }) => ({ body: { data: await listReceptionistsForApi(context, caller, { archived: booleanParam(request, "archived") }), next_cursor: null, has_more: false } })),
   createReceptionist: (request: Request) => handleApiRequest(request, "createReceptionist", async ({ context, caller }) => ({ body: data(await createReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistCreateSchema))) })),
   reorderReceptionists: (request: Request) => handleApiRequest(request, "reorderReceptionists", async ({ context, caller }) => ({ body: { data: await reorderReceptionistsForApi(context, caller, await readApiBody(request, apiReceptionistReorderSchema)), next_cursor: null, has_more: false } })),

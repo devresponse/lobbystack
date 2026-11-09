@@ -130,6 +130,7 @@ const receptionistText = z.string().trim().min(1).max(RECEPTIONIST_TEXT_MAX_LENG
 const receptionistInstructions = z.string().trim().min(1).max(RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH).nullable();
 
 export const apiReceptionistSchema = z.object({
+  receptionist_id: id.describe("The receptionist these settings are. summary, recording_notice and appointment_change_policy are the business's, the same for every receptionist."),
   greeting: z.string().describe("What the receptionist says when it answers."),
   tone: z.string().describe("How it speaks, such as professional or warm."),
   summary: z.string().describe("What it tells callers the business does. Calls leave it out while summary_source is placeholder."),

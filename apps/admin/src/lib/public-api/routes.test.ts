@@ -1382,11 +1382,22 @@ describe("receptionist settings", () => {
     expect(await response.json()).toEqual({ data: receptionist });
   });
 
+  it("reads and changes another receptionist's settings with receptionist_id, which must be an id", async () => {
+    const id = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+    domain.getReceptionistForApi.mockResolvedValue(receptionist);
+    domain.updateReceptionistForApi.mockResolvedValue(receptionist);
+    expect((await v1.getReceptionist(call(`/receptionist?receptionist_id=${id}`))).status).toBe(200);
+    expect(domain.getReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { receptionistId: id });
+    expect((await v1.updateReceptionist(call(`/receptionist?receptionist_id=${id}`, { method: "PATCH", body: JSON.stringify({ greeting: "Hello." }) }))).status).toBe(200);
+    expect(domain.updateReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { greeting: "Hello." }, { receptionistId: id });
+    expect((await v1.getReceptionist(call("/receptionist?receptionist_id=front-desk"))).status).toBe(400);
+  });
+
   it("passes the checked fields through and refuses anything the dashboard would refuse", async () => {
     domain.updateReceptionistForApi.mockResolvedValue({ ...receptionist, greeting: "Hello." });
     const response = await v1.updateReceptionist(call("/receptionist", { method: "PATCH", body: JSON.stringify({ greeting: " Hello. ", booking_mode: "request", transfer_number: "+14165550134" }) }));
     expect(response.status).toBe(200);
-    expect(domain.updateReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { greeting: "Hello.", booking_mode: "request", transfer_number: "+14165550134" });
+    expect(domain.updateReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { greeting: "Hello.", booking_mode: "request", transfer_number: "+14165550134" }, { receptionistId: undefined });
     for (const bad of [{ transfer_mode: "sometimes" }, { summary: "Mine.", regenerate_summary: true }, { greeting: "" }, { appointment_change_policy: { enabled: false } }, { locale: "fr" }]) {
       expect((await v1.updateReceptionist(call("/receptionist", { method: "PATCH", body: JSON.stringify(bad) }))).status).toBe(400);
     }

@@ -773,7 +773,7 @@
       "get": {
         "operationId": "getReceptionist",
         "summary": "Get the receptionist settings",
-        "description": "How the receptionist greets callers, what it says about the business, when it transfers calls and what it may book.",
+        "description": "How the receptionist greets callers, what it says about the business, when it transfers calls and what it may book: the default receptionist's, or another's with receptionist_id.",
         "tags": [
           "Receptionist"
         ],
@@ -784,6 +784,15 @@
         ],
         "x-required-scope": "business:read",
         "parameters": [
+          {
+            "name": "receptionist_id",
+            "in": "query",
+            "description": "The receptionist whose settings these are, from GET /receptionists. Left out, the default receptionist's.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "name": "LobbyStack-Business",
             "in": "header",
@@ -876,7 +885,7 @@
       "patch": {
         "operationId": "updateReceptionist",
         "summary": "Update the receptionist settings",
-        "description": "Changes the fields sent and leaves the rest. Calls and chats pick up the change once the business snapshot refreshes. The business default caller language is locale on PATCH /business.",
+        "description": "Changes the fields sent and leaves the rest: the default receptionist's, or another's with receptionist_id. summary, recording_notice and appointment_change_policy are the business's, so they change for every receptionist. Calls and chats pick up the change once the business snapshot refreshes. The business default caller language is locale on PATCH /business; another receptionist's is locale on PATCH /receptionists/{receptionist_id}.",
         "tags": [
           "Receptionist"
         ],
@@ -887,6 +896,15 @@
         ],
         "x-required-scope": "business:write",
         "parameters": [
+          {
+            "name": "receptionist_id",
+            "in": "query",
+            "description": "The receptionist whose settings these are, from GET /receptionists. Left out, the default receptionist's.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "name": "LobbyStack-Business",
             "in": "header",
@@ -23712,6 +23730,11 @@
       "Receptionist": {
         "type": "object",
         "properties": {
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist these settings are. summary, recording_notice and appointment_change_policy are the business's, the same for every receptionist."
+          },
           "greeting": {
             "type": "string",
             "description": "What the receptionist says when it answers."
@@ -23829,6 +23852,7 @@
           }
         },
         "required": [
+          "receptionist_id",
           "greeting",
           "tone",
           "summary",

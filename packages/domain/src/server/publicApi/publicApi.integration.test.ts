@@ -705,6 +705,15 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await expectApiError(reorderReceptionistsForApi(context, caller, { receptionist_ids: [kits.id] }), 400, "invalid_request");
       await expectApiError(getReceptionistProfileForApi(context, b.caller, kits.id), 404, "not_found");
 
+      // Each receptionist has its own greeting; the summary and the recording notice are the business's.
+      const frontSettings = await getReceptionistForApi(context, caller, { receptionistId: front!.id });
+      expect(frontSettings.receptionist_id).toBe(front!.id);
+      const kitsSettings = await updateReceptionistForApi(context, caller, { greeting: "Bonjour, clinique de Kitsilano.", recording_notice: false }, { receptionistId: kits.id });
+      expect(kitsSettings).toMatchObject({ receptionist_id: kits.id, greeting: "Bonjour, clinique de Kitsilano.", recording_notice: false });
+      expect(await getReceptionistForApi(context, caller, { receptionistId: front!.id })).toMatchObject({ greeting: frontSettings.greeting, recording_notice: false });
+      expect((await getReceptionistForApi(context, caller)).receptionist_id).toBe(kits.id);
+      await expectApiError(getReceptionistForApi(context, b.caller, { receptionistId: kits.id }), 404, "not_found");
+
       // The plan's 5 active receptionists: a sixth is refused.
       for (const name of ["Gastown", "Yaletown", "Kerrisdale"]) await createReceptionistForApi(context, caller, { name });
       await expectApiError(createReceptionistForApi(context, caller, { name: "Main Street" }), 409, "conflict");

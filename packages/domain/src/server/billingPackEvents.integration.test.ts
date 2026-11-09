@@ -369,6 +369,17 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
     });
   });
 
+  it("finds a Stripe pack by LobbyStack's own price id, which the worker puts on the payment, when it names no pack checkout", async () => {
+    await rollbackTest(async (tx) => {
+      const { stripePriceId } = await catalog(tx);
+      const businessId = await business(tx);
+      // The price id is a uuid, as a Polar product's is, but on Stripe it names LobbyStack's own row. The code names no pack, so only the price can.
+      const payload = { ...stripeSession(businessId, { paymentRef: "pi_own_price_1" }), packCode: "pack_missing", packPriceRef: stripePriceId };
+      await expect(reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.completed", payload }))).resolves.toBe("processed");
+      expect(await packsOf(tx, businessId)).toMatchObject([{ pack: "pack_events_stripe", providerRef: "pi_own_price_1", status: "active", priceId: stripePriceId }]);
+    });
+  });
+
   it("adds a pack from a Polar order for a pack's product with the order's refunds, and leaves orders for other products alone", async () => {
     await rollbackTest(async (tx) => {
       const { polarPriceId } = await catalog(tx);

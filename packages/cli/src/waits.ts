@@ -22,7 +22,7 @@ export const checkoutWait: WaitSpec = {
 };
 
 // A plan the business bought started while the pack's checkout was open, which closed it. Another checkout's pack would
-// end that plan, so the CLI doesn't suggest one.
+// end a monthly plan, and a yearly one refuses it, so the CLI doesn't suggest one.
 const closedForPlan = (data: Row) => typeof data.error === "string" && data.error.trim() === PACK_CHECKOUT_CLOSED_FOR_PLAN;
 
 export const packCheckoutWait: WaitSpec = {
@@ -30,7 +30,7 @@ export const packCheckoutWait: WaitSpec = {
   param: "checkout_id",
   done: (data) => ["ready", "paid", "failed", "expired"].includes(String(data.status)),
   failed: (data) => (data.status !== "failed" && data.status !== "expired" ? undefined
-    : closedForPlan(data) ? "A plan the business bought started, so the pack's checkout closed. A pack bought now would end that plan."
+    : closedForPlan(data) ? "A plan the business bought started, so the pack's checkout closed. A pack bought now would end a monthly plan; a yearly one has to end first."
     : data.status === "failed" ? `The pack's checkout failed: ${reason(data)}. Start another checkout.`
     : `The pack's checkout expired: ${reason(data)}. Start another checkout.`),
 };

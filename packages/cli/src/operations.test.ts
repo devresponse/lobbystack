@@ -129,11 +129,11 @@ describe("one command per endpoint", () => {
       expect(result.out).toContain(sentence);
     }
 
-    const planFirst = "A plan the business bought started, so the pack's checkout closed. A pack bought now would end that plan.";
+    const planFirst = "A plan the business bought started, so the pack's checkout closed. A pack bought now would end a monthly plan; a yearly one has to end first.";
     for (const [status, error, message] of [
       ["failed", "Polar checkout creation failed.", "The pack's checkout failed: Polar checkout creation failed. Start another checkout."],
       ["expired", "This request waited too long to run.", "The pack's checkout expired: This request waited too long to run. Start another checkout."],
-      // A plan's start closed it, which no provider failed: another checkout's pack would end that plan.
+      // A plan's start closed it, which no provider failed: another checkout's pack would end a monthly plan.
       ["failed", PACK_CHECKOUT_CLOSED_FOR_PLAN, planFirst],
       ["expired", PACK_CHECKOUT_CLOSED_FOR_PLAN, planFirst],
     ] as const) {

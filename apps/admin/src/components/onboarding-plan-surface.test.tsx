@@ -317,6 +317,41 @@ describe("prepaid packs during onboarding", () => {
     expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "attribution" })]);
   });
 
+  it("reads billing again after the payment rather than joining a read that began before it", async () => {
+    route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    // Billing isn't loaded yet, so the page's first read goes out beside the checkout's. It read the plan before the
+    // payment, Free without a number, and answers only after the checkout says paid.
+    const billing = (body: Record<string, unknown>) => Response.json({ checkoutAvailable: true, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly", "annual"] }, plans: builtInBillingPlanList(), ...body });
+    let answerFirst: () => void = () => undefined;
+    let billingReads = 0;
+    let checkoutReads = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
+      if (url.startsWith("/api/billing/packs/checkout?")) {
+        checkoutReads += 1;
+        return Response.json({ status: "paid", checkoutUrl: null, error: null, synced: true, refusal: null, providerName: "Stripe" });
+      }
+      if (url.startsWith("/api/billing?")) {
+        billingReads += 1;
+        if (billingReads > 1) return billing({ effectivePlan: "prepaid", limits: { includedBusinessNumbers: 1 } });
+        await new Promise<void>((resolve) => { answerFirst = resolve; });
+        return billing({ effectivePlan: "free_cloud", limits: { includedBusinessNumbers: 0 } });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<StrictMode><QueryClientProvider client={client}><OnboardingPlanSurface /></QueryClientProvider></StrictMode>);
+    await waitFor(() => expect(checkoutReads).toBeGreaterThan(0));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    answerFirst();
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalled());
+    expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number");
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    expect(billingReads).toBe(2);
+  });
+
   it("goes on to the number step when billing can't be read again after the payment", async () => {
     const fetchMock = renderReturn({ status: "paid" }, "free_cloud");
     const served = fetchMock.getMockImplementation()!;

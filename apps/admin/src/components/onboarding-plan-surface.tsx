@@ -149,10 +149,13 @@ export function OnboardingPlanSurface() {
         telemetry.track("web.onboarding.plan_checkout_completed", { businessId: business.businessId, plan: "prepaid" });
       }
       const businessId = business.businessId;
+      const billingKey = ["billing", businessId];
       // The next step depends on whether the plan in force now, the pack or the plan it gave way to, includes a
       // number. Billing is read again for it, since the answer from before the payment shows the plan the business
-      // had then; if that read fails, the number step is the guess, as before.
-      const next = queryClient.fetchQuery({ queryKey: ["billing", businessId], queryFn: () => requestJson<BillingStatus>(billingUrl(businessId)), staleTime: 0 })
+      // had then: a read still in flight, which may have begun before the payment, is cancelled rather than joined.
+      // If the new read fails, the number step is the guess, as before.
+      const next = queryClient.cancelQueries({ queryKey: billingKey, exact: true })
+        .then(() => queryClient.fetchQuery({ queryKey: billingKey, queryFn: () => requestJson<BillingStatus>(billingUrl(businessId)), staleTime: 0 }))
         .then((latest) => latest.limits?.includedBusinessNumbers === 0 ? "attribution" as const : "phone_number" as const, () => "phone_number" as const);
       packReturnAttempt.current = { key, promise: next.then(async (to) => {
         await requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ to }) });

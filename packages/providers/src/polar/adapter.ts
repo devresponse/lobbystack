@@ -136,6 +136,24 @@ export class PolarBilling implements BillingProvider {
     return { id: checkout.checkoutId, url: checkout.checkoutUrl, expiresAt: null };
   }
 
+  /**
+   * The plan checkout's request for the pack's one-time product, with
+   * metadata naming the business, the pack checkout and the role pack.
+   * Polar's answer doesn't say when its page expires.
+   */
+  async createPackCheckout(input: Parameters<BillingProvider["createPackCheckout"]>[0]): Promise<{ id: string; url: string; expiresAt: Date | null }> {
+    if (!this.client.createCheckout) throw this.unsupported("make a checkout");
+    const checkout = await this.client.createCheckout({
+      productId: input.price.ref,
+      customer: input.customer.id ? { id: input.customer.id } : { email: input.email, externalId: input.customer.billingKey },
+      metadata: { ...input.metadata, lobbystack_business: input.businessId, lobbystack_pack_checkout: input.checkoutId, lobbystack_role: "pack" },
+      successUrl: input.successUrl,
+      // Someone leaving checkout hasn't paid, so it returns to the plan page without the success marker.
+      returnUrl: input.cancelUrl,
+    });
+    return { id: checkout.checkoutId, url: checkout.checkoutUrl, expiresAt: null };
+  }
+
   async getSubscription(id: string): Promise<ProviderSubscription | null> {
     if (!this.client.getSubscription) return null;
     const subscription = await this.client.getSubscription(id);

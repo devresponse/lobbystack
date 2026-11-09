@@ -218,6 +218,49 @@ exports[`the requests Polar receives > ending a deleted business's plan 1`] = `
 ]
 `;
 
+exports[`the requests Polar receives > ending a plan a prepaid pack replaced, after its pending usage 1`] = `
+[
+  {
+    "body": {
+      "events": [
+        {
+          "external_customer_id": "business-key",
+          "external_id": "voice:call-1",
+          "metadata": {
+            "businessId": "00000000-0000-4000-8000-0000000000b1",
+            "quantity": 1.5833333333333333,
+            "usageKind": "voice_seconds",
+          },
+          "name": "billing.voice_minutes",
+          "timestamp": "2099-11-08T10:30:00.000Z",
+        },
+      ],
+    },
+    "method": "POST",
+    "path": "/v1/events/ingest",
+  },
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "cancel_at_period_end": true,
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "current_billing_period_end": "2099-11-08T12:05:00.000Z",
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
 exports[`the requests Polar receives > usage > a call's seconds 1`] = `
 [
   {

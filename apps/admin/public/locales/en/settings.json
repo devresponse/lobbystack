@@ -663,7 +663,7 @@
         "checkoutExpired": "The payment page expired. Try again.",
         "gaveWay": "A plan started before this payment arrived, so no pack was added. The payment will be refunded.",
         "refundedFirst": "This payment was refunded or charged back, so no pack was added.",
-        "closedForPlan": "A plan started for this business, so the pack's payment page closed."
+        "closedForPlan": "A plan started for this business, so this pack's checkout closed."
       }
     },
     "transactions": {

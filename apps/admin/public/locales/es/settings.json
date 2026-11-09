@@ -687,7 +687,7 @@
         "checkoutExpired": "La página de pago caducó. Inténtelo de nuevo.",
         "gaveWay": "Un plan comenzó antes de que llegara este pago, así que no se agregó ningún paquete de minutos. Se le reembolsará el pago.",
         "refundedFirst": "Este pago se reembolsó o se anuló por un contracargo, así que no se agregó ningún paquete de minutos.",
-        "closedForPlan": "Comenzó un plan para este negocio, así que se cerró la página de pago del paquete de minutos."
+        "closedForPlan": "Comenzó un plan para este negocio, así que se cerró el pago de este paquete de minutos."
       }
     },
     "transactions": {

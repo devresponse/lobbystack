@@ -216,27 +216,29 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
 describe("prepaid packs during onboarding", () => {
   const offer = (code: string, minutes: number, days: number | null, checkoutAvailable = true) => ({ code, names: { en: code }, minutes, voiceSeconds: minutes * 60, days, amountCents: 9_900, currency: "cad", smsSegments: 50, outboundCalls: 20, chatUnits: 50, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable });
   const onSale = { packOffers: [offer("pack-500-180", 500, 180), offer("pack-500-365", 500, 365)], packCheckout: { refusal: null, endsSubscription: null } };
-  /** The pack checkout's answers: the POST's checkout, then what its GET reads. */
-  function servePacks(status: Record<string, unknown>) {
+  /** The pack checkout's answers: the POST's checkout, then what its GET reads, and billing as it reads after the payment. */
+  function servePacks(status: Record<string, unknown>, billingNow: Record<string, unknown> = { effectivePlan: "prepaid", limits: { includedBusinessNumbers: 1 } }) {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
       if (url === "/api/billing/packs/checkout" && init?.method === "POST") return Response.json({ checkoutId: "pc-1" }, { status: 202 });
       if (url.startsWith("/api/billing/packs/checkout?")) return Response.json({ checkoutUrl: null, error: null, synced: status.status === "paid", refusal: null, providerName: "Stripe", ...status });
+      if (url.startsWith("/api/billing?")) return Response.json({ checkoutAvailable: true, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly", "annual"] }, plans: builtInBillingPlanList(), ...billingNow });
       throw new Error(`Unexpected request ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
   }
   /** Back from a pack's payment page, with its checkout reading status from the first request. */
-  function renderReturn(status: Record<string, unknown>, effectivePlan = "free_cloud") {
+  function renderReturn(status: Record<string, unknown>, effectivePlan = "free_cloud", billingNow?: Record<string, unknown>) {
     route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
     client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly", "annual"] }, plans: builtInBillingPlanList() });
-    const fetchMock = servePacks(status);
+    const fetchMock = servePacks(status, billingNow);
     render(<StrictMode><QueryClientProvider client={client}><OnboardingPlanSurface /></QueryClientProvider></StrictMode>);
     return fetchMock;
   }
+  const stageMoves = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/onboarding/stage?")).map(([, init]) => (init as RequestInit | undefined)?.body);
 
   it("offers no pack when none is on sale, as before packs", () => {
     setup();
@@ -290,12 +292,37 @@ describe("prepaid packs during onboarding", () => {
   });
 
   it("goes on to the number step without the pack when a plan bought meanwhile came first, and says the pack wasn't added", async () => {
-    const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "starter");
+    const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "starter", { effectivePlan: "starter", limits: { includedBusinessNumbers: 1 } });
     await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
     expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
-    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/api/onboarding/stage?")).map(([, init]) => init?.body)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
     // The plan's own checkout reported its purchase; the pack's never arrived as one.
     expect(telemetryRef.current!.events.filter((event) => event.name === "web.onboarding.plan_checkout_completed")).toHaveLength(0);
+  });
+
+  it("goes past the number step after paying for a pack that includes no number, reading the plan in force after the payment", async () => {
+    // Billing read before the payment still says Free, which has a number step: the step follows the pack's limits instead.
+    const fetchMock = renderReturn({ status: "paid" }, "free_cloud", { effectivePlan: "prepaid", limits: { includedBusinessNumbers: 0 } });
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/attribution"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "attribution" })]);
+    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+    expect(fetchMock).toHaveBeenCalledWith("/api/billing?businessId=business", expect.anything());
+    telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "prepaid" });
+  });
+
+  it("goes past the number step when a pack gave way to a promo plan that includes no number", async () => {
+    const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "free_cloud", { effectivePlan: "starter", limits: { includedBusinessNumbers: 0 } });
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/attribution"));
+    expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "attribution" })]);
+  });
+
+  it("goes on to the number step when billing can't be read again after the payment", async () => {
+    const fetchMock = renderReturn({ status: "paid" }, "free_cloud");
+    const served = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url.startsWith("/api/billing?") ? Response.json({ error: "Unavailable" }, { status: 503 }) : served(url, init));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
   });
 
   it("says a pack's payment was refunded before it arrived and shows the plans again", async () => {

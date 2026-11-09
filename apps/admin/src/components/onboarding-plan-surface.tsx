@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { brandLinks, contactEmailFor, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -37,6 +37,8 @@ const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
 ];
 
 const REPORTED_CHECKOUT_KEY = "lobbystack.onboarding.checkoutReported";
+
+const billingUrl = (businessId: string) => `/api/billing?businessId=${encodeURIComponent(businessId)}`;
 
 /**
  * The funnel should count checkouts, not visits to the return URL. A ref only
@@ -74,13 +76,14 @@ export function OnboardingPlanSurface() {
   // A checkout Polar couldn't make this business's customer for starts again with a billing email.
   const [emailPrompt, setEmailPrompt] = useState<{ refusal: BillingEmailRefusal; email: string | null; target: "starter" | "pro" } | null>(null);
   const returnAttempt = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
-  const packReturnAttempt = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
+  const packReturnAttempt = useRef<{ key: string; promise: Promise<"attribution" | "phone_number"> } | null>(null);
   const [chosenPack, setChosenPack] = useState<string | null>(null);
   const [confirmingPack, setConfirmingPack] = useState(false);
   // A pack's payment that came back failed, or refunded before it arrived: the plans to choose from again, with why.
   const [packReturnFailed, setPackReturnFailed] = useState<"failed" | "refunded" | null>(null);
   const { business } = useActiveBusiness();
-  const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<BillingStatus>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business) });
+  const queryClient = useQueryClient();
+  const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<BillingStatus>(billingUrl(business!.businessId)), enabled: Boolean(business) });
   const checkout = useQuery({
     queryKey: ["onboarding-checkout", business?.businessId, checkoutRequestId],
     queryFn: () => requestJson<Checkout>(`/api/billing/checkout?businessId=${encodeURIComponent(business!.businessId)}&requestId=${encodeURIComponent(checkoutRequestId!)}`),
@@ -130,7 +133,8 @@ export function OnboardingPlanSurface() {
     return () => { cancelled = true; };
   }, [business, returnRequestId, returnedCheckout.data?.synced, returnedCheckout.data?.target, router, telemetry]);
   // A prepaid pack bought here: its checkout, then the return from its payment page, which waits for the
-  // payment, counts the checkout once, and moves on to the number step as a paid plan does.
+  // payment, counts the checkout once, and moves on to the number step as a paid plan does, or past it for
+  // a plan in force without a number, as Continue does.
   const packCheckout = usePackCheckout(business?.businessId);
   const packReturnId = searchParams.get("pack") === "success" ? searchParams.get("packCheckoutId") : null;
   const packReturn = usePackCheckoutReturn(business?.businessId, packReturnId);
@@ -144,14 +148,23 @@ export function OnboardingPlanSurface() {
         markCheckoutReported(key);
         telemetry.track("web.onboarding.plan_checkout_completed", { businessId: business.businessId, plan: "prepaid" });
       }
-      packReturnAttempt.current = { key, promise: requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", body: JSON.stringify({ to: "phone_number" }) }) };
+      const businessId = business.businessId;
+      // The next step depends on whether the plan in force now, the pack or the plan it gave way to, includes a
+      // number. Billing is read again for it, since the answer from before the payment shows the plan the business
+      // had then; if that read fails, the number step is the guess, as before.
+      const next = queryClient.fetchQuery({ queryKey: ["billing", businessId], queryFn: () => requestJson<BillingStatus>(billingUrl(businessId)), staleTime: 0 })
+        .then((latest) => latest.limits?.includedBusinessNumbers === 0 ? "attribution" as const : "phone_number" as const, () => "phone_number" as const);
+      packReturnAttempt.current = { key, promise: next.then(async (to) => {
+        await requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ to }) });
+        return to;
+      }) };
     }
     let cancelled = false;
-    void packReturnAttempt.current.promise.then(() => {
-      if (!cancelled) router.replace("/onboarding/number");
+    void packReturnAttempt.current.promise.then((to) => {
+      if (!cancelled) router.replace(to === "attribution" ? "/onboarding/attribution" : "/onboarding/number");
     }).catch(() => { if (!cancelled) packReturnAttempt.current = null; });
     return () => { cancelled = true; };
-  }, [billingT, business, packReturnId, packReturn.outcome, router, telemetry]);
+  }, [billingT, business, packReturnId, packReturn.outcome, queryClient, router, telemetry]);
   useEffect(() => {
     // A payment that failed, or went back before it arrived, leaves the plans to choose from again, under a clean address.
     if (packReturn.outcome !== "failed" && packReturn.outcome !== "refunded") return;

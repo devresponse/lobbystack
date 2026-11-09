@@ -165,7 +165,8 @@ export function usePackCheckout(businessId: string | undefined) {
  * What a return from the provider's payment page comes to: still waiting,
  * paid, failed, or paid but not arrived yet; replaced or refunded when the
  * payment arrived but its pack ended at once, because a plan the business
- * bought started first, or the payment went back first.
+ * bought started first, or the payment went back first. replaced also
+ * covers a page that plan's start closed, whose payment hasn't arrived yet.
  */
 export type PackCheckoutReturn = "waiting" | "paid" | "failed" | "processing" | "replaced" | "refunded";
 
@@ -174,8 +175,12 @@ export type PackCheckoutReturn = "waiting" | "paid" | "failed" | "processing" | 
  * from, for PLAN_CHANGE_SYNC_MS at most: a bank debit settles later, so the
  * page then says the payment is processing. A page that expired reads as
  * processing too, since the provider sends the person back only once they
- * paid, and a payment can land after its page expired. checkAgain waits once
- * more. The outcome is null without a checkout.
+ * paid, and a payment can land after its page expired. A page that a plan's
+ * start closed is waited on as well, since Polar's page, or Stripe's before
+ * its close, still takes the payment: it reads replaced once the payment
+ * arrives, its pack giving way to that plan, or when the wait runs out, since
+ * the same comes of it then. checkAgain waits once more. The outcome is null
+ * without a checkout.
  */
 export function usePackCheckoutReturn(businessId: string | undefined, checkoutId: string | null): { outcome: PackCheckoutReturn | null; checkAgain: () => void } {
   const [round, setRound] = useState(0);
@@ -185,7 +190,10 @@ export function usePackCheckoutReturn(businessId: string | undefined, checkoutId
     queryKey: ["billing-pack-checkout-return", businessId, checkoutId, round],
     enabled: Boolean(wait) && timedOut !== wait,
     queryFn: () => requestJson<PackCheckoutStatus>(statusUrl(businessId!, checkoutId!)),
-    refetchInterval: (query) => ["paid", "failed", "expired"].includes(query.state.data?.status ?? "") ? false : 1_500,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.status === "paid" || data?.status === "failed" || (data?.status === "expired" && !data.closedForPlan) ? false : 1_500;
+    },
   });
   useEffect(() => {
     if (!wait) return;
@@ -194,6 +202,12 @@ export function usePackCheckoutReturn(businessId: string | undefined, checkoutId
   }, [wait]);
   const current = status.data?.status;
   const ended = status.data?.packStatus === "replaced" || status.data?.packStatus === "refunded" ? status.data.packStatus : null;
-  const outcome: PackCheckoutReturn | null = !wait ? null : current === "paid" ? ended ?? "paid" : current === "failed" ? "failed" : current === "expired" || timedOut === wait ? "processing" : "waiting";
+  const closedForPlan = current === "expired" && status.data?.closedForPlan === true;
+  const outcome: PackCheckoutReturn | null = !wait ? null
+    : current === "paid" ? ended ?? "paid"
+    : current === "failed" ? "failed"
+    : closedForPlan ? (timedOut === wait ? "replaced" : "waiting")
+    : current === "expired" || timedOut === wait ? "processing"
+    : "waiting";
   return { outcome, checkAgain: () => setRound((value) => value + 1) };
 }

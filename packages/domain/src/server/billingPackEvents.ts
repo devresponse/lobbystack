@@ -144,9 +144,15 @@ export async function packsGiveWayToSubscriptionInTransaction(tx: DatabaseTransa
  * hear of it. A business that never bought a pack has none.
  */
 async function closePackCheckoutsForPlan(tx: DatabaseTransaction, input: { businessId: string; at: Date }): Promise<void> {
+  const openStatuses = ["pending", "processing", "ready"];
+  // Read first, locking what is open, so a business without an open pack checkout has nothing written.
+  const open = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts)
+    .where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.status, openStatuses), gt(billingPackCheckouts.expiresAt, input.at)))
+    .for("update");
+  if (!open.length) return;
   const closed = await tx.update(billingPackCheckouts)
     .set({ status: sql`case when ${billingPackCheckouts.status} = 'ready' then 'expired' else 'failed' end`, error: PACK_CHECKOUT_CLOSED_FOR_PLAN, updatedAt: input.at })
-    .where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.status, ["pending", "processing", "ready"]), gt(billingPackCheckouts.expiresAt, input.at)))
+    .where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.id, open.map((checkout) => checkout.id)), inArray(billingPackCheckouts.status, openStatuses)))
     .returning({ id: billingPackCheckouts.id, status: billingPackCheckouts.status, checkoutId: billingPackCheckouts.checkoutId });
   for (const checkout of closed) {
     if (checkout.status === "expired" && checkout.checkoutId) {

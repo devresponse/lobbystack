@@ -150,12 +150,17 @@ async function applyStripePackCheckout(tx: DatabaseTransaction, input: PackEvent
 
 async function applyPolarPackOrder(tx: DatabaseTransaction, input: PackEventInput, order: NonNullable<PackEventInput["order"]>): Promise<boolean> {
   if (!order.productId || !["paid", "partially_refunded", "refunded"].includes(order.status)) return false;
-  const bought = await packOfPrice(tx, order.productId);
+  // The order names Polar's product, which the catalog's link keeps as the price's provider_ref. A Polar product id
+  // is a uuid, as LobbyStack's own price ids are, so it is matched on provider_ref only.
+  const bought = await packOfPrice(tx, { providerRef: order.productId });
   if (!bought) return false;
   const checkoutId = stringField(order.metadata, "lobbystack_pack_checkout") ?? await packCheckoutOf(tx, input.businessId, order.checkoutId);
   if (checkoutId) await settlePackCheckout(tx, { businessId: input.businessId, checkoutId, status: "paid" });
+  // As on Stripe, the pack is ordered against a subscription from when the business asked for its checkout, so a
+  // subscription bought while the payment page was open is the later choice and wins.
+  const boughtAt = (checkoutId ? await packCheckoutCreatedAt(tx, input.businessId, checkoutId) : undefined) ?? order.occurredAt;
   // The order carries its refunds, so whichever of its events comes first adds the pack and applies them.
-  await recordPurchase(tx, input, { bought, providerRef: order.orderId, amountCents: order.amountCents, currency: order.currency, paidAt: order.occurredAt, transactionId: order.transactionId, boughtAt: order.occurredAt, history: { refundedCents: 0, dispute: null } });
+  await recordPurchase(tx, input, { bought, providerRef: order.orderId, amountCents: order.amountCents, currency: order.currency, paidAt: order.occurredAt, transactionId: order.transactionId, boughtAt, history: { refundedCents: 0, dispute: null } });
   const refund = await applyPackRefundInTransaction(tx, { businessId: input.businessId, provider: "polar", providerRef: order.orderId, refundedCents: order.refundedCents, at: input.eventCreatedAt });
   if (refund) await afterPackChange(tx, input.businessId, refund);
   return true;
@@ -164,15 +169,29 @@ async function applyPolarPackOrder(tx: DatabaseTransaction, input: PackEventInpu
 async function applyStripePackDispute(tx: DatabaseTransaction, input: PackEventInput): Promise<boolean> {
   const paymentRef = stringField(input.payload, "paymentRef");
   if (!paymentRef) return false;
-  const change = await applyDispute(tx, input.businessId, paymentRef, stringField(input.payload, "disputeOutcome"), dateField(input.payload, "occurredAt") ?? input.eventCreatedAt);
+  const change = await applyDispute(tx, input.businessId, paymentRef, stringField(input.payload, "disputeOutcome"), dateField(input.payload, "occurredAt") ?? input.eventCreatedAt, stringField(input.payload, "id"));
   if (change) await afterPackChange(tx, input.businessId, change);
   return change !== null;
 }
 
-async function applyDispute(tx: DatabaseTransaction, businessId: string, paymentRef: string, outcome: string | undefined, at: Date): Promise<PackChange | null> {
-  if (outcome === "opened") return await freezePackInTransaction(tx, { businessId, provider: "stripe", providerRef: paymentRef });
+/** A Stripe dispute's opening or close. An opening of disputeId leaves a live pack live when that dispute's close was applied first. */
+async function applyDispute(tx: DatabaseTransaction, businessId: string, paymentRef: string, outcome: string | undefined, at: Date, disputeId?: string): Promise<PackChange | null> {
+  if (outcome === "opened") return await freezePackInTransaction(tx, { businessId, provider: "stripe", providerRef: paymentRef, ...(disputeId ? { alreadyClosed: () => stripeDisputeClosed(tx, businessId, disputeId) } : {}) });
   if (outcome === "won" || outcome === "lost") return await closePackDisputeInTransaction(tx, { businessId, provider: "stripe", providerRef: paymentRef, won: outcome === "won", at });
   return null;
+}
+
+/**
+ * Whether Stripe's close of this dispute was applied already: its events can
+ * be applied in either order. Matched on the dispute, not the payment, since
+ * an inquiry closed without a chargeback can be followed by a dispute of the
+ * same payment, which freezes the pack again.
+ */
+async function stripeDisputeClosed(tx: DatabaseTransaction, businessId: string, disputeId: string): Promise<boolean> {
+  const [closed] = await tx.select({ id: providerEvents.id }).from(providerEvents)
+    .where(and(eq(providerEvents.businessId, businessId), eq(providerEvents.provider, "stripe"), eq(providerEvents.status, "processed"), eq(providerEvents.eventType, "charge.dispute.closed"), sql`${providerEvents.payload}->>'id' = ${disputeId}`))
+    .limit(1);
+  return closed !== undefined;
 }
 
 type Purchase = {
@@ -311,18 +330,23 @@ async function packOfStripeCheckout(tx: DatabaseTransaction, businessId: string,
     const terms = checkout ? await readPackPlan(tx, checkout.pack) : null;
     if (checkout && terms) return { terms, priceId: checkout.priceId };
   }
+  // The worker puts LobbyStack's own price id on the payment, and a Stripe price id is never a uuid.
   const priceRef = stringField(payload, "packPriceRef");
-  const byPrice = priceRef ? await packOfPrice(tx, priceRef) : null;
+  const byPrice = priceRef ? await packOfPrice(tx, isUuid(priceRef) ? { id: priceRef } : { providerRef: priceRef }) : null;
   if (byPrice) return byPrice;
   const code = stringField(payload, "packCode");
   const terms = code ? await readPackPlan(tx, code) : null;
   return terms ? { terms, priceId: null } : null;
 }
 
-/** The pack a price sells, by LobbyStack's price id or the provider's object (a Stripe price or a Polar product), a retired one too. */
-async function packOfPrice(tx: DatabaseTransaction, reference: string): Promise<BoughtPack | null> {
+/**
+ * The pack a price sells, a retired one too: by LobbyStack's price id, or by
+ * the provider's object that sells it (a Stripe price or a Polar product). The
+ * caller names the column, since a uuid can be either.
+ */
+async function packOfPrice(tx: DatabaseTransaction, reference: { id: string } | { providerRef: string }): Promise<BoughtPack | null> {
   const [price] = await tx.select({ id: billingPackPrices.id, pack: billingPackPrices.pack }).from(billingPackPrices)
-    .where(isUuid(reference) ? eq(billingPackPrices.id, reference) : eq(billingPackPrices.providerRef, reference)).limit(1);
+    .where("id" in reference ? eq(billingPackPrices.id, reference.id) : eq(billingPackPrices.providerRef, reference.providerRef)).limit(1);
   const terms = price ? await readPackPlan(tx, price.pack) : null;
   return price && terms ? { terms, priceId: price.id } : null;
 }
@@ -333,6 +357,15 @@ async function packCheckoutOf(tx: DatabaseTransaction, businessId: string, provi
   const [checkout] = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts)
     .where(and(eq(billingPackCheckouts.businessId, businessId), eq(billingPackCheckouts.checkoutId, providerCheckoutId))).limit(1);
   return checkout?.id;
+}
+
+/** When the business asked for a pack checkout, or undefined for a checkout it doesn't have. */
+async function packCheckoutCreatedAt(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<Date | undefined> {
+  // A uuid column compared with anything else fails the statement, and the event would never apply.
+  if (!isUuid(checkoutId)) return undefined;
+  const [checkout] = await tx.select({ createdAt: billingPackCheckouts.createdAt }).from(billingPackCheckouts)
+    .where(and(eq(billingPackCheckouts.id, checkoutId), eq(billingPackCheckouts.businessId, businessId))).limit(1);
+  return checkout?.createdAt;
 }
 
 /** When a Stripe checkout session was made, from its own created time. */

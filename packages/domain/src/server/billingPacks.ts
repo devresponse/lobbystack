@@ -436,12 +436,17 @@ export async function applyPackRefundInTransaction(tx: DatabaseTransaction, inpu
   return { packId: pack.id, status: pack.status, previous: pack.status };
 }
 
-/** Freezes a live pack whose payment is disputed: it stops counting until the dispute closes. */
-export async function freezePackInTransaction(tx: DatabaseTransaction, input: { businessId: string; provider: "polar" | "stripe"; providerRef: string }): Promise<PackChange | null> {
+/**
+ * Freezes a live pack whose payment is disputed: it stops counting until the
+ * dispute closes. alreadyClosed is asked only once a live pack is found: when
+ * it says the dispute's close was applied before this opening, which found no
+ * frozen pack to give back, the pack stays live.
+ */
+export async function freezePackInTransaction(tx: DatabaseTransaction, input: { businessId: string; provider: "polar" | "stripe"; providerRef: string; alreadyClosed?: () => Promise<boolean> }): Promise<PackChange | null> {
   await lockBusinessPacks(tx, input.businessId);
   const pack = await packByPayment(tx, input.businessId, input.provider, input.providerRef);
   if (!pack) return null;
-  if (pack.status !== "active") return { packId: pack.id, status: pack.status, previous: pack.status };
+  if (pack.status !== "active" || (input.alreadyClosed && await input.alreadyClosed())) return { packId: pack.id, status: pack.status, previous: pack.status };
   await tx.update(billingPacks).set({ status: "frozen", updatedAt: new Date() }).where(eq(billingPacks.id, pack.id));
   return { packId: pack.id, status: "frozen", previous: pack.status };
 }

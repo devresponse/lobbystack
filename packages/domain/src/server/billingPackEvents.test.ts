@@ -114,4 +114,20 @@ describe("the pack step's reach", () => {
     expect(mocks.enqueueOutbox).not.toHaveBeenCalled();
     expect(mocks.recordProductEventInTransaction).not.toHaveBeenCalled();
   });
+
+  it("reads nothing past the pack lookup for a dispute or a Polar order no pack has", async () => {
+    const events: PackEventInput[] = [
+      { ...stripePackPaid(), kind: "dispute", payload: { id: "dp_1", kind: "dispute", paymentRef: "pi_plan_1", disputeOutcome: "opened" } },
+      { ...stripePackPaid(), provider: "polar", kind: "payment", payload: { kind: "payment" }, order: { transactionId: "txn_1", orderId: "order_1", status: "paid", amountCents: 3_000, refundedCents: 0, currency: "usd", occurredAt: new Date(), productId: "0b6c3a51-7e1d-4f2a-9c87-2d5e8f4a6b10", metadata: { lobbystack_pack_checkout: "5d3f4a8e-1b2c-4d6e-8f90-a1b2c3d4e5f6" }, checkoutId: "chk_1" } },
+    ];
+    for (const event of events) {
+      const tx = transaction([]) as unknown as { select: () => unknown };
+      const select = tx.select;
+      let reads = 0;
+      tx.select = () => { reads += 1; return select(); };
+      await expect(applyPackEventInTransaction(tx as never, event)).resolves.toBe(false);
+      expect(reads).toBe(1);
+    }
+    expect(mocks.enqueueOutbox).not.toHaveBeenCalled();
+  });
 });

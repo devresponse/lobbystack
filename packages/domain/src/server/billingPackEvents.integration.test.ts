@@ -29,7 +29,8 @@ afterAll(async () => { await client?.pool.end(); });
 
 const DAY = 86_400_000;
 const STRIPE_PRICE = "price_pack_events_test";
-const POLAR_PRODUCT = "prod_pack_events_test";
+// Polar names its products by uuid, as LobbyStack names its price rows.
+const POLAR_PRODUCT = randomUUID();
 
 async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
   const rollback = new Error("rollback test fixture");
@@ -48,8 +49,8 @@ async function catalog(tx: DatabaseTransaction) {
   const terms = { status: "active", names: { en: "Test pack", fr: "Test pack", es: "Test pack", sr: "Test pack" }, voiceSec: 15_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, termsHash: "0".repeat(64) };
   await tx.insert(billingPackPlans).values([{ code: "pack_events_stripe", ...terms }, { code: "pack_events_polar", ...terms, days: 180 }]).onConflictDoNothing();
   const [stripe] = await tx.insert(billingPackPrices).values({ pack: "pack_events_stripe", currency: "cad", cents: 5_500, providerRef: STRIPE_PRICE }).returning({ id: billingPackPrices.id });
-  await tx.insert(billingPackPrices).values({ pack: "pack_events_polar", currency: "usd", cents: 9_900, providerRef: POLAR_PRODUCT });
-  return { stripePriceId: stripe!.id };
+  const [polar] = await tx.insert(billingPackPrices).values({ pack: "pack_events_polar", currency: "usd", cents: 9_900, providerRef: POLAR_PRODUCT }).returning({ id: billingPackPrices.id });
+  return { stripePriceId: stripe!.id, polarPriceId: polar!.id };
 }
 
 type Account = { plan?: "free_cloud" | "starter"; state?: string; interval?: "monthly" | "annual"; subscriptionId?: string; replacedSubscriptionId?: string; source?: "stripe" | "polar"; telemetry?: boolean };
@@ -71,10 +72,11 @@ async function business(tx: DatabaseTransaction, account: Account = {}) {
   return businessId;
 }
 
-async function packCheckout(tx: DatabaseTransaction, businessId: string, priceId: string) {
+/** A pack checkout the business asked for, a Stripe one unless it names a Polar pack and checkout; createdAt is when it asked. */
+async function packCheckout(tx: DatabaseTransaction, businessId: string, priceId: string, options: { pack?: string; providerCheckoutId?: string; createdAt?: Date } = {}) {
   const userId = randomUUID();
   await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
-  const [row] = await tx.insert(billingPackCheckouts).values({ businessId, requestedByUserId: userId, pack: "pack_events_stripe", priceId, status: "ready", checkoutId: `cs_${randomUUID()}`, checkoutUrl: "https://checkout.stripe.test/pay", expiresAt: new Date(Date.now() + DAY) }).returning({ id: billingPackCheckouts.id });
+  const [row] = await tx.insert(billingPackCheckouts).values({ businessId, requestedByUserId: userId, pack: options.pack ?? "pack_events_stripe", priceId, status: "ready", checkoutId: options.providerCheckoutId ?? `cs_${randomUUID()}`, checkoutUrl: "https://checkout.stripe.test/pay", expiresAt: new Date(Date.now() + DAY), ...(options.createdAt ? { createdAt: options.createdAt } : {}) }).returning({ id: billingPackCheckouts.id });
   return row!.id;
 }
 
@@ -257,6 +259,26 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
     });
   });
 
+  it("keeps a pack live when a dispute's close was applied before its opening, and still freezes it for a later dispute of the same payment", async () => {
+    await rollbackTest(async (tx) => {
+      await catalog(tx);
+      const businessId = await business(tx);
+      await reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.completed", payload: stripeSession(businessId, { paymentRef: "pi_dispute_order_1" }) }));
+      const dispute = (eventType: string, disputeId: string, status: string, disputeOutcome: string) => store(tx, businessId, { eventType, payload: { id: disputeId, object: "dispute", kind: "dispute", paymentRef: "pi_dispute_order_1", status, disputeOutcome, occurredAt: new Date().toISOString() } });
+
+      // An inquiry the bank closed without a chargeback, its close applied first.
+      const inquiry = `dp_${randomUUID()}`;
+      await expect(reconcile(tx, businessId, await dispute("charge.dispute.closed", inquiry, "warning_closed", "won"))).resolves.toBe("processed");
+      await expect(reconcile(tx, businessId, await dispute("charge.dispute.created", inquiry, "warning_needs_response", "opened"))).resolves.toBe("processed");
+      expect((await packsOf(tx, businessId))[0]?.status).toBe("active");
+      expect(await planInForce(tx, businessId)).toBe("prepaid");
+
+      // A chargeback on the same payment is a dispute of its own, which the inquiry's close says nothing about.
+      await reconcile(tx, businessId, await dispute("charge.dispute.created", `dp_${randomUUID()}`, "needs_response", "opened"));
+      expect((await packsOf(tx, businessId))[0]?.status).toBe("frozen");
+    });
+  });
+
   it("marks a live monthly subscription replaced when a pack's payment arrives, starts the pack's allowances and queues the job that ends it at the provider", async () => {
     await rollbackTest(async (tx) => {
       await catalog(tx);
@@ -347,17 +369,33 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
     });
   });
 
+  it("finds a Stripe pack by LobbyStack's own price id, which the worker puts on the payment, when it names no pack checkout", async () => {
+    await rollbackTest(async (tx) => {
+      const { stripePriceId } = await catalog(tx);
+      const businessId = await business(tx);
+      // The price id is a uuid, as a Polar product's is, but on Stripe it names LobbyStack's own row. The code names no pack, so only the price can.
+      const payload = { ...stripeSession(businessId, { paymentRef: "pi_own_price_1" }), packCode: "pack_missing", packPriceRef: stripePriceId };
+      await expect(reconcile(tx, businessId, await store(tx, businessId, { eventType: "checkout.session.completed", payload }))).resolves.toBe("processed");
+      expect(await packsOf(tx, businessId)).toMatchObject([{ pack: "pack_events_stripe", providerRef: "pi_own_price_1", status: "active", priceId: stripePriceId }]);
+    });
+  });
+
   it("adds a pack from a Polar order for a pack's product with the order's refunds, and leaves orders for other products alone", async () => {
     await rollbackTest(async (tx) => {
-      await catalog(tx);
+      const { polarPriceId } = await catalog(tx);
       const businessId = await business(tx, { source: "polar" });
       const order = (id: string, status: string, refunded: number, product = POLAR_PRODUCT) => ({ kind: "payment", billingKey: `business:${businessId}`, id, status, total_amount: 10_890, refunded_amount: refunded, refunded_tax_amount: 0, currency: "usd", created_at: new Date(Date.now() - 60_000).toISOString(), billing_reason: "purchase", productId: product, priceRef: product, metadata: {} });
 
       await expect(reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.paid", payload: order("order_pack_1", "paid", 0) }))).resolves.toBe("processed");
       let [pack] = await packsOf(tx, businessId);
       const row = await orderOf(tx, "order_pack_1");
-      expect(pack).toMatchObject({ pack: "pack_events_polar", provider: "polar", providerRef: "order_pack_1", amountCents: 10_890, status: "active", transactionId: row!.id });
+      expect(pack).toMatchObject({ pack: "pack_events_polar", provider: "polar", providerRef: "order_pack_1", amountCents: 10_890, status: "active", transactionId: row!.id, priceId: polarPriceId });
       expect(pack!.endsAt!.getTime() - pack!.paidAt.getTime()).toBe(180 * DAY);
+
+      // Polar reports a partial refund on the order, with its whole refunded amount so far.
+      await reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.refunded", payload: order("order_pack_1", "partially_refunded", 3_630) }));
+      [pack] = await packsOf(tx, businessId);
+      expect(pack).toMatchObject({ status: "active", refundedCents: 3_630 });
 
       await reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.refunded", payload: order("order_pack_1", "refunded", 10_890) }));
       [pack] = await packsOf(tx, businessId);
@@ -367,8 +405,54 @@ describe.skipIf(!testUrl)("prepaid pack events against PostgreSQL", () => {
       await reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.refunded", payload: order("order_pack_2", "refunded", 10_890) }));
       expect((await packsOf(tx, businessId)).find((entry) => entry.providerRef === "order_pack_2")).toMatchObject({ status: "refunded" });
 
-      await reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.paid", payload: order("order_plan_1", "paid", 0, "prod_starter_monthly") }));
-      expect((await packsOf(tx, businessId)).map((entry) => entry.providerRef)).toEqual(["order_pack_1", "order_pack_2"]);
+      // So does a partial refund, which takes its share off.
+      await reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.refunded", payload: order("order_pack_3", "partially_refunded", 3_630) }));
+      expect((await packsOf(tx, businessId)).find((entry) => entry.providerRef === "order_pack_3")).toMatchObject({ status: "active", refundedCents: 3_630, priceId: polarPriceId });
+
+      // A price retired since the checkout keeps its product, so an order at it still finds the pack.
+      await tx.update(billingPackPrices).set({ retiredAt: new Date() }).where(eq(billingPackPrices.id, polarPriceId));
+      await reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.paid", payload: order("order_pack_4", "paid", 0) }));
+      expect((await packsOf(tx, businessId)).find((entry) => entry.providerRef === "order_pack_4")).toMatchObject({ status: "active", priceId: polarPriceId });
+
+      await reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.paid", payload: order("order_plan_1", "paid", 0, randomUUID()) }));
+      expect((await packsOf(tx, businessId)).map((entry) => entry.providerRef)).toEqual(["order_pack_1", "order_pack_2", "order_pack_3", "order_pack_4"]);
+    });
+  });
+
+  it("orders a Polar pack against a subscription from when the business asked for its checkout, as Stripe does from its session", async () => {
+    await rollbackTest(async (tx) => {
+      const { polarPriceId } = await catalog(tx);
+      const askedAt = new Date(Date.now() - 2 * 60 * 60_000);
+      // A monthly Starter business whose subscription began at subscribedAt pays for a pack it asked for at askedAt.
+      // The order names its pack checkout in its metadata, or only Polar's checkout.
+      const buyPack = async (subscribedAt: Date, names: "metadata" | "checkout") => {
+        const subscriptionId = `sub_${randomUUID()}`;
+        const businessId = await business(tx, { source: "polar", plan: "starter", state: "active", interval: "monthly", subscriptionId });
+        const providerCheckoutId = randomUUID();
+        const checkoutId = await packCheckout(tx, businessId, polarPriceId, { pack: "pack_events_polar", providerCheckoutId, createdAt: askedAt });
+        await store(tx, businessId, { provider: "polar", eventType: "subscription.active", payload: { kind: "subscription", subscriptionId }, createdAt: subscribedAt }).then((id) => tx.update(providerEvents).set({ status: "processed" }).where(eq(providerEvents.id, id)));
+        const payload = { kind: "payment", billingKey: `business:${businessId}`, id: `order_${randomUUID()}`, status: "paid", total_amount: 10_890, refunded_amount: 0, refunded_tax_amount: 0, currency: "usd", created_at: new Date(Date.now() - 60_000).toISOString(), billing_reason: "purchase", productId: POLAR_PRODUCT, priceRef: POLAR_PRODUCT, ...(names === "metadata" ? { metadata: { lobbystack_pack_checkout: checkoutId } } : { metadata: {}, checkout_id: providerCheckoutId }) };
+        await expect(reconcile(tx, businessId, await store(tx, businessId, { provider: "polar", eventType: "order.paid", payload }))).resolves.toBe("processed");
+        const [checkout] = await tx.select({ status: billingPackCheckouts.status }).from(billingPackCheckouts).where(eq(billingPackCheckouts.id, checkoutId));
+        expect(checkout?.status).toBe("paid");
+        return { businessId, subscriptionId };
+      };
+
+      // Subscribed in another tab while the pack's payment page was open: the subscription is the later choice.
+      for (const names of ["metadata", "checkout"] as const) {
+        const { businessId } = await buyPack(new Date(Date.now() - 60 * 60_000), names);
+        expect((await packsOf(tx, businessId))[0]?.status).toBe("replaced");
+        expect((await accountOf(tx, businessId)).replacedSubscriptionId).toBeNull();
+        expect(await planInForce(tx, businessId)).toBe("starter");
+        expect((await outbox(tx, businessId)).map((message) => message.topic)).not.toContain("billing.endPlanForPack");
+      }
+
+      // Subscribed before it asked for the pack: the pack replaces the subscription.
+      const { businessId, subscriptionId } = await buyPack(new Date(Date.now() - 30 * DAY), "metadata");
+      expect((await packsOf(tx, businessId))[0]?.status).toBe("active");
+      expect((await accountOf(tx, businessId)).replacedSubscriptionId).toBe(subscriptionId);
+      expect(await planInForce(tx, businessId)).toBe("prepaid");
+      expect((await outbox(tx, businessId)).map((message) => message.topic)).toContain("billing.endPlanForPack");
     });
   });
 

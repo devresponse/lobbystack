@@ -113,6 +113,14 @@ describe("enqueueJob job ids", () => {
     for (const short of options.slice(6)) expect(short).not.toHaveProperty("attempts");
   });
 
+  it("retries closing a pack's payment page a plan's start closed for longer than the page stays open, so nobody pays on it meanwhile", async () => {
+    expect(queueForJobType["billing.closePackCheckout"]).toBe("critical");
+    const { queue, add } = createQueueStub("critical");
+    await enqueueJob(queue, { type: "billing.closePackCheckout", businessId: "3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3e", payload: { checkoutId: "3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3f", providerCheckoutId: "cs_1" }, idempotencyKey: "billing-pack-checkout:3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3f:close" });
+    const [, , options] = add.mock.calls[0] as unknown as [string, unknown, Record<string, unknown>];
+    expect(options).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
+  });
+
   it("runs the end of a subscription a prepaid pack replaced on the critical queue and retries it for hours, since the business pays for both until it ends", async () => {
     expect(queueForJobType["billing.endPlanForPack"]).toBe("critical");
     const { queue, add } = createQueueStub("critical");

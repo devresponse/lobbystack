@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { builtInBillingPlanLimits, builtInBillingPlanList, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
+import { builtInBillingPlanLimits, builtInBillingPlanList, type BillingCodeView, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
 import { PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { LivePlanSurface } from "./live-plan-surface";
 import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
@@ -14,12 +14,15 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 const clients: QueryClient[] = [];
 beforeEach(() => { route.search = new URLSearchParams(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup({ provider = "polar", planActions = false, paymentActionUrl = null as string | null, cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null, packStatus = "paid", extra = {} as Record<string, unknown> } = {}) {
+function setup({ provider = "polar", planActions = false, paymentActionUrl = null as string | null, cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null, packStatus = "paid", packEnded = null as "replaced" | "refunded" | null, packReplies = [] as Array<Record<string, unknown>>, extra = {} as Record<string, unknown> } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
   const billing = { provider, providerName: provider === "stripe" ? "Stripe" : "Polar", planActions, cancelsAt, nextChange, paymentActionUrl, permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [], ...extra };
   if (!billingFails) client.setQueryData(["billing", "business"], billing);
-  const fetchMock = vi.fn(async (url: string) => url.includes("/packs/checkout?") ? Response.json({ status: packStatus, checkoutUrl: null, error: null, synced: packStatus === "paid", refusal: null, providerName: "Polar" }) : url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
+  // The pack checkout's reads, in turn when packReplies lists them, the last one repeating.
+  let packReads = 0;
+  const packReply = () => ({ status: packStatus, checkoutUrl: null, error: null, packStatus: packEnded, synced: packStatus === "paid" && !packEnded, closedForPlan: false, refusal: null, providerName: "Polar", ...packReplies[Math.min(packReads++, packReplies.length - 1)] });
+  const fetchMock = vi.fn(async (url: string) => url.includes("/packs/checkout?") ? Response.json(packReply()) : url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
   if (billingFails) fetchMock.mockResolvedValueOnce(Response.json({ error: "Unavailable" }, { status: 503 }));
   vi.stubGlobal("fetch", fetchMock);
   render(<QueryClientProvider client={client}><UpgradePlanDialogProvider onOpen={vi.fn()}><LivePlanSurface /></UpgradePlanDialogProvider></QueryClientProvider>);
@@ -247,6 +250,21 @@ describe("a business on prepaid packs", () => {
     expect(screen.getByRole("button", { name: "billing.actions.upgradeToPro" })).toBeTruthy();
   });
 
+  it("can enter a promo code, whose plan it is warned ends its packs and the minutes left on them", async () => {
+    const held = (id: string, status: string, secondsLeft: number) => ({ id, code: "pack-500-180", names: { en: "500 minutes" }, status, secondsTotal: 30_000, secondsLeft, paidAt: "2026-10-01T00:00:00.000Z", endsAt: "2027-03-30T00:00:00.000Z" });
+    const fetchMock = setup({ plan: "prepaid", extra: { usageStatus: usageStatus(packUsage), packs: [held("live", "active", 24_030), held("disputed", "frozen", 6_000)] } });
+    const view: BillingCodeView = { code: "SALONS-2026", plan: "salons-half-off", tier: "starter", names: { en: "Salons half off" }, discount: null, currency: "cad", current: false, prices: [{ interval: "monthly", cents: 2900, discountedCents: 2900, checkoutAvailable: true }], included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1, receptionists: 1 }, moreThanTier: [] };
+    fetchMock.mockImplementation(async (url: string) => url.startsWith("/api/billing/promo?") ? Response.json(view) : Response.json({}));
+    await userEvent.click(screen.getByRole("button", { name: "billing.promo.link" }));
+    await userEvent.type(screen.getByLabelText("billing.promo.label"), "salons-2026");
+    await userEvent.click(screen.getByRole("button", { name: "billing.promo.apply" }));
+    // A subscription ends every pack held, a frozen one too: 30,030 seconds are 500 whole minutes.
+    expect(await screen.findByText("billing.upgradeDialog.endsPacks")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.endsPacks", { count: 500, minutes: "500" });
+    // Buying the code's plan from a pack starts a subscription, as from Free.
+    expect(screen.getByRole("button", { name: "billing.promo.subscribe.monthly" })).toBeTruthy();
+  });
+
   it("sees its packs and can buy more", () => {
     setup({ plan: "prepaid", extra: { usageStatus: usageStatus(packUsage), packOffers: [offer], packs: [{ id: "held", code: "pack-500-180", names: { en: "500 minutes" }, status: "active", secondsTotal: 30_000, secondsLeft: 24_030, paidAt: "2026-10-01T00:00:00.000Z", endsAt: "2027-03-30T00:00:00.000Z" }], packCheckout: { refusal: null, endsSubscription: null } } });
     expect(screen.getByText("billing.packs.title")).toBeTruthy();
@@ -284,6 +302,64 @@ describe("prepaid packs on the plan page", () => {
     await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/settings/plan"));
     expect(translate).toHaveBeenCalledWith("billing.packs.toast.failed");
     expect(translate).not.toHaveBeenCalledWith("billing.packs.toast.added");
+  });
+
+  it.each([["replaced", "billing.packs.toast.gaveWay"], ["refunded", "billing.packs.toast.refundedFirst"]] as const)("says a paid pack that ended as it arrived (%s) wasn't added", async (packEnded, key) => {
+    route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
+    setup({ plan: "starter", packEnded });
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/settings/plan"));
+    expect(translate).toHaveBeenCalledWith(key);
+    expect(translate).not.toHaveBeenCalledWith("billing.packs.toast.added");
+  });
+
+  describe("back from a pack's page that a plan's start closed", () => {
+    const closed = { status: "expired", error: "A plan started for this business, so this pack's checkout closed.", closedForPlan: true, packStatus: null, synced: false };
+    const packReadsOf = (fetchMock: ReturnType<typeof setup>) => fetchMock.mock.calls.filter(([url]) => String(url).includes("/packs/checkout?")).length;
+
+    it("keeps waiting, since the page still took the payment, and says the pack gave way once it arrives", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
+        const fetchMock = setup({ plan: "starter", packReplies: [closed, closed, { status: "paid", error: null, closedForPlan: false, packStatus: "replaced", synced: false }] });
+        await waitFor(() => expect(packReadsOf(fetchMock)).toBeGreaterThan(0));
+        expect(route.router.replace).not.toHaveBeenCalled();
+        await act(async () => { await vi.advanceTimersByTimeAsync(3_100); });
+        await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/settings/plan"));
+        expect(packReadsOf(fetchMock)).toBe(3);
+        expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
+        expect(translate).not.toHaveBeenCalledWith("billing.packs.toast.processing");
+        expect(translate).not.toHaveBeenCalledWith("billing.packs.toast.added");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("says the pack gave way when the payment hasn't arrived by the end of the wait, rather than that it is coming", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
+        const fetchMock = setup({ plan: "starter", packReplies: [closed] });
+        await waitFor(() => expect(packReadsOf(fetchMock)).toBeGreaterThan(0));
+        await act(async () => { await vi.advanceTimersByTimeAsync(PLAN_CHANGE_SYNC_MS); });
+        await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/settings/plan"));
+        expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
+        expect(translate).not.toHaveBeenCalledWith("billing.packs.toast.processing");
+        // It stops reading once the wait is over.
+        const reads = packReadsOf(fetchMock);
+        await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+        expect(packReadsOf(fetchMock)).toBe(reads);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still reads a page that expired on its own as processing, at once", async () => {
+      route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
+      setup({ plan: "free_cloud", packReplies: [{ status: "expired", error: "This payment page expired.", closedForPlan: false, packStatus: null, synced: false }] });
+      await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/settings/plan"));
+      expect(translate).toHaveBeenCalledWith("billing.packs.toast.processing");
+      expect(translate).not.toHaveBeenCalledWith("billing.packs.toast.gaveWay");
+    });
   });
 
   it("stops waiting for a payment that settles later and says it is processing", async () => {

@@ -417,7 +417,8 @@
       "waiting": "Dodavanje minuta...",
       "processing": "Plaćanje se još obrađuje. Proverite ponovo za nekoliko minuta.",
       "checkAgain": "Proveri ponovo",
-      "failed": "Plaćanje nije prošlo. Ponovo izaberite paket ili dopunu minuta."
+      "failed": "Plaćanje nije prošlo. Ponovo izaberite paket ili dopunu minuta.",
+      "refunded": "Plaćanje je vraćeno ili osporeno preko banke, pa dopuna minuta nije dodata. Ponovo izaberite paket ili dopunu minuta."
     }
   }
 }

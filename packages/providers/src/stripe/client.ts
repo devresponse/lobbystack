@@ -18,7 +18,7 @@ export type StripeApi = {
   subscriptionSchedules: Pick<Stripe["subscriptionSchedules"], "create" | "update" | "release">;
   invoices: Pick<Stripe["invoices"], "voidInvoice">;
   prices: Pick<Stripe["prices"], "list">;
-  checkout: { sessions: Pick<Stripe["checkout"]["sessions"], "create"> };
+  checkout: { sessions: Pick<Stripe["checkout"]["sessions"], "create" | "expire" | "retrieve"> };
   billingPortal: { sessions: Pick<Stripe["billingPortal"]["sessions"], "create"> };
   invoicePayments: Pick<Stripe["invoicePayments"], "list">;
   paymentIntents: Pick<Stripe["paymentIntents"], "retrieve">;

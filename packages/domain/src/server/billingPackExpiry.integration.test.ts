@@ -385,6 +385,32 @@ describe.skipIf(!testUrl)("the daily end of prepaid packs against PostgreSQL", (
     });
   });
 
+  it("sends no reminder while the packs wait beside a plan in force, and sends those still due once a pack is the plan again", async () => {
+    await rollbackTest(async (tx) => {
+      const now = new Date();
+      // A Starter subscription a pack didn't replace, as a yearly or past-due one stays, and a managed plan.
+      const starter = await business(tx, { plan: "starter" });
+      const managed = await business(tx);
+      await setManaged(tx, managed.businessId);
+      const packs = new Map<string, string>();
+      for (const { businessId } of [starter, managed]) {
+        await owner(tx, businessId);
+        // 29 days left and every minute used: the month's and the empty reminders would be due.
+        const beside = await pack(tx, businessId, { paidAt: new Date(now.getTime() - 151 * DAY), secondsUsed: 30_000 });
+        packs.set(businessId, beside.id);
+        expect(await expire(tx, businessId, now)).toEqual({ expired: 0, settled: 0, emails: 0, releaseAt: null });
+        expect((await packRow(tx, beside.id)).notices).toEqual([]);
+        expect(await outbox(tx, businessId, "email.send")).toEqual([]);
+      }
+
+      // Once the subscription ends, the pack is the plan in force, and the reminders still due go out.
+      await tx.update(billingAccounts).set({ subscriptionState: "canceled" }).where(eq(billingAccounts.businessId, starter.businessId));
+      expect(await expire(tx, starter.businessId, new Date(now.getTime() + HOUR))).toMatchObject({ emails: 2 });
+      expect((await outbox(tx, starter.businessId, "email.send")).map((row) => row.dedupeKey.split(":")[2]).sort()).toEqual(["empty", "ends_30"]);
+      expect((await packRow(tx, packs.get(starter.businessId)!)).notices).toEqual(expect.arrayContaining(["ends_30", "low", "empty"]));
+    });
+  });
+
   it("asks again, once a day, to end a subscription a pack replaced while it is still live", async () => {
     await rollbackTest(async (tx) => {
       const now = new Date();

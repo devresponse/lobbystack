@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; window.history.replaceState(null, "", "/"); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-function setup(answer: (url: string, init?: RequestInit) => Response, props: { changesPlan?: boolean } = {}) {
+function setup(answer: (url: string, init?: RequestInit) => Response, props: { changesPlan?: boolean; leavesPacks?: { minutesLeft: number } | null } = {}) {
   const assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, href: window.location.href, assign });
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => answer(url, init));
@@ -81,6 +81,24 @@ describe("Have a promo code?", () => {
     const receptionists = (await screen.findByText('billing.currentPlan.includedReceptionists {"count":3}')).closest("li")!;
     expect(receptionists.textContent).toContain("billing.promo.moreThanTier");
     expect(screen.getByText('billing.currentPlan.includedVoice {"count":300}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
+  });
+
+  it("warns a business with packs that the code's plan ends them and the minutes left on them", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json(view) : Response.json({}), { leavesPacks: { minutesLeft: 1_250 } });
+    expect(await screen.findByText('billing.upgradeDialog.endsPacks {"count":1250,"minutes":"1,250"}')).toBeTruthy();
+  });
+
+  it("says nothing about packs to a business without any, or for the plan it already has", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json(view) : Response.json({}));
+    await screen.findByRole("button", { name: "billing.promo.subscribe.monthly" });
+    expect(screen.queryByText(/^billing\.upgradeDialog\.endsPacks/)).toBeNull();
+    cleanup();
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json({ ...view, current: true }) : Response.json({}), { leavesPacks: { minutesLeft: 1_250 } });
+    await screen.findByText("billing.promo.errors.current");
+    expect(screen.queryByText(/^billing\.upgradeDialog\.endsPacks/)).toBeNull();
   });
 
   it("checks a promo link's code at once and forgets it when it doesn't work", async () => {

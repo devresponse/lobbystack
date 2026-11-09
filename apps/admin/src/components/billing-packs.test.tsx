@@ -183,6 +183,27 @@ describe("buying a prepaid pack", () => {
     await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.packs.toast.checkoutExpired"));
   });
 
+  it("says a payment page a plan's start closed was closed for the plan", async () => {
+    serve({ statuses: [{ status: "expired", error: "A plan started for this business, so this pack's checkout closed.", closedForPlan: true }] });
+    renderSection();
+    await userEvent.click(screen.getByRole("button", { name: "billing.packs.buy" }));
+    await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.packs.toast.closedForPlan"));
+    expect(alerts.error).not.toHaveBeenCalledWith("billing.packs.toast.checkoutExpired");
+  });
+
+  it.each([
+    [{ synced: true, packStatus: "active" }, "success", "billing.packs.toast.added"],
+    [{ synced: true, packStatus: null }, "success", "billing.packs.toast.added"],
+    [{ synced: false, packStatus: "replaced" }, "error", "billing.packs.toast.gaveWay"],
+    [{ synced: false, packStatus: "refunded" }, "error", "billing.packs.toast.refundedFirst"],
+  ] as const)("says what came of a checkout already paid in another tab (%o)", async (answer, kind, key) => {
+    serve({ statuses: [{ status: "paid", ...answer }] });
+    renderSection();
+    await userEvent.click(screen.getByRole("button", { name: "billing.packs.buy" }));
+    await waitFor(() => expect(alerts[kind]).toHaveBeenCalledWith(key));
+    expect(alerts[kind === "success" ? "error" : "success"]).not.toHaveBeenCalled();
+  });
+
   it("asks for a billing email when the provider wouldn't take the person's own, and starts again with it", async () => {
     const fetchMock = serve({ statuses: [{ status: "failed", refusal: "billing_email_taken" }, { status: "ready", checkoutUrl: "https://pay.example/pc-2" }], post: () => Response.json({ checkoutId: fetchMock.mock.calls.length > 1 ? "pc-2" : "pc-1" }, { status: 202 }) });
     const { assign } = renderSection();

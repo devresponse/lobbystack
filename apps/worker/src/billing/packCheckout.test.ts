@@ -187,3 +187,34 @@ describe("billing jobs: a pack's checkout", () => {
     expect(releasePackCheckout).not.toHaveBeenCalled();
   });
 });
+
+// billing.closePackCheckout: a pack's page a plan's start closed, closed at the provider too.
+describe("billing jobs: closing a pack's payment page", () => {
+  function closeJob(providerCheckoutId: string, businessId = randomUUID()): JobEnvelope {
+    return { jobId: randomUUID(), type: "billing.closePackCheckout", queue: "critical", businessId, payload: { checkoutId: randomUUID(), providerCheckoutId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+  }
+
+  it("expires the Stripe Checkout Session, and takes one already paid as closed", async () => {
+    const businessId = randomUUID();
+    const { stripe, billing } = stripeAccount(businessId);
+    const open = await billing.createPackCheckout({ customer: { id: "cus_1", billingKey: `business:${businessId}` }, email: "owner@example.com", price: { ref: "price_pack_500_90" }, businessId, checkoutId: randomUUID(), metadata: {}, successUrl: "https://app.example/settings/plan", cancelUrl: "https://app.example/settings/plan", locale: null });
+    const job = closeJob(open.id, businessId);
+    expect(await handleJob(job, { domain, billing })).toEqual({ status: "completed", entityId: job.payload.checkoutId });
+    expect(stripe.state.checkoutSessions.get(open.id)).toMatchObject({ status: "expired" });
+
+    const paid = await billing.createPackCheckout({ customer: { id: "cus_1", billingKey: `business:${businessId}` }, email: "owner@example.com", price: { ref: "price_pack_500_90" }, businessId, checkoutId: randomUUID(), metadata: {}, successUrl: "https://app.example/settings/plan", cancelUrl: "https://app.example/settings/plan", locale: null });
+    stripe.completePaymentCheckout(paid.id);
+    const late = closeJob(paid.id, businessId);
+    expect(await handleJob(late, { domain, billing })).toEqual({ status: "skipped", entityId: late.payload.checkoutId });
+    expect(stripe.state.checkoutSessions.get(paid.id)).toMatchObject({ status: "complete" });
+  });
+
+  it("leaves the page to its own expiry on Polar, which has no such call, and without billing", async () => {
+    const polar = { createCheckout: vi.fn() };
+    for (const billing of [polarFake(polar), undefined]) {
+      const job = closeJob("checkout-1");
+      expect(await handleJob(job, { domain, ...(billing ? { billing } : {}) })).toEqual({ status: "skipped", entityId: job.payload.checkoutId });
+    }
+    expect(polar.createCheckout).not.toHaveBeenCalled();
+  });
+});

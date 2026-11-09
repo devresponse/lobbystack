@@ -393,6 +393,36 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
     });
   });
 
+  it("treats a plan a pack's payment replaced as over for its codes, before the provider ends it", async () => {
+    await rollbackTest(async (tx) => {
+      await promoCatalog(tx);
+      const { userId, businessId } = await ownedBusiness(tx, "packed");
+      await issue(tx, { plan: "pro-launch", code: "PACKED-USED", max_uses: 5, expires_at: inAWeek() });
+      await issue(tx, { plan: "pro-launch", code: "PACKED-OTHER", max_uses: 5, expires_at: inAWeek() });
+      const dashboard = (code: string) => createBillingCheckoutRequest(context(tx), { userId, businessId, target: "pro", billingInterval: "monthly", promoCode: code, checkPromoCode: async () => {} });
+      const view = (code: string) => withBusinessTransaction(tx as unknown as Database, { businessId, userId, actorType: "operator" }, (scoped) => billingCodeView(scoped, { businessId, code, checkout: true }));
+      await as(tx, "lobbystack_app");
+      await dashboard("PACKED-USED");
+      await as(tx, "owner");
+      const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType: "subscription.active", businessId, payload: { billingKey: `business:${businessId}`, plan: "pro", planCode: "pro-launch", billingInterval: "monthly", status: "active", subscriptionId: "sub_packed", currentPeriodStart: "2026-11-01T00:00:00.000Z", currentPeriodEnd: "2026-12-01T00:00:00.000Z" } }).returning({ id: providerEvents.id });
+      await as(tx, "lobbystack_worker");
+      await reconcileBillingProviderEvent(context(tx), { businessId, providerEventId: stored!.id });
+      await as(tx, "lobbystack_app");
+      expect(await view("packed-used")).toMatchObject({ plan: "pro-launch", current: true });
+      expect(await view("packed-other")).toMatchObject({ plan: "pro-launch", current: true });
+
+      // A pack's payment replaced the subscription, which the provider still calls active until its end lands.
+      await as(tx, "owner");
+      await tx.execute(sql`update public.billing_accounts set replaced_subscription_id = subscription_id where business_id = ${businessId}::uuid`);
+      await as(tx, "lobbystack_app");
+      // The code the business used finds nothing, as once the plan has ended, so it can't sell the plan twice...
+      expect(await view("packed-used")).toBeNull();
+      expect(await thrown(dashboard("PACKED-USED"))).toMatchObject({ status: 400, code: "promo_invalid" });
+      // ...and a code it never used sells the plan again, instead of calling it the plan the business is on.
+      expect(await view("packed-other")).toMatchObject({ plan: "pro-launch", current: false });
+    });
+  });
+
   it("sells a paying business only Pro from Starter without a code, from the dashboard as through the API", async () => {
     await rollbackTest(async (tx) => {
       await promoCatalog(tx);

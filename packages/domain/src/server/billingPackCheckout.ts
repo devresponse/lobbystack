@@ -1,10 +1,11 @@
 import { and, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 
-import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, billingPackOffers, billingPackPlans, billingPackPrices, businesses, enqueueOutbox, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingProviderOf, isUuid } from "@lobbystack/shared";
+import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, billingPackOffers, billingPackPlans, billingPackPrices, billingPacks, businesses, enqueueOutbox, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { billingProviderOf, isBillingPackStatus, isUuid, isYearlyBillingInterval, type BillingPackStatus } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, BILLING_CHECKOUT_EXPIRES_MS, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment, lockBillingAccount, OPEN_PURCHASE_REFUSAL, openPackCheckout, type BillingCheckoutClaim, type BillingCheckoutLimit } from "./billing";
+import { packCheckoutTerms } from "./billingPacks";
 import { readBillingDeployment } from "./billingProvider";
 import type { DomainContext } from "./context";
 import { loadBillingContext } from "./usage";
@@ -64,11 +65,6 @@ export function packCheckoutConfigured(env: Record<string, string | undefined> =
   return Boolean(env.POLAR_ACCESS_TOKEN && env.POLAR_ORGANIZATION_ID);
 }
 
-/** A yearly subscription, as the providers' events and read-backs name its interval. */
-function isYearly(interval: string | null | undefined): boolean {
-  return interval === "annual" || interval === "year";
-}
-
 /** The realtime message that tells a checkout's page its row changed. */
 async function publishPackCheckout(tx: DatabaseTransaction, input: { businessId: string; checkoutId: string; status: PackCheckoutStatus }): Promise<void> {
   await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_pack_checkout", aggregateId: input.checkoutId, dedupeKey: `billing-pack-checkout:${input.checkoutId}:${input.status}`, payload: { type: "billing.updated", entityId: input.checkoutId } });
@@ -105,10 +101,10 @@ export async function createPackCheckoutRequestInTransaction(
   if (plan === "enterprise") throw refused("pack_not_sold_on_plan", "Prepaid packs aren't sold to a business on the Enterprise plan.");
   // A subscription the pack would end: the pack's payment replaces it, and a job then ends it at the provider.
   const subscriptionId = account?.subscriptionId && isLiveSubscriptionState(account.subscriptionState) && !isReplacedSubscription(account) ? account.subscriptionId : null;
-  if (subscriptionId && isYearly(account?.billingInterval)) throw refused("pack_yearly_plan", "This business pays for a yearly plan. Set it to end at its renewal, and buy a pack once it ends.");
+  if (subscriptionId && isYearlyBillingInterval(account?.billingInterval)) throw refused("pack_yearly_plan", "This business pays for a yearly plan. Set it to end at its renewal, and buy a pack once it ends.");
   if (subscriptionId && account?.subscriptionState === "past_due") throw refused("pack_past_due", "This business has a payment past due. Settle it before buying a pack.");
   if (subscriptionId && await loadPlanChangePayment(tx, { businessId: input.businessId, subscriptionId })) throw refused("plan_change_payment_waiting", "An upgrade of this business's plan is waiting for its payment. Pay it, or buy a pack once it expires.");
-  const [offer] = await tx.select({ priceId: billingPackOffers.priceId, providerRef: billingPackOffers.providerRef }).from(billingPackOffers).where(eq(billingPackOffers.code, input.pack)).limit(1);
+  const [offer] = await tx.select({ priceId: billingPackOffers.priceId, providerRef: billingPackOffers.providerRef, voiceSec: billingPackOffers.voiceSec, days: billingPackOffers.days, smsSeg: billingPackOffers.smsSeg, callsOut: billingPackOffers.callsOut, chatUnits: billingPackOffers.chatUnits, kbBytes: billingPackOffers.kbBytes, numbers: billingPackOffers.numbers, receptionists: billingPackOffers.receptionists }).from(billingPackOffers).where(eq(billingPackOffers.code, input.pack)).limit(1);
   if (!offer?.providerRef) throw refused("pack_not_on_sale", PACK_NOT_ON_SALE);
   const now = Date.now();
   // Under the lock, so two clicks at once make one row. One older than its 15 minutes fails rather than runs.
@@ -136,6 +132,10 @@ export async function createPackCheckoutRequestInTransaction(
     requestedByUserId: input.userId,
     pack: input.pack,
     priceId: offer.priceId,
+    // The terms the business sees now, which its payment adds the pack with, whatever the catalog says by then.
+    terms: packCheckoutTerms(offer),
+    // The subscription the payment replaces: one live when it arrives that this doesn't name came later, so the pack gives way.
+    subscriptionId,
     status: "pending",
     // The job's 15 minutes; the page's own expiry replaces it once the provider makes one.
     expiresAt: new Date(now + BILLING_CHECKOUT_EXPIRES_MS),
@@ -320,6 +320,14 @@ export type PackCheckoutView = {
   pack: string;
   /** The row's status, except that a page left unpaid past its expiry reads as expired. */
   status: PackCheckoutStatus;
+  /**
+   * Where the pack its payment added stands, once it arrived: active, or
+   * frozen while its payment is disputed, when the business has it; replaced
+   * when a plan the business started meanwhile ended it at once; refunded
+   * when the payment went back before it arrived. Null until the payment
+   * arrives, and on a checkout paid before 0149.
+   */
+  packStatus: BillingPackStatus | null;
   /** Where the business pays: only while the page is ready and hasn't expired. */
   checkoutUrl: string | null;
   /** Why it failed or expired; null otherwise. */
@@ -332,8 +340,10 @@ export type PackCheckoutView = {
 /** The business's checkout, read in the caller's transaction; null when it has none by that ID. */
 export async function readPackCheckoutInTransaction(tx: DatabaseTransaction, input: { businessId: string; checkoutId: string }, now = new Date()): Promise<PackCheckoutView | null> {
   if (!isUuid(input.checkoutId)) return null;
-  const [row] = await tx.select({ id: billingPackCheckouts.id, pack: billingPackCheckouts.pack, status: billingPackCheckouts.status, checkoutUrl: billingPackCheckouts.checkoutUrl, error: billingPackCheckouts.error, expiresAt: billingPackCheckouts.expiresAt, createdAt: billingPackCheckouts.createdAt, updatedAt: billingPackCheckouts.updatedAt })
-    .from(billingPackCheckouts).where(and(eq(billingPackCheckouts.id, input.checkoutId), eq(billingPackCheckouts.businessId, input.businessId))).limit(1);
+  const [row] = await tx.select({ id: billingPackCheckouts.id, pack: billingPackCheckouts.pack, status: billingPackCheckouts.status, checkoutUrl: billingPackCheckouts.checkoutUrl, error: billingPackCheckouts.error, expiresAt: billingPackCheckouts.expiresAt, createdAt: billingPackCheckouts.createdAt, updatedAt: billingPackCheckouts.updatedAt, packStatus: billingPacks.status })
+    .from(billingPackCheckouts)
+    .leftJoin(billingPacks, and(eq(billingPacks.id, billingPackCheckouts.packId), eq(billingPacks.businessId, billingPackCheckouts.businessId)))
+    .where(and(eq(billingPackCheckouts.id, input.checkoutId), eq(billingPackCheckouts.businessId, input.businessId))).limit(1);
   if (!row) return null;
   const stored = isPackCheckoutStatus(row.status) ? row.status : "pending";
   // The row stays ready once its page is made; past the page's expiry nobody can pay on it.
@@ -343,6 +353,7 @@ export async function readPackCheckoutInTransaction(tx: DatabaseTransaction, inp
     id: row.id,
     pack: row.pack,
     status,
+    packStatus: isBillingPackStatus(row.packStatus) ? row.packStatus : null,
     checkoutUrl: status === "ready" ? row.checkoutUrl : null,
     error: lapsed ? PACK_CHECKOUT_PAGE_EXPIRED : status === "failed" || status === "expired" ? row.error : null,
     expiresAt: row.expiresAt,

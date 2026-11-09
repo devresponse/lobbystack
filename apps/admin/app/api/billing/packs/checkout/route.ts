@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { createPackCheckoutRequest, readPackCheckoutInTransaction } from "@lobbystack/domain";
+import { createPackCheckoutRequest, PACK_CHECKOUT_CLOSED_FOR_PLAN, packCheckoutConfigured, readPackCheckoutInTransaction } from "@lobbystack/domain";
 import { billingProviderNames, billingProviderOf, planChangeRefusalOf } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, readJson, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
 import { assertBillingCallAllowed } from "@/lib/billing-limit";
@@ -34,8 +34,12 @@ export async function GET(request: Request) {
         checkoutUrl: checkout.checkoutUrl,
         error: checkout.error,
         expiresAt: checkout.expiresAt.toISOString(),
-        // billing.reconcile marks the checkout paid as it adds the pack, so the business has it once this is true.
-        synced: checkout.status === "paid",
+        // What became of the pack once the payment arrived: replaced when a plan started first, refunded when the payment went back first.
+        packStatus: checkout.packStatus,
+        // The payment arrived and the business has the pack: live, or frozen while a dispute holds it. A checkout paid before the link was kept names none.
+        synced: checkout.status === "paid" && (checkout.packStatus === null || checkout.packStatus === "active" || checkout.packStatus === "frozen"),
+        // A plan the business bought started while this checkout was open, which closed it.
+        closedForPlan: checkout.error === PACK_CHECKOUT_CLOSED_FOR_PLAN,
         refusal: planChangeRefusalOf(checkout.error),
         providerName: billingProviderNames[billingProviderOf(process.env)],
       };
@@ -55,6 +59,8 @@ export async function POST(request: Request) {
     if (!businessId) throw invalid("A businessId is required.");
     const pack = packSchema.safeParse(input.pack);
     if (!pack.success) throw invalid("pack is invalid.");
+    // As GET /api/billing and the API say: without the deployment's provider set up, no page could be made.
+    if (!packCheckoutConfigured(process.env)) throw Object.assign(new Error("Packs can't be bought here right now."), { status: 409, code: "pack_not_on_sale" });
     // The email the business's new provider customer gets when the provider already has the person's own for another business.
     const billingEmail = typeof input.billingEmail === "string" ? input.billingEmail.trim() : input.billingEmail;
     if (billingEmail !== undefined && !billingEmailSchema.safeParse(billingEmail).success) throw invalid("billingEmail must be an email address.");

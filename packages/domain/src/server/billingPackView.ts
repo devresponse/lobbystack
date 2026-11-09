@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { billingAccounts, billingPackOffers, billingPackPlans, billingPacks, type DatabaseTransaction } from "@lobbystack/db";
-import { packCapacitySeconds, type BillingPlanSlug } from "@lobbystack/shared";
+import { isYearlyBillingInterval, packCapacitySeconds, type BillingPlanSlug } from "@lobbystack/shared";
 
 import { isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment } from "./billing";
 import { packSecondsLeft } from "./billingPacks";
@@ -128,11 +128,6 @@ export async function loadBusinessPacks(tx: DatabaseTransaction, businessId: str
   }));
 }
 
-/** A yearly subscription, as the providers' events and read-backs name its interval. */
-function isYearly(interval: string | null | undefined): boolean {
-  return interval === "annual" || interval === "year";
-}
-
 const refused = (refusal: PackCheckoutRefusal): PackCheckoutEligibility => ({ refusal, endsSubscription: null });
 
 /**
@@ -153,7 +148,7 @@ export async function packCheckoutEligibility(tx: DatabaseTransaction, input: { 
   if (plan === "self_host" || plan === "enterprise") return refused("pack_not_sold_on_plan");
   const subscriptionId = account?.subscriptionId && isLiveSubscriptionState(account.subscriptionState) && !isReplacedSubscription(account) ? account.subscriptionId : null;
   if (!account || !subscriptionId) return { refusal: null, endsSubscription: null };
-  if (isYearly(account.billingInterval)) return refused("pack_yearly_plan");
+  if (isYearlyBillingInterval(account.billingInterval)) return refused("pack_yearly_plan");
   if (account.subscriptionState === "past_due") return refused("pack_past_due");
   if (await loadPlanChangePayment(tx, { businessId: input.businessId, subscriptionId })) return refused("plan_change_payment_waiting");
   const tier = plan === "starter" || plan === "pro" ? plan : account.plan === "starter" || account.plan === "pro" ? account.plan : null;

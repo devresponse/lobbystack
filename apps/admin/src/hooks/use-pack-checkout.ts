@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { PlanChangeRefusal } from "@lobbystack/shared";
+import type { BillingPackStatus, PlanChangeRefusal } from "@lobbystack/shared";
 
 import { isBillingEmailRefusal, type BillingEmailRefusal } from "@/components/billing-email-form";
 import { isBillingRateLimited, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
@@ -18,7 +18,9 @@ import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 // provider wouldn't make the business's customer with the person's email, a
 // form asks for a billing email and the checkout starts again with it. After
 // paying, the provider sends the person back with ?pack=success and
-// packCheckoutId, where usePackCheckoutReturn waits for the payment.
+// packCheckoutId, where usePackCheckoutReturn waits for the payment. A paid
+// checkout whose pack ended as it arrived, because a plan the business bought
+// started first or the payment went back first, says so instead of added.
 
 /** A pack checkout as GET /api/billing/packs/checkout answers it. */
 export type PackCheckoutStatus = {
@@ -26,11 +28,22 @@ export type PackCheckoutStatus = {
   /** Where the business pays, only while the page is ready. */
   checkoutUrl: string | null;
   error: string | null;
+  /** What became of the pack once the payment arrived; null before it did, or for a checkout paid before LobbyStack kept the link. */
+  packStatus: BillingPackStatus | null;
   /** The payment arrived and the business has the pack. */
   synced: boolean;
+  /** A plan the business bought started while the checkout was open, which closed it. */
+  closedForPlan: boolean;
   refusal: PlanChangeRefusal | null;
   providerName: string;
 };
+
+/** The toast for a paid checkout: added, or why its pack ended as it arrived. */
+export function paidPackToastKey(packStatus: BillingPackStatus | null | undefined): string {
+  if (packStatus === "replaced") return "billing.packs.toast.gaveWay";
+  if (packStatus === "refunded") return "billing.packs.toast.refundedFirst";
+  return "billing.packs.toast.added";
+}
 
 /** A checkout the provider couldn't make the business's customer for, which starts again with a billing email. */
 export type PackEmailPrompt = { refusal: BillingEmailRefusal; email: string | null; pack: string };
@@ -110,8 +123,9 @@ export function usePackCheckout(businessId: string | undefined) {
       return;
     }
     if (data?.status === "paid") {
-      // Paid already, in another tab: the business has the pack.
-      toast.success(t("billing.packs.toast.added"));
+      // Paid already, in another tab: the business has the pack, unless it ended as it arrived.
+      if (data.synced) toast.success(t("billing.packs.toast.added"));
+      else toast.error(t(paidPackToastKey(data.packStatus)));
       void queryClient.invalidateQueries({ queryKey: ["billing", checkout.businessId] });
       setCheckout(null);
       return;
@@ -123,7 +137,7 @@ export function usePackCheckout(businessId: string | undefined) {
     } else {
       setEmailPrompt(null);
       // The worker's own error is for operators, in English; the toast says it in the person's language.
-      toast.error(t(data?.status === "expired" ? "billing.packs.toast.checkoutExpired" : "billing.packs.toast.checkoutFailed"));
+      toast.error(t(data?.closedForPlan ? "billing.packs.toast.closedForPlan" : data?.status === "expired" ? "billing.packs.toast.checkoutExpired" : "billing.packs.toast.checkoutFailed"));
     }
     setCheckout(null);
   }, [businessId, checkout, data, queryClient, status.isError, t]);
@@ -147,16 +161,26 @@ export function usePackCheckout(businessId: string | undefined) {
   };
 }
 
-/** What a return from the provider's payment page comes to: still waiting, paid, failed, or paid but not arrived yet. */
-export type PackCheckoutReturn = "waiting" | "paid" | "failed" | "processing";
+/**
+ * What a return from the provider's payment page comes to: still waiting,
+ * paid, failed, or paid but not arrived yet; replaced or refunded when the
+ * payment arrived but its pack ended at once, because a plan the business
+ * bought started first, or the payment went back first. replaced also
+ * covers a page that plan's start closed, whose payment hasn't arrived yet.
+ */
+export type PackCheckoutReturn = "waiting" | "paid" | "failed" | "processing" | "replaced" | "refunded";
 
 /**
  * Waits for the payment of the checkout the provider sent the person back
  * from, for PLAN_CHANGE_SYNC_MS at most: a bank debit settles later, so the
  * page then says the payment is processing. A page that expired reads as
  * processing too, since the provider sends the person back only once they
- * paid, and a payment can land after its page expired. checkAgain waits once
- * more. The outcome is null without a checkout.
+ * paid, and a payment can land after its page expired. A page that a plan's
+ * start closed is waited on as well, since Polar's page, or Stripe's before
+ * its close, still takes the payment: it reads replaced once the payment
+ * arrives, its pack giving way to that plan, or when the wait runs out, since
+ * the same comes of it then. checkAgain waits once more. The outcome is null
+ * without a checkout.
  */
 export function usePackCheckoutReturn(businessId: string | undefined, checkoutId: string | null): { outcome: PackCheckoutReturn | null; checkAgain: () => void } {
   const [round, setRound] = useState(0);
@@ -166,7 +190,10 @@ export function usePackCheckoutReturn(businessId: string | undefined, checkoutId
     queryKey: ["billing-pack-checkout-return", businessId, checkoutId, round],
     enabled: Boolean(wait) && timedOut !== wait,
     queryFn: () => requestJson<PackCheckoutStatus>(statusUrl(businessId!, checkoutId!)),
-    refetchInterval: (query) => ["paid", "failed", "expired"].includes(query.state.data?.status ?? "") ? false : 1_500,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.status === "paid" || data?.status === "failed" || (data?.status === "expired" && !data.closedForPlan) ? false : 1_500;
+    },
   });
   useEffect(() => {
     if (!wait) return;
@@ -174,6 +201,13 @@ export function usePackCheckoutReturn(businessId: string | undefined, checkoutId
     return () => window.clearTimeout(timer);
   }, [wait]);
   const current = status.data?.status;
-  const outcome: PackCheckoutReturn | null = !wait ? null : current === "paid" ? "paid" : current === "failed" ? "failed" : current === "expired" || timedOut === wait ? "processing" : "waiting";
+  const ended = status.data?.packStatus === "replaced" || status.data?.packStatus === "refunded" ? status.data.packStatus : null;
+  const closedForPlan = current === "expired" && status.data?.closedForPlan === true;
+  const outcome: PackCheckoutReturn | null = !wait ? null
+    : current === "paid" ? ended ?? "paid"
+    : current === "failed" ? "failed"
+    : closedForPlan ? (timedOut === wait ? "replaced" : "waiting")
+    : current === "expired" || timedOut === wait ? "processing"
+    : "waiting";
   return { outcome, checkAgain: () => setRound((value) => value + 1) };
 }

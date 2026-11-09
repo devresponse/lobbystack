@@ -126,6 +126,7 @@ export const OPERATIONS_EVENT_NAMES = [
   "ops.billing.provider_mismatch",
   "ops.billing.usage_totals_mismatch",
   "ops.billing.usage_credit_unapplied",
+  "ops.billing.pack_gave_way",
   "ops.outbox.backlog_sample",
   "ops.outbox.flush_failed",
   "ops.service.health_check",
@@ -570,6 +571,8 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "ops.billing.usage_totals_mismatch": ["businessId", "deploymentMode", "provider", "kind"],
   // The totals check's balance credit is in the catalog's currency and the customer is billed in another, so it won't reach them.
   "ops.billing.usage_credit_unapplied": ["businessId", "deploymentMode", "provider", "kind"],
+  // A prepaid pack paid after its business subscribed ended at once: the operator refunds the payment it names.
+  "ops.billing.pack_gave_way": ["businessId", "deploymentMode", "provider", "pack", "providerRef"],
   "ops.outbox.backlog_sample": ["deploymentMode", "backlogBucket"],
   "ops.outbox.flush_failed": ["deploymentMode"],
   "ops.service.health_check": [

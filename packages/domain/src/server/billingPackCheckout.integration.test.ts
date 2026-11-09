@@ -8,6 +8,7 @@ import { apiPackCheckoutSchema } from "@lobbystack/shared";
 import { createBillingCheckoutRequestInTransaction, loadBillingCheckoutRequest, OPEN_PURCHASE_REFUSAL, setManagedPlanInTransaction } from "./billing";
 import { claimPackCheckout, createPackCheckoutRequest, createPackCheckoutRequestInTransaction, loadPackCheckoutRequest, markPackCheckoutFailed, markPackCheckoutPaidInTransaction, markPackCheckoutReady, PACK_CHECKOUT_PAGE_MS, readPackCheckoutInTransaction, releasePackCheckout } from "./billingPackCheckout";
 import { createBillingSubscriptionRequestInTransaction } from "./billingSubscription";
+import { PACK_CHECKOUT_CLOSED_FOR_PLAN } from "./billingPacks";
 import { workUnderWay } from "./businessDeletion";
 import { generateApiKey } from "./publicApi/apiKeys";
 import { PublicApiError } from "./publicApi/errors";
@@ -154,7 +155,9 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       // The dashboard's request, under the app's row-level security.
       const id = await as(tx, "lobbystack_app", (context) => createPackCheckoutRequest(context, { userId, businessId, pack: sold.code, checkLimit }));
       const made = await row(tx, id);
-      expect(made).toMatchObject({ businessId, requestedByUserId: userId, pack: sold.code, priceId: sold.priceId, status: "pending", checkoutId: null, checkoutUrl: null, billingEmail: null });
+      expect(made).toMatchObject({ businessId, requestedByUserId: userId, pack: sold.code, priceId: sold.priceId, status: "pending", checkoutId: null, checkoutUrl: null, billingEmail: null, packId: null, subscriptionId: null });
+      // The terms the business saw, which its payment adds the pack with whatever the catalog says by then.
+      expect(made.terms).toEqual({ voiceSec: 30_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1 });
       expect(made.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 15 * MINUTE - 1_000);
       expect(made.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 15 * MINUTE + 1_000);
       expect(await outbox(tx, id)).toEqual([{ topic: "billing.createPackCheckout", aggregateType: "billing_pack_checkout", dedupeKey: `billing-pack-checkout:${id}`, payload: { checkoutId: id } }]);
@@ -203,6 +206,15 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       expect((await buy(tx, { userId, businessId: prepaid, pack: sold.code })).created).toBe(true);
       // An ended subscription is Free.
       expect(await allowed({ plan: "starter", state: "canceled", interval: "annual" })).toBe(true);
+      // Each checkout keeps the subscription its payment replaces: the monthly plan's, and none on Free or an ended plan.
+      const kept = async (account: AccountInput | null) => {
+        const businessId = await business(tx, { account });
+        return { businessId, subscriptionId: (await row(tx, (await buy(tx, { userId, businessId, pack: sold.code })).id)).subscriptionId };
+      };
+      const monthly = await kept({ plan: "starter" });
+      expect(monthly.subscriptionId).toBe(`sub_${monthly.businessId}`);
+      expect((await kept({ plan: "starter", state: "canceled", interval: "annual" })).subscriptionId).toBeNull();
+      expect((await kept(null)).subscriptionId).toBeNull();
 
       const yearly = await business(tx, { account: { plan: "starter", interval: "annual" } });
       expect(await refusal(buy(tx, { userId, businessId: yearly, pack: sold.code }))).toEqual({ status: 409, code: "pack_yearly_plan", message: "This business pays for a yearly plan. Set it to end at its renewal, and buy a pack once it ends." });
@@ -221,7 +233,10 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       const sold = await pack(tx);
       const userId = await person(tx);
       const yearly = await business(tx, { account: { plan: "starter", interval: "annual", replaced: true } });
-      expect((await buy(tx, { userId, businessId: yearly, pack: sold.code })).created).toBe(true);
+      const made = await buy(tx, { userId, businessId: yearly, pack: sold.code });
+      expect(made.created).toBe(true);
+      // Its payment replaces no plan, so the checkout keeps none.
+      expect((await row(tx, made.id)).subscriptionId).toBeNull();
       const pastDue = await business(tx, { account: { plan: "pro", state: "past_due", replaced: true } });
       expect((await buy(tx, { userId, businessId: pastDue, pack: sold.code })).created).toBe(true);
     });
@@ -352,13 +367,28 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       expect(ready.expiresAt.getTime()).toBeGreaterThanOrEqual(before + PACK_CHECKOUT_PAGE_MS - 1_000);
       expect(ready.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + PACK_CHECKOUT_PAGE_MS + 1_000);
 
-      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "ready", checkoutUrl: "https://polar.test/checkout/1", error: null });
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "ready", checkoutUrl: "https://polar.test/checkout/1", error: null, packStatus: null });
       // Left unpaid past its expiry, the page reads as expired, as nobody can pay on it.
       expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id }, new Date(ready.expiresAt.getTime() + 1_000))).toMatchObject({ status: "expired", checkoutUrl: null, error: "This payment page expired." });
       expect((await row(tx, id)).status).toBe("ready");
       // Another business's, or no such checkout.
       expect(await readPackCheckoutInTransaction(tx, { businessId: await business(tx), checkoutId: id })).toBeNull();
       expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: "not-a-checkout" })).toBeNull();
+    });
+  });
+
+  it("says what became of the pack a paid checkout added, once its payment named it", async () => {
+    await rollbackTest(async (tx) => {
+      const sold = await pack(tx);
+      const businessId = await business(tx);
+      const userId = await person(tx);
+      const id = await checkoutRow(tx, { businessId, userId, pack: sold, status: "paid" });
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "paid", packStatus: null });
+      // A plan bought while the page was open started first, so the pack ended as it arrived.
+      const paidAt = new Date(Date.now() - 60_000);
+      const [added] = await tx.insert(billingPacks).values({ businessId, pack: sold.code, days: 90, provider: "stripe", providerRef: `pi_${randomUUID()}`, amountCents: 9900, currency: "cad", secondsTotal: 30_000, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, paidAt, endsAt: new Date(paidAt.getTime() + 90 * 86_400_000), status: "replaced", endedAt: new Date(), unusedSeconds: 30_000 }).returning({ id: billingPacks.id });
+      await tx.update(billingPackCheckouts).set({ packId: added!.id }).where(eq(billingPackCheckouts.id, id));
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "paid", packStatus: "replaced" });
     });
   });
 
@@ -424,6 +454,13 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       expect(await workUnderWay(tx, businessId)).toBeNull();
       // Paid, failed or expired ones are done.
       await tx.update(billingPackCheckouts).set({ status: "paid", expiresAt: new Date(Date.now() + 30 * MINUTE) }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
+      expect(await workUnderWay(tx, businessId)).toBeNull();
+      await tx.update(billingPackCheckouts).set({ status: "expired" }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
+      expect(await workUnderWay(tx, businessId)).toBeNull();
+      // One a plan's start closed stays payable on Polar, and on Stripe until the close went through, so it counts until its page expires.
+      await tx.update(billingPackCheckouts).set({ error: PACK_CHECKOUT_CLOSED_FOR_PLAN }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
+      expect(await workUnderWay(tx, businessId)).toBe("checkout_open");
+      await tx.update(billingPackCheckouts).set({ expiresAt: new Date(Date.now() - MINUTE) }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
       expect(await workUnderWay(tx, businessId)).toBeNull();
     });
   });

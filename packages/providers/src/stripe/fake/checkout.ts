@@ -59,6 +59,24 @@ export function fakeCheckout(fake: FakeStripeContext): StripeApi["checkout"] {
           return session;
         });
       },
+      async retrieve(id: string) {
+        return await fake.call("checkout.sessions.retrieve", { id }, null, () => {
+          const session = fake.state.checkoutSessions.get(id);
+          if (!session) throw missing("checkout.session", id);
+          return session;
+        });
+      },
+      /** Stripe expires only an open session; its refusal of any other, seen in a sandbox. */
+      async expire(id: string) {
+        return await fake.call("checkout.sessions.expire", { id }, null, () => {
+          const session = fake.state.checkoutSessions.get(id);
+          if (!session) throw missing("checkout.session", id);
+          if (session.status !== "open") throw invalid(`Only Checkout Sessions with a status in ["open"] can be expired.`);
+          const expired = { ...session, status: "expired", url: null } as Stripe.Checkout.Session;
+          fake.state.checkoutSessions.set(id, expired);
+          return expired;
+        });
+      },
     } as unknown as StripeApi["checkout"]["sessions"],
   };
 }

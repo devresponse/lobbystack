@@ -417,7 +417,8 @@
       "waiting": "Agregando sus minutos...",
       "processing": "Su pago aún se está procesando. Vuelva a comprobarlo en unos minutos.",
       "checkAgain": "Comprobar de nuevo",
-      "failed": "Su pago no se completó. Elija de nuevo un plan o un paquete de minutos."
+      "failed": "Su pago no se completó. Elija de nuevo un plan o un paquete de minutos.",
+      "refunded": "Su pago se reembolsó o se anuló por un contracargo, así que no se agregó ningún paquete de minutos. Elija de nuevo un plan o un paquete de minutos."
     }
   }
 }

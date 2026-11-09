@@ -417,7 +417,8 @@
       "waiting": "Ajout de vos minutes...",
       "processing": "Votre paiement est encore en cours de traitement. Vérifiez de nouveau dans quelques minutes.",
       "checkAgain": "Vérifier de nouveau",
-      "failed": "Votre paiement n'a pas abouti. Choisissez de nouveau un forfait ou un pack de minutes."
+      "failed": "Votre paiement n'a pas abouti. Choisissez de nouveau un forfait ou un pack de minutes.",
+      "refunded": "Votre paiement a été remboursé ou a fait l'objet d'une rétrofacturation, donc aucun pack de minutes n'a été ajouté. Choisissez de nouveau un forfait ou un pack de minutes."
     }
   }
 }

@@ -94,6 +94,14 @@ export interface BillingProvider {
    * Payments). expiresAt is null when the provider doesn't say.
    */
   createPackCheckout(input: { customer: CustomerRef; email: string; price: Pick<PriceRef, "ref">; businessId: string; checkoutId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; merchantOfRecord?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
+  /**
+   * Closes a pack's payment page, the provider's checkout id, so nobody can
+   * pay on it any more, as when a plan started while it was open (Stripe
+   * expires its Checkout Session). already_closed for a page paid, expired or
+   * unknown. Absent where the provider has no such call (Polar), whose page
+   * stays payable until its own expiry.
+   */
+  closePackCheckout?(input: { checkoutId: string }): Promise<"closed" | "already_closed">;
   /** The subscription, or null when the provider doesn't know it. */
   getSubscription(id: string): Promise<ProviderSubscription | null>;
 

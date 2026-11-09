@@ -101,6 +101,20 @@ export function isPaidSubscription(plan: string | null | undefined, state: strin
   return ["starter", "pro", "enterprise"].includes(plan ?? "") && (liveSubscriptionStates as readonly string[]).includes(state ?? "");
 }
 
+/**
+ * Whether the account's subscription is the one a prepaid pack replaced,
+ * which LobbyStack treats as ended while the provider confirms its end. False
+ * for every business that never switched to a pack.
+ */
+export function isReplacedSubscription(account: { subscriptionId: string | null; replacedSubscriptionId?: string | null } | null | undefined): boolean {
+  return Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
+}
+
+/** A yearly subscription, as the providers' events and read-backs name its interval. */
+export function isYearlyBillingInterval(interval: string | null | undefined): boolean {
+  return interval === "annual" || interval === "year";
+}
+
 const planTierRank: Record<HostedCheckoutPlanSlug, number> = { starter: 1, pro: 2 };
 
 /**
@@ -643,6 +657,13 @@ export type BillingPackStatus = (typeof billingPackStatuses)[number];
 export function isBillingPackStatus(value: string | null | undefined): value is BillingPackStatus {
   return (billingPackStatuses as readonly (string | null | undefined)[]).includes(value);
 }
+
+/**
+ * The error of a pack checkout that a plan's start closed, since a pack paid
+ * after the plan started would end at once. The API answers it as the
+ * checkout's error, which the CLI tells apart from a provider's failure.
+ */
+export const PACK_CHECKOUT_CLOSED_FOR_PLAN = "A plan started for this business, so this pack's checkout closed.";
 
 /** What a pack gives a business each UTC month while it lasts, and its limits: everything but the minutes, which last the whole pack. */
 export type BillingPackIncluded = {

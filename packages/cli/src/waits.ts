@@ -1,3 +1,5 @@
+import { PACK_CHECKOUT_CLOSED_FOR_PLAN } from "@lobbystack/shared";
+
 import type { Row, WaitSpec } from "./operations";
 
 // The work a command can wait on, and how each tells it's over and whether it failed.
@@ -19,13 +21,18 @@ export const checkoutWait: WaitSpec = {
   failed: (data) => (data.status === "error" ? `The billing provider couldn't make the checkout page or change the plan: ${reason(data)}. Start another checkout.` : undefined),
 };
 
+// A plan the business bought started while the pack's checkout was open, which closed it. Another checkout's pack would
+// end a monthly plan, and a yearly one refuses it, so the CLI doesn't suggest one.
+const closedForPlan = (data: Row) => typeof data.error === "string" && data.error.trim() === PACK_CHECKOUT_CLOSED_FOR_PLAN;
+
 export const packCheckoutWait: WaitSpec = {
   operation: "getPackCheckout",
   param: "checkout_id",
   done: (data) => ["ready", "paid", "failed", "expired"].includes(String(data.status)),
-  failed: (data) => (data.status === "failed" ? `The billing provider couldn't make the pack's checkout page: ${reason(data)}. Start another checkout.`
-    : data.status === "expired" ? `The pack's checkout expired: ${reason(data)}. Start another checkout.`
-    : undefined),
+  failed: (data) => (data.status !== "failed" && data.status !== "expired" ? undefined
+    : closedForPlan(data) ? "A plan the business bought started, so the pack's checkout closed. A pack bought now would end a monthly plan; a yearly one has to end first."
+    : data.status === "failed" ? `The pack's checkout failed: ${reason(data)}. Start another checkout.`
+    : `The pack's checkout expired: ${reason(data)}. Start another checkout.`),
 };
 
 export const subscriptionChangeWait: WaitSpec = {

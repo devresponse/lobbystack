@@ -3,6 +3,7 @@ import { and, eq, gt, inArray, isNull, min, ne, or, sql } from "drizzle-orm";
 import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, businessMemberships, businesses, calls, enqueueOutbox, feedbackSubmissions, onboardingNumberClaimEvents, outboxMessages, phoneNumbers, productEvents, providerEvents, rlsContextStatement, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { isManagedBillingAccount, lockBillingAccount, MANAGED_BILLING_SOURCE } from "./billing";
+import { PACK_CHECKOUT_CLOSED_FOR_PLAN } from "./billingPacks";
 import type { DomainContext } from "./context";
 import { lockBusinessNumberClaims } from "./phoneNumbers";
 import { isSharedSmsSender } from "./smsSender";
@@ -176,10 +177,11 @@ export async function workUnderWay(tx: DatabaseTransaction, businessId: string):
     gt(billingCheckoutRequests.updatedAt, new Date(Date.now() - OPEN_CHECKOUT_MS)),
   )).limit(1);
   if (checkout) return "checkout_open";
-  // A prepaid pack's checkout stays open until its page expires, which its row says.
+  // A prepaid pack's checkout stays open until its page expires, which its row says. So does one a plan's start
+  // closed: Polar can't close its page, and Stripe's close may still be on its way, so it stays payable until then.
   const [packCheckout] = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts).where(and(
     eq(billingPackCheckouts.businessId, businessId),
-    inArray(billingPackCheckouts.status, ["pending", "processing", "ready"]),
+    or(inArray(billingPackCheckouts.status, ["pending", "processing", "ready"]), and(eq(billingPackCheckouts.status, "expired"), eq(billingPackCheckouts.error, PACK_CHECKOUT_CLOSED_FOR_PLAN))),
     gt(billingPackCheckouts.expiresAt, sql`now()`),
   )).limit(1);
   return packCheckout ? "checkout_open" : null;

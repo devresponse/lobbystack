@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingPackCheckouts, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
+import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isReplacedSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 
@@ -16,7 +16,7 @@ import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
 import { dateField, numberField, recordObject, stringField } from "./billingFields";
-import { applyPackEventInTransaction, applyStripePackRefundInTransaction, packsGiveWayToSubscriptionInTransaction, type PackEventInput } from "./billingPackEvents";
+import { applyPackEventInTransaction, applyStripePackRefundInTransaction, packsGiveWayToSubscriptionInTransaction, subscriptionLiveSince, type PackEventInput } from "./billingPackEvents";
 import { clearPackNumberReleaseInTransaction } from "./billingPacks";
 import { limitsFor, polarProductLinks, readBillingCatalogSnapshot, readBillingPlanLimitBook } from "./billingPlans";
 import { readBillingDeployment } from "./billingProvider";
@@ -263,14 +263,8 @@ function paysThroughPolar(account: { source: string | null; subscriptionState: s
   return Boolean(account?.subscriptionId) && account?.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account?.subscriptionState) && !isReplacedSubscription(account) && (account?.plan === "starter" || account?.plan === "pro");
 }
 
-/**
- * Whether the account's subscription is the one a prepaid pack replaced,
- * which LobbyStack treats as ended while the provider confirms its end. False
- * for every business that never switched to a pack.
- */
-export function isReplacedSubscription(account: { subscriptionId: string | null; replacedSubscriptionId?: string | null } | null | undefined): boolean {
-  return Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
-}
+// Whether the account's subscription is the one a prepaid pack replaced: in @lobbystack/shared, so the pack modules this one imports use it too.
+export { isReplacedSubscription };
 
 /** Whether a billing account is on a managed plan now. An ended managed plan keeps its source, for the finance export, but isn't live. */
 export function isManagedBillingAccount(account: { source?: string | null; subscriptionState: string | null } | null | undefined): boolean {
@@ -1016,7 +1010,7 @@ export async function loadOverageWork(context: DomainContext, input: { businessI
     const { replacedSubscriptionId, ...account } = row;
     const catalog = await readBillingCatalogSnapshot(tx);
     // A subscription a prepaid pack replaced counts as ended (decision 6): it gets no new overage, and its own ends with its month.
-    const replaced = replacedSubscriptionId !== null && replacedSubscriptionId === account.subscriptionId;
+    const replaced = isReplacedSubscription({ subscriptionId: account.subscriptionId, replacedSubscriptionId });
     return { ...account, ...(replaced ? { subscriptionState: "canceled" } : {}), currency: catalog.prices.find((price) => !price.retired)?.currency ?? null };
   }, { accessMode: "read only" });
 }
@@ -1225,8 +1219,13 @@ export async function reconcileBillingProviderEvent(
       // A plan with fewer receptionists pauses the newest ones past its number, in a job of its
       // own so nothing about receptionists can hold up the payment.
       if (polarFields.plan || polarFields.subscriptionState) await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_reconcile");
-      // Decision 6, pack to subscription: a subscription that starts ends the live prepaid packs in this transaction.
-      if (startedSubscription) await packsGiveWayToSubscriptionInTransaction(tx, { businessId: input.businessId, at: new Date() });
+      // Decision 6, pack to subscription: a subscription that starts ends the live prepaid packs in this transaction,
+      // and a pack paid after it went live is reported for a refund, whichever event came first. When it went live is
+      // read from the event as stored, since a read-back's time is only when LobbyStack looked.
+      if (startedSubscription) {
+        const subscription = subscriptionId ? { id: subscriptionId, liveSince: subscriptionLiveSince(stored, { eventCreatedAt: event.createdAt, readAt: fresh?.readAt, newToAccount: subscriptionId !== existing?.subscriptionId }) } : undefined;
+        await packsGiveWayToSubscriptionInTransaction(tx, { businessId: input.businessId, at: new Date(), ...(subscription ? { subscription } : {}) });
+      }
       // On Stripe, overage is a subscription of its own (the Stripe plan's step 13). billing.ensureOverage gives a
       // live plan without one its overage subscription, takes back an end set while the plan wasn't live, and ends
       // it with its month once the plan has ended. Each plan event that finds one of those to do queues it once.
@@ -1263,7 +1262,7 @@ export async function reconcileBillingProviderEvent(
           properties: { provider: "stripe", overageSubscriptionId },
         });
       }
-    } else if (event.provider === "stripe" && overageSubscriptionId && existing?.source === "stripe" && existing.subscriptionId && !existing.overageSubscriptionId && isLiveSubscriptionState(existing.subscriptionState) && existing.subscriptionId !== existing.replacedSubscriptionId) {
+    } else if (event.provider === "stripe" && overageSubscriptionId && existing?.source === "stripe" && existing.subscriptionId && !existing.overageSubscriptionId && isLiveSubscriptionState(existing.subscriptionState) && !isReplacedSubscription(existing)) {
       // An overage subscription live again once its invoice is paid, or the invoice of one Stripe ended paid, voided
       // or marked uncollectible, while the plan pays on without one: billing.ensureOverage records the live one, or
       // makes a new one, so overage is billed again without waiting for the plan's next event, a year off for some.

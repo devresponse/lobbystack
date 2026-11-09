@@ -684,7 +684,10 @@
         "failed": "Plaćanje nije prošlo, pa dopuna minuta nije dodata.",
         "processing": "Plaćanje se obrađuje. Dopuna minuta će se pojaviti ovde čim stigne.",
         "checkoutFailed": "Nije moguće otvoriti stranicu za plaćanje. Pokušajte ponovo.",
-        "checkoutExpired": "Stranica za plaćanje je istekla. Pokušajte ponovo."
+        "checkoutExpired": "Stranica za plaćanje je istekla. Pokušajte ponovo.",
+        "gaveWay": "Paket je počeo pre nego što je ovo plaćanje stiglo, pa dopuna minuta nije dodata. Novac će Vam biti vraćen.",
+        "refundedFirst": "Ovo plaćanje je vraćeno ili osporeno preko banke, pa dopuna minuta nije dodata.",
+        "closedForPlan": "Za ovu firmu je počeo paket, pa je plaćanje ove dopune minuta zatvoreno."
       }
     },
     "transactions": {

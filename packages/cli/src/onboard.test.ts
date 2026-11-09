@@ -44,6 +44,16 @@ phone_number: { country: CA, area_code: "416" }
 owner: { email: owner@acmeplumbing.ca }
 `;
 const checkoutYaml = manifestYaml.replace("plan: { managed: true }", "plan: { checkout: { plan: pro, interval: monthly } }");
+const receptionistsYaml = `receptionists:
+  - name: Emergency line
+    description: Burst pipes, floods and no heat, day and night.
+    settings:
+      greeting: Acme Plumbing emergency line, what's happening?
+      transfer_mode: on_urgent
+      booking_mode: instant
+  - name: Valet desk
+    listed: false
+`;
 const partnerYaml = manifestYaml.replace("plan: { managed: true }\n", "").replace('phone_number: { country: CA, area_code: "416" }\n', "");
 
 type Mode = { key: "platform"; access: "partner" | "all" } | { key: "business" };
@@ -69,6 +79,9 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
     keyRevoked: false,
     business: { id: BUSINESS, name: "Acme Plumbing", timezone: "America/Toronto", locale: "en", website_url: "https://acmeplumbing.ca", business_type: "service_company", hours: [] as Row[] },
     receptionist: { greeting: "Hi", tone: "warm", transfer_mode: "never", transfer_number: null, booking_mode: "instant" } as Row,
+    /** Every receptionist, the default first, as GET /receptionists lists them, and the others' own settings; the default's are receptionist. */
+    receptionists: [{ id: "00000000-0000-4000-8000-0000000000aa", name: "Receptionist", description: "", handle: null, is_default: true, status: "active", listed: true, position: 0, locale: null, knowledge_scope: "all", phone_numbers: 0, widget_keys: 0, entry_links: 0, archived_at: null }] as Row[],
+    receptionistSettings: new Map<string, Row>(),
     services: [] as Row[],
     rules: [] as Row[],
     sources: [] as Row[],
@@ -147,8 +160,22 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
     }
     if (route === "GET /business") return ok(world.business);
     if (route === "PATCH /business") { Object.assign(world.business, body); return ok(world.business); }
-    if (route === "GET /receptionist") return ok(world.receptionist);
-    if (route === "PATCH /receptionist") { Object.assign(world.receptionist, body); return ok(world.receptionist); }
+    const named = url.searchParams.get("receptionist_id");
+    const settings = named ? world.receptionistSettings.get(named) : world.receptionist;
+    if (route === "GET /receptionist") return settings ? ok(settings) : error(404, "not_found", "Receptionist not found.");
+    if (route === "PATCH /receptionist") { if (!settings) return error(404, "not_found", "Receptionist not found."); Object.assign(settings, body); return ok(settings); }
+    if (route === "GET /receptionists") return page(world.receptionists.filter((row) => (url.searchParams.get("archived") === "true") === Boolean(row.archived_at)));
+    if (route === "POST /receptionists") {
+      // The free plan includes one active receptionist, the paid ones five.
+      const included = paid() ? 5 : 1;
+      if (world.receptionists.filter((row) => !row.archived_at && row.status === "active").length >= included) return error(409, "conflict", `Your plan includes ${included} active receptionist${included === 1 ? "" : "s"}. Upgrade for more.`);
+      const receptionist = { id: id(), description: "", handle: null, is_default: false, status: "active", listed: true, position: world.receptionists.length, locale: null, knowledge_scope: "audience", phone_numbers: 0, widget_keys: 0, entry_links: 0, archived_at: null, ...body };
+      world.receptionists.push(receptionist);
+      // A new receptionist starts with the default's greeting, instructions and booking.
+      world.receptionistSettings.set(String(receptionist.id), { ...world.receptionist });
+      return ok(receptionist, 201);
+    }
+    if (matches("PATCH /receptionists/*", route)) { const receptionist = world.receptionists.find((row) => path.endsWith(String(row.id)))!; Object.assign(receptionist, body); return ok(receptionist); }
     if (route === "GET /services") return page(world.services);
     if (route === "POST /services") { const service = { id: id(), active: true, staff_ids: [], ...body }; world.services.push(service); return ok(service, 201); }
     if (matches("PATCH /services/*", route)) { const service = world.services.find((row) => path.endsWith(String(row.id)))!; Object.assign(service, body); return ok(service); }
@@ -346,6 +373,15 @@ describe("the manifest", () => {
     expect(error).toContain("public_profile.address.country_code: Use a two-letter country code, such as CA.");
   });
 
+  it("keeps the business's settings out of a receptionist's own, and refuses what a manifest can't name", async () => {
+    await writeFile(manifest, `${manifestYaml}receptionists:\n  - name: Emergency line\n    settings: { recording_notice: false, greeting: Hi }\n`);
+    expect(await readManifest(manifest).then(() => null, (value: Error) => value.message)).toContain("receptionists[0].settings.recording_notice: It's the business's, shared by every receptionist, so it goes in receptionist instead.");
+    await writeFile(manifest, `${manifestYaml}receptionists:\n  - name: Emergency line\n  - name: "emergency line "\n`);
+    expect(await readManifest(manifest).then(() => null, (value: Error) => value.message)).toContain("receptionists[1].name: It repeats entry 0.");
+    await writeFile(manifest, `${manifestYaml}receptionists:\n  - { name: Emergency line, copy_from_id: ${BUSINESS} }\n`);
+    expect(await readManifest(manifest).then(() => null, (value: Error) => value.message)).toMatch(/receptionists\[0\]: .*copy_from_id/);
+  });
+
   it("refuses two entries a rerun couldn't tell apart", async () => {
     await writeFile(manifest, `${manifestYaml}rules:\n  - { title: Gas leaks, content: Leave the building. }\n  - { title: gas leaks , content: Call the gas company. }\n`.replace("websites: [https://acmeplumbing.ca]", "websites: [https://acmeplumbing.ca, acmeplumbing.ca/]"));
     const error = await readManifest(manifest).then(() => null, (value: Error) => value.message);
@@ -395,6 +431,66 @@ describe("lobbystack onboard", () => {
     expect(second.code).toBe(exitCodes.ok);
     expect(world.writes).toEqual([]);
     expect(second.out).not.toMatch(/created|updated|added|uploaded|claimed|sent|reading/);
+  });
+
+  it("sets up receptionists besides the default one, then changes only what differs and leaves an archived one alone", async () => {
+    const { world, fetch } = fakeWorld();
+    await writeFile(manifest, `${manifestYaml}${receptionistsYaml}`);
+    expect((await onboard(["--plan"], fetch)).out).toMatch(/receptionists\s+would set up/);
+    const first = await onboard(["--yes"], fetch);
+    expect(first.code).toBe(exitCodes.ok);
+    expect(first.out).toMatch(/receptionists\s+added\s+Emergency line/);
+    // It starts with the default's settings, so only what differs from them changes.
+    expect(first.out).toMatch(/receptionist Emergency line\s+updated\s+greeting, booking_mode\n/);
+    expect(first.out).toMatch(/receptionists\s+added\s+Valet desk/);
+    const emergency = world.receptionists.find((row) => row.name === "Emergency line")!;
+    expect(emergency).toMatchObject({ description: "Burst pipes, floods and no heat, day and night.", is_default: false });
+    expect(world.receptionistSettings.get(String(emergency.id))).toMatchObject({ greeting: "Acme Plumbing emergency line, what's happening?", transfer_mode: "on_urgent", booking_mode: "instant" });
+    expect(world.receptionists.find((row) => row.name === "Valet desk")).toMatchObject({ listed: false });
+    // The default receptionist keeps the manifest's receptionist settings.
+    expect(world.receptionist).toMatchObject({ greeting: "Thanks for calling Acme Plumbing, how can I help?", transfer_mode: "on_urgent", booking_mode: "request" });
+    expect((await state()).keys).toEqual({});
+
+    world.writes.length = 0;
+    expect((await onboard([], fetch)).code).toBe(exitCodes.ok);
+    expect(world.writes.filter((write) => /receptionist/.test(write))).toEqual([]);
+
+    // Someone changes a description in the dashboard and archives the valet desk: the description comes back, and the archived one stays archived.
+    emergency.description = "Changed in the dashboard";
+    world.receptionists.find((row) => row.name === "Valet desk")!.archived_at = "2026-11-01T00:00:00.000Z";
+    world.writes.length = 0;
+    const third = await onboard([], fetch);
+    expect(third.code).toBe(exitCodes.ok);
+    expect(third.out).toMatch(/receptionist Emergency line\s+updated\s+description/);
+    expect(third.out).toMatch(/receptionists\s+archived\s+Valet desk/);
+    expect(third.out).toContain("Valet desk is archived, so the run left it as it is.");
+    expect(world.writes.filter((write) => /receptionist/.test(write))).toEqual([`PATCH /receptionists/${String(emergency.id)}`]);
+  });
+
+  it("waits for the paid plan when the free plan's receptionist is in use, then adds the others", async () => {
+    const { world, fetch } = fakeWorld();
+    await writeFile(manifest, `${checkoutYaml}${receptionistsYaml}`);
+    const first = await onboard(["--yes"], fetch);
+    expect(first.code).toBe(exitCodes.waiting);
+    expect(first.out).toMatch(/receptionists\s+waiting\s+Emergency line: Your plan includes 1 active receptionist\./);
+    expect(world.receptionists).toHaveLength(1);
+    // The owner accepts the claim link, the next run starts the checkout, and the owner pays.
+    world.acceptClaim();
+    expect((await onboard(["--yes"], fetch)).code).toBe(exitCodes.waiting);
+    world.pay();
+    const paid = await onboard(["--yes"], fetch);
+    expect(paid.out).toMatch(/receptionists\s+added\s+Emergency line/);
+    expect(world.receptionists.map((row) => row.name)).toEqual(["Receptionist", "Emergency line", "Valet desk"]);
+  });
+
+  it("reports a receptionist the plan has no room for, and finishes the rest", async () => {
+    const { world, fetch } = fakeWorld();
+    await writeFile(manifest, `${manifestYaml.replace("plan: { managed: true }\n", "").replace('phone_number: { country: CA, area_code: "416" }\n', "")}receptionists:\n  - name: Emergency line\n`);
+    const run = await onboard(["--yes"], fetch);
+    expect(run.code).toBe(exitCodes.failed);
+    expect(run.out).toContain("Emergency line: Your plan includes 1 active receptionist.");
+    expect(world.services).toHaveLength(1);
+    expect(world.receptionists).toHaveLength(1);
   });
 
   it("sets up the public page, and on a rerun changes only the fields that differ", async () => {

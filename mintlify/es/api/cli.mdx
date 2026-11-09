@@ -69,6 +69,12 @@ receptionist:
   transfer_mode: on_urgent
   transfer_number: "+14165550100"
   booking_mode: request
+receptionists:
+  - name: Emergency line
+    description: Burst pipes, floods and no heat, day and night.
+    settings:
+      greeting: Acme Plumbing emergency line, what's happening?
+      booking_mode: instant
 services:
   - name: Drain cleaning
     duration_minutes: 60
@@ -99,6 +105,7 @@ owner:
 | --- | --- |
 | `business` | `name` y `timezone` son obligatorios. `locale` (`en` o `fr`), `website_url`, `business_type` y `slug` son opcionales. `hours` enumera los horarios de la semana por `day`, `open` y `close`, y reemplaza los horarios que tenía el negocio. `id` configura un negocio que ya existe en lugar de crear uno. |
 | `receptionist` | Los campos de `PATCH /receptionist`, como `greeting`, `tone`, `transfer_mode`, `transfer_number` y `booking_mode`. |
+| `receptionists` | Las recepcionistas además de la predeterminada, para un plan que incluye varias: los campos de `POST /receptionists` (`name`, `description`, `handle`, `locale`, `knowledge_scope` y `listed`), y `settings` con los campos de `PATCH /receptionist` propios de esa recepcionista, como `greeting`, `transfer_mode` y `booking_mode`. Una recepcionista con el mismo nombre se actualiza en lugar de agregarse de nuevo, y una archivada se queda como está. El resumen, el aviso de grabación y las reglas para cambiar citas son del negocio, así que van en `receptionist`. |
 | `services` | Los campos de `POST /services`. Un servicio con el mismo nombre se actualiza en lugar de agregarse otra vez. |
 | `rules` | Los campos de `POST /rules`. Una regla con el mismo título se actualiza. |
 | `knowledge.websites` | Los sitios que lee la recepcionista. La primera lectura toma una muestra de cada sitio. |

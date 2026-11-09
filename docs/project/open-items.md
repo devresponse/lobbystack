@@ -87,7 +87,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 
 **Launch RealInfoBot** ([branding](../branding.md#send-the-outside-links-to-your-own-site)): since fork PR #112 the code has its brand, but nothing runs it yet. Still open: a deployment on a realinfobot.com address, such as `app.realinfobot.com`, with its own texting registration, whose HELP and START samples carry RealInfoBot's name and support address; prices in US dollars for realinfobot.com's `/us` pages, since a `billing.json` holds one currency and RealInfoBot's is AlloPlace's in Canadian dollars; its own Zapier integration and Make app; and the widget's "Say Allo!" button and the yellow QR codes and printed signs, which still look like AlloPlace's ([still AlloPlace's](../branding.md#still-alloplaces)).
 
-**Take receptionists further** ([roadmap](../roadmap/receptionists-next.md)): when businesses ask, receptionists in the API and integrations, a chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and members limited to some receptionists.
+**Take receptionists further** ([roadmap](../roadmap/receptionists-next.md)): when businesses ask, a chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and members limited to some receptionists.
 
 **Close smaller gaps:**
 

@@ -316,6 +316,65 @@ async function syncReceptionist(run: Run): Promise<void> {
   await apply(run, "receptionist", Object.keys(changes), async () => { await run.client.call("updateReceptionist", { body: changes }); });
 }
 
+/** A receptionist's own settings, compared with what it has. One the run is about to add has none to read. */
+async function syncReceptionistSettings(run: Run, name: string, receptionistId: string | undefined, wanted: Row): Promise<void> {
+  const step = `receptionist ${name}`;
+  const fields = Object.keys(wanted).filter((field) => wanted[field] !== undefined);
+  if (!receptionistId) return run.log({ step, action: "would set", detail: fields.join(", ") });
+  const current = (await run.client.call("getReceptionist", { query: { receptionist_id: receptionistId } })).data as Row;
+  const changes = Object.fromEntries(fields.filter((field) => !sameValue(wanted[field], current[field])).map((field) => [field, wanted[field]]));
+  await apply(run, step, Object.keys(changes), async () => { await run.client.call("updateReceptionist", { query: { receptionist_id: receptionistId }, body: changes }); });
+}
+
+/**
+ * The receptionists besides the default one, found again by name. A new one
+ * is added, and one the business has gets the fields that differ, then its own
+ * settings. An archived one is left as it is: restoring it is the owner's call.
+ * A refusal, such as the plan's receptionists all in use, waits for the paid
+ * plan the manifest buys, or is noted, and the run goes on.
+ */
+async function syncReceptionists(run: Run): Promise<void> {
+  const wanted = run.manifest.receptionists;
+  if (!wanted?.length) return;
+  const current = [
+    ...((await run.client.call("listReceptionists")).data as Row[]),
+    ...((await run.client.call("listReceptionists", { query: { archived: true } })).data as Row[]),
+  ];
+  for (const { settings, ...receptionist } of wanted) {
+    const step = `receptionist:${nameKey(receptionist.name)}`;
+    let existing = current.find((row) => sameName(row.name, receptionist.name));
+    if (existing?.archived_at) {
+      delete run.state.keys[step];
+      run.log({ step: "receptionists", action: "archived", detail: receptionist.name });
+      run.notes.push(`${receptionist.name} is archived, so the run left it as it is. Restore it on AI agents, or with lobbystack receptionists restore ${String(existing.id)}, and run again.`);
+      continue;
+    }
+    try {
+      if (!existing) {
+        if (run.plan) {
+          run.log({ step: "receptionists", action: "would add", detail: receptionist.name });
+          if (settings) await syncReceptionistSettings(run, receptionist.name, undefined, settings);
+          continue;
+        }
+        existing = (await sendOnce(run, step, async (key) => await run.client.call("createReceptionist", { body: receptionist, idempotencyKey: key }))).data as Row;
+        await run.save();
+        run.log({ step: "receptionists", action: "added", detail: receptionist.name });
+      } else {
+        delete run.state.keys[step];
+        const found = existing;
+        const changes = Object.fromEntries(Object.entries(receptionist).filter(([field, value]) => value !== undefined && !sameValue(value, found[field])));
+        await apply(run, `receptionist ${receptionist.name}`, Object.keys(changes), async () => { await run.client.call("updateReceptionistProfile", { params: { receptionist_id: String(found.id) }, body: changes }); });
+      }
+      if (settings) await syncReceptionistSettings(run, receptionist.name, String(existing.id), settings);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409) throw error;
+      // A paid plan the manifest buys may include more receptionists, so the next run, after the checkout, tries again.
+      if (run.planPending) run.log({ step: "receptionists", action: "waiting", detail: `${receptionist.name}: ${error.message}` });
+      else fail(run, `${receptionist.name}: ${error.message}`);
+    }
+  }
+}
+
 /** The page at /profile/<slug>. Address parts the manifest leaves out keep what they have. */
 async function syncPublicProfile(run: Run): Promise<void> {
   const wanted = run.manifest.public_profile;
@@ -841,7 +900,7 @@ export const onboard: Command = {
       const businessId = await ensureBusiness(run, make, named, fresh, connection.key.startsWith("lsk_"));
       if (!businessId) {
         // With --plan and no business yet there's nothing to compare against, so every section would be set up.
-        for (const section of ["receptionist", "services", "rules", "knowledge", "public_profile", "plan", "phone_number", "owner"] as const) {
+        for (const section of ["receptionist", "receptionists", "services", "rules", "knowledge", "public_profile", "plan", "phone_number", "owner"] as const) {
           if (manifest[section] !== undefined) run.log({ step: section.replace("_", " "), action: "would set up", detail: "" });
         }
       } else {
@@ -856,6 +915,7 @@ export const onboard: Command = {
           run.planPending = checkoutNeeded(manifest, run.billing);
         }
         await syncReceptionist(run);
+        await syncReceptionists(run);
         await syncServices(run);
         await syncRules(run);
         await syncKnowledge(run);

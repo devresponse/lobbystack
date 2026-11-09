@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
-import { apiBusinessCreateSchema, apiPhoneNumberSearchSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, apiRuleCreateSchema, apiServiceCreateSchema, weekdays } from "@lobbystack/shared";
+import { apiBusinessCreateSchema, apiPhoneNumberSearchSchema, apiPublicProfileUpdateSchema, apiReceptionistCreateSchema, apiReceptionistUpdateSchema, apiRuleCreateSchema, apiServiceCreateSchema, weekdays } from "@lobbystack/shared";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -40,6 +40,19 @@ export function websiteKey(value: string): string {
 /** The text a name is found by on a rerun. */
 export const nameKey = (value: string) => value.trim().toLowerCase();
 
+// The business's settings, which every receptionist shares: a receptionist's
+// own settings can't hold them, or one entry would change every receptionist.
+const sharedReceptionistSettings = ["summary", "regenerate_summary", "recording_notice", "appointment_change_policy"] as const;
+
+/** A receptionist besides the default one: who it is, and its own settings. Its id isn't known in a manifest, so it can't copy another. */
+const receptionistEntry = apiReceptionistCreateSchema.omit({ copy_from_id: true }).extend({
+  settings: apiReceptionistUpdateSchema.superRefine((settings, context) => {
+    for (const field of sharedReceptionistSettings) {
+      if (settings[field] !== undefined) context.addIssue({ code: "custom", path: [field], message: "It's the business's, shared by every receptionist, so it goes in receptionist instead." });
+    }
+  }).optional(),
+});
+
 export const manifestSchema = z.strictObject({
   business: apiBusinessCreateSchema.extend({
     id: z.uuid().optional(),
@@ -49,6 +62,7 @@ export const manifestSchema = z.strictObject({
     path: ["regenerate_summary"],
     message: "It isn't a setting, so every run would write a new summary. Run lobbystack receptionist set --regenerate-summary once instead.",
   }).optional(),
+  receptionists: z.array(receptionistEntry).optional(),
   services: z.array(apiServiceCreateSchema).optional(),
   rules: z.array(apiRuleCreateSchema).optional(),
   knowledge: z.strictObject({
@@ -76,6 +90,7 @@ export const manifestSchema = z.strictObject({
       else context.addIssue({ code: "custom", path: path(index), message: `It repeats entry ${first}. Give each entry its own name, or remove one.` });
     });
   };
+  unique(manifest.receptionists, (receptionist) => nameKey(receptionist.name), (index) => ["receptionists", index, "name"]);
   unique(manifest.services, (service) => nameKey(service.name), (index) => ["services", index, "name"]);
   unique(manifest.rules, (rule) => nameKey(rule.title), (index) => ["rules", index, "title"]);
   unique(manifest.knowledge?.websites, websiteKey, (index) => ["knowledge", "websites", index]);

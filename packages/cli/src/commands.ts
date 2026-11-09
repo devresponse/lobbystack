@@ -9,7 +9,7 @@ import { formatTable, print } from "./output";
 import { LOG_DIR_VARIABLE, logFolder, saveLog } from "./searchLog";
 import { readUploadFile, uploadKnowledgeFile } from "./upload";
 import { userAgent, version } from "./version";
-import { checkoutWait, claimWait, sourceWait, subscriptionChangeWait } from "./waits";
+import { checkoutWait, claimWait, packCheckoutWait, sourceWait, subscriptionChangeWait } from "./waits";
 
 // The command groups. Most commands are specs for operationCommand; the few
 // that need more than one call, or a file, are written out below.
@@ -212,6 +212,16 @@ function planTable(data: Row): string {
   return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "receptionists", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
 }
 
+/** The plan in force, then each prepaid pack with its minutes left and when it ends; no table for a business without packs, or an older server. */
+function billingStatus(data: Row): string {
+  const { packs, ...plan } = data;
+  const held = (packs as Row[] | undefined) ?? [];
+  if (!held.length) return showRecord(plan);
+  const minutes = (seconds: unknown) => Math.floor(Number(seconds) / 60);
+  const rows = held.map((pack) => ({ pack: pack.pack, status: pack.status, minutes_left: minutes(pack.seconds_left), of: minutes(pack.seconds_total), paid_at: pack.paid_at, ends_at: pack.ends_at ?? "never ends" }));
+  return `${showRecord(plan)}\n\n${formatTable(rows, columns("pack", "status", "minutes_left", "of", "paid_at", "ends_at"))}`;
+}
+
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 const indent = (text: string) => text.split("\n").map((line) => (line ? `   ${line}` : line)).join("\n");
 
@@ -308,7 +318,25 @@ function providerLine(data: Row): string {
   return link ? `\nLinked to ${linkTarget(link)} ${String(link.started_at)}.` : `\n${name} ${String(provider.env)} account ${String(provider.account)}, not linked yet: run pnpm billing apply.`;
 }
 
-/** Every plan the deployment holds with its live prices and how many the billing provider sells, whether the applied file is the deployed one, and the provider account it's linked to. */
+/** The prepaid packs with their minutes, length, live price and whether the provider's object is linked; nothing on a deployment without packs, or older than them. */
+function packTable(data: Row): string {
+  const packs = (data.packs as Row[] | undefined) ?? [];
+  if (!packs.length) return "";
+  const rows = packs.map((pack) => {
+    const live = (pack.prices as Row[]).find((price) => price.retired_at === null);
+    return {
+      code: pack.code,
+      status: pack.status,
+      minutes: Math.round(Number(pack.voice_sec) / 60),
+      days: pack.days ?? "never ends",
+      price: live ? `${(Number(live.cents) / 100).toFixed(2)} ${String(live.currency).toUpperCase()} once` : "",
+      linked: live ? ((live.provider_ref ?? null) === null ? "no" : "yes") : "",
+    };
+  });
+  return `\n\n${formatTable(rows, columns("code", "status", "minutes", "days", "price", "linked"))}`;
+}
+
+/** Every plan the deployment holds with its live prices and how many the billing provider sells, its packs, whether the applied file is the deployed one, and the provider account it's linked to. */
 function catalogTables(data: Row): string {
   const plans = (data.plans as Row[]).map((plan) => {
     const live = (plan.prices as Row[]).filter((price) => price.retired_at === null);
@@ -319,7 +347,7 @@ function catalogTables(data: Row): string {
   const run = data.last_run as Row | null;
   if (!run) return `Nothing applied yet for ${String(data.brand)}. See what applying its file would change with lobbystack billing catalog-preview ${String(data.brand)} --billing-file @brands/${String(data.brand)}/billing.json.`;
   const matches = data.matches_code ? "the file the running code was built with" : data.code_hash ? "not the file the running code was built with: apply the deployed one" : "and the running code has no billing.json for this brand";
-  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "provider"))}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${providerLine(data)}`;
+  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "provider"))}${packTable(data)}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${providerLine(data)}`;
 }
 
 const changeTable = (changes: Row[]) => changes.length ? `${formatTable(changes.map((change) => ({ ...change, fields: Object.keys(change.fields as Row).join(", "), warns: [change.lowers_allowance ? "lowers an allowance" : "", change.raises_price ? "raises a price" : ""].filter(Boolean).join(", ") })), columns("action", "table", "key", "fields", "warns"))}\n\n` : "";
@@ -463,12 +491,14 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "add-rule": { operation: "createWebsiteRule" },
     "remove-rule": { operation: "deleteWebsiteRule" },
   }),
-  group("billing", "The plan, its checkout, cancelling and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
-    status: { operation: "getBilling" },
+  group("billing", "The plan, its checkout, prepaid packs, cancelling and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
+    status: { operation: "getBilling", show: billingStatus },
     plans: { operation: "listBillingPlans", show: planTable },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
     checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : data.status === "changed" ? `The business already paid for a plan, so Polar moved that subscription to ${String(data.plan)} ${String(data.interval)} and charged any difference to the saved payment method. No page is needed.` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
     "checkout-status": { operation: "getCheckout" },
+    "buy-pack": { operation: "createPackCheckout", args: ["pack"], wait: packCheckoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays for the pack: ${String(data.checkout_url)}` : data.status === "paid" ? "The pack is paid, and the business has it." : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing pack-status ${String(data.id)}.` },
+    "pack-status": { operation: "getPackCheckout" },
     cancel: { operation: "cancelBillingPlan", wait: subscriptionChangeWait },
     resume: { operation: "resumeBillingPlan", wait: subscriptionChangeWait },
     "keep-plan": { operation: "keepBillingPlan", wait: subscriptionChangeWait },

@@ -18,6 +18,10 @@ import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
 type WorkspaceResponse = { businesses: WorkspaceViewModel[] };
 type Billing = {
   account: { plan: string | null; billingInterval: string | null; subscriptionState: string | null } | null;
+  /** The plan in force: prepaid while a pack has time left, even beside a subscription the pack replaced. */
+  effectivePlan?: BillingPlanSlug;
+  /** The packs the business holds with time left: live, or frozen while a dispute holds them. */
+  packs?: Array<{ secondsLeft: number }>;
   availableCheckoutPlans: HostedUpgradePlan[];
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
   plans: BillingPlanList;
@@ -45,12 +49,17 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const billing = useQuery({ queryKey: ["billing", businessId], enabled: Boolean(businessId && open), queryFn: () => requestJson<Billing>(`/api/billing?businessId=${encodeURIComponent(businessId!)}`) });
   const rawPlan = billing.data?.account?.plan;
   // A cancelled or lapsed tier is not the plan someone is on, and marking its
-  // card as current leaves them unable to start the tier they just lost.
-  const plan: BillingPlanSlug = rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
+  // card as current leaves them unable to start the tier they just lost. On a
+  // pack no card is current, and a plan starts with a checkout, even while the
+  // provider still reports the subscription the pack replaced as live.
+  const plan: BillingPlanSlug = billing.data?.effectivePlan === "prepaid" ? "prepaid" : rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
   // Starter or Pro already paid through Polar: picking another plan changes that subscription.
   const changesPlan = plan === "starter" || plan === "pro";
   // Moving off a promo plan drops it, its discount and its allowances.
   const promoPlan = changesPlan && billing.data?.promoPlan?.tier === plan ? billing.data.promoPlan : null;
+  // A checkout from Free or a pack starts a subscription, which ends every pack the business
+  // holds, frozen ones too, and the minutes left on them. A plan changed in place ends none.
+  const packMinutesLeft = plan === "free_cloud" || plan === "prepaid" ? Math.floor((billing.data?.packs ?? []).reduce((seconds, pack) => seconds + pack.secondsLeft, 0) / 60) : 0;
   const activeBusinessId = () => selectActiveBusiness(client.getQueryData<WorkspaceResponse>(["businesses"])?.businesses)?.businessId;
   const mutation = useMutation({
     mutationFn: (input: CheckoutInput) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),
@@ -135,6 +144,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       changesPlan={changesPlan}
       currentPlan={plan}
       leavesPromoPlan={promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? promoPlan.plan : null}
+      leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null}
       loading={pending ? "checkout" : null}
       loadingPlan={checkout?.target ?? (mutation.isPending ? mutation.variables.target : null)}
       locale={i18n.language}

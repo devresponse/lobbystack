@@ -15,6 +15,7 @@ export const SCENARIOS = [
   { name: "deletion", title: "Deleting a business ends both subscriptions at once, each with its last invoice" },
   { name: "refund", title: "A refund of the plan's first payment names its invoice" },
   { name: "totals", title: "An event the meters never got shows as a gap, and a correcting event closes it" },
+  { name: "pack-plan-end", title: "A monthly plan a prepaid pack replaced ends at once with nothing credited, and the usage on its meters is still billed" },
   { name: "events", title: "Stripe's events of the scenarios above normalize, each to its own business" },
 ] as const;
 
@@ -54,7 +55,7 @@ export const SCENARIO_USAGE = [
  * whose Stripe calls differ from Stripe directly, one checkout to pay each,
  * and the events check. The others run when named, but for those that can't.
  */
-export const MERCHANT_OF_RECORD_SCENARIOS: readonly ScenarioName[] = ["usage", "upgrade-paid", "downgrade", "cancel-resume", "totals", "events"];
+export const MERCHANT_OF_RECORD_SCENARIOS: readonly ScenarioName[] = ["usage", "upgrade-paid", "downgrade", "cancel-resume", "totals", "pack-plan-end", "events"];
 
 /** Why a scenario can't run with Stripe as the merchant of record. */
 export const MERCHANT_OF_RECORD_CANT: Partial<Record<ScenarioName, string>> = {

@@ -390,7 +390,18 @@
     "retry": "Try again",
     "current": {
       "title": "This business is already on the {{plan}} plan.",
-      "description": "Its plan is already set up, so you can go on to its phone number."
+      "description": "Its plan is already set up, so you can go on to its phone number.",
+      "prepaidTitle": "This business already has prepaid minutes.",
+      "prepaidDescription": "Its minutes are ready, so you can go on to its phone number."
+    },
+    "packs": {
+      "title": "Prefer prepaid minutes?",
+      "description": "Buy minutes once, with no monthly bill. They last until they run out or the pack ends.",
+      "cta": "Buy pack",
+      "waiting": "Adding your minutes...",
+      "processing": "Your payment is still processing. Check again in a few minutes.",
+      "checkAgain": "Check again",
+      "failed": "Your payment didn't go through. Choose a plan or a pack again."
     }
   }
 }

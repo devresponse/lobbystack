@@ -2,14 +2,16 @@ import type { PolarDiscount, PolarMeter, PolarMetadata, PolarPrice, PolarProduct
 import { isPolarRef, polarRef, type PolarRef } from "@lobbystack/providers/polar/polarCatalog";
 import { billingMeterEventNames, POLAR_API_VERSION, trimTrailingSlashes, type BillingCatalogLinkRequest, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
-import type { DesiredBillingPlan } from "./billingCatalog";
+import type { DesiredBillingPack, DesiredBillingPlan } from "./billingCatalog";
 
 // What a billing.json makes Polar sell, and the calls that get it there. Every
 // Polar object made here carries metadata naming the row it came from, so a
 // rerun finds what an interrupted run made instead of making it again, and
 // another brand's objects are never touched. Pure: the plan is computed from
 // a snapshot of the organization, so the rules are tested without Polar, and
-// `pnpm billing` and the worker's daily check read the same plan.
+// `pnpm billing` and the worker's daily check read the same plan. A prepaid
+// pack is a private one-time product of its own, tagged with the pack's code,
+// so a plan's products never take it for theirs.
 
 /** The 15 events LobbyStack's Polar webhook handles. */
 export const POLAR_WEBHOOK_EVENTS = [
@@ -40,6 +42,7 @@ export const polarTags = {
   interval: "lobbystack_interval",
   terms: "lobbystack_terms",
   meter: "lobbystack_meter",
+  pack: "lobbystack_pack",
 } as const;
 
 type MeterSource = Pick<DesiredBillingPlan, "voice_rate" | "sms_rate" | "call_rate">;
@@ -68,6 +71,8 @@ export type DesiredPolarProduct = {
   terms: string;
 };
 export type DesiredPolarDiscount = { plan: string; name: string; terms: string; currency: string; discount: ResolvedBillingDiscount; products: string[] };
+/** A prepaid pack: a private one-time product with one fixed price. */
+export type DesiredPolarPack = { pack: string; name: string; cents: number; currency: string; terms: string };
 
 /** Everything one brand's file makes Polar sell. */
 export type DesiredPolarCatalog = {
@@ -77,6 +82,8 @@ export type DesiredPolarCatalog = {
   meters: DesiredPolarMeter[];
   products: DesiredPolarProduct[];
   discounts: DesiredPolarDiscount[];
+  /** Empty for a file without packs. */
+  packs: DesiredPolarPack[];
   /** Null when the instance's address isn't known, as on a worker without APP_BASE_URL: the webhook is then neither set up nor checked. */
   webhook: { url: string; events: string[] } | null;
 };
@@ -100,8 +107,10 @@ export function billingPlanLabel(plan: Pick<DesiredBillingPlan, "code" | "names"
  * past each UTC month's allowance, on monthly and annual plans alike, so
  * Polar bills every unit it hears of. An annual product invoices it each
  * month, on a meter cycle of its own, rather than a year of it at renewal.
+ * Each pack gets a private one-time product: only LobbyStack's checkout, which
+ * names the business, sells it.
  */
-export function desiredPolarCatalog(input: { brand: string; profile: Pick<BillingProfile, "currency" | "polar">; plans: readonly DesiredBillingPlan[]; webhookUrl: string | null }): DesiredPolarCatalog {
+export function desiredPolarCatalog(input: { brand: string; profile: Pick<BillingProfile, "currency" | "polar">; plans: readonly DesiredBillingPlan[]; packs?: readonly DesiredBillingPack[]; webhookUrl: string | null }): DesiredPolarCatalog {
   const polar = input.profile.polar;
   // The apply refuses such a file on a Polar deployment (provider_block_missing).
   if (!polar) throw new Error(`brands/${input.brand}/billing.json has no polar block, which a Polar deployment needs.`);
@@ -133,6 +142,7 @@ export function desiredPolarCatalog(input: { brand: string; profile: Pick<Billin
     meters: polarMeterSpecs.map((meter) => ({ key: meter.key, name: meter.name, event: meter.event })),
     products,
     discounts,
+    packs: (input.packs ?? []).map((pack) => ({ pack: pack.code, name: pack.names.en, cents: pack.price.cents, currency: pack.price.currency, terms: pack.terms_hash })),
     webhook: input.webhookUrl ? { url: input.webhookUrl, events: [...POLAR_WEBHOOK_EVENTS] } : null,
   };
 }
@@ -297,9 +307,9 @@ function cycleProblem(product: PolarProduct, desired: DesiredPolarProduct): { pr
 /**
  * The calls that make an organization sell what the file says, in the order
  * they run: settings, meters, products, the Credits taken off them,
- * discounts, the webhook, then archiving, meters last. Anything the run must
- * not decide on its own is a refusal instead, and a run with refusals makes
- * no call at all.
+ * discounts, the webhook, the packs' products, then archiving, meters last.
+ * Anything the run must not decide on its own is a refusal instead, and a
+ * run with refusals makes no call at all.
  */
 export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot: PolarSnapshot; options: PolarPlanOptions; now?: string }): PolarPlan {
   const { catalog, snapshot, options } = input;
@@ -460,10 +470,10 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
   // subscribers keep it. Other kinds of benefit stay.
   const productIds = new Map<string, string | PolarRef>();
   const detach: PolarStep[] = [];
-  const detachCredits = (product: PolarProduct, subject: string) => {
+  const detachCredits = (product: PolarProduct, subject: string, into: PolarStep[] = detach) => {
     const credits = product.benefits.filter((benefit) => benefit.type === "meter_credit");
     if (!credits.length) return;
-    detach.push({ object: "product", action: "detach", subject, changes: [`detach ${quoted(credits)}: the worker reports only each month's overage`], method: "POST", path: `/v1/products/${product.id}/benefits`, body: { benefits: product.benefits.filter((benefit) => benefit.type !== "meter_credit").map((benefit) => benefit.id) } });
+    into.push({ object: "product", action: "detach", subject, changes: [`detach ${quoted(credits)}: the worker reports only each month's overage`], method: "POST", path: `/v1/products/${product.id}/benefits`, body: { benefits: product.benefits.filter((benefit) => benefit.type !== "meter_credit").map((benefit) => benefit.id) } });
   };
   for (const match of matches) {
     const { desired } = match;
@@ -521,10 +531,10 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     detachCredits(found, subject);
   }
 
-  // Products this brand no longer sells.
+  // Products this brand no longer sells. A pack's is judged against the file's packs, below.
   const wantedProducts = new Set(catalog.products.map((product) => productKey(product.plan, product.period)));
   for (const product of snapshot.products) {
-    if (product.is_archived || !ours(product.metadata) || wantedProducts.has(productKey(String(product.metadata[polarTags.plan]), String(product.metadata[polarTags.interval])))) continue;
+    if (product.is_archived || !ours(product.metadata) || product.metadata[polarTags.pack] !== undefined || wantedProducts.has(productKey(String(product.metadata[polarTags.plan]), String(product.metadata[polarTags.interval])))) continue;
     const subject = `Product "${product.name}"`;
     if (!options.allowArchive) refuse("product", subject, `It sells ${String(product.metadata[polarTags.plan])} ${String(product.metadata[polarTags.interval])}, which the file no longer has. Run with --allow-archive to archive it; its subscribers keep their subscription.`);
     else {
@@ -632,6 +642,84 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     }
   }
 
+  // Packs, after everything else, so the calls before them are the ones a
+  // file without packs gets: a private one-time product each, with one fixed
+  // price, found only by its tags. No older script made one, so none is
+  // adopted by its name.
+  const packProducts = snapshot.products.filter((product) => ours(product.metadata) && product.metadata[polarTags.pack] !== undefined);
+  const packDetach: PolarStep[] = [];
+  for (const desired of catalog.packs) {
+    const subject = `Product "${desired.name}"`;
+    const packTagged = packProducts.filter((product) => product.metadata[polarTags.pack] === desired.pack);
+    const live = packTagged.filter((product) => !product.is_archived);
+    if (live.length > 1) {
+      refuse("product", subject, `${live.length} live products are tagged ${catalog.brand} pack ${desired.pack} (${quoted(live)}). Archive all but one in Polar.`);
+      continue;
+    }
+    // A pack back in the file brings back the product its row kept.
+    const [archived] = packTagged.filter((product) => product.is_archived).sort(newestFirst);
+    const found = live[0] ?? archived;
+    const tags = { [polarTags.brand]: catalog.brand, [polarTags.pack]: desired.pack, [polarTags.terms]: desired.terms };
+    const price = { amount_type: "fixed", price_amount: desired.cents, price_currency: desired.currency };
+    const describe = `${money(desired.cents, desired.currency)} once`;
+    const create = (changes: string[]) => steps.push({ object: "product", action: "create", subject, changes: [...changes, "private: only an API checkout sells it"], method: "POST", path: "/v1/products/", body: { name: desired.name, recurring_interval: null, visibility: "private", prices: [price], metadata: tags }, produces: `pack:${desired.pack}` });
+    if (!found) {
+      create([describe]);
+      continue;
+    }
+    if (found.recurring_interval !== null) {
+      // Polar never changes a product's billing cycle, and a pack is paid once.
+      const cycle = `bills every ${found.recurring_interval_count ?? 1} ${found.recurring_interval}`;
+      if (!options.allowReplace) {
+        refuse("product", subject, `"${found.name}" ${cycle}, a pack is paid once, and Polar never changes a product's billing cycle. Run with --allow-replace to make a one-time product and archive this one.`);
+        continue;
+      }
+      create([`replaces "${found.name}", which ${cycle}: ${describe}`]);
+      if (!found.is_archived) late.push({ object: "product", action: "archive", subject: `Product "${found.name}"`, changes: ["replaced by a one-time product"], method: "PATCH", path: `/v1/products/${found.id}`, body: { is_archived: true } });
+      continue;
+    }
+    const changes: string[] = [];
+    const body: Record<string, unknown> = {};
+    if (found.is_archived) {
+      body.is_archived = false;
+      changes.push("bring it back: the file sells this pack again");
+    }
+    if (found.name !== desired.name) {
+      body.name = desired.name;
+      changes.push(`named "${found.name}", the file says "${desired.name}"`);
+    }
+    if ((found.visibility ?? "public") !== "private") {
+      body.visibility = "private";
+      changes.push(`${found.visibility ?? "public"}, a pack is private`);
+    }
+    // One fixed price: the matching one is kept by its id, or the new one sent, and Polar archives the rest.
+    const current = livePrices(found);
+    const same = current.find((candidate) => candidate.amount_type === "fixed" && inCurrency(candidate, desired.currency) && candidate.price_amount === desired.cents);
+    if (!same || current.length > 1) {
+      body.prices = same ? [{ id: same.id }] : [price];
+      changes.push(...(same ? [] : [`add ${describe}`]), ...current.filter((candidate) => candidate !== same).map((candidate) => `drop ${describePrice(candidate, snapshot.meters)}`));
+    }
+    const metadata = mergedTags(found.metadata, tags);
+    if (metadata) {
+      body.metadata = metadata;
+      changes.push(found.metadata[polarTags.terms] !== undefined && found.metadata[polarTags.terms] !== desired.terms ? `made from older terms (${String(found.metadata[polarTags.terms]).slice(0, 6)})` : "tag it as LobbyStack's");
+    }
+    if (Object.keys(body).length) steps.push({ object: "product", action: "update", subject, changes, method: "PATCH", path: `/v1/products/${found.id}`, body });
+    detachCredits(found, subject, packDetach);
+  }
+  // Pack products this brand no longer sells.
+  const wantedPacks = new Set(catalog.packs.map((pack) => pack.pack));
+  for (const product of packProducts) {
+    if (product.is_archived || wantedPacks.has(String(product.metadata[polarTags.pack]))) continue;
+    const subject = `Product "${product.name}"`;
+    if (!options.allowArchive) refuse("product", subject, `It sells pack ${String(product.metadata[polarTags.pack])}, which the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes.`);
+    else {
+      detachCredits(product, subject, packDetach);
+      late.push({ object: "product", action: "archive", subject, changes: ["the file no longer sells it; packs bought through it keep their minutes"], leftover: true, method: "PATCH", path: `/v1/products/${product.id}`, body: { is_archived: true } });
+    }
+  }
+  steps.push(...packDetach);
+
   return { steps: [...steps, ...late, ...lateMeters], refusals };
 }
 
@@ -642,9 +730,10 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
 /**
  * The link request for a snapshot taken once Polar sells what the file says:
  * every live price of every sold plan with the live product tagged for it,
- * and each plan's discount. missing names what has no single tagged object.
+ * each plan's discount, and each pack's live product. missing names what has
+ * no single tagged object.
  */
-export function polarLinkPlans(input: { catalog: DesiredPolarCatalog; plans: readonly DesiredBillingPlan[]; snapshot: PolarSnapshot; now?: string }): { plans: BillingCatalogLinkRequest["plans"]; missing: string[] } {
+export function polarLinkPlans(input: { catalog: DesiredPolarCatalog; plans: readonly DesiredBillingPlan[]; snapshot: PolarSnapshot; now?: string }): { plans: BillingCatalogLinkRequest["plans"]; packs: BillingCatalogLinkRequest["packs"]; missing: string[] } {
   const now = input.now ?? new Date().toISOString();
   const brand = input.catalog.brand;
   const missing: string[] = [];
@@ -664,5 +753,10 @@ export function polarLinkPlans(input: { catalog: DesiredPolarCatalog; plans: rea
     }
     plans.push({ code: plan.code, terms_hash: plan.terms_hash, provider_disc: discount, prices });
   }
-  return { plans, missing };
+  const packs = input.catalog.packs.map((pack) => {
+    const live = input.snapshot.products.filter((product) => !product.is_archived && product.metadata[polarTags.brand] === brand && product.metadata[polarTags.pack] === pack.pack);
+    if (live.length !== 1) missing.push(`pack ${pack.pack}: ${live.length} live products tagged for it`);
+    return { code: pack.pack, terms_hash: pack.terms, currency: pack.currency, provider_ref: live[0]?.id ?? "" };
+  });
+  return { plans, packs, missing };
 }

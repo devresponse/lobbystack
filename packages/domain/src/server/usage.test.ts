@@ -90,6 +90,8 @@ describe("replacement non-AI usage policy", () => {
     expect(effectiveBillingPlan({ deploymentMode: "cloud", accountPlan: "pro", subscriptionState: "canceled" })).toBe("free_cloud");
     expect(effectiveBillingPlan({ deploymentMode: "cloud", accountPlan: "pro", subscriptionState: "active" })).toBe("pro");
     expect(effectiveBillingPlan({ deploymentMode: "self_hosted", accountPlan: null, subscriptionState: null })).toBe("self_host");
+    // Prepaid comes only from live packs: a stored plan of prepaid reads as Free, so the packs decide.
+    expect(effectiveBillingPlan({ deploymentMode: "cloud", accountPlan: "prepaid", subscriptionState: "active" })).toBe("free_cloud");
   });
 
   it("estimates GSM and Unicode SMS segments conservatively", () => {

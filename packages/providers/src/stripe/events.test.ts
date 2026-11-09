@@ -151,3 +151,43 @@ describe("Stripe's events in reconcile's terms", () => {
     expect(deliver("customer.updated", { id: "cus_1", object: "customer" })).toBeNull();
   });
 });
+
+describe("Stripe's events about prepaid packs", () => {
+  const packMetadata = { lobbystack_business: businessId, lobbystack_role: "pack", lobbystack_pack: "pack_500_90", lobbystack_pack_checkout: "f7a4a0a2-3a37-4f43-9d2a-8a56a7fb6a10", lobbystack_pack_price: "price_pack_500_90" };
+  const session = (fields: Record<string, unknown> = {}) => ({ id: "cs_pack_1", object: "checkout.session", mode: "payment", customer: "cus_1", payment_intent: "pi_pack_1", invoice: null, amount_total: 10_450, currency: "cad", payment_status: "paid", client_reference_id: packMetadata.lobbystack_pack_checkout, created: seconds - 300, metadata: packMetadata, ...fields });
+
+  it("reads a pack's checkout as paid, keyed on its payment intent, with the pack and amount reconcile adds", () => {
+    const normalized = deliver("checkout.session.completed", session());
+    expect(normalized).toMatchObject({
+      kind: "checkout",
+      businessId,
+      fields: { customerId: "cus_1", paymentRef: "pi_pack_1" },
+      payload: { role: "pack", packCheckoutId: packMetadata.lobbystack_pack_checkout, packCode: "pack_500_90", packPriceRef: "price_pack_500_90", paymentRef: "pi_pack_1", packOutcome: "paid", amountCents: 10_450, currency: "cad", occurredAt: new Date((seconds - 5) * 1000).toISOString() },
+    });
+    // The pack's session names no plan, request or invoice reconcile would read as a plan's.
+    expect(normalized!.fields).not.toHaveProperty("checkoutRequestId");
+    expect(normalized!.payload).not.toHaveProperty("invoiceRef");
+    expect(deliver("checkout.session.completed", session({ invoice: "in_pack_1" }))!.payload).toMatchObject({ invoiceRef: "in_pack_1" });
+  });
+
+  it("reads a payment that settles later as pending, then paid or failed, and an expired session as expired", () => {
+    expect(deliver("checkout.session.completed", session({ payment_status: "unpaid" }))!.payload).toMatchObject({ packOutcome: "pending" });
+    expect(deliver("checkout.session.async_payment_succeeded", session())!.payload).toMatchObject({ packOutcome: "paid" });
+    expect(deliver("checkout.session.async_payment_failed", session({ payment_status: "unpaid" }))!.payload).toMatchObject({ packOutcome: "failed" });
+    expect(deliver("checkout.session.expired", session({ payment_status: "unpaid", payment_intent: null }))!.payload).toMatchObject({ packOutcome: "expired" });
+  });
+
+  it("drops a plan checkout's later payment events, which its subscription's events already report", () => {
+    const plan = { id: "cs_1", object: "checkout.session", customer: "cus_1", subscription: "sub_1", client_reference_id: "chk_1", metadata: { lobbystack_business: businessId } };
+    expect(deliver("checkout.session.async_payment_succeeded", plan)).toBeNull();
+    expect(deliver("checkout.session.async_payment_failed", plan)).toBeNull();
+  });
+
+  it("reads a dispute's payment intent, and whether it opened, was won or was lost", () => {
+    const dispute = (status: string) => ({ id: "dp_1", object: "dispute", charge: "ch_1", payment_intent: "pi_pack_1", amount: 10_450, currency: "cad", status, metadata: {} });
+    expect(deliver("charge.dispute.created", dispute("needs_response"))).toMatchObject({ kind: "dispute", businessId: null, businessReference: "ch_1", fields: { paymentRef: "pi_pack_1" }, payload: { paymentRef: "pi_pack_1", disputeOutcome: "opened" } });
+    expect(deliver("charge.dispute.closed", dispute("won"))!.payload).toMatchObject({ disputeOutcome: "won" });
+    expect(deliver("charge.dispute.closed", dispute("warning_closed"))!.payload).toMatchObject({ disputeOutcome: "won" });
+    expect(deliver("charge.dispute.closed", dispute("lost"))!.payload).toMatchObject({ disputeOutcome: "lost" });
+  });
+});

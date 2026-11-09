@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { callTranscriptSubject, cancellationSubject, invitationSubject, promoEndingSubject, renderEmail, type CallTranscriptEmail, type RenderEmailInput, type TemplateName } from "./templates";
+import { callTranscriptSubject, cancellationSubject, invitationSubject, packReminderSubject, promoEndingSubject, renderEmail, type CallTranscriptEmail, type RenderEmailInput, type TemplateName } from "./templates";
 
 const base = "https://app.example.test";
 const locales = ["en", "fr", "es", "sr"] as const;
@@ -196,6 +196,82 @@ describe("promo endings", () => {
 
   it("fall back to UTC for a time zone the runtime doesn't know", () => {
     expect(promoEndingSubject(ending({ timeZone: "Mars/Olympus" }))).toBe("Your Salons half off plan ends on November 1, 2026");
+  });
+});
+
+describe("pack reminders", () => {
+  const reminder = (variables: Record<string, string>) => ({ locale: "en", businessName: "Maple Dental", packName: "500 minutes, 180 days", reminder: "ends_7", minutesLeft: "120", date: "2026-12-01T03:30:00.000Z", timeZone: "America/Toronto", url: `${base}/settings/plan`, ...variables });
+  const reason = "You're receiving this email because you own Maple Dental on AlloPlace.";
+
+  it("say when a pack ends, in the business's time zone, that its unused minutes are lost, and what the last pack's end does to the number", () => {
+    const { text } = render({ template: "pack_reminder", variables: reminder({}) });
+    expect(text).toBe([
+      "Maple Dental\nYour pack (500 minutes, 180 days) ends on November 30, 2026",
+      "Your pack (500 minutes, 180 days) for Maple Dental ends on November 30, 2026. Minutes still unused then are lost.",
+      "Once your last pack ends, your business number stops answering calls and is released 30 days later, unless you buy another pack or a plan.",
+      `Open Settings > Plan:\n${base}/settings/plan`,
+      reason,
+    ].join("\n\n"));
+    // The month's reminder reads the same.
+    expect(render({ template: "pack_reminder", variables: reminder({ reminder: "ends_30" }) }).text).toBe(text);
+    expect(packReminderSubject(reminder({}))).toBe("Your pack (500 minutes, 180 days) ends on November 30, 2026");
+  });
+
+  it("say about how many minutes the packs have left, and that calls get a busy signal once none are left", () => {
+    const { text } = render({ template: "pack_reminder", variables: reminder({ reminder: "low", minutesLeft: "45" }) });
+    expect(text).toBe([
+      "Maple Dental\nYou have about 45 minutes left",
+      "Maple Dental has about 45 minutes left in its packs. Once none are left, calls get a busy signal.",
+      `Buy more minutes:\n${base}/settings/plan`,
+      reason,
+    ].join("\n\n"));
+  });
+
+  it("say no minutes are left, so calls get a busy signal until another pack is bought", () => {
+    const { text } = render({ template: "pack_reminder", variables: reminder({ reminder: "empty", minutesLeft: "0" }) });
+    expect(text).toBe([
+      "Maple Dental\nYou have no minutes left",
+      "Maple Dental has no minutes left, so calls get a busy signal until you buy another pack.",
+      `Buy more minutes:\n${base}/settings/plan`,
+      reason,
+    ].join("\n\n"));
+    // A pack that never ends has no date, and a balance reminder needs none.
+    const { date: _date, ...undated } = reminder({ reminder: "empty", minutesLeft: "0" });
+    expect(render({ template: "pack_reminder", variables: undated }).text).toBe(text);
+  });
+
+  it.each(locales)("read as the owner's language, with why it was sent, in %s", (locale) => {
+    for (const kind of ["low", "empty", "ends_30", "ends_7"]) {
+      const { text, html } = render({ template: "pack_reminder", variables: reminder({ locale, reminder: kind }) });
+      expect(text.split("\n\n").at(-1)?.startsWith(reasonOpeners[locale])).toBe(true);
+      expect(text.split("\n")).toContain(`${base}/settings/plan`);
+      expect(html).toContain(`<html lang="${htmlLang[locale]}">`);
+      expect(text).not.toContain("—");
+    }
+    if (locale === "sr") expect(render({ template: "pack_reminder", variables: reminder({ locale }) }).text).toContain("30. 11. 2026.");
+  });
+
+  it("call a pack by a word the dashboard doesn't use for a plan", () => {
+    expect(packReminderSubject(reminder({ locale: "fr" }))).toBe("Votre pack de minutes (500 minutes, 180 days) se termine le 30 novembre 2026");
+    expect(packReminderSubject(reminder({ locale: "es" }))).toBe("Su paquete de minutos (500 minutes, 180 days) termina el 30 de noviembre de 2026");
+    expect(packReminderSubject(reminder({ locale: "sr" }))).toBe("Vaša dopuna minuta (500 minutes, 180 days) ističe 30. 11. 2026.");
+    // The plan keeps its own word where the last pack's end offers one.
+    expect(render({ template: "pack_reminder", variables: reminder({ locale: "fr" }) }).text).toContain("un autre pack de minutes ou un forfait.");
+    expect(render({ template: "pack_reminder", variables: reminder({ locale: "sr" }) }).text).toContain("novu dopunu minuta ili paket.");
+  });
+
+  it("count minutes with each language's plurals", () => {
+    expect(packReminderSubject(reminder({ locale: "sr", reminder: "low", minutesLeft: "1" }))).toBe("Imate još približno 1 minut");
+    expect(packReminderSubject(reminder({ locale: "sr", reminder: "low", minutesLeft: "3" }))).toBe("Imate još približno 3 minuta");
+    expect(packReminderSubject(reminder({ locale: "sr", reminder: "low", minutesLeft: "1000" }))).toBe("Imate još približno 1.000 minuta");
+    expect(packReminderSubject(reminder({ locale: "es", reminder: "low", minutesLeft: "1" }))).toBe("Le queda alrededor de 1 minuto");
+    expect(packReminderSubject(reminder({ locale: "es", reminder: "low", minutesLeft: "45" }))).toBe("Le quedan alrededor de 45 minutos");
+    expect(packReminderSubject(reminder({ locale: "fr", reminder: "low", minutesLeft: "1" }))).toBe("Il vous reste environ 1 minute");
+    expect(packReminderSubject(reminder({ reminder: "low", minutesLeft: "1" }))).toBe("You have about 1 minute left");
+  });
+
+  it("fall back to UTC for a time zone the runtime doesn't know", () => {
+    expect(packReminderSubject(reminder({ timeZone: "Mars/Olympus" }))).toBe("Your pack (500 minutes, 180 days) ends on December 1, 2026");
   });
 });
 

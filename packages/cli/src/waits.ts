@@ -19,6 +19,15 @@ export const checkoutWait: WaitSpec = {
   failed: (data) => (data.status === "error" ? `The billing provider couldn't make the checkout page or change the plan: ${reason(data)}. Start another checkout.` : undefined),
 };
 
+export const packCheckoutWait: WaitSpec = {
+  operation: "getPackCheckout",
+  param: "checkout_id",
+  done: (data) => ["ready", "paid", "failed", "expired"].includes(String(data.status)),
+  failed: (data) => (data.status === "failed" ? `The billing provider couldn't make the pack's checkout page: ${reason(data)}. Start another checkout.`
+    : data.status === "expired" ? `The pack's checkout expired: ${reason(data)}. Start another checkout.`
+    : undefined),
+};
+
 export const subscriptionChangeWait: WaitSpec = {
   operation: "getSubscriptionChange",
   param: "change_id",

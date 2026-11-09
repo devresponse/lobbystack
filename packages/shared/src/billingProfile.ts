@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { billingPlanCatalog, type BillingInterval, type BillingProvider } from "./billing";
+import { billingPlanCatalog, MAX_PACK_DAYS, type BillingInterval, type BillingProvider } from "./billing";
 import type { InterfaceLocale } from "./locales";
 
 // brands/<brand>/billing.json: every plan a brand sells, standard or not, and
@@ -29,6 +29,8 @@ export type BillingPlanEnding = (typeof billingPlanEndings)[number];
 export const PLAN_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,46}[a-z0-9]$/;
 /** Plans a file may hold besides the four standard ones. */
 export const MAX_ADDITIONAL_PLANS = 50;
+/** Prepaid packs a file may hold: each size and length is a pack of its own. */
+export const MAX_BILLING_PACKS = 30;
 
 const BYTES_PER_MB = 1_048_576;
 
@@ -69,6 +71,21 @@ const discount = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("percentage"), basisPoints: z.number().int().min(1).max(10_000), duration, durationInMonths: months.optional() }),
   z.strictObject({ type: z.literal("fixed"), amountCents: cents(10_000_000), duration, durationInMonths: months.optional() }),
 ]);
+// A prepaid pack (docs/features/prepaid-packs.md): voice minutes paid for
+// once, used within days of the payment, or at any time when days is left
+// out. Its monthly allowances and limits are the ones a business on it gets;
+// whatever it leaves out comes from the file's Starter. Each size and length
+// is a pack of its own, with its own price.
+const packIncluded = z.strictObject({ alertSmsSegments: count(100_000), outboundCallAttempts: count(100_000), chatAiUnits: count(1_000_000) });
+const pack = z.strictObject({
+  names: z.strictObject({ en: name, fr: name, es: name, sr: name } satisfies Record<InterfaceLocale, typeof name>),
+  minutes: z.number().int().min(1).max(100_000),
+  days: z.number().int().min(1).max(MAX_PACK_DAYS).optional(),
+  priceCents: cents(10_000_000),
+  included: packIncluded.partial().optional(),
+  limits: limits.partial().optional(),
+});
+
 const additionalPlan = z.strictObject({
   tier: z.enum(["starter", "pro"]),
   access: z.enum(billingPlanAccessLevels),
@@ -117,6 +134,8 @@ const billingProfileShape = z.strictObject({
   stripe: stripeBlock.optional(),
   // catchall makes every key but the four standard ones an additional plan.
   plans: z.object({ free_cloud: freePlan, starter: tierPlan, pro: tierPlan, enterprise: customPlan }).catchall(additionalPlan),
+  // Prepaid packs by code; a file without the key sells none.
+  packs: z.record(z.string(), pack).optional(),
 });
 
 type ProfileShape = z.output<typeof billingProfileShape>;
@@ -177,6 +196,14 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
       if (plan.discount.type === "fixed" && Number.isFinite(lowest) && plan.discount.amountCents > lowest) issue([code, "discount", "amountCents"], `the discount is more than the plan's lowest price (${lowest})`);
     }
   }
+  const packs = Object.keys(profile.packs ?? {}).sort();
+  for (const code of packs) {
+    const packIssue = (path: Array<string>, message: string) => context.addIssue({ code: "custom", path: ["packs", code, ...path], message });
+    // C10: a pack's code is permanent too, and no plan has it.
+    if (!PLAN_CODE_PATTERN.test(code)) packIssue([], "a pack code is 3 to 48 lowercase letters, digits, _ and -, starting and ending with a letter or digit");
+    if (Object.hasOwn(profile.plans, code)) packIssue([], "a plan already has this code");
+  }
+  packs.slice(MAX_BILLING_PACKS).forEach((code) => context.addIssue({ code: "custom", path: ["packs", code], message: `a file holds at most ${MAX_BILLING_PACKS} packs` }));
   if (profile.stripe) {
     // C8: Managed Payments sells through Checkout alone, so overage can't be a subscription of its own.
     if (profile.stripe.managedPayments && profile.stripe.overage !== "checkout") context.addIssue({ code: "custom", path: ["stripe", "overage"], message: "with managedPayments, overage is checkout: Managed Payments sells only through Checkout" });
@@ -367,6 +394,65 @@ export function resolveBillingPlans(profile: Pick<BillingProfile, "currency" | "
     });
   }
   return resolved.sort((a, b) => a.sort - b.sort || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+}
+
+/** One pack as a complete billing_pack_plans row and its price, under the columns' own names. */
+export type ResolvedBillingPack = {
+  code: string;
+  names: Record<InterfaceLocale, string>;
+  voice_sec: number;
+  /** Null: the pack never ends. */
+  days: number | null;
+  sms_seg: number;
+  calls_out: number;
+  chat_units: number;
+  kb_bytes: number;
+  numbers: number;
+  receptionists: number;
+  sort: number;
+  price: { currency: string; cents: number };
+};
+
+/**
+ * Every pack of a checked file as the complete row it becomes, smallest and
+ * shortest first. What a pack leaves out of its allowances and limits comes
+ * from the file's Starter, so no reader ever merges two rows.
+ */
+export function resolveBillingPacks(profile: Pick<BillingProfile, "currency" | "plans" | "packs">): ResolvedBillingPack[] {
+  const starter = standardAllowances("starter", profile.plans.starter);
+  const packs = Object.entries(profile.packs ?? {}).map(([code, pack]): ResolvedBillingPack => {
+    const storage = pack.limits?.knowledgeStorageMb;
+    return {
+      code,
+      names: { en: pack.names.en, fr: pack.names.fr, es: pack.names.es, sr: pack.names.sr },
+      voice_sec: pack.minutes * 60,
+      days: pack.days ?? null,
+      sms_seg: pack.included?.alertSmsSegments ?? starter.sms_seg ?? 0,
+      calls_out: pack.included?.outboundCallAttempts ?? starter.calls_out ?? 0,
+      chat_units: pack.included?.chatAiUnits ?? starter.chat_units ?? 0,
+      kb_bytes: storage === undefined ? starter.kb_bytes ?? 0 : storage * BYTES_PER_MB,
+      numbers: pack.limits?.businessNumbers ?? starter.numbers ?? 0,
+      receptionists: pack.limits?.receptionists ?? starter.receptionists ?? DEFAULT_PLAN_RECEPTIONISTS.starter,
+      sort: 0,
+      price: { currency: profile.currency, cents: pack.priceCents },
+    };
+  });
+  // A pack that never ends sorts after every length.
+  const length = (pack: ResolvedBillingPack) => pack.days ?? Number.POSITIVE_INFINITY;
+  packs.sort((a, b) => a.voice_sec - b.voice_sec || length(a) - length(b) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+  return packs.map((pack, index) => ({ ...pack, sort: (index + 1) * 10 }));
+}
+
+/** The pack columns its terms hash covers, besides the price and currency: everything a buyer gets. */
+export const billingPackTermColumns = ["voice_sec", "days", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "receptionists"] as const satisfies ReadonlyArray<keyof ResolvedBillingPack>;
+
+/** The text a pack's terms hash is the SHA-256 of. It leaves out names and sort, which may change at any time. */
+export function packTermsJson(pack: Pick<ResolvedBillingPack, (typeof billingPackTermColumns)[number] | "price">): string {
+  return canonicalJson({
+    ...Object.fromEntries(billingPackTermColumns.map((column) => [column, pack[column]])),
+    currency: pack.price.currency,
+    cents: pack.price.cents,
+  });
 }
 
 /**

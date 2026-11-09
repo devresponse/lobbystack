@@ -84,6 +84,16 @@ export interface BillingProvider {
    * sells it with Stripe as the merchant of record (Managed Payments).
    */
   createCheckout(input: { customer: CustomerRef; email: string; price: PriceRef; businessId: string; requestId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; overageOnCheckout?: { currency: string }; merchantOfRecord?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
+  /**
+   * A one-time payment page for a prepaid pack, made out to the customer, or
+   * else to the email and billing key: Stripe Checkout in payment mode, or a
+   * Polar checkout for the pack's one-time product. price is the pack's price
+   * or product, and checkoutId the pack checkout's own ID, which the page's
+   * metadata carries back with the payment, beside the role pack. On Stripe,
+   * merchantOfRecord sells it with Stripe as the merchant of record (Managed
+   * Payments). expiresAt is null when the provider doesn't say.
+   */
+  createPackCheckout(input: { customer: CustomerRef; email: string; price: Pick<PriceRef, "ref">; businessId: string; checkoutId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; merchantOfRecord?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
   /** The subscription, or null when the provider doesn't know it. */
   getSubscription(id: string): Promise<ProviderSubscription | null>;
 
@@ -105,6 +115,16 @@ export interface BillingProvider {
   removeDiscount(input: { subscriptionId: string; requestId: string }): Promise<ProviderSubscription>;
   /** Ends the subscription now, as for a business being deleted. */
   revoke(input: { subscriptionId: string; requestId: string }): Promise<"ended" | "already_ended">;
+  /**
+   * Ends a subscription a prepaid pack replaced (decision 6), with its usage
+   * so far billed and nothing credited for the rest of its period.
+   * overageSubscriptionId is Stripe's separate overage subscription, which
+   * ends with its month; null when overage bills on the plan itself or on
+   * Polar. endsAt is when it ends where the provider ends a subscription only
+   * at its period's end (Polar). Null once it has ended; otherwise the
+   * subscription as it stands, which ends at its cancelAt.
+   */
+  endForPack(input: { subscriptionId: string; overageSubscriptionId: string | null; endsAt: Date; requestId: string }): Promise<ProviderSubscription | null>;
 
   /** The worker's startup check (Stripe): null when the credentials are the deployment's own account, else the account expected and the one found. */
   checkAccount?(): Promise<{ expected: string; found: string } | null>;
@@ -143,6 +163,12 @@ export interface BillingProvider {
   businessOfCustomer?(customerId: string): Promise<string | null>;
   /** The invoice a payment paid, for a refund that names only the payment (Stripe's charges). Null when there's none. */
   invoiceOfPayment?(paymentRef: string): Promise<string | null>;
+  /**
+   * The business a prepaid pack's payment names, for an event that names only
+   * the payment (Stripe's disputes). Null for any other payment, such as a
+   * plan's invoice, so those events stay unattributed as before.
+   */
+  businessOfPackPayment?(paymentRef: string): Promise<string | null>;
 }
 
 /** A webhook delivery whose signature checked out. */
@@ -166,6 +192,8 @@ export type NormalizedBillingEvent = {
     discountRef?: string | null; subscriptionModifiedAt?: string; periodStart?: string; periodEnd?: string;
     cancelAt?: string | null; nextChange?: { planCode: string; billingInterval: BillingInterval; at: string } | null; checkoutRequestId?: string; checkoutOutcome?: "completed" | "expired";
     payment?: { id: string; status: string; amountCents: number; refundedCents: number; currency: string; invoiceUrl: string | null; subscriptionId: string | null; description: string | null; occurredAt: string };
+    /** The payment intent a pack's checkout or a dispute names (Stripe): a pack's row is keyed on it. */
+    paymentRef?: string;
   };
   /**
    * What gets stored: the provider's object with the normalized fields beside it at

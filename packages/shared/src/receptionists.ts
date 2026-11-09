@@ -298,10 +298,14 @@ export type ReceptionistUpgrade = "plan" | "sales" | null;
 /** The plans a business buys itself, cheapest first. Enterprise is agreed with sales. */
 const SELF_SERVE_TIERS: readonly BillingPlanSlug[] = ["free_cloud", "starter", "pro"];
 
-/** What raises a business's limit, from its plan and the receptionists each tier includes. */
+/**
+ * What raises a business's limit, from its plan and the receptionists each
+ * tier includes. A prepaid pack sits beside Free: Starter and Pro are both
+ * plans it can buy.
+ */
 export function receptionistUpgrade(plan: BillingPlanSlug, limit: number, cap: number, tiers: Readonly<Record<BillingPlanSlug, Pick<BillingPlanLimits, "includedReceptionists">>>): ReceptionistUpgrade {
   if (plan === "self_host" || plan === "enterprise" || limit >= cap) return null;
-  const higher = SELF_SERVE_TIERS.slice(SELF_SERVE_TIERS.indexOf(plan) + 1);
+  const higher = SELF_SERVE_TIERS.slice(SELF_SERVE_TIERS.indexOf(plan === "prepaid" ? "free_cloud" : plan) + 1);
   return higher.some((tier) => receptionistAllowance(tiers[tier].includedReceptionists, cap) > limit) ? "plan" : "sales";
 }
 

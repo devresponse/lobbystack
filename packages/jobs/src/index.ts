@@ -58,7 +58,7 @@ export function createQueue(
   });
 }
 
-const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "conversation.finalizeSession", "billing.revokeSubscription", "billing.ensureOverage", "billing.changeSubscription", "phoneNumber.releaseDeleted", "privacy.deleteStoredObjects"]);
+const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "billing.expirePacks", "conversation.finalizeSession", "billing.revokeSubscription", "billing.endPlanForPack", "billing.ensureOverage", "billing.changeSubscription", "phoneNumber.releaseDeleted", "privacy.deleteStoredObjects"]);
 
 export async function enqueueJob(
   queue: Queue<JobEnvelope>,
@@ -78,11 +78,15 @@ export async function enqueueJob(
   });
   // Attempts and backoff come from the queue's defaultJobOptions, which give up
   // after about 15 seconds. Usage billing, applying a Polar event, customer
-  // notifications, a promo plan's ending or discount removal, and a call's
-  // summary ride out a provider or database outage, or Polar's "a change is
-  // still pending", for about 3 hours instead; the billing sweep queues
-  // billing work again after that. So do the jobs a deleted business leaves:
-  // ending its plan, and releasing its numbers and files, which nothing queues again.
+  // notifications, a promo plan's ending or discount removal, a pack run that
+  // a call's draw, a refund or a dispute queued, so the owners hear that day,
+  // and a call's summary ride out a provider or database outage, or Polar's
+  // "a change is still pending", for about 3 hours instead; the billing sweep
+  // queues billing work again after that, and the next daily run a pack's. So
+  // do the jobs a deleted business leaves: ending its plan, and releasing its
+  // numbers and files, which nothing queues again; and ending a subscription a
+  // prepaid pack replaced, which the daily pack job queues again while the
+  // account still shows it live.
   const options: JobsOptions = {
     jobId,
     ...(input.delayMs !== undefined ? { delay: input.delayMs } : {}),

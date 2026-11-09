@@ -194,19 +194,37 @@ async function main(): Promise<void> {
             ,('lobbystack_worker', 'billing_code_redemptions', 'SELECT')
             ,('lobbystack_worker', 'billing_code_redemptions', 'INSERT')
             ,('lobbystack_readonly', 'billing_code_redemptions', 'SELECT')
+            ,('lobbystack_worker', 'billing_pack_plans', 'SELECT')
+            ,('lobbystack_worker', 'billing_pack_plans', 'INSERT')
+            ,('lobbystack_worker', 'billing_pack_plans', 'UPDATE')
+            ,('lobbystack_worker', 'billing_pack_prices', 'SELECT')
+            ,('lobbystack_worker', 'billing_pack_prices', 'INSERT')
+            ,('lobbystack_worker', 'billing_pack_prices', 'UPDATE')
+            ,('lobbystack_app', 'billing_pack_plans', 'SELECT')
+            ,('lobbystack_app', 'billing_pack_prices', 'SELECT')
+            ,('lobbystack_app', 'billing_pack_offers', 'SELECT')
+            ,('lobbystack_worker', 'billing_pack_offers', 'SELECT')
+            ,('lobbystack_readonly', 'billing_pack_offers', 'SELECT')
+            ,('lobbystack_app', 'billing_pack_checkouts', 'INSERT')
+            ,('lobbystack_worker', 'billing_pack_checkouts', 'UPDATE')
+            ,('lobbystack_app', 'billing_packs', 'UPDATE')
+            ,('lobbystack_worker', 'billing_packs', 'INSERT')
+            ,('lobbystack_worker', 'billing_packs', 'UPDATE')
+            ,('lobbystack_app', 'billing_pack_draws', 'INSERT')
+            ,('lobbystack_worker', 'billing_pack_draws', 'INSERT')
           ) as expected(role_name, table_name, privilege_type)
           where not has_table_privilege(expected.role_name, 'public.' || expected.table_name, expected.privilege_type)
         `);
         if (grantFailures.rows.length > 0) {
           throw new Error(`Database grant verification failed for: ${grantFailures.rows.map((row) => `${row.role_name}:${row.table_name}:${row.privilege_type}`).join(", ")}`);
         }
-        // The billing catalog and its codes are retired or revoked, never deleted, and a code's uses go
-        // only with its business; the app never reads a code or a use but through app.billing_code_offers;
-        // and the view reads with each caller's own policies.
+        // The billing catalog, the pack catalog and its codes are retired or revoked, never deleted, a code's
+        // uses and a business's packs go only with their business; the app never reads a code or a use but
+        // through app.billing_code_offers; and the views read with each caller's own policies.
         const billingCatalogFailures = await migrator.db.execute<{ failure: string }>(sql`
           select role_name || ':' || table_name || ':DELETE' as failure
           from unnest(array['lobbystack_app', 'lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
-          cross join unnest(array['billing_runs', 'billing_plans', 'billing_prices', 'billing_codes', 'billing_code_redemptions']) as table_name
+          cross join unnest(array['billing_runs', 'billing_plans', 'billing_prices', 'billing_codes', 'billing_code_redemptions', 'billing_pack_plans', 'billing_pack_prices', 'billing_packs']) as table_name
           where exists (select 1 from pg_roles where rolname = role_name)
             and has_table_privilege(role_name, 'public.' || table_name, 'DELETE')
           union all
@@ -218,10 +236,11 @@ async function main(): Promise<void> {
           from unnest(array['lobbystack_app', 'lobbystack_worker']) as role_name
           where not has_function_privilege(role_name, 'app.billing_code_offers(text)', 'EXECUTE')
           union all
-          select 'billing_offers:security_invoker'
+          select view_name || ':security_invoker'
+          from unnest(array['billing_offers', 'billing_pack_offers']) as view_name
           where not exists (
             select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
-            where n.nspname = 'public' and c.relname = 'billing_offers' and c.relkind = 'v' and 'security_invoker=true' = any(c.reloptions)
+            where n.nspname = 'public' and c.relname = view_name and c.relkind = 'v' and 'security_invoker=true' = any(c.reloptions)
           )
         `);
         if (billingCatalogFailures.rows.length > 0) {

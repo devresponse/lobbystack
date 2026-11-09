@@ -241,7 +241,8 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
     }
     if (route === "POST /billing/checkout") {
       if (mode.key === "platform" && !world.team.members.some((member) => member.role === "business_owner" && member.email !== PARTNER)) return error(409, "conflict", "Only the business's own owner can pay for a plan, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan.");
-      if (world.billing.plan !== "free_cloud" && !(world.billing.plan === "starter" && body!.plan === "pro")) return error(409, "conflict", "This business already pays for a plan. Change it in the billing portal.");
+      // As the server's standardCheckoutAllowed: Free and a prepaid pack may buy either plan, Starter only Pro.
+      if (world.billing.plan !== "free_cloud" && world.billing.plan !== "prepaid" && !(world.billing.plan === "starter" && body!.plan === "pro")) return error(409, "conflict", "This business already pays for a plan. Change it in the billing portal.");
       const checkout = { id: id(), plan: body!.plan, interval: body!.interval, status: "pending", checkout_url: null, error: null, paid: false, created_at: new Date().toISOString() };
       world.checkouts.set(checkout.id, checkout);
       // A Starter business already pays, so the API changes that subscription instead of making a page.
@@ -717,6 +718,25 @@ describe("lobbystack onboard", () => {
     expect(waiting.out).toContain("- A number needs a paid plan. Pay for one in the dashboard, or add plan to the manifest, then run this again.");
     expect(world.writes).not.toContain("POST /phone-numbers/search");
     expect(world.writes.at(-1)).toBe("POST /team/claim-link");
+  });
+
+  it("claims a number for a business on a prepaid pack, which includes one, without waiting for a plan", async () => {
+    const { world, fetch } = fakeWorld();
+    world.billing = { plan: "prepaid", managed: false, billing_interval: null };
+    await writeFile(manifest, manifestYaml.replace("plan: { managed: true }\n", ""));
+    const run = await onboard(["--yes"], fetch);
+    expect(run.out).not.toContain("for a paid plan");
+    expect(world.writes).toContain("POST /phone-numbers/search");
+  });
+
+  it("buys the manifest's plan for a business on a prepaid pack, as for a free one", async () => {
+    const { world, fetch } = fakeWorld({ key: "business" });
+    await writeFile(manifest, checkoutYaml);
+    world.billing = { plan: "prepaid", managed: false, billing_interval: null };
+    const run = await onboard(["--yes"], fetch);
+    expect(run.code).toBe(exitCodes.waiting);
+    expect(run.out).toContain("isn't paid yet");
+    expect(world.writes).toContain("POST /billing/checkout");
   });
 
   it("waits for a paid plan when its key can't read the plan, and still sends the claim link", async () => {

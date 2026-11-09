@@ -28,10 +28,10 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(synced: boolean | "error" = false, monthlyOnly = false, effectivePlan = "free_cloud", plans: BillingPlanList = builtInBillingPlanList()) {
+function setup(synced: boolean | "error" = false, monthlyOnly = false, effectivePlan = "free_cloud", plans: BillingPlanList = builtInBillingPlanList(), extra: Record<string, unknown> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-  client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: monthlyOnly ? ["monthly"] : ["monthly", "annual"] }, plans });
+  client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: monthlyOnly ? ["monthly"] : ["monthly", "annual"] }, plans, ...extra });
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
     if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "new-checkout" });
@@ -210,5 +210,102 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: "plan.billingInterval.monthly" }).getAttribute("aria-selected")).toBe("true"));
     expect(screen.getByRole("button", { name: "plan.tiers.starter.cta.monthly" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "plan.tiers.pro.cta.monthly" }).hasAttribute("disabled")).toBe(false);
+  });
+});
+
+describe("prepaid packs during onboarding", () => {
+  const offer = (code: string, minutes: number, days: number | null, checkoutAvailable = true) => ({ code, names: { en: code }, minutes, voiceSeconds: minutes * 60, days, amountCents: 9_900, currency: "cad", smsSegments: 50, outboundCalls: 20, chatUnits: 50, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable });
+  const onSale = { packOffers: [offer("pack-500-180", 500, 180), offer("pack-500-365", 500, 365)], packCheckout: { refusal: null, endsSubscription: null } };
+  /** The pack checkout's answers: the POST's checkout, then what its GET reads. */
+  function servePacks(status: Record<string, unknown>) {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
+      if (url === "/api/billing/packs/checkout" && init?.method === "POST") return Response.json({ checkoutId: "pc-1" }, { status: 202 });
+      if (url.startsWith("/api/billing/packs/checkout?")) return Response.json({ checkoutUrl: null, error: null, synced: status.status === "paid", refusal: null, providerName: "Stripe", ...status });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  /** Back from a pack's payment page, with its checkout reading status from the first request. */
+  function renderReturn(status: Record<string, unknown>, effectivePlan = "free_cloud") {
+    route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly", "annual"] }, plans: builtInBillingPlanList() });
+    const fetchMock = servePacks(status);
+    render(<StrictMode><QueryClientProvider client={client}><OnboardingPlanSurface /></QueryClientProvider></StrictMode>);
+    return fetchMock;
+  }
+
+  it("offers no pack when none is on sale, as before packs", () => {
+    setup();
+    expect(screen.queryByText("plan.packs.title")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
+  });
+
+  it("offers the packs on sale beside the plans, and records the choice and its checkout as prepaid", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    setup(false, false, "free_cloud", builtInBillingPlanList(), onSale);
+    const fetchMock = servePacks({ status: "ready", checkoutUrl: "https://pay.example/pc-1" });
+    expect(screen.getByText("plan.packs.title")).toBeTruthy();
+    // The second length, 365 days, of the two the 500 minutes are sold for.
+    await userEvent.click(screen.getAllByRole("radio", { name: "billing.packs.daysOption" })[1]!);
+    await userEvent.click(screen.getByRole("button", { name: "plan.packs.cta" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/pc-1"));
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/billing/packs/checkout")!;
+    expect(JSON.parse(String(init!.body))).toEqual({ businessId: "business", pack: "pack-500-365" });
+    telemetryRef.current!.expectEvent("web.onboarding.plan_selected", { businessId: "business", plan: "prepaid" });
+    telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_started", { businessId: "business", plan: "prepaid" });
+    // The plans wait while the pack's checkout opens.
+    expect(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("says why a pack can't be bought here, and offers none on a plan that sells none", () => {
+    setup(false, false, "free_cloud", builtInBillingPlanList(), { packOffers: [offer("pack-500-180", 500, 180, false)], packCheckout: { refusal: null, endsSubscription: null } });
+    expect(screen.getByRole("button", { name: "plan.packs.cta" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("billing.packs.unavailable")).toBeTruthy();
+    cleanup();
+    setup(false, false, "free_cloud", builtInBillingPlanList(), { ...onSale, packCheckout: { refusal: "managed_plan", endsSubscription: null } });
+    expect(screen.queryByText("plan.packs.title")).toBeNull();
+  });
+
+  it("waits for a pack's payment after the provider sends them back, records the checkout once, and goes on to the number step", async () => {
+    // The pack is in force once paid, which must not stop the return on the current-plan screen.
+    const fetchMock = renderReturn({ status: "paid" }, "prepaid");
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/billing/packs/checkout?checkoutId=pc-1&businessId=business", expect.anything());
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/api/onboarding/stage?")).map(([, init]) => init?.body)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "prepaid" });
+    expect(telemetryRef.current!.events.filter((event) => event.name === "web.onboarding.plan_checkout_completed")).toHaveLength(1);
+    expect(screen.queryByText("plan.current.prepaidTitle")).toBeNull();
+  });
+
+  it("says a pack's payment failed and shows the plans again", async () => {
+    renderReturn({ status: "failed", error: "The payment failed." });
+    expect(await screen.findByText("plan.packs.failed")).toBeTruthy();
+    expect(route.router.replace).toHaveBeenCalledWith("/onboarding/plan");
+    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+  });
+
+  it("says a payment that hasn't arrived is processing, and checks again when asked", async () => {
+    const fetchMock = renderReturn({ status: "expired", error: "This payment page expired." });
+    expect(await screen.findByText("plan.packs.processing")).toBeTruthy();
+    const reads = () => fetchMock.mock.calls.filter(([url]) => url.startsWith("/api/billing/packs/checkout?")).length;
+    const before = reads();
+    servePacks({ status: "paid" });
+    await userEvent.click(screen.getByRole("button", { name: "plan.packs.checkAgain" }));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    expect(before).toBeGreaterThan(0);
+  });
+
+  it("lets a business already on a pack go on to its number", async () => {
+    const fetchMock = setup(false, false, "prepaid");
+    expect(screen.getByText("plan.current.prepaidTitle")).toBeTruthy();
+    expect(screen.getByText("plan.current.prepaidDescription")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/number"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "phone_number" }) }));
   });
 });

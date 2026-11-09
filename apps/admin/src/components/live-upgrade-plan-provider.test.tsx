@@ -10,7 +10,7 @@ import { isUpgradeInProgress } from "@/lib/upgrade-in-progress";
 
 const alerts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: alerts }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string, options?: { minutes?: string }) => options?.minutes ? `${key}:${options.minutes}` : key }) }));
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
 function OpenButton() { const open = useOpenUpgradePlanDialog(); return <button onClick={open}>Open plans</button>; }
@@ -286,5 +286,59 @@ describe("telling the dashboard an upgrade is under way", () => {
     expect(isUpgradeInProgress()).toBe(true);
     view.unmount();
     expect(isUpgradeInProgress()).toBe(false);
+  });
+});
+
+describe("starting a plan from a prepaid pack", () => {
+  // On the prepaid tier the usage status counts the live packs only, while packs lists frozen ones too.
+  const onPack = { effectivePlan: "prepaid", usageStatus: { pack: { secondsTotal: 60_000, secondsUsed: 30_000, secondsLeft: 30_030, nextEndsAt: null, lastEndsAt: null } }, packs: [{ status: "active", secondsTotal: 60_000, secondsLeft: 30_030 }] };
+  async function openPlans(account: Record<string, unknown> | null, billing: Record<string, unknown> = onPack) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account, ...billing, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST" ? Response.json({ requestId: "request" }) : Response.json({ status: "pending", checkoutUrl: null, error: null, synced: false, refusal: null }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    return fetchMock;
+  }
+
+  it("marks no card current and warns that the packs and their minutes end", async () => {
+    await openPlans({ plan: "free_cloud", billingInterval: null, subscriptionState: null });
+    expect(screen.queryByRole("button", { name: "billing.upgradeDialog.actions.currentPlan" })).toBeNull();
+    expect(screen.getByText("billing.upgradeDialog.endsPacks:500")).toBeTruthy();
+    expect(screen.queryByText("billing.upgradeDialog.changesSubscription")).toBeNull();
+  });
+
+  it("counts a frozen pack's minutes with the live packs', since the new subscription ends it too", async () => {
+    await openPlans({ plan: "free_cloud", billingInterval: null, subscriptionState: null }, { ...onPack, packs: [...onPack.packs, { status: "frozen", secondsTotal: 30_000, secondsLeft: 3_000 }] });
+    expect(screen.getByText("billing.upgradeDialog.endsPacks:550")).toBeTruthy();
+  });
+
+  it("warns a business on Free whose only pack is frozen while a dispute is open", async () => {
+    await openPlans({ plan: "free_cloud", billingInterval: null, subscriptionState: null }, { effectivePlan: "free_cloud", usageStatus: { pack: null }, packs: [{ status: "frozen", secondsTotal: 30_000, secondsLeft: 6_000 }] });
+    expect(screen.getByText("billing.upgradeDialog.endsPacks:100")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "billing.upgradeDialog.actions.currentPlan" })).toHaveLength(1);
+  });
+
+  it.each<[string, Record<string, unknown>, Record<string, unknown>]>([
+    ["a free business without packs", { plan: "free_cloud", billingInterval: null, subscriptionState: null }, { effectivePlan: "free_cloud", usageStatus: { pack: null }, packs: [] }],
+    ["a yearly Starter business, whose plan changes in place, with a pack waiting beside it", { plan: "starter", billingInterval: "annual", subscriptionState: "active" }, { effectivePlan: "starter", usageStatus: { pack: null }, packs: [{ status: "active", secondsTotal: 30_000, secondsLeft: 6_000 }] }],
+    ["a business on a managed plan with a pack waiting beside it", { source: "managed", plan: "enterprise", billingInterval: null, subscriptionState: "active" }, { effectivePlan: "enterprise", usageStatus: { pack: null }, packs: [{ status: "active", secondsTotal: 30_000, secondsLeft: 6_000 }] }],
+  ])("doesn't warn %s", async (_business, account, billing) => {
+    await openPlans(account, billing);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByText(/^billing\.upgradeDialog\.endsPacks/)).toBeNull();
+  });
+
+  it("opens a checkout rather than changing the subscription a pack replaced, which the provider still reports live", async () => {
+    const fetchMock = await openPlans({ plan: "pro", billingInterval: "monthly", subscriptionState: "active" });
+    expect(screen.queryByText("billing.upgradeDialog.changesSubscription")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/billing/checkout", expect.objectContaining({ method: "POST" })));
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/billing/checkout")!;
+    expect(JSON.parse(String(init!.body))).toEqual({ businessId: "business", target: "pro", billingInterval: "annual" });
+    expect(screen.queryByText("billing.actions.changingPlan")).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type Stripe from "stripe";
 
 import { stripeEventSchema, stripeThinEventSchema, type StripeThinEvent } from "@lobbystack/contracts";
-import { isUuid, STRIPE_WEBHOOK_EVENTS } from "@lobbystack/shared";
+import { isUuid, STRIPE_PACK_WEBHOOK_EVENTS, STRIPE_WEBHOOK_EVENTS } from "@lobbystack/shared";
 
 import { BillingWebhookRefusal } from "../billing/errors";
 import type { BillingEnv, BillingWebhook, NormalizedBillingEvent, PriceLinks, VerifiedDelivery } from "../billing/types";
@@ -62,6 +62,9 @@ function orderStatusOf(status: string | undefined): string {
 /** The business a hint names, when it's a business ID. */
 const businessOf = (...hints: unknown[]): string | undefined => hints.map(text).find(isUuid);
 
+/** The events the route takes: the endpoint's, and the ones it adds for a file with prepaid packs. */
+const takenEvents: readonly string[] = [...STRIPE_WEBHOOK_EVENTS, ...STRIPE_PACK_WEBHOOK_EVENTS];
+
 export class StripeWebhook implements BillingWebhook {
   readonly provider = "stripe" as const;
 
@@ -88,13 +91,17 @@ export class StripeWebhook implements BillingWebhook {
 
   /** The events LobbyStack uses in reconcile's terms; null for any other, which is answered 202 and not stored. */
   normalize(delivery: VerifiedDelivery, links: Pick<PriceLinks, "planFor">): NormalizedBillingEvent | null {
-    if (!(STRIPE_WEBHOOK_EVENTS as readonly string[]).includes(delivery.type)) return null;
+    if (!takenEvents.includes(delivery.type)) return null;
     const object = delivery.object;
     if (delivery.type.startsWith("customer.subscription.")) return subscriptionEvent(delivery, links);
     if (delivery.type.startsWith("invoice.")) return invoiceEvent(object);
-    if (delivery.type.startsWith("checkout.session.")) return checkoutEvent(delivery);
+    if (delivery.type.startsWith("checkout.session.")) {
+      // A payment that settles later is a pack's only: a plan's subscription events say when it pays.
+      if (record(object.metadata).lobbystack_role === "pack") return packCheckoutEvent(delivery);
+      return delivery.type.startsWith("checkout.session.async_payment_") ? null : checkoutEvent(delivery);
+    }
     if (delivery.type === "charge.refunded") return refundEvent(object);
-    return disputeEvent(object);
+    return disputeEvent(delivery);
   }
 }
 
@@ -249,10 +256,68 @@ function refundEvent(object: RecordValue): NormalizedBillingEvent {
   };
 }
 
-/** A dispute opened on a charge. It names no customer, so unless its metadata names the business it's logged and dropped. */
-function disputeEvent(object: RecordValue): NormalizedBillingEvent {
+/**
+ * A dispute opened or closed on a charge. It names no customer: unless its
+ * metadata names the business, the webhook route asks Stripe for the business
+ * a pack's payment names, and drops any other. paymentRef is the payment
+ * intent, which a pack's row is keyed on.
+ */
+function disputeEvent(delivery: VerifiedDelivery): NormalizedBillingEvent {
+  const object = delivery.object;
   const businessId = businessOf(record(object.metadata).lobbystack_business);
-  return { kind: "dispute", businessId: businessId ?? null, businessReference: businessId ?? idOf(object.charge) ?? null, customerBusinessId: null, fields: {}, payload: { ...object, kind: "dispute" } };
+  const paymentRef = idOf(object.payment_intent);
+  const disputeStatus = text(object.status);
+  const disputeOutcome = delivery.type === "charge.dispute.closed" ? (disputeStatus === "lost" ? "lost" as const : "won" as const) : "opened" as const;
+  return {
+    kind: "dispute",
+    businessId: businessId ?? null,
+    businessReference: businessId ?? idOf(object.charge) ?? null,
+    customerBusinessId: null,
+    fields: { ...(paymentRef ? { paymentRef } : {}) },
+    payload: { ...object, kind: "dispute", ...(paymentRef ? { paymentRef } : {}), disputeOutcome, occurredAt: delivery.createdAt.toISOString() },
+  };
+}
+
+/**
+ * A pack's checkout session (lobbystack_role pack): paid when it completes
+ * paid or its later payment succeeds, pending while a payment that settles
+ * later is on its way, failed when that payment fails, and expired. Reconcile
+ * adds the pack from the paid one, keyed on its payment intent, and records
+ * the outcome on the pack checkout the session's reference names.
+ */
+function packCheckoutEvent(delivery: VerifiedDelivery): NormalizedBillingEvent {
+  const object = delivery.object;
+  const metadata = record(object.metadata);
+  const businessId = businessOf(metadata.lobbystack_business);
+  const customerId = idOf(object.customer);
+  const packCheckoutId = text(metadata.lobbystack_pack_checkout) ?? text(object.client_reference_id);
+  const paymentRef = idOf(object.payment_intent);
+  const invoiceRef = idOf(object.invoice);
+  const paid = text(object.payment_status) === "paid" || text(object.payment_status) === "no_payment_required";
+  const packOutcome = delivery.type === "checkout.session.expired" ? "expired" as const
+    : delivery.type === "checkout.session.async_payment_failed" ? "failed" as const
+      : delivery.type === "checkout.session.async_payment_succeeded" || paid ? "paid" as const : "pending" as const;
+  const amountCents = amount(object.amount_total) ?? 0;
+  const currency = text(object.currency) ?? "";
+  const pack = {
+    ...(packCheckoutId ? { packCheckoutId } : {}),
+    ...(text(metadata.lobbystack_pack) ? { packCode: text(metadata.lobbystack_pack) } : {}),
+    ...(text(metadata.lobbystack_pack_price) ? { packPriceRef: text(metadata.lobbystack_pack_price) } : {}),
+    ...(paymentRef ? { paymentRef } : {}),
+    ...(invoiceRef ? { invoiceRef } : {}),
+    packOutcome,
+    amountCents,
+    currency,
+    occurredAt: delivery.createdAt.toISOString(),
+  };
+  return {
+    kind: "checkout",
+    businessId: businessId ?? null,
+    businessReference: businessId ?? null,
+    customerBusinessId: null,
+    fields: { ...(customerId ? { customerId } : {}), ...(paymentRef ? { paymentRef } : {}) },
+    payload: { ...object, kind: "checkout", role: "pack", ...(customerId ? { customerId } : {}), ...pack },
+  };
 }
 
 /**

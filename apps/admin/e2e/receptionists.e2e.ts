@@ -226,9 +226,9 @@ test("visitors pick a listed receptionist on the business page, each receptionis
     await page.getByLabel(settings.publicPage.details.city).fill("Vancouver");
     await page.getByLabel(settings.publicPage.details.region).fill("BC");
     await page.getByLabel(settings.publicPage.details.country).selectOption("CA");
-    await page.getByRole("switch", { name: settings.publicPage.publish.label }).click();
+    // Publish page saves the edits with the page published.
     const published = page.waitForResponse((response) => response.url().includes("/api/business-profile?") && response.request().method() === "PUT");
-    await page.getByRole("button", { name: settings.publicPage.save, exact: true }).click();
+    await page.getByRole("button", { name: settings.publicPage.publish.publishAction, exact: true }).click();
     expect((await published).ok()).toBe(true);
 
     // The page's card lists who visitors can pick, Front desk always first; taking Billing off saves at once.

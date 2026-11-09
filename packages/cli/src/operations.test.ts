@@ -108,6 +108,28 @@ describe("one command per endpoint", () => {
     expect(JSON.parse(result.err)).toEqual({ error: { message: "The claim failed: The carrier no longer offers this number. Search again for another number.", exit_code: exitCodes.failed } });
   });
 
+  it("buys a prepaid pack, waiting for its page with --wait, and says why a checkout that failed or expired did", async () => {
+    const checkout = (status: string, extra: Record<string, unknown> = {}) => ({ body: { data: { id: otherId, pack: "pack_250_90", status, checkout_url: null, error: null, paid: false, ...extra } } });
+    const api = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: [checkout("processing"), checkout("ready", { checkout_url: "https://checkout.stripe.com/c/pay/cs_1" })] });
+    const bought = await runCli(["billing", "buy-pack", "pack_250_90", "--billing-email", "billing@example.com", "--wait"], { fetch: api.fetch });
+    expect(bought.code).toBe(exitCodes.ok);
+    expect(bought.out).toContain("Send this page to whoever pays for the pack: https://checkout.stripe.com/c/pay/cs_1");
+    expect(api.sent[0]).toMatchObject({ method: "POST", path: "/api/v1/billing/packs/checkout", body: { pack: "pack_250_90", billing_email: "billing@example.com" } });
+    expect(api.sent.map((request) => `${request.method} ${request.path}`)).toEqual(["POST /api/v1/billing/packs/checkout", `GET /api/v1/billing/packs/checkout/${otherId}`, `GET /api/v1/billing/packs/checkout/${otherId}`]);
+
+    // Without --wait it says how to check, which pack-status does.
+    const queued = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: checkout("paid", { paid: true }) });
+    expect((await runCli(["billing", "buy-pack", "pack_250_90"], { fetch: queued.fetch })).out).toContain(`lobbystack billing pack-status ${otherId}`);
+    expect(JSON.parse((await runCli(["billing", "pack-status", otherId, "--json"], { fetch: queued.fetch })).out)).toMatchObject({ status: "paid", paid: true });
+
+    for (const [status, error, message] of [["failed", "Polar checkout creation failed.", "The billing provider couldn't make the pack's checkout page: Polar checkout creation failed. Start another checkout."], ["expired", "This request waited too long to run.", "The pack's checkout expired: This request waited too long to run. Start another checkout."]] as const) {
+      const ended = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: checkout(status, { error }) });
+      const result = await runCli(["billing", "buy-pack", "pack_250_90", "--wait", "--json"], { fetch: ended.fetch });
+      expect(result.code).toBe(exitCodes.failed);
+      expect(JSON.parse(result.err)).toEqual({ error: { message, exit_code: exitCodes.failed } });
+    }
+  });
+
   it("makes up an Idempotency-Key for every operation that takes one, and shows it to scripts when the call fails", async () => {
     const failed = fakeApi({ "POST /api/v1/services": { status: 503, body: { error: { code: "rate_limit_unavailable", message: "The API is temporarily unavailable. Retry shortly." } } } });
     const result = await runCli(["services", "add", "Cut", "--duration-minutes", "30", "--json"], { fetch: failed.fetch });

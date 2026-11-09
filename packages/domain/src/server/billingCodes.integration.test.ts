@@ -8,7 +8,7 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, apiBillingCo
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { createBillingCheckoutRequest, loadBillingCheckoutRequest, reconcileBillingProviderEvent } from "./billing";
-import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, linkBillingCatalogForApi } from "./billingCatalog";
+import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPacks, desiredBillingPlans, linkBillingCatalogForApi } from "./billingCatalog";
 import { billingCodeView, createBillingCodeForApi, findBillingCodeOffer, listBillingCodesForApi, loadBusinessPromoPlan, revokeBillingCodeForApi } from "./billingCodes";
 import { readBillingPlanLimitBook, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
@@ -42,6 +42,11 @@ async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
       // applies can't add or delete rows while this one reads the tables.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('lobbystack.billing_catalog'))`);
       await tx.execute(sql`delete from public.billing_codes`);
+      // A pack's purchases point at its rows, and every row at the run that wrote it.
+      await tx.execute(sql`delete from public.billing_packs`);
+      await tx.execute(sql`delete from public.billing_pack_checkouts`);
+      await tx.execute(sql`delete from public.billing_pack_prices`);
+      await tx.execute(sql`delete from public.billing_pack_plans`);
       await tx.execute(sql`delete from public.billing_prices`);
       await tx.execute(sql`delete from public.billing_plans`);
       await tx.execute(sql`delete from public.billing_runs`);
@@ -110,10 +115,10 @@ async function promoCatalog(tx: DatabaseTransaction, value = promoFile()): Promi
   const polar = new PolarCatalogClient({ token: "polar_oat_test", baseUrl: polarEnv.POLAR_API_BASE_URL, fetch: fake.fetch, sleep: async () => undefined });
   const profile = billingProfileSchema.parse(value);
   const plans = desiredBillingPlans(profile);
-  const catalog = desiredPolarCatalog({ brand: "alloplace", profile, plans, webhookUrl: `${polarEnv.APP_BASE_URL}/api/webhooks/polar` });
+  const catalog = desiredPolarCatalog({ brand: "alloplace", profile, plans, packs: desiredBillingPacks(profile), webhookUrl: `${polarEnv.APP_BASE_URL}/api/webhooks/polar` });
   await runPolarSteps(polar, planPolarChanges({ catalog, snapshot: await polar.readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false } }).steps);
   const links = polarLinkPlans({ catalog, plans, snapshot: await polar.readSnapshot() });
-  const body = apiBillingCatalogLinkSchema.parse({ brand: "alloplace", polar_env: "sandbox", polar_org: "org_test", hash: applied.run.hash, plans: links.plans });
+  const body = apiBillingCatalogLinkSchema.parse({ brand: "alloplace", polar_env: "sandbox", polar_org: "org_test", hash: applied.run.hash, plans: links.plans, packs: links.packs });
   await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body, deployment: { brand: "alloplace", polar: billingDeploymentPolar(polarEnv) } });
 }
 
@@ -696,6 +701,22 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
         expect(await account(tx, businessId)).toEqual(before);
         // Settings > Plan shows when, and what comes next.
         expect(await withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, (scoped) => loadBusinessPromoPlan(scoped, businessId))).toMatchObject({ plan: "salons-half-off", ends: periodEnd, endsWith: "tier" });
+      });
+    });
+
+    it("leaves a promo subscription a prepaid pack replaced to the job that ends it", async () => {
+      await rollbackTest(async (tx) => {
+        await promoCatalog(tx);
+        const { businessId } = await ownedBusiness(tx, "replaced");
+        const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
+        await polarEvent(tx, businessId, "subscription.active", { plan: "starter", planCode: "salons-half-off", currentPeriodStart: new Date(Date.now() - 10 * 86_400_000).toISOString(), currentPeriodEnd: new Date(Date.now() + 20 * 86_400_000).toISOString() });
+        await as(tx, "owner");
+        await tx.execute(sql`update public.billing_accounts set replaced_subscription_id = subscription_id where business_id = ${businessId}::uuid`);
+        await as(tx, "lobbystack_worker");
+        // The provider still reports it active, yet no promo email goes and the provider isn't told to move it to a tier.
+        expect(await thrown(endPromoPlanForApi(context(tx), apiCaller))).toMatchObject({ status: 404 });
+        expect(await outbox(tx, businessId, "billing.endPromoPlan")).toEqual([]);
+        expect(await loadPromoEndWork(context(tx), { businessId })).toBeNull();
       });
     });
 

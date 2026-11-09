@@ -21,7 +21,7 @@ import { recordUnansweredQuestion, type UnansweredQuestionChannel } from "@lobby
 import { isBusinessDeleted } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
-import { callTranscriptSubject, cancellationSubject, invitationSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
+import { callTranscriptSubject, cancellationSubject, invitationSubject, packReminderSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import type { BillingProvider } from "@lobbystack/providers/billing/types";
 import type { PolarSnapshot } from "@lobbystack/providers/polar/polarCatalog";
 import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
@@ -509,7 +509,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         return { status: "skipped" };
       }
       {
-        const template = job.payload.template === "existing_account" || job.payload.template === "account_setup" || job.payload.template === "verify_email" || job.payload.template === "password_reset" || job.payload.template === "invitation" || job.payload.template === "operator_alert" || job.payload.template === "feedback_submission" || job.payload.template === "onboarding_followup" || job.payload.template === "promo_ending" || job.payload.template === "cancellation_confirm" || job.payload.template === "cancellation_request" || job.payload.template === "cancellation_completed"
+        const template = job.payload.template === "existing_account" || job.payload.template === "account_setup" || job.payload.template === "verify_email" || job.payload.template === "password_reset" || job.payload.template === "invitation" || job.payload.template === "operator_alert" || job.payload.template === "feedback_submission" || job.payload.template === "onboarding_followup" || job.payload.template === "promo_ending" || job.payload.template === "pack_reminder" || job.payload.template === "cancellation_confirm" || job.payload.template === "cancellation_request" || job.payload.template === "cancellation_completed"
           ? job.payload.template
           : "operator_alert";
         const variables = typeof job.payload.variables === "object" && job.payload.variables !== null
@@ -521,7 +521,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           const sent = await dependencies.email.sendTemplate({
             template,
             to: String(job.payload.to ?? job.payload.email ?? ""),
-            subject: String(job.payload.subject ?? (template === "invitation" ? invitationSubject(variables, appName) : template === "promo_ending" ? promoEndingSubject(variables) : template === "cancellation_confirm" || template === "cancellation_request" || template === "cancellation_completed" ? cancellationSubject(template, variables) : `${appName} notification`)),
+            subject: String(job.payload.subject ?? (template === "invitation" ? invitationSubject(variables, appName) : template === "promo_ending" ? promoEndingSubject(variables) : template === "pack_reminder" ? packReminderSubject(variables) : template === "cancellation_confirm" || template === "cancellation_request" || template === "cancellation_completed" ? cancellationSubject(template, variables) : `${appName} notification`)),
             variables,
             appName,
             idempotencyKey: job.idempotencyKey,
@@ -725,8 +725,11 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     case "billing.reconcile":
     case "billing.refreshUnitEconomics":
     case "billing.createCheckout":
+    case "billing.createPackCheckout":
     case "billing.endPromoPlan":
+    case "billing.expirePacks":
     case "billing.revokeSubscription":
+    case "billing.endPlanForPack":
     case "billing.ensureOverage":
     case "billing.changeSubscription":
     case "billing.checkUsageTotals":

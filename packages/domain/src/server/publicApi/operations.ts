@@ -43,6 +43,8 @@ import {
   type ApiCheckout,
   type ApiSubscriptionChange,
   type ApiCheckoutCreate,
+  type ApiPackCheckout,
+  type ApiPackCheckoutCreate,
   type ApiClaimLink,
   type ApiClaimLinkCreate,
   type ApiContact,
@@ -124,9 +126,10 @@ import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
+import { listBusinessPacks } from "../billingPacks";
+import { createPackCheckoutRequestInTransaction, readPackCheckoutInTransaction } from "../billingPackCheckout";
 import { billingSubscriptionChangeShown, createBillingSubscriptionRequestInTransaction, isBillingSubscriptionAction } from "../billingSubscription";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
-import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -138,14 +141,14 @@ import { changeKnowledgeAudienceInTransaction, createWebsiteRuleInTransaction, d
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { answerUnansweredQuestionInTransaction, dismissUnansweredQuestionInTransaction, listOpenUnansweredQuestionsInTransaction, type OpenUnansweredQuestion, type UnansweredAnswerAudience } from "../unansweredQuestions";
 import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
-import { normalizeOnboardingStage, resolveOnboardingStageForPlan, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
+import { normalizeOnboardingStage, resolveOnboardingStageForNumbers, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
-import { loadBillingContext } from "../usage";
+import { loadBillingContext, loadBusinessPlanLimits } from "../usage";
 import { createEntryLinkInTransaction, getEntryLinkInTransaction, listEntryLinkScansInTransaction, listEntryLinksInTransaction, updateEntryLinkInTransaction, type EntryLink, type EntryLinkPatch } from "../entryLinks";
 import { setPhoneNumberReceptionistInTransaction, setWidgetKeyReceptionistInTransaction } from "../receptionistEntryPoints";
 import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "../receptionistInput";
@@ -193,6 +196,7 @@ import {
   loadPhoneNumberResource,
   pageSize,
   serializeCalendarConnection,
+  serializeBillingPack,
   serializeContact,
   knowledgeEntryReceptionists,
   serializeNotificationPreferences,
@@ -376,7 +380,9 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 /** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
 async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  // A subscription a prepaid pack replaced counts as ended while the provider ends it, whatever its own state, end date or next change says.
+  const replaced = Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
   // A promo plan's end, and what its renewal does; a plan that keeps going has neither.
   const [promo] = planCode ? await tx.select({ ends: billingPlans.ends }).from(billingPlans).where(eq(billingPlans.code, planCode)).limit(1) : [];
   const planEndsWith = planCode && account?.planEnds ? promoPlanEnding(account.endWith, promo?.ends) : null;
@@ -392,17 +398,18 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
     plan_ends: planEndsWith && account?.planEnds ? account.planEnds.toISOString() : null,
     plan_ends_with: planEndsWith,
     managed: isManagedBillingAccount(account),
-    subscription_state: account?.subscriptionState ?? null,
+    subscription_state: replaced ? null : account?.subscriptionState ?? null,
     billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
     current_period_end: paid && account?.currentPeriodEnd ? account.currentPeriodEnd.toISOString() : null,
-    cancels_at: account?.cancelAt && isLiveSubscriptionState(account.subscriptionState) ? account.cancelAt.toISOString() : null,
-    next_change: account?.nextPlanCode && (account.nextInterval === "monthly" || account.nextInterval === "annual") && account.nextChangeAt ? { plan: account.nextPlanCode, interval: account.nextInterval, at: account.nextChangeAt.toISOString() } : null,
-    payment_action_url: await loadPlanChangePayment(tx, { businessId, subscriptionId: account?.subscriptionId ?? null }),
+    cancels_at: account?.cancelAt && isLiveSubscriptionState(account.subscriptionState) && !replaced ? account.cancelAt.toISOString() : null,
+    next_change: !replaced && account?.nextPlanCode && (account.nextInterval === "monthly" || account.nextInterval === "annual") && account.nextChangeAt ? { plan: account.nextPlanCode, interval: account.nextInterval, at: account.nextChangeAt.toISOString() } : null,
+    payment_action_url: replaced ? null : await loadPlanChangePayment(tx, { businessId, subscriptionId: account?.subscriptionId ?? null }),
     spending_cap_cents: cap,
     overage_spend_cents: spend,
     spending_cap_reached: cap !== null && spend > 0 && spend >= cap,
     provider: billingProviderOf(process.env),
     provider_name: billingProviderNames[billingProviderOf(process.env)],
+    packs: (await listBusinessPacks(tx, businessId)).map(serializeBillingPack),
   };
 }
 
@@ -468,12 +475,12 @@ async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkou
  * owner or admin. A platform key acts for an owner of the business other than
  * the key's own account, and is refused while there is none: every business the
  * key onboards would otherwise carry one email in Polar, which can tie their
- * payments together.
+ * payments together. purchase names what is bought in that refusal.
  */
-async function checkoutPayerId(context: DomainContext, caller: ApiCaller): Promise<string> {
+async function checkoutPayerId(context: DomainContext, caller: ApiCaller, purchase = "a plan"): Promise<string> {
   if (caller.platformKeyId === undefined) return await resolveActingUserId(context, caller);
   const [owner] = await inBusiness(context, caller, async (tx) => await tx.select({ userId: businessMemberships.userId }).from(businessMemberships).where(and(eq(businessMemberships.businessId, caller.businessId), eq(businessMemberships.role, "business_owner"), eq(businessMemberships.status, "active"), ne(businessMemberships.userId, caller.actingUserId))).orderBy(asc(businessMemberships.createdAt)).limit(1));
-  if (!owner) throw conflict("Only the business's own owner can pay for a plan, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan.");
+  if (!owner) throw conflict(`Only the business's own owner can pay for ${purchase}, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan.`);
   return owner.userId;
 }
 
@@ -495,10 +502,11 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
 
 /**
  * Asks Polar for a page where the customer pays. Like the dashboard, it sells
- * any plan to a free business and Pro to a Starter one, which the worker does
+ * any plan to a free business or one on a prepaid pack, whose packs the new
+ * subscription ends, and Pro to a Starter one, which the worker does
  * by changing the Starter subscription rather than with a page; other changes
  * to a paid plan happen in Polar's billing portal. A promo code's plan is sold
- * to a free, Starter or Pro business alike. Callers say whether this
+ * to a free, prepaid, Starter or Pro business alike. Callers say whether this
  * deployment sells a standard plan and interval, and limit promo code tries
  * in checkPromoCode, which runs once the key may pay for the business, before
  * the code is looked up, so a key that is refused spends none of its tries.
@@ -551,6 +559,50 @@ export async function getSubscriptionChangeForApi(context: DomainContext, caller
 
 export async function getCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiCheckout> {
   return await inBusiness(context, caller, async (tx) => await loadCheckout(tx, caller.businessId, checkoutId));
+}
+
+/** A prepaid pack's checkout as the API shows it; paid once billing.reconcile added the pack. */
+async function loadPackCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiPackCheckout> {
+  const checkout = await readPackCheckoutInTransaction(tx, { businessId, checkoutId });
+  if (!checkout) throw notFound("Pack checkout");
+  return {
+    id: checkout.id,
+    pack: checkout.pack,
+    status: checkout.status,
+    checkout_url: checkout.checkoutUrl,
+    error: checkout.error,
+    paid: checkout.status === "paid",
+    expires_at: checkout.expiresAt.toISOString(),
+    created_at: checkout.createdAt.toISOString(),
+    updated_at: checkout.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Asks the deployment's billing provider for a page where the customer pays
+ * once for a prepaid pack, as Settings > Plan does, with the dashboard's
+ * refusals as the API's 409. Callers say whether this deployment sells packs
+ * through its provider. Made out to the person the key acts for, or the owner
+ * for a platform key. The payer's open checkout for the same pack comes back
+ * instead of a new one; checkLimit runs only before a new one is made.
+ */
+export async function createPackCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiPackCheckoutCreate, options: { available: boolean; checkLimit?: BillingCheckoutLimit }): Promise<ApiPackCheckout> {
+  if (!options.available) throw conflict(`This deployment doesn't sell packs through ${billingProviderNames[billingProviderOf(process.env)]}.`);
+  const userId = await checkoutPayerId(context, caller, "a pack");
+  return await inBusiness(context, caller, async (tx) => {
+    let checkout: { id: string; created: boolean };
+    try {
+      checkout = await createPackCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, pack: input.pack, billingEmail: input.billing_email, checkLimit: options.checkLimit });
+    } catch (error) {
+      throw apiErrorFromDomain(error, "Pack checkout");
+    }
+    if (checkout.created) await audit(tx, caller, { eventType: "api.billing.pack_checkout_started", entityType: "billing_pack_checkout", entityId: checkout.id, payload: { pack: input.pack, payerUserId: userId } });
+    return await loadPackCheckout(tx, caller.businessId, checkout.id);
+  });
+}
+
+export async function getPackCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiPackCheckout> {
+  return await inBusiness(context, caller, async (tx) => await loadPackCheckout(tx, caller.businessId, checkoutId));
 }
 
 /** Puts the business on the managed enterprise plan. Callers check that an operator's platform key asked. */
@@ -775,11 +827,11 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
-  const { plan, planCode } = await loadBillingContext(tx, businessId);
-  const limits = await readBillingPlanLimitBook(tx);
-  const paid = plan === "starter" || plan === "pro" || plan === "enterprise";
+  const { plan, limits } = await loadBusinessPlanLimits(tx, businessId);
+  // A prepaid pack is bought like a plan, and its own limits say whether it includes a number.
+  const paid = plan === "starter" || plan === "pro" || plan === "enterprise" || plan === "prepaid";
   // A hosted plan needs its number when it includes one: claims follow the plan's own count, which a promo plan can set to none.
-  const needsNumber = plan !== "self_host" && limitsFor(limits, plan, planCode).includedBusinessNumbers !== 0;
+  const needsNumber = plan !== "self_host" && limits.includedBusinessNumbers !== 0;
   const answeredCall = await hasAnsweredPhoneCall(tx, businessId);
   const item = (id: ApiOnboardingItem, done: boolean, skipped: boolean, required: boolean) => ({ id, status: done ? "done" as const : skipped ? "skipped" as const : "missing" as const, required });
   const checklist = [
@@ -794,7 +846,7 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
     item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
   ];
   // The step the dashboard shows: a business on a plan without a number goes back from the number steps to its plan.
-  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), plan, limits, planCode);
+  const stage = resolveOnboardingStageForNumbers(normalizeOnboardingStage(business.stage), limits.includedBusinessNumbers);
   const complete = stage === "complete";
   return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
 }

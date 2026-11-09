@@ -5,8 +5,8 @@ import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
 import { billingProfileForProvider, billingProfileSchema, perMonthCents, STRIPE_API_VERSION, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
-import { desiredBillingPlans } from "./billingCatalog";
-import { desiredStripeCatalog, planStripeChanges, stripeLinkBody, stripePlanner, verifyStripeCatalog, type StripeStep, type StripeVerifyInput } from "./billingStripe";
+import { desiredBillingPacks, desiredBillingPlans } from "./billingCatalog";
+import { desiredStripeCatalog, planStripeChanges, stripeLinkBody, stripePackLookupKey, stripePlanner, verifyStripeCatalog, type StripeStep, type StripeVerifyInput } from "./billingStripe";
 import { emptyStripeSnapshot, runStripeSteps } from "./billingStripe.testing";
 import type { CatalogPlanOptions } from "./billingProvider";
 
@@ -59,6 +59,36 @@ function apply(snapshot: StripeSnapshot, file: BillingProfile, options: Partial<
 
 const summary = (steps: readonly StripeStep[]) => steps.map((step) => `${step.action} ${step.object}`);
 
+/** RealInfoBot's catalog with the file's packs, as apply and verify build it. catalogFor leaves them out. */
+function catalogWithPacks(file: BillingProfile) {
+  return desiredStripeCatalog({ brand: "realinfobot", profile: file, plans: desiredBillingPlans(file), packs: desiredBillingPacks(file), webhookUrl: webhookUrl("realinfobot"), links });
+}
+
+function planWithPacks(snapshot: StripeSnapshot, file: BillingProfile, options: Partial<CatalogPlanOptions> = {}) {
+  return planStripeChanges({ catalog: catalogWithPacks(file), snapshot, options: { ...strict, ...options } });
+}
+
+/** apply, with the file's packs. */
+function applyWithPacks(snapshot: StripeSnapshot, file: BillingProfile, options: Partial<CatalogPlanOptions> = {}) {
+  const first = planWithPacks(snapshot, file, options);
+  expect(first.refusals).toEqual([]);
+  const result = runStripeSteps(snapshot, first.steps);
+  expect(planWithPacks(result.snapshot, file)).toEqual({ steps: [], refusals: [] });
+  return { first, ...result };
+}
+
+// The events of an endpoint made before packs, and the three a file with packs adds.
+const eventsBeforePacks = [
+  "checkout.session.completed", "checkout.session.expired",
+  "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed", "customer.subscription.pending_update_applied", "customer.subscription.pending_update_expired",
+  "invoice.paid", "invoice.payment_failed", "invoice.finalized", "invoice.voided", "invoice.marked_uncollectible",
+  "charge.refunded", "charge.dispute.created",
+];
+const packEvents = ["checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "charge.dispute.closed"];
+
+const livePackPrice = (snapshot: StripeSnapshot, pack: string) => snapshot.prices.find((price) => price.metadata.lobbystack_pack === pack && price.active)!;
+const packProduct = (snapshot: StripeSnapshot, pack: string) => snapshot.products.find((product) => product.metadata.lobbystack_pack === pack)!;
+
 describe("desiredStripeCatalog", () => {
   it.each(brands)("maps %s's file to its plans' products and prices, the overage meters, products and prices, the portal, the webhook and the meter error destination", (brand) => {
     const file = profile(brand);
@@ -78,8 +108,8 @@ describe("desiredStripeCatalog", () => {
     ]);
     expect(catalog.coupons).toEqual([]);
     expect(catalog.portal).toEqual({ returnUrl: `https://dev1.${brand}.com/settings/plan`, ...links, planChanges: true, cancel: false, upgrade: "invoice", downgrade: "next_period", plans: ["starter", "pro"] });
-    expect(catalog.webhook).toEqual({ url: webhookUrl(brand), events: expect.arrayContaining(["checkout.session.completed", "customer.subscription.updated", "invoice.paid", "charge.dispute.created"]) });
-    expect(catalog.webhook!.events).toHaveLength(16);
+    // Without packs, the events the endpoint had before them.
+    expect(catalog.webhook).toEqual({ url: webhookUrl(brand), events: eventsBeforePacks });
     expect(catalog.meterErrors).toEqual({ url: `${webhookUrl(brand)}/meter-errors`, events: ["v1.billing.meter.error_report_triggered", "v1.billing.meter.no_meter_found"] });
     expect(catalog).toMatchObject({ currency: "cad", taxCode: "txcd_10103001", managedPayments: false, overageMode: "separate", usageGraceHours: 1 });
   });
@@ -341,6 +371,140 @@ describe("stripeLinkBody", () => {
   });
 });
 
+describe("Stripe packs", () => {
+  it("gives each pack a product and a one-time price under an lsp_ lookup key, adds the packs' webhook events, and leaves the rest as a file without packs has it", () => {
+    const file = profile();
+    const catalog = catalogWithPacks(file);
+    const packs = desiredBillingPacks(file);
+    expect(catalog.packs.map((pack) => [pack.pack, pack.name, pack.lookupKey, pack.cents, pack.currency, pack.terms])).toEqual(packs.map((pack) => [pack.code, pack.names.en, `lsp_realinfobot_${pack.code}_cad_${pack.terms_hash.slice(0, 8)}`, pack.price.cents, "cad", pack.terms_hash]));
+    expect(catalog.packs.slice(0, 2).map((pack) => [pack.name, pack.cents])).toEqual([["250 minutes, 90 days", 5500], ["250 minutes, 180 days", 5900]]);
+    expect(stripePackLookupKey("realinfobot", "pack_250_90", "cad", packs[0]!.terms_hash)).toBe(catalog.packs[0]!.lookupKey);
+    expect(catalog.webhook).toEqual({ url: webhookUrl("realinfobot"), events: [...eventsBeforePacks, ...packEvents] });
+    expect({ ...catalog, packs: [], webhook: { ...catalog.webhook!, events: eventsBeforePacks } }).toEqual(catalogFor(file));
+  });
+
+  it("makes the packs' products and one-time prices after every call a file without packs gets, keeps them out of the portal, and makes nothing on a second run", () => {
+    const file = profile();
+    const plain = plan(emptyStripeSnapshot(), file);
+    const { first, snapshot } = applyWithPacks(emptyStripeSnapshot(), file);
+    // The same calls, but for the webhook endpoint, which a file with packs makes with their events too.
+    const endpoint = (steps: readonly StripeStep[]) => steps.find((step) => step.call === "webhookEndpoints.create")!;
+    expect(first.steps.slice(0, plain.steps.length).map((step) => (step.object === "webhook" ? null : step))).toEqual(plain.steps.map((step) => (step.object === "webhook" ? null : step)));
+    expect(endpoint(first.steps)).toEqual({ ...endpoint(plain.steps), changes: [`19 events, API version ${STRIPE_API_VERSION}`], params: { ...endpoint(plain.steps).params, enabled_events: [...eventsBeforePacks, ...packEvents] } });
+    expect(snapshot.webhooks[0]!.enabled_events).toEqual([...eventsBeforePacks, ...packEvents]);
+    const packSteps = first.steps.slice(plain.steps.length);
+    expect(summary(packSteps)).toEqual(Array(9).fill(["create product", "create price"]).flat());
+    const smallest = catalogWithPacks(file).packs[0]!;
+    expect(packSteps[0]).toEqual({ object: "product", action: "create", subject: 'Product "250 minutes, 90 days"', changes: ["tax code txcd_10103001"], call: "products.create", params: { name: "250 minutes, 90 days", tax_code: "txcd_10103001", metadata: { lobbystack_brand: "realinfobot", lobbystack_pack: "pack_250_90" } }, idempotencyKey: "catalog:realinfobot:product:pack:pack_250_90", produces: "pack-product:pack_250_90" });
+    // A one-time price: no recurring, before tax, tagged with the pack and its terms.
+    expect(packSteps[1]).toEqual({ object: "price", action: "create", subject: `Price ${smallest.lookupKey}`, changes: ["55.00 CAD once, before tax"], call: "prices.create", params: { product: { $ref: "pack-product:pack_250_90" }, currency: "cad", unit_amount: 5500, lookup_key: smallest.lookupKey, tax_behavior: "exclusive", metadata: { lobbystack_brand: "realinfobot", lobbystack_pack: "pack_250_90", lobbystack_terms: smallest.terms } }, idempotencyKey: `catalog:realinfobot:price:${smallest.lookupKey}`, produces: "pack-price:pack_250_90" });
+    const packPrices = snapshot.prices.filter((price) => price.metadata.lobbystack_pack !== undefined);
+    expect(packPrices.map((price) => [price.recurring, price.tax_behavior, price.currency])).toEqual(Array(9).fill([null, "exclusive", "cad"]));
+    const packProducts = new Set(snapshot.products.filter((product) => product.metadata.lobbystack_pack !== undefined).map((product) => product.id));
+    expect(packProducts.size).toBe(9);
+    expect((snapshot.portalConfigurations[0]!.features.subscription_update.products ?? []).filter((entry) => packProducts.has(entry.product))).toEqual([]);
+  });
+
+  it("adds only the packs and their three webhook events to an account that already sells the file's plans", () => {
+    const file = profile();
+    const { snapshot } = apply(emptyStripeSnapshot(), file);
+    const { first } = applyWithPacks(snapshot, file);
+    expect(summary(first.steps)).toEqual(["update webhook", ...Array(9).fill(["create product", "create price"]).flat()]);
+    expect(first.steps[0]).toMatchObject({ changes: [`add ${packEvents.join(", ")}`], call: "webhookEndpoints.update", target: snapshot.webhooks[0]!.id, params: { enabled_events: [...eventsBeforePacks, ...packEvents] } });
+  });
+
+  it("leaves an endpoint made before packs alone for a file without packs, and never takes the packs' events off one", () => {
+    const file = profile();
+    const { snapshot } = apply(emptyStripeSnapshot(), file);
+    const before = structuredClone(snapshot);
+    before.webhooks[0]!.enabled_events = [...eventsBeforePacks];
+    expect(plan(before, file)).toEqual({ steps: [], refusals: [] });
+    // An apply only adds events, so a file that drops its packs leaves theirs on the endpoint.
+    const { snapshot: after } = applyWithPacks(before, file);
+    expect(after.webhooks[0]!.enabled_events).toEqual([...eventsBeforePacks, ...packEvents]);
+    const dropped = plan(after, file, { allowArchive: true });
+    expect([...dropped.steps, ...dropped.refusals].filter((entry) => entry.object === "webhook")).toEqual([]);
+  });
+
+  it("makes a new one-time price on the pack's product for new terms, and archives the old one only with --allow-archive", () => {
+    const { snapshot } = applyWithPacks(emptyStripeSnapshot(), profile());
+    const old = livePackPrice(snapshot, "pack_250_90");
+    const raised = profile("realinfobot", (value) => {
+      value.packs.pack_250_90.priceCents = 6000;
+    });
+    const lookupKey = catalogWithPacks(raised).packs.find((pack) => pack.pack === "pack_250_90")!.lookupKey;
+    expect(lookupKey).not.toBe(old.lookup_key);
+    const refused = planWithPacks(snapshot, raised);
+    expect(refused.steps.map((step) => [step.action, step.subject, step.changes])).toEqual([["create", `Price ${lookupKey}`, ["60.00 CAD once, before tax"]]]);
+    expect(refused.refusals).toEqual([{ object: "price", subject: `Price ${old.lookup_key}`, message: "It sells pack pack_250_90 at 55.00 CAD on terms the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes." }]);
+    const { first, snapshot: after } = applyWithPacks(snapshot, raised, { allowArchive: true });
+    expect(first.steps.map((step) => [step.action, step.object, step.target ?? null, step.leftover ?? false])).toEqual([["create", "price", null, false], ["archive", "price", old.id, true]]);
+    expect(first.steps[1]!.changes).toEqual(["the file no longer sells it; packs bought through it keep their minutes"]);
+    const product = packProduct(after, "pack_250_90");
+    expect(after.prices.filter((price) => price.product === product.id).map((price) => [price.unit_amount, price.active])).toEqual([[5500, false], [6000, true]]);
+  });
+
+  it("refuses to archive a pack's price and product the file no longer has without --allow-archive, archives them with it, and leaves the plans' objects alone", () => {
+    const { snapshot } = applyWithPacks(emptyStripeSnapshot(), profile());
+    const price = livePackPrice(snapshot, "pack_250_90");
+    const product = packProduct(snapshot, "pack_250_90");
+    const fewer = profile("realinfobot", (value) => {
+      delete value.packs.pack_250_90;
+    });
+    expect(planWithPacks(snapshot, fewer)).toEqual({
+      steps: [],
+      refusals: [
+        { object: "price", subject: `Price ${price.lookup_key}`, message: "It sells pack pack_250_90 at 55.00 CAD on terms the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes." },
+        { object: "product", subject: 'Product "250 minutes, 90 days"', message: "It sells pack pack_250_90, which the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes." },
+      ],
+    });
+    const { first, snapshot: after } = applyWithPacks(snapshot, fewer, { allowArchive: true });
+    expect(first.steps.map((step) => [step.action, step.object, step.target, step.leftover])).toEqual([["archive", "price", price.id, true], ["archive", "product", product.id, true]]);
+    expect([after.prices.filter((entry) => !entry.active).map((entry) => entry.id), after.products.filter((entry) => !entry.active).map((entry) => entry.id)]).toEqual([[price.id], [product.id]]);
+    // A file without packs at all would archive every pack's objects, and still none of the plans'.
+    const none = plan(snapshot, profile("realinfobot", (value) => {
+      delete value.packs;
+    }));
+    expect(none.steps).toEqual([]);
+    expect(none.refusals.map((refusal) => [refusal.object, refusal.message.match(/^It sells pack (pack_\d+_\d+)/)?.[1]])).toEqual([
+      ...catalogWithPacks(profile()).packs.map((pack) => ["price", pack.pack]),
+      ...catalogWithPacks(profile()).packs.map((pack) => ["product", pack.pack]),
+    ]);
+  });
+
+  it("replaces a recurring price under a pack's lookup key only with --allow-replace, as a pack is paid once", () => {
+    const file = profile();
+    const { snapshot } = applyWithPacks(emptyStripeSnapshot(), file);
+    const drifted = structuredClone(snapshot);
+    const price = livePackPrice(drifted, "pack_250_90");
+    price.recurring = { interval: "month", interval_count: 1, usage_type: "licensed", meter: null };
+    expect(planWithPacks(drifted, file).refusals).toEqual([{ object: "price", subject: `Price ${price.lookup_key}`, message: `${price.id} bills every 1 month, while a pack is paid once, and Stripe never changes a price. Run with --allow-replace to make a new price that takes over the lookup key; packs bought through the old one keep their minutes.` }]);
+    const { first, snapshot: after } = applyWithPacks(drifted, file, { allowReplace: true });
+    expect(first.steps.map((step) => [step.action, step.call, step.params.transfer_lookup_key ?? null, step.changes])).toEqual([
+      ["create", "prices.create", true, [`replaces ${price.id}, which bills every 1 month, while a pack is paid once: 55.00 CAD once, before tax`]],
+      ["archive", "prices.update", null, [`replaced under ${price.lookup_key}; packs bought through it keep their minutes`]],
+    ]);
+    expect(after.prices.find((entry) => entry.id === price.id)).toMatchObject({ active: false, lookup_key: null });
+    expect(after.prices.find((entry) => entry.lookup_key === price.lookup_key)).toMatchObject({ active: true, recurring: null, unit_amount: 5500 });
+  });
+
+  it("links each pack to its live one-time price, names a pack without one, and links the plans and objects as a file without packs does", () => {
+    const file = profile();
+    const plans = desiredBillingPlans(file);
+    const catalog = catalogWithPacks(file);
+    const before = stripeLinkBody({ catalog, plans, snapshot: emptyStripeSnapshot() });
+    expect(before.missing).toHaveLength(stripeLinkBody({ catalog: catalogFor(file), plans, snapshot: emptyStripeSnapshot() }).missing.length + 9);
+    expect(before.missing).toContain(`pack pack_250_90: no live price under ${catalog.packs[0]!.lookupKey}`);
+    const { snapshot } = applyWithPacks(emptyStripeSnapshot(), file);
+    const after = stripeLinkBody({ catalog, plans, snapshot });
+    expect(after.missing).toEqual([]);
+    expect(after.packs).toEqual(catalog.packs.map((pack) => ({ code: pack.pack, terms_hash: pack.terms, currency: "cad", provider_ref: snapshot.prices.find((price) => price.lookup_key === pack.lookupKey)!.id })));
+    const plain = stripeLinkBody({ catalog: catalogFor(file), plans, snapshot });
+    expect(plain.packs).toEqual([]);
+    expect({ ...after, packs: [] }).toEqual(plain);
+  });
+});
+
 describe("verifyStripeCatalog", () => {
   const fileHash = "b".repeat(64);
   const earlier = "2026-11-08T08:00:00.000Z";
@@ -351,10 +515,11 @@ describe("verifyStripeCatalog", () => {
   }
 
   /** Applies the file to an empty account, links it, and returns what verify reads on such an instance. */
-  function syncedInstance(file = profile()) {
+  function syncedInstance(file = profile(), withPacks = false) {
     const plans = desiredBillingPlans(file);
-    const catalog = catalogFor(file);
-    const { snapshot, secrets } = apply(emptyStripeSnapshot({ account: "acct_dev1" }), file);
+    const packs = withPacks ? desiredBillingPacks(file) : undefined;
+    const catalog = withPacks ? catalogWithPacks(file) : catalogFor(file);
+    const { snapshot, secrets } = (withPacks ? applyWithPacks : apply)(emptyStripeSnapshot({ account: "acct_dev1" }), file);
     const body = stripeLinkBody({ catalog, plans, snapshot });
     const linkOf = (code: string, period: string) => body.plans.find((entry) => entry.code === code)?.prices.find((price) => price.period === period)?.provider_ref ?? null;
     const rows: ApiBillingCatalog["plans"] = plans.map(({ prices, ...entry }) => ({
@@ -370,6 +535,16 @@ describe("verifyStripeCatalog", () => {
       discount: entry.discount as Record<string, unknown> | null,
       prices: prices.map((price) => ({ id: `${entry.code}-${price.period}`, period: price.period, currency: price.currency, cents: price.cents, per_month: perMonthCents(price.period, price.cents), polar_id: null, provider_ref: entry.sold ? linkOf(entry.code, price.period) : null, retired_at: null, created_at: earlier, updated_at: earlier })),
     }));
+    // Linked packs are active, each with its one live price.
+    const packRows: ApiBillingCatalog["packs"] = (packs ?? []).map(({ price, ...entry }) => ({
+      ...entry,
+      status: "active",
+      frozen_at: null,
+      retired_at: null,
+      created_at: earlier,
+      updated_at: earlier,
+      prices: [{ id: `${entry.code}-${price.currency}`, currency: price.currency, cents: price.cents, provider_ref: body.packs.find((linked) => linked.code === entry.code)!.provider_ref, retired_at: null, created_at: earlier, updated_at: earlier }],
+    }));
     const secret = secrets[0]!;
     const instance: ApiBillingCatalog = {
       brand: "realinfobot",
@@ -380,15 +555,16 @@ describe("verifyStripeCatalog", () => {
       profile: file as unknown as Record<string, unknown>,
       currency: "cad",
       plans: rows,
+      packs: packRows,
       polar: null,
       provider: { id: "stripe", env: "sandbox", account: "acct_dev1", secret_sha256: sha256(secret), objects: { ...body.objects, webhook_secret_sha256: sha256(secret) }, product_vars: null, last_link: run("link", "acct_dev1") },
     };
-    return { file, plans, snapshot, catalog: instance };
+    return { file, plans, packs, snapshot, catalog: instance };
   }
 
   function verify(instance: ReturnType<typeof syncedInstance>, change: Partial<StripeVerifyInput> = {}) {
     return verifyStripeCatalog({
-      file: { brand: "realinfobot", hash: fileHash, profile: instance.file, plans: instance.plans },
+      file: { brand: "realinfobot", hash: fileHash, profile: instance.file, plans: instance.plans, ...(instance.packs ? { packs: instance.packs } : {}) },
       catalog: instance.catalog,
       stripe: { env: "sandbox", snapshot: instance.snapshot },
       webhookUrl: webhookUrl("realinfobot"),
@@ -456,11 +632,63 @@ describe("verifyStripeCatalog", () => {
     expect(problems(unreadable)).toEqual(["file_provider unreadable drift: Stripe answered 401: Invalid API Key provided."]);
   });
 
+  it("finds no webhook drift for a file without packs whose endpoint has the packs' events too", () => {
+    const instance = syncedInstance();
+    expect(instance.snapshot.webhooks[0]!.enabled_events).toEqual(eventsBeforePacks);
+    const snapshot = structuredClone(instance.snapshot);
+    snapshot.webhooks[0]!.enabled_events.push(...packEvents);
+    const result = verify({ ...instance, snapshot });
+    expect(problems(result)).toEqual([]);
+    expect(result.checks.find((check) => check.code === "webhook")).toMatchObject({ level: "ok", message: `webhook ${webhookUrl("realinfobot")}, 16 events, API version ${STRIPE_API_VERSION}, and the meter error destination` });
+  });
+
   it("leaves the webhook and its secret out without the instance's address, as the worker's daily check does", () => {
     const instance = syncedInstance();
     const result = verify(instance, { webhookUrl: null, checkWebhookSecret: false });
     expect(result.status).toBe("passed");
     expect(result.checks.map((check) => check.code)).not.toContain("webhook");
     expect(result.checks.map((check) => check.code)).not.toContain("webhook_secret");
+  });
+
+  it("passes an instance whose packs are linked to their live one-time prices, and names packs in what passes only when the file has some", () => {
+    const instance = syncedInstance(profile(), true);
+    const result = verify(instance);
+    expect(problems(result)).toEqual([]);
+    expect(result.status).toBe("passed");
+    const message = (key: string) => result.checks.find((check) => `${check.pair} ${check.code}` === key)!.message;
+    expect(["file_postgres plan_rows", "file_postgres not_linked", "file_provider product", "file_provider price", "postgres_provider linked_id"].map(message)).toEqual([
+      "4 plans, 4 live prices, 9 packs, 9 live pack prices",
+      "2 sold plans and 9 packs active and linked",
+      "2 products and 9 pack products, tagged and taxed as txcd_10103001",
+      "4 prices and 9 one-time pack prices before tax, each under its lookup key",
+      "4 prices and 9 pack prices linked, all live and priced as the rows say",
+    ]);
+    // The same checks, in the same order, as for a file without packs, whose lines don't mention packs.
+    const plain = verify(syncedInstance());
+    expect(result.checks.map((check) => `${check.pair} ${check.code}`)).toEqual(plain.checks.map((check) => `${check.pair} ${check.code}`));
+    expect(plain.checks.filter((check) => check.message.includes("pack"))).toEqual([]);
+  });
+
+  it("names a pack linked to a price that's archived, recurring or another pack's, and a pack that isn't active yet", () => {
+    const instance = syncedInstance(profile(), true);
+    const snapshot = structuredClone(instance.snapshot);
+    const archived = livePackPrice(snapshot, "pack_250_90");
+    const recurring = livePackPrice(snapshot, "pack_250_180");
+    const other = livePackPrice(snapshot, "pack_500_180");
+    archived.active = false;
+    recurring.recurring = { interval: "month", interval_count: 1, usage_type: "licensed", meter: null };
+    const catalog = structuredClone(instance.catalog);
+    const row = (code: string) => catalog.packs.find((entry) => entry.code === code)!;
+    row("pack_500_90").prices[0]!.provider_ref = other.id;
+    row("pack_1000_90").status = "draft";
+    expect(problems(verify({ ...instance, snapshot, catalog }))).toEqual([
+      "file_postgres not_linked drift: Pack pack_1000_90 is draft, so Stripe doesn't sell it as the file says yet. Run pnpm billing apply.",
+      `file_provider price drift: Price ${archived.lookup_key}: bring it back: the file sells it again.`,
+      `file_provider price drift: Price ${recurring.lookup_key}: replaces ${recurring.id}, which bills every 1 month, while a pack is paid once: 59.00 CAD once, before tax.`,
+      `file_provider price drift: Price ${recurring.id}: replaced under ${recurring.lookup_key}; packs bought through it keep their minutes.`,
+      `postgres_provider linked_id drift: Pack pack_250_90/cad is linked to price ${archived.id}, which is archived.`,
+      `postgres_provider linked_id drift: Pack pack_250_180/cad is linked to price ${recurring.id}, which bills every 1 month, while a pack is paid once.`,
+      `postgres_provider linked_id drift: Pack pack_500_90/cad is linked to price ${other.id}, which belongs to product ${other.product}, which isn't tagged realinfobot pack pack_500_90.`,
+    ]);
   });
 });

@@ -3733,7 +3733,7 @@
       "post": {
         "operationId": "createCheckout",
         "summary": "Start a checkout",
-        "description": "Asks the billing provider for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: the provider changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in the provider's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With plan promo and a promo_code, it sells the plan the code unlocks, with that plan's discount, to a free, Starter or Pro business; one that already pays has its subscription moved, as above. A code that doesn't work for the business, for any reason, is a 400 on promo_code. A business can try 10 codes an hour, a key 20 across the businesses it reaches, and the person the key acts for 20, with their dashboard and their other keys. Each new checkout is a call to the provider, so a business can start 10 an hour, and the person it is made out to 20 across businesses, with the dashboard's; past either it is a 429. The same plan, interval and billing_email asked for again while that person's checkout is still pending or processing returns that checkout, which counts nothing. Otherwise a business that already pays changes plan one checkout at a time, so a new one while another of its checkouts is pending or processing is a 409. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409. Each business has its own customer at the provider, made on its first checkout with the payer's email or billing_email. On Polar, which keeps one customer per email, a checkout whose email already belongs to another business's customer ends in error, and another with a separate billing_email works.",
+        "description": "Asks the billing provider for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business or one on a prepaid pack can buy either plan, and a Starter business can move to Pro. Once a new subscription starts, it ends the business's packs, active and frozen ones alike, and the minutes left on them, with no refund. A Starter business already pays, so its move to Pro needs no page: the provider changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in the provider's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With plan promo and a promo_code, it sells the plan the code unlocks, with that plan's discount, to a free business, one on a prepaid pack, or a Starter or Pro business; one that already pays has its subscription moved, as above. A code that doesn't work for the business, for any reason, is a 400 on promo_code. A business can try 10 codes an hour, a key 20 across the businesses it reaches, and the person the key acts for 20, with their dashboard and their other keys. Each new checkout is a call to the provider, so a business can start 10 an hour, and the person it is made out to 20 across businesses, with the dashboard's; past either it is a 429. The same plan, interval and billing_email asked for again while that person's checkout is still pending or processing returns that checkout, which counts nothing. Otherwise a business that already pays changes plan one checkout at a time, so a new one while another of its checkouts is pending or processing is a 409. For any business, a new checkout while one of its pack checkouts is pending or processing is a 409 too. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409. Each business has its own customer at the provider, made on its first checkout with the payer's email or billing_email. On Polar, which keeps one customer per email, a checkout whose email already belongs to another business's customer ends in error, and another with a separate billing_email works.",
         "tags": [
           "Billing"
         ],
@@ -4025,6 +4025,264 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/Checkout"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/packs/checkout": {
+      "post": {
+        "operationId": "createPackCheckout",
+        "summary": "Start a checkout for a prepaid pack",
+        "description": "Asks the billing provider for a page where the customer pays once for a prepaid pack of minutes. Poll GET /billing/packs/checkout/{checkout_id} until status is ready, then send them checkout_url. A free business, one on a pack already, and one on a monthly Starter or Pro plan can buy one; on a monthly plan, the pack replaces the plan once paid, and the plan ends. A business that pays for a yearly plan is a 409 until that plan ends, as is one with a payment past due until it is settled, and one whose upgrade still waits for its payment. A managed plan, a self-hosted deployment, the Enterprise plan and a pack this deployment doesn't sell are a 409 too. A business makes one purchase at a time, so a new checkout while a plan checkout, a subscription change or another pack checkout of the business is pending or processing is a 409. The same pack and billing_email asked for again while that person's checkout is still pending or processing returns that checkout, which counts nothing. Each new checkout is a call to the provider, and counts toward a checkout's limits: past them it is a 429. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409. Each business has its own customer at the provider, made on its first checkout with the payer's email or billing_email. On Polar, which keeps one customer per email, a checkout whose email already belongs to another business's customer fails, and another with a separate billing_email works.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackCheckoutCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PackCheckout"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/packs/checkout/{checkout_id}": {
+      "get": {
+        "operationId": "getPackCheckout",
+        "summary": "Check a checkout for a prepaid pack",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "checkout_id",
+            "in": "path",
+            "required": true,
+            "description": "The pack checkout id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PackCheckout"
                     }
                   }
                 }
@@ -18986,9 +19244,10 @@
               "free_cloud",
               "starter",
               "pro",
-              "enterprise"
+              "enterprise",
+              "prepaid"
             ],
-            "description": "The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."
+            "description": "The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud, and a business that would be on free_cloud reads as prepaid while one of its packs has time left."
           },
           "promo_plan": {
             "description": "The code of the promo plan in force, which behaves as plan with its own allowances, limits and overage rates. Null on a standard plan.",
@@ -19158,6 +19417,146 @@
           "provider_name": {
             "type": "string",
             "description": "How to name the provider to the business, such as Polar."
+          },
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Stable identifier (UUID)."
+                },
+                "pack": {
+                  "type": "string",
+                  "description": "The pack's code, such as pack_500_180."
+                },
+                "names": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Display names by language: en, fr, es and sr."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "expired",
+                    "replaced",
+                    "refunded",
+                    "frozen"
+                  ],
+                  "description": "active; frozen while a dispute holds its payment, when calls can't use it until the dispute is won; expired at its end date; replaced when a subscription started; refunded when its whole payment was refunded or a dispute was lost."
+                },
+                "seconds_total": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Voice seconds it holds after refunds: a partial refund takes its share off."
+                },
+                "seconds_used": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Voice seconds calls drew from it."
+                },
+                "seconds_left": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "What it still holds, which a frozen pack gives only once its dispute is won. 0 once it ended or its end date passed."
+                },
+                "days": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "How long it lasts from the payment, in 24-hour days. Null when it never ends."
+                },
+                "paid_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "ends_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "paid_at plus days, fixed at the payment. Null when it never ends."
+                },
+                "ended_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When it ended. Null while active or frozen."
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "amount_cents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "What was paid, before refunds."
+                },
+                "refunded_cents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "id",
+                "pack",
+                "names",
+                "status",
+                "seconds_total",
+                "seconds_used",
+                "seconds_left",
+                "days",
+                "paid_at",
+                "ends_at",
+                "ended_at",
+                "currency",
+                "amount_cents",
+                "refunded_cents"
+              ],
+              "additionalProperties": false,
+              "description": "A prepaid pack the business bought."
+            },
+            "description": "The prepaid packs bought: active and frozen ones first, the one that ends first first, then the latest 20 that ended, newest first. Calls draw on them only while plan is prepaid; a pack bought beside a yearly, past-due or managed plan waits, and its end date still comes. Empty when none was bought."
           }
         },
         "required": [
@@ -19176,7 +19575,8 @@
           "overage_spend_cents",
           "spending_cap_reached",
           "provider",
-          "provider_name"
+          "provider_name",
+          "packs"
         ],
         "additionalProperties": false,
         "description": "The business's plan and what it spends."
@@ -19384,6 +19784,98 @@
         ],
         "additionalProperties": false
       },
+      "PackCheckout": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "pack": {
+            "type": "string",
+            "description": "The pack's code."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "ready",
+              "paid",
+              "failed",
+              "expired"
+            ],
+            "description": "pending or processing: the billing provider is making the page. ready: checkout_url is set until expires_at. paid: the payment arrived and the business has the pack. failed: the provider made no page, or the business moved to a managed plan; error says why, and another checkout can be started. expired: the checkout waited too long to run, or its page expired unpaid; another can be started."
+          },
+          "checkout_url": {
+            "description": "The billing provider's page where the customer pays once for the pack. Send it to them. Null unless status is ready.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "true once the payment arrived and the business has the pack."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the checkout stops being open: 15 minutes after it was asked for while the provider makes the page, then when the page expires."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "id",
+          "pack",
+          "status",
+          "checkout_url",
+          "error",
+          "paid",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "description": "A checkout for a prepaid pack, paid once through the billing provider."
+      },
+      "PackCheckoutCreate": {
+        "type": "object",
+        "properties": {
+          "pack": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "The pack's code in the deployment's billing catalog, such as pack_250_90."
+          },
+          "billing_email": {
+            "description": "The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here.",
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          }
+        },
+        "required": [
+          "pack"
+        ],
+        "additionalProperties": false
+      },
       "ManagedPlanCreate": {
         "type": "object",
         "properties": {
@@ -19523,12 +20015,14 @@
                           "type": "string",
                           "enum": [
                             "billing_plans",
-                            "billing_prices"
+                            "billing_prices",
+                            "billing_pack_plans",
+                            "billing_pack_prices"
                           ]
                         },
                         "key": {
                           "type": "string",
-                          "description": "A plan's code, or code/period/currency for a price."
+                          "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                         },
                         "action": {
                           "type": "string",
@@ -19560,7 +20054,7 @@
                         },
                         "lowers_allowance": {
                           "type": "boolean",
-                          "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                          "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                         },
                         "raises_price": {
                           "type": "boolean",
@@ -20288,6 +20782,223 @@
             },
             "description": "Every plan, whatever its access or status, by sort then code."
           },
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "The pack's permanent code, its key in billing.json's packs."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "active",
+                    "retired"
+                  ],
+                  "description": "draft until the billing provider can sell it as defined, active, or retired."
+                },
+                "names": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Display names by language."
+                },
+                "voice_sec": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Voice seconds the pack holds."
+                },
+                "days": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "How many days a bought pack lasts from its payment. Null means it never ends."
+                },
+                "sms_seg": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Alert SMS segments included a month."
+                },
+                "calls_out": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Outbound call attempts included a month."
+                },
+                "chat_units": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Website chat AI units included a month."
+                },
+                "kb_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Knowledge storage limit in bytes."
+                },
+                "numbers": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Business phone numbers included."
+                },
+                "receptionists": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Receptionists active at once, the default included."
+                },
+                "terms_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "SHA-256 as 64 lowercase hex characters."
+                },
+                "frozen_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When it was first bought. From then its minutes and length can't change."
+                },
+                "sort": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "retired_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "prices": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Stable identifier (UUID)."
+                      },
+                      "currency": {
+                        "type": "string"
+                      },
+                      "cents": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "What the pack costs, paid once."
+                      },
+                      "provider_ref": {
+                        "description": "The provider's object that sells it, once linked: a Polar product or a Stripe price.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "retired_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "ISO 8601 timestamp in UTC."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "When it stopped being sold. Null for the live price. A retired price keeps its object, so packs bought through it are still recognized."
+                      },
+                      "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "currency",
+                      "cents",
+                      "provider_ref",
+                      "retired_at",
+                      "created_at",
+                      "updated_at"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Every price of the pack, the live one first."
+                }
+              },
+              "required": [
+                "code",
+                "status",
+                "names",
+                "voice_sec",
+                "days",
+                "sms_seg",
+                "calls_out",
+                "chat_units",
+                "kb_bytes",
+                "numbers",
+                "receptionists",
+                "terms_hash",
+                "frozen_at",
+                "sort",
+                "retired_at",
+                "created_at",
+                "updated_at",
+                "prices"
+              ],
+              "additionalProperties": false,
+              "description": "A prepaid pack: voice minutes paid for once, to use within its days of the payment."
+            },
+            "description": "Every prepaid pack, whatever its status, by sort then code. Empty when no applied file had packs."
+          },
           "polar": {
             "anyOf": [
               {
@@ -20423,12 +21134,14 @@
                                   "type": "string",
                                   "enum": [
                                     "billing_plans",
-                                    "billing_prices"
+                                    "billing_prices",
+                                    "billing_pack_plans",
+                                    "billing_pack_prices"
                                   ]
                                 },
                                 "key": {
                                   "type": "string",
-                                  "description": "A plan's code, or code/period/currency for a price."
+                                  "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                                 },
                                 "action": {
                                   "type": "string",
@@ -20460,7 +21173,7 @@
                                 },
                                 "lowers_allowance": {
                                   "type": "boolean",
-                                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                                 },
                                 "raises_price": {
                                   "type": "boolean",
@@ -20910,12 +21623,14 @@
                               "type": "string",
                               "enum": [
                                 "billing_plans",
-                                "billing_prices"
+                                "billing_prices",
+                                "billing_pack_plans",
+                                "billing_pack_prices"
                               ]
                             },
                             "key": {
                               "type": "string",
-                              "description": "A plan's code, or code/period/currency for a price."
+                              "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                             },
                             "action": {
                               "type": "string",
@@ -20947,7 +21662,7 @@
                             },
                             "lowers_allowance": {
                               "type": "boolean",
-                              "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                              "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                             },
                             "raises_price": {
                               "type": "boolean",
@@ -21240,6 +21955,7 @@
           "profile",
           "currency",
           "plans",
+          "packs",
           "polar",
           "provider"
         ],
@@ -22149,6 +22865,112 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "packs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "names": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "fr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "es": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "sr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        }
+                      },
+                      "required": [
+                        "en",
+                        "fr",
+                        "es",
+                        "sr"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minutes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    },
+                    "days": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1095
+                    },
+                    "priceCents": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000000
+                    },
+                    "included": {
+                      "type": "object",
+                      "properties": {
+                        "alertSmsSegments": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "outboundCallAttempts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "chatAiUnits": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000000
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "knowledgeStorageMb": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1024
+                        },
+                        "businessNumbers": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "receptionists": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "names",
+                    "minutes",
+                    "priceCents"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -22329,6 +23151,45 @@
             },
             "description": "Every sold plan that isn't retired, each with every live price."
           },
+          "packs": {
+            "description": "Every pack that isn't retired, each with the object that sells its live price. Required once the catalog has packs; left out, the link names none.",
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "description": "A pack that isn't retired."
+                },
+                "terms_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "The pack's terms_hash its provider object was made from. It must be the row's."
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[a-z]{3}$",
+                  "description": "The currency of the pack's live price."
+                },
+                "provider_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "description": "The provider's object that sells the pack's live price: a Polar product or a Stripe price."
+                }
+              },
+              "required": [
+                "code",
+                "terms_hash",
+                "currency",
+                "provider_ref"
+              ],
+              "additionalProperties": false
+            }
+          },
           "objects": {
             "description": "The provider's objects beyond plans and prices, which a Stripe link records: its meters, overage prices, billing portal configuration and webhook endpoint, with the endpoint secret's SHA-256. Not with provider polar.",
             "type": "object",
@@ -22440,12 +23301,14 @@
                   "type": "string",
                   "enum": [
                     "billing_plans",
-                    "billing_prices"
+                    "billing_prices",
+                    "billing_pack_plans",
+                    "billing_pack_prices"
                   ]
                 },
                 "key": {
                   "type": "string",
-                  "description": "A plan's code, or code/period/currency for a price."
+                  "description": "A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."
                 },
                 "action": {
                   "type": "string",
@@ -22477,7 +23340,7 @@
                 },
                 "lowers_allowance": {
                   "type": "boolean",
-                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."
                 },
                 "raises_price": {
                   "type": "boolean",

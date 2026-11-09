@@ -135,6 +135,8 @@ const count = async (tx: DatabaseTransaction, table: "billing_runs" | "billing_p
 const plan = async (tx: DatabaseTransaction, code: string) => (await rows(tx, sql`select * from public.billing_plans where code = ${code}`))[0]!;
 const prices = async (tx: DatabaseTransaction, code: string) => await rows(tx, sql`select * from public.billing_prices where plan = ${code} order by period, retired_at nulls first`);
 const actions = (run: ApiBillingCatalogRun) => run.changes.map((change) => `${change.action} ${change.key}`);
+const pack = async (tx: DatabaseTransaction, code: string) => (await rows(tx, sql`select * from public.billing_pack_plans where code = ${code}`))[0]!;
+const packPrices = async (tx: DatabaseTransaction, code: string) => await rows(tx, sql`select * from public.billing_pack_prices where pack = ${code} order by retired_at nulls first, created_at desc`);
 // The brand file's nine packs, in the order a run lists their changes.
 const packCodes = Object.keys(JSON.parse(fileText).packs as Record<string, unknown>).sort();
 /** What a run does to each of the brand file's packs and then to each pack's price. */
@@ -297,6 +299,54 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect(actions(more.run)).toEqual(["update pro-launch"]);
       expect(more.run.changes[0]).toMatchObject({ lowers_allowance: false, fields: { receptionists: { from: 5, to: 8 } } });
       expect(await plan(tx, "pro-launch")).toMatchObject({ receptionists: 8, status: "active" });
+    });
+  });
+
+  it("refuses to change a bought pack's minutes or length, lets its price and names change, and retires a pack that leaves the file until it comes back", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "draft", voice_sec: 15_000, days: 90, sort: 10, frozen_at: null, retired_at: null });
+      expect((await packPrices(tx, "pack_250_90")).map((row) => [row.currency, row.cents, row.provider_ref, row.retired_at])).toEqual([["cad", 5500, null, null]]);
+      await byHand(tx, sql`update public.billing_pack_plans set frozen_at = now(), status = 'active' where code = 'pack_250_90'`);
+      const runs = await count(tx, "billing_runs");
+      const fewer = await refusal(apply(tx, file((value) => { value.packs.pack_250_90.minutes = 200; })));
+      expect(fewer).toMatchObject({ status: 409, code: "conflict", details: [{ code: "plan_frozen", path: "billing_file.packs.pack_250_90" }] });
+      const shorter = await refusal(apply(tx, file((value) => { value.packs.pack_250_90.days = 60; })));
+      expect(shorter.details!.map((detail) => detail.code)).toEqual(["plan_frozen"]);
+      expect(await count(tx, "billing_runs")).toBe(runs);
+
+      // A new price is new terms: the pack waits in draft until its provider sells the price.
+      const raised = await apply(tx, file((value) => { value.packs.pack_250_90.priceCents = 6000; value.packs.pack_250_90.names.en = "250 minutes for 90 days"; }));
+      expect(raised.run.changes.map((change) => [change.table, change.action, change.key, Object.keys(change.fields).sort(), change.raises_price])).toEqual([
+        ["billing_pack_plans", "update", "pack_250_90", ["names", "status", "terms_hash"], false],
+        ["billing_pack_prices", "update", "pack_250_90/cad", ["cents"], true],
+      ]);
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "draft", frozen_at: expect.anything() });
+
+      // The others move up a place; the pack and its price are retired, never deleted.
+      const removed = await apply(tx, file((value) => { delete value.packs.pack_250_90; }));
+      expect(removed.run.changes.filter((change) => change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${change.key}`)).toEqual(["retire pack_250_90", "retire pack_250_90/cad"]);
+      expect(removed.run.changes.filter((change) => !change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${Object.keys(change.fields).join(",")}`)).toEqual(Array(8).fill("update sort"));
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "retired", retired_at: expect.anything(), frozen_at: expect.anything() });
+      expect(await count(tx, "billing_pack_plans")).toBe(9);
+
+      const back = await apply(tx, file());
+      expect(back.run.changes.filter((change) => change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${change.key} ${Object.keys(change.fields).sort().join(",")}`)).toEqual([
+        "restore pack_250_90 names,retired_at,status,terms_hash",
+        "restore pack_250_90/cad cents,retired_at",
+      ]);
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "draft", retired_at: null, sort: 10 });
+      expect((await packPrices(tx, "pack_250_90")).map((row) => [row.cents, row.retired_at])).toEqual([[5500, null]]);
+    });
+  });
+
+  it("refuses a pack with the code of a plan made through the API", async () => {
+    await rollbackTest(async (tx) => {
+      await byHand(tx, sql`insert into public.billing_plans (code, tier, status, access, sold, overage, src, names, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, terms_hash) values ('pack_250_90', 'starter', 'active', 'code', false, true, 'api', ${JSON.stringify(names("Partner pack"))}::jsonb, 1, 1, 1, 1, 1, 1, 1, 1, 1, ${"a".repeat(64)})`);
+      const taken = await refusal(apply(tx, file()));
+      expect(taken).toMatchObject({ status: 409, code: "conflict" });
+      expect(taken.details).toEqual([{ code: "code_taken", path: "billing_file.packs.pack_250_90", message: "A plan already has the code pack_250_90, so a pack can't use it. Pick another code." }]);
+      expect(await count(tx, "billing_pack_plans")).toBe(0);
     });
   });
 
@@ -524,6 +574,33 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       expect(after[1]!.id).toBe(before!.id);
       // The old product can't be linked again: it stays with its retired row.
       expect((await refusal(link(tx, { hash: deployedHash, plans, packs, replace_ids: true }))).details).toEqual([expect.objectContaining({ code: "id_taken", message: expect.stringContaining("a retired price") })]);
+    });
+  });
+
+  it("refuses a link that leaves the packs out, sells a pack through a plan's product or names a pack on older terms, and then links every pack together", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      const { plans, packs } = await seededPolar(file());
+      // A link sent as before packs names none of them.
+      const older = await refusal(link(tx, { hash: deployedHash, plans }));
+      expect(older).toMatchObject({ status: 409, code: "conflict" });
+      expect(older.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(Array(9).fill("links_incomplete packs"));
+      expect(older.details![0]!.message).toMatch(/^Pack pack_\d+_\d+ isn't retired and isn't in the link\. Name every pack that isn't retired, with the product that sells its live price\.$/);
+      // One product sells one price, a plan's or a pack's; the plan's field goes by the request's Polar names.
+      const crossed = structuredClone(packs);
+      crossed[0]!.provider_ref = plans[0]!.prices[0]!.provider_ref;
+      expect((await refusal(link(tx, { hash: deployedHash, plans, packs: crossed }))).details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["id_taken plans[0].prices[0].polar_id", "id_taken packs[0].provider_ref"]);
+      const stale = structuredClone(packs);
+      stale[1]!.terms_hash = "c".repeat(64);
+      expect((await refusal(link(tx, { hash: deployedHash, plans, packs: stale }))).details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["terms_changed packs[1].terms_hash"]);
+      expect(await count(tx, "billing_runs")).toBe(1);
+      expect((await rows(tx, sql`select count(*) as n from public.billing_pack_prices where provider_ref is not null`))[0]!.n).toBe("0");
+
+      await link(tx, { hash: deployedHash, plans, packs });
+      for (const entry of packs) {
+        expect(await pack(tx, entry.code)).toMatchObject({ status: "active", terms_hash: entry.terms_hash });
+        expect((await packPrices(tx, entry.code)).map((row) => [row.currency, row.provider_ref, row.retired_at])).toEqual([["cad", entry.provider_ref, null]]);
+      }
     });
   });
 

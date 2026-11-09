@@ -5,7 +5,7 @@ import { billingProfileSchema, perMonthCents, type ApiBillingCatalog, type ApiBi
 import { describe, expect, it } from "vitest";
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
-import { desiredBillingPlans } from "./billingCatalog";
+import { desiredBillingPacks, desiredBillingPlans } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
 import { billingProblems, billingVerifyReport, verifyBillingCatalog, type BillingVerifyInput } from "./billingVerify";
@@ -35,10 +35,11 @@ function run(kind: ApiBillingCatalogRun["kind"], polarOrg: string | null): ApiBi
 }
 
 /** Applies the file to a fresh Polar stand-in, links it, and returns what verify reads on such an instance. */
-async function syncedInstance(file = profile()) {
+async function syncedInstance(file = profile(), withPacks = false) {
   const fake = createFakePolar();
   const plans = desiredBillingPlans(file);
-  const catalog = desiredPolarCatalog({ brand: "alloplace", profile: file, plans, webhookUrl });
+  const packs = withPacks ? desiredBillingPacks(file) : undefined;
+  const catalog = desiredPolarCatalog({ brand: "alloplace", profile: file, plans, ...(packs ? { packs } : {}), webhookUrl });
   const first = planPolarChanges({ catalog, snapshot: await client(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false }, now });
   const { webhookSecret } = await runPolarSteps(client(fake), first.steps);
   const links = polarLinkPlans({ catalog, plans, snapshot: await client(fake).readSnapshot(), now });
@@ -56,6 +57,16 @@ async function syncedInstance(file = profile()) {
     discount: plan.discount as Record<string, unknown> | null,
     prices: prices.map((price) => ({ id: `${plan.code}-${price.period}`, period: price.period, currency: price.currency, cents: price.cents, per_month: perMonthCents(price.period, price.cents), polar_id: plan.sold ? linkOf(plan.code, price.period) : null, provider_ref: plan.sold ? linkOf(plan.code, price.period) : null, retired_at: null, created_at: earlier, updated_at: earlier })),
   }));
+  // Linked packs are active, each with its one live price.
+  const packRows: ApiBillingCatalog["packs"] = (packs ?? []).map(({ price, ...pack }) => ({
+    ...pack,
+    status: "active",
+    frozen_at: null,
+    retired_at: null,
+    created_at: earlier,
+    updated_at: earlier,
+    prices: [{ id: `${pack.code}-${price.currency}`, currency: price.currency, cents: price.cents, provider_ref: links.packs.find((entry) => entry.code === pack.code)!.provider_ref, retired_at: null, created_at: earlier, updated_at: earlier }],
+  }));
   // The product ID variables are optional, and an instance set up since the catalog has none.
   const productVars: Record<string, string | null> = { "starter/monthly": null, "starter/annual": null, "pro/monthly": null, "pro/annual": null };
   const instance: ApiBillingCatalog = {
@@ -67,16 +78,16 @@ async function syncedInstance(file = profile()) {
     profile: file as unknown as Record<string, unknown>,
     currency: "cad",
     plans: rows,
-    packs: [],
+    packs: packRows,
     polar: { env: "sandbox", org: fake.state.organization.id, secret_sha256: sha256(webhookSecret!), product_vars: productVars, last_link: run("polar", fake.state.organization.id) },
     provider: { id: "polar", env: "sandbox", account: fake.state.organization.id, secret_sha256: sha256(webhookSecret!), objects: null, product_vars: productVars, last_link: run("polar", fake.state.organization.id) },
   };
-  return { fake, file, plans, catalog: instance };
+  return { fake, file, plans, packs, catalog: instance };
 }
 
 async function verify(instance: Awaited<ReturnType<typeof syncedInstance>>, change: Partial<BillingVerifyInput> = {}) {
   return verifyBillingCatalog({
-    file: { brand: "alloplace", hash: fileHash, profile: instance.file, plans: instance.plans },
+    file: { brand: "alloplace", hash: fileHash, profile: instance.file, plans: instance.plans, ...(instance.packs ? { packs: instance.packs } : {}) },
     catalog: instance.catalog,
     polar: { env: "sandbox", snapshot: await client(instance.fake).readSnapshot() },
     webhookUrl,
@@ -271,6 +282,53 @@ describe("verifyBillingCatalog", () => {
     expect(result.status).toBe("failed");
     expect(result.checks.map((check) => check.code)).toEqual(["catalog_hash", "code_hash", "plan_rows", "not_linked", "unreadable"]);
     expect(billingProblems(result.checks)).toEqual([{ code: "unreadable", pair: "file_polar", level: "drift", subject: "Polar", message: "Polar answered 401 to GET /v1/organizations/" }]);
+  });
+
+  it("passes an instance whose packs are linked to their live one-time products, and names packs in what passes only when the file has some", async () => {
+    const result = await verify(await syncedInstance(profile(), true));
+    expect(notOk(result)).toEqual([]);
+    expect(result.status).toBe("passed");
+    const message = (key: string) => result.checks.find((check) => `${check.pair} ${check.code}` === key)!.message;
+    expect(["file_postgres plan_rows", "file_postgres not_linked", "file_polar product", "postgres_polar linked_id"].map(message)).toEqual([
+      "4 plans, 4 live prices, 9 packs, 9 live pack prices",
+      "2 sold plans and 9 packs active and linked",
+      "4 products and 9 one-time pack products, tagged and priced as the file says, annual ones invoicing overage each month",
+      "4 products and 9 pack products linked, all live, tagged and priced as the rows say",
+    ]);
+    const plain = await verify(await syncedInstance());
+    expect(result.checks.map((check) => `${check.pair} ${check.code}`)).toEqual(plain.checks.map((check) => `${check.pair} ${check.code}`));
+    expect(plain.checks.filter((check) => check.message.includes("pack"))).toEqual([]);
+  });
+
+  it("finds a pack row an apply would change, a pack without its product, and links to a pack product that's archived, recurring or another pack's", async () => {
+    const instance = await syncedInstance(profile(), true);
+    const { state } = instance.fake;
+    const row = (code: string) => instance.catalog.packs.find((pack) => pack.code === code)!;
+    const productOf = (code: string) => state.products.find((product) => product.id === row(code).prices[0]!.provider_ref)!;
+    row("pack_250_90").voice_sec = 12_000;
+    row("pack_250_180").prices[0]!.provider_ref = null;
+    productOf("pack_250_365").is_archived = true;
+    const recurring = productOf("pack_500_90");
+    recurring.recurring_interval = "month";
+    recurring.recurring_interval_count = 1;
+    row("pack_500_180").prices[0]!.provider_ref = productOf("pack_500_365").id;
+    const result = await verify(instance);
+    expect(notOk(result)).toEqual([
+      "drift file_postgres plan_rows pack_250_90",
+      "drift file_postgres not_linked pack_250_180/cad",
+      'drift file_polar product Product "250 minutes, 365 days"',
+      'drift file_polar product Product "500 minutes, 90 days"',
+      'drift file_polar product Product "500 minutes, 90 days"',
+      "drift postgres_polar linked_id pack_250_365/cad",
+      "drift postgres_polar linked_id pack_500_90/cad",
+      "drift postgres_polar linked_id pack_500_180/cad",
+    ]);
+    const message = (code: string, subject: string) => result.checks.find((check) => check.code === code && check.subject === subject)!.message;
+    expect(message("plan_rows", "pack_250_90")).toBe("billing_pack_plans pack_250_90 would be updated (voice_sec) by an apply.");
+    expect(message("not_linked", "pack_250_180/cad")).toBe("Pack pack_250_180 has no Polar product. Run pnpm billing apply.");
+    expect(message("linked_id", "pack_250_365/cad")).toBe(`Pack pack_250_365/cad is linked to product ${productOf("pack_250_365").id}, which is archived ("250 minutes, 365 days").`);
+    expect(message("linked_id", "pack_500_90/cad")).toBe(`Pack pack_500_90/cad is linked to product ${recurring.id}, which bills every 1 month, while a pack is paid once ("500 minutes, 90 days").`);
+    expect(message("linked_id", "pack_500_180/cad")).toBe(`Pack pack_500_180/cad is linked to product ${productOf("pack_500_365").id}, which is tagged alloplace pack_500_365 ("500 minutes, 365 days").`);
   });
 });
 

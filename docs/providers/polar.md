@@ -76,6 +76,8 @@ Make an organization access token for each service in Polar under **Settings** >
 
 Since fork PR #101 the worker's `subscriptions:write` also ends, at once, the subscription of a business an owner deletes (`DELETE /v1/subscriptions/{id}`, `revokeSubscription`). The admin's token can't, so the delete waits for the worker, and a business that pays can't be deleted while the worker's token lacks the scope ([delete a business](../features/business-deletion.md)).
 
+The same scope ends the monthly subscription a prepaid pack replaced (`billing.endPlanForPack`). It sets the subscription to cancel at its period's end (`PATCH /v1/subscriptions/{id}` with `cancel_at_period_end`), then moves that end five minutes ahead (`PATCH` with `current_billing_period_end`). The subscription then ends with a final order that bills the period's usage and refunds nothing. A revoke would most likely drop that usage, since Polar settles usage at a revoke only for plans with a meter cycle. A sandbox run must still confirm that the final order bills the period's usage.
+
 Give neither `webhooks:read`. Polar lists each webhook with its signing secret, and whoever has the secret can send events that put any business on any plan. The worker's daily check leaves the webhook out, and `pnpm billing verify`, run with a read token of your own, checks the webhook and its secret. When Polar turns the webhook off, it emails the organization's members.
 
 ## Keep Polar's API version

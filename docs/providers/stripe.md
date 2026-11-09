@@ -39,6 +39,7 @@ With `managedPayments: true` and `overage: checkout` in the brand's `stripe` blo
 | Yearly plans | Sold | Not sold: the deployment leaves the file's yearly prices out, which its Polar deployments still sell |
 | Usage dates | By the month's end and the grace hours | By the plan's renewal and the grace hours, with usage from before the period the last renewal ended dated now, since its invoice is final; the daily totals check's open period starts at the renewal |
 | Plan changes, cancelling | **Settings > Plan**, as on Stripe directly; a renewal schedule keeps the metered items | The same |
+| A plan a prepaid pack replaced | `billing.endPlanForPack` cancels it at once, crediting nothing, and sets the overage subscription to end with its month, whose invoice on the 1st bills the month's usage | It cancels it at once with `invoice_now` and no proration, which credits nothing and invoices the usage on its meters |
 | Cards | The portal | The portal or Link; the API can't set a subscription's card |
 | Currency | The catalog's | The customer's own abroad: Stripe's Adaptive Pricing can't be turned off, so a transaction can be in another currency than the plans |
 
@@ -163,4 +164,5 @@ Two limits: the plan subscription is made through the API with Stripe's test car
 
 - The checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. [The sandbox scenarios](#run-the-sandbox-scenarios) passed twice in a row with Stripe as the merchant of record, the mode both brands use; Stripe directly hasn't run against a sandbox.
 - Stripe's names for each key's permissions, from that run.
+- A test-clock run showing that cancelling with `invoice_now` and no proration bills the usage on the meters under Managed Payments. Stripe's API reference says it does, and its cancellation guide that it doesn't. A plan a prepaid pack replaced and a deleted business's plan both end this way. If it doesn't, the fallback is to cancel a few minutes ahead (`cancel_at`) with no proration, which ends the plan through a normal final invoice.
 - The legal pages: with Stripe directly the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments; with Stripe as the merchant of record, the payment terms name Link as the seller. The landing's legal pages, which this fork doesn't publish, name only Polar or Stripe.

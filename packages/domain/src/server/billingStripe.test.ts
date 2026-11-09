@@ -380,6 +380,7 @@ describe("verifyStripeCatalog", () => {
       profile: file as unknown as Record<string, unknown>,
       currency: "cad",
       plans: rows,
+      packs: [],
       polar: null,
       provider: { id: "stripe", env: "sandbox", account: "acct_dev1", secret_sha256: sha256(secret), objects: { ...body.objects, webhook_secret_sha256: sha256(secret) }, product_vars: null, last_link: run("link", "acct_dev1") },
     };

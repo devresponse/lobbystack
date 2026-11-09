@@ -138,7 +138,8 @@ describe("the billing catalog link request", () => {
 
   it("takes Polar's names, as clients before the provider's names send them, and translates them on arrival", () => {
     const body = apiBillingCatalogLinkSchema.parse({ ...base, polar_env: "production", polar_org: "org_1", plans: polarPlans });
-    expect(billingCatalogLinkRequest(body)).toEqual({ ...base, provider: "polar", provider_env: "live", provider_account: "org_1", plans: [translated], objects: null, replace_ids: false, dry_run: false, names: "polar" });
+    // Such a client names no pack.
+    expect(billingCatalogLinkRequest(body)).toEqual({ ...base, provider: "polar", provider_env: "live", provider_account: "org_1", plans: [translated], packs: [], objects: null, replace_ids: false, dry_run: false, names: "polar" });
   });
 
   it("takes the provider's names, for Polar or Stripe, with Stripe's other objects", () => {

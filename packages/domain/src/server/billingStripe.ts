@@ -2,7 +2,7 @@ import type { OverageKind } from "@lobbystack/providers/billing/types";
 import type { StripeCatalogMeter, StripeCatalogPrice, StripeCatalogProduct, StripeCatalogStep, StripeMetadata, StripePortalConfiguration, StripeRef, StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
 import { STRIPE_API_VERSION, STRIPE_METER_ERROR_EVENTS, STRIPE_WEBHOOK_EVENTS, stripeOverageMeterEvents, trimTrailingSlashes, type ApiBillingCatalog, type BillingCatalogLinkRequest, type BillingCheckCode, type BillingInterval, type BillingProfile, type BillingProviderEnv, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
-import type { DesiredBillingPlan } from "./billingCatalog";
+import type { DesiredBillingPack, DesiredBillingPlan } from "./billingCatalog";
 import { billingPlanLabel } from "./billingPolar";
 import type { CatalogDesiredInput, CatalogPlanner, CatalogPlanOptions } from "./billingProvider";
 import { fileAndPostgresChecks, type AddBillingCheck, type BillingCheckResult, type BillingVerifyResult } from "./billingVerify";
@@ -19,7 +19,9 @@ import { fileAndPostgresChecks, type AddBillingCheck, type BillingCheckResult, t
 // lookup key and a new coupon under a new ID, and the old ones are archived
 // or deleted only with --allow-archive, while their subscribers keep them.
 // The three overage meters, products and prices are the account's, the same
-// for every brand, and found by their event names and lookup keys.
+// for every brand, and found by their event names and lookup keys. A prepaid
+// pack is a product of its own with one one-time price, under a lookup key
+// of its own shape, so a pack and a plan never take each other's objects.
 
 /** The path under the dashboard's address that Stripe's webhook endpoint calls. */
 export const STRIPE_WEBHOOK_PATH = "/api/webhooks/stripe";
@@ -33,6 +35,7 @@ export const stripeTags = {
   interval: "lobbystack_interval",
   terms: "lobbystack_terms",
   overage: "lobbystack_overage",
+  pack: "lobbystack_pack",
 } as const;
 
 /** Each kind of overage: the meter its dollars are counted on, and the product its invoice lines are named after. */
@@ -50,6 +53,12 @@ export const STRIPE_METER_VALUE_KEY = "value";
 
 /** A plan price's lookup key: brand, plan, period, currency and the first 8 of the plan's terms hash. New terms make a new key. */
 export const stripePriceLookupKey = (brand: string, plan: string, period: BillingInterval, currency: string, terms: string) => `ls_${brand}_${plan}_${period}_${currency}_${terms.slice(0, 8)}`;
+/**
+ * A pack price's lookup key: brand, pack, currency and the first 8 of the
+ * pack's terms hash. Its prefix is its own, since under the plans' one pack
+ * x_monthly's key would be plan x's.
+ */
+export const stripePackLookupKey = (brand: string, pack: string, currency: string, terms: string) => `lsp_${brand}_${pack}_${currency}_${terms.slice(0, 8)}`;
 /** An overage price's lookup key: its meter's event name and the currency. */
 export const stripeOverageLookupKey = (event: string, currency: string) => `${event}_${currency}`;
 /** A plan's coupon ID: brand, plan and the first 8 of its terms hash. */
@@ -59,6 +68,8 @@ export type DesiredStripeProduct = { plan: string; name: string };
 export type DesiredStripePrice = { plan: string; period: BillingInterval; lookupKey: string; cents: number; currency: string; interval: "month" | "year"; terms: string };
 export type DesiredStripeOverage = { kind: OverageKind; event: string; meterName: string; productName: string; lookupKey: string };
 export type DesiredStripeCoupon = { plan: string; id: string; name: string; terms: string; currency: string; discount: ResolvedBillingDiscount };
+/** A prepaid pack: a product of its own and a one-time price under its lookup key. */
+export type DesiredStripePack = { pack: string; name: string; lookupKey: string; cents: number; currency: string; terms: string };
 export type DesiredStripePortal = {
   /** Settings > Plan. Null when the dashboard's address isn't known, and then left as it is. */
   returnUrl: string | null;
@@ -85,6 +96,8 @@ export type DesiredStripeCatalog = {
   prices: DesiredStripePrice[];
   overage: DesiredStripeOverage[];
   coupons: DesiredStripeCoupon[];
+  /** Empty for a file without packs. */
+  packs: DesiredStripePack[];
   portal: DesiredStripePortal;
   /** Null when the instance's address isn't known, as on a worker without APP_BASE_URL: neither is then set up nor checked. */
   webhook: { url: string; events: string[] } | null;
@@ -98,8 +111,9 @@ const priceKey = (plan: string, period: string) => `${plan}/${period}`;
  * The Stripe objects a checked file needs: a product per sold plan (a promo
  * plan has its own, since the portal can't hold two prices of one product
  * with the same interval), a price per live price, the three overage
- * meters, products and prices, a coupon per discounted plan, the billing
- * portal's configuration, the webhook endpoint and the meter error destination.
+ * meters, products and prices, a coupon per discounted plan, a product and a
+ * one-time price per pack, the billing portal's configuration, the webhook
+ * endpoint and the meter error destination.
  */
 export function desiredStripeCatalog(input: CatalogDesiredInput): DesiredStripeCatalog {
   const block = input.profile.stripe;
@@ -131,6 +145,7 @@ export function desiredStripeCatalog(input: CatalogDesiredInput): DesiredStripeC
     prices,
     overage: stripeOverageSpecs.map((spec) => ({ kind: spec.kind, event: spec.event, meterName: spec.meter, productName: spec.product, lookupKey: stripeOverageLookupKey(spec.event, currency) })),
     coupons,
+    packs: (input.packs ?? []).map((pack) => ({ pack: pack.code, name: pack.names.en, lookupKey: stripePackLookupKey(input.brand, pack.code, pack.price.currency, pack.terms_hash), cents: pack.price.cents, currency: pack.price.currency, terms: pack.terms_hash })),
     portal: {
       returnUrl: webhookUrl ? `${new URL(webhookUrl).origin}/settings/plan` : null,
       termsUrl: input.links?.termsUrl ?? null,
@@ -193,7 +208,8 @@ function changedTags(existing: StripeMetadata, tags: StripeMetadata): StripeMeta
 
 const meterMatches = (meter: StripeCatalogMeter) => meter.default_aggregation.formula === "sum" && meter.customer_mapping.type === "by_id" && meter.customer_mapping.event_payload_key === STRIPE_METER_CUSTOMER_KEY && meter.value_settings.event_payload_key === STRIPE_METER_VALUE_KEY;
 
-type WantedPrice = { product: string | StripeRef; currency: string; cents: number; interval: "month" | "year"; meter: string | StripeRef | null };
+/** interval null: a one-time price, as a pack's. */
+type WantedPrice = { product: string | StripeRef; currency: string; cents: number; interval: "month" | "year" | null; meter: string | StripeRef | null };
 
 /** Why a price can't sell what's wanted: Stripe never changes its product, amount, currency, cycle, usage type or meter. Null when it can. */
 function priceProblem(found: StripeCatalogPrice, wanted: WantedPrice): string | null {
@@ -201,7 +217,9 @@ function priceProblem(found: StripeCatalogPrice, wanted: WantedPrice): string | 
   if (!sameId(wanted.product, found.product)) problems.push(`belongs to product ${found.product}`);
   if (found.currency !== wanted.currency || found.unit_amount !== wanted.cents) problems.push(`costs ${money(found.unit_amount ?? 0, found.currency)}`);
   const recurring = found.recurring;
-  if (!recurring) problems.push("isn't recurring");
+  if (wanted.interval === null) {
+    if (recurring) problems.push(`bills every ${recurring.interval_count} ${recurring.interval}, while a pack is paid once`);
+  } else if (!recurring) problems.push("isn't recurring");
   else {
     if (recurring.interval !== wanted.interval || recurring.interval_count !== 1) problems.push(`bills every ${recurring.interval_count} ${recurring.interval}`);
     const usage = wanted.meter === null ? "licensed" : "metered";
@@ -265,9 +283,9 @@ function portalFeatureChanges(found: StripePortalConfiguration["features"], port
  * The calls that make a Stripe account sell what the file says, in the order
  * they run: meters, the overage products and prices, the plans' products and
  * prices, coupons, the billing portal, the webhook endpoint and the meter
- * error destination, then archiving and deleting. Anything the run must not
- * decide on its own is a refusal instead, and a run with refusals makes no
- * call at all.
+ * error destination, the packs' products and prices, then archiving and
+ * deleting. Anything the run must not decide on its own is a refusal
+ * instead, and a run with refusals makes no call at all.
  */
 export function planStripeChanges(input: { catalog: DesiredStripeCatalog; snapshot: StripeSnapshot; options: CatalogPlanOptions }): StripePlan {
   const { catalog, snapshot, options } = input;
@@ -342,8 +360,9 @@ export function planStripeChanges(input: { catalog: DesiredStripeCatalog; snapsh
   const planPrice = (spec: { object: "price" | "overage"; lookupKey: string; wanted: WantedPrice; describe: string; tags: StripeMetadata; produces: string }): string | StripeRef | null => {
     const subject = `Price ${spec.lookupKey}`;
     const found = snapshot.prices.find((price) => price.lookup_key === spec.lookupKey);
-    const recurring = { interval: spec.wanted.interval, ...(spec.wanted.meter !== null ? { usage_type: "metered", meter: spec.wanted.meter } : {}) };
-    const params = { product: spec.wanted.product, currency: spec.wanted.currency, unit_amount: spec.wanted.cents, recurring, lookup_key: spec.lookupKey, tax_behavior: "exclusive", metadata: spec.tags };
+    // A one-time price is sent without recurring.
+    const recurring = spec.wanted.interval === null ? {} : { recurring: { interval: spec.wanted.interval, ...(spec.wanted.meter !== null ? { usage_type: "metered", meter: spec.wanted.meter } : {}) } };
+    const params = { product: spec.wanted.product, currency: spec.wanted.currency, unit_amount: spec.wanted.cents, ...recurring, lookup_key: spec.lookupKey, tax_behavior: "exclusive", metadata: spec.tags };
     if (!found) {
       steps.push({ object: spec.object, action: "create", subject, changes: [spec.describe], call: "prices.create", params, idempotencyKey: idempotencyKey("price", spec.lookupKey), produces: spec.produces });
       return ref(spec.produces);
@@ -355,13 +374,15 @@ export function planStripeChanges(input: { catalog: DesiredStripeCatalog; snapsh
     }
     const problem = priceProblem(found, spec.wanted);
     if (problem) {
+      // A one-time price has buyers, not subscribers.
+      const once = spec.wanted.interval === null;
       if (!options.allowReplace) {
-        refuse(spec.object, subject, `${found.id} ${problem}, and Stripe never changes a price. Run with --allow-replace to make a new price that takes over the lookup key; its subscribers keep the old one.`);
+        refuse(spec.object, subject, `${found.id} ${problem}, and Stripe never changes a price. Run with --allow-replace to make a new price that takes over the lookup key; ${once ? "packs bought through the old one keep their minutes" : "its subscribers keep the old one"}.`);
         return null;
       }
       steps.push({ object: spec.object, action: "create", subject, changes: [`replaces ${found.id}, which ${problem}: ${spec.describe}`], call: "prices.create", params: { ...params, transfer_lookup_key: true }, idempotencyKey: idempotencyKey("price", `${spec.lookupKey}:after:${found.id}`), produces: spec.produces });
       replacedPrices.add(found.id);
-      if (found.active) late.push({ object: spec.object, action: "archive", subject: `Price ${found.id}`, changes: [`replaced under ${spec.lookupKey}; its subscribers keep it`], call: "prices.update", target: found.id, params: { active: false } });
+      if (found.active) late.push({ object: spec.object, action: "archive", subject: `Price ${found.id}`, changes: [`replaced under ${spec.lookupKey}; ${once ? "packs bought through it keep their minutes" : "its subscribers keep it"}`], call: "prices.update", target: found.id, params: { active: false } });
       return ref(spec.produces);
     }
     const update: Record<string, unknown> = {};
@@ -407,19 +428,34 @@ export function planStripeChanges(input: { catalog: DesiredStripeCatalog; snapsh
     if (price !== null) priceIds.set(priceKey(desired.plan, desired.period), price);
   }
 
-  // Prices and products of this brand that the file no longer sells.
-  const wantedKeys = new Set(catalog.prices.map((price) => price.lookupKey));
+  // Prices and products of this brand that the file no longer sells. A pack's
+  // are judged against the file's packs, a plan's against its plans.
+  const wantedKeys = new Set([...catalog.prices.map((price) => price.lookupKey), ...catalog.packs.map((pack) => pack.lookupKey)]);
   for (const price of snapshot.prices) {
     if (!price.active || !ours(price.metadata) || (price.lookup_key !== null && wantedKeys.has(price.lookup_key)) || replacedPrices.has(price.id)) continue;
     const subject = `Price ${price.lookup_key ?? price.id}`;
+    const pack = price.metadata[stripeTags.pack];
+    if (pack !== undefined) {
+      if (!options.allowArchive) refuse("price", subject, `It sells pack ${pack} at ${money(price.unit_amount ?? 0, price.currency)} on terms the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes.`);
+      else late.push({ object: "price", action: "archive", subject, changes: ["the file no longer sells it; packs bought through it keep their minutes"], leftover: true, call: "prices.update", target: price.id, params: { active: false } });
+      continue;
+    }
     const sells = `${price.metadata[stripeTags.plan] ?? "a plan"} ${price.metadata[stripeTags.interval] ?? ""}`.trim();
     if (!options.allowArchive) refuse("price", subject, `It sells ${sells} at ${money(price.unit_amount ?? 0, price.currency)} on terms the file no longer has. Run with --allow-archive to archive it; its subscribers keep it.`);
     else late.push({ object: "price", action: "archive", subject, changes: ["the file no longer sells it; its subscribers keep it"], leftover: true, call: "prices.update", target: price.id, params: { active: false } });
   }
   const wantedPlans = new Set(catalog.products.map((product) => product.plan));
+  const wantedPacks = new Set(catalog.packs.map((pack) => pack.pack));
   for (const product of snapshot.products) {
-    if (!product.active || !ours(product.metadata) || wantedPlans.has(String(product.metadata[stripeTags.plan]))) continue;
+    if (!product.active || !ours(product.metadata)) continue;
+    const pack = product.metadata[stripeTags.pack];
+    if (pack !== undefined ? wantedPacks.has(pack) : wantedPlans.has(String(product.metadata[stripeTags.plan]))) continue;
     const subject = `Product "${product.name}"`;
+    if (pack !== undefined) {
+      if (!options.allowArchive) refuse("product", subject, `It sells pack ${pack}, which the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes.`);
+      else late.push({ object: "product", action: "archive", subject, changes: ["the file no longer sells it; packs bought through it keep their minutes"], leftover: true, call: "products.update", target: product.id, params: { active: false } });
+      continue;
+    }
     if (!options.allowArchive) refuse("product", subject, `It sells ${String(product.metadata[stripeTags.plan])}, which the file no longer has. Run with --allow-archive to archive it; its subscribers keep their subscription.`);
     else late.push({ object: "product", action: "archive", subject, changes: ["the file no longer sells it; its subscribers keep their subscription"], leftover: true, call: "products.update", target: product.id, params: { active: false } });
   }
@@ -578,6 +614,15 @@ export function planStripeChanges(input: { catalog: DesiredStripeCatalog; snapsh
     }
   }
 
+  // The packs, after everything else, so the calls before them are the ones a
+  // file without packs gets: a product each, found by its pack tag, and its
+  // one-time price. The product's key can't be a plan's, since a plan code has no colon.
+  for (const desired of catalog.packs) {
+    const product = planProduct({ object: "product", name: desired.name, candidates: snapshot.products.filter((entry) => ours(entry.metadata) && entry.metadata[stripeTags.pack] === desired.pack), tags: { ...brandTag, [stripeTags.pack]: desired.pack }, produces: `pack-product:${desired.pack}`, key: `pack:${desired.pack}` });
+    if (product === null) continue;
+    planPrice({ object: "price", lookupKey: desired.lookupKey, wanted: { product, currency: desired.currency, cents: desired.cents, interval: null, meter: null }, describe: `${money(desired.cents, desired.currency)} once, before tax`, tags: { ...brandTag, [stripeTags.pack]: desired.pack, [stripeTags.terms]: desired.terms }, produces: `pack-price:${desired.pack}` });
+  }
+
   return { steps: [...steps, ...late], refusals };
 }
 
@@ -595,9 +640,10 @@ export type StripeLinkObjects = {
 /**
  * The link request for a snapshot taken once Stripe sells what the file says:
  * every live price of every sold plan by its lookup key, each plan's coupon,
- * and the deployment-wide objects. missing names what has no single object.
+ * each pack's one-time price, and the deployment-wide objects. missing names
+ * what has no single object.
  */
-export function stripeLinkBody(input: { catalog: DesiredStripeCatalog; plans: readonly DesiredBillingPlan[]; snapshot: StripeSnapshot }): { plans: BillingCatalogLinkRequest["plans"]; objects: StripeLinkObjects; missing: string[] } {
+export function stripeLinkBody(input: { catalog: DesiredStripeCatalog; plans: readonly DesiredBillingPlan[]; snapshot: StripeSnapshot }): { plans: BillingCatalogLinkRequest["plans"]; packs: BillingCatalogLinkRequest["packs"]; objects: StripeLinkObjects; missing: string[] } {
   const { catalog, snapshot } = input;
   const missing: string[] = [];
   const livePrice = (lookupKey: string, what: string) => {
@@ -617,6 +663,7 @@ export function stripeLinkBody(input: { catalog: DesiredStripeCatalog; plans: re
     }
     plans.push({ code: plan.code, terms_hash: plan.terms_hash, provider_disc: discount, prices });
   }
+  const packs: BillingCatalogLinkRequest["packs"] = catalog.packs.map((pack) => ({ code: pack.pack, terms_hash: pack.terms, currency: pack.currency, provider_ref: livePrice(pack.lookupKey, `pack ${pack.pack}`) }));
   const meters = {} as Record<OverageKind, string>;
   const overagePrices = {} as Record<OverageKind, string>;
   for (const overage of catalog.overage) {
@@ -635,6 +682,7 @@ export function stripeLinkBody(input: { catalog: DesiredStripeCatalog; plans: re
   };
   return {
     plans,
+    packs,
     objects: {
       meters,
       overage_prices: overagePrices,
@@ -649,7 +697,8 @@ export function stripeLinkBody(input: { catalog: DesiredStripeCatalog; plans: re
 // Verify.
 
 export type StripeVerifyInput = {
-  file: { brand: string; hash: string; profile: Pick<BillingProfile, "currency" | "stripe">; plans: readonly DesiredBillingPlan[] };
+  /** packs: the file's, absent or empty for a file without them. */
+  file: { brand: string; hash: string; profile: Pick<BillingProfile, "currency" | "stripe">; plans: readonly DesiredBillingPlan[]; packs?: readonly DesiredBillingPack[] };
   /** getBillingCatalog's answer: the tables, and the deployment's provider settings and latest link. */
   catalog: ApiBillingCatalog;
   /** What the Stripe key read, or why it couldn't. */
@@ -683,7 +732,7 @@ export function verifyStripeCatalog(input: StripeVerifyInput): BillingVerifyResu
   const { snapshot } = input.stripe;
 
   // File and Stripe: everything an apply would still change.
-  const desired = desiredStripeCatalog({ brand: file.brand, profile: file.profile, plans: file.plans, webhookUrl: input.webhookUrl, ...(input.links ? { links: input.links } : {}) });
+  const desired = desiredStripeCatalog({ brand: file.brand, profile: file.profile, plans: file.plans, ...(file.packs ? { packs: file.packs } : {}), webhookUrl: input.webhookUrl, ...(input.links ? { links: input.links } : {}) });
   const plan = planStripeChanges({ catalog: desired, snapshot, options: { adopt: false, allowReplace: true, allowArchive: true } });
   const found = new Set<BillingCheckCode>();
   for (const step of plan.steps) {
@@ -695,11 +744,13 @@ export function verifyStripeCatalog(input: StripeVerifyInput): BillingVerifyResu
     found.add(stripeStepCodes[refusal.object]);
     add(stripeStepCodes[refusal.object], "file_provider", "drift", refusal.subject, `${refusal.subject}: ${refusal.message}`);
   }
+  // Packs are named only when the file has some, so a file without them reads as before.
+  const packs = desired.packs.length;
   const okLines: Array<[BillingCheckCode, string]> = [
     ["meter", `${desired.overage.length} meters, each summing dollars of overage`],
     ["overage", `${desired.overage.length} overage prices at ${money(STRIPE_OVERAGE_UNIT_CENTS, desired.currency)} a dollar of usage`],
-    ["product", `${desired.products.length} products, tagged and taxed as ${desired.taxCode}`],
-    ["price", `${desired.prices.length} prices before tax, each under its lookup key`],
+    ["product", `${desired.products.length} products${packs ? ` and ${packs} pack ${packs === 1 ? "product" : "products"}` : ""}, tagged and taxed as ${desired.taxCode}`],
+    ["price", `${desired.prices.length} prices${packs ? ` and ${packs} one-time pack ${packs === 1 ? "price" : "prices"}` : ""} before tax, each under its lookup key`],
     ["discount", desired.coupons.length ? `${desired.coupons.length} ${desired.coupons.length === 1 ? "coupon" : "coupons"}` : "no coupons"],
     ["portal", `billing portal with plan changes ${desired.portal.planChanges ? "on" : "off"} and cancelling ${desired.portal.cancel ? "on" : "off"}`],
     ...(desired.webhook ? [["webhook", `webhook ${desired.webhook.url}, ${desired.webhook.events.length} events, API version ${STRIPE_API_VERSION}, and the meter error destination`] as [BillingCheckCode, string]] : []),
@@ -743,10 +794,36 @@ export function verifyStripeCatalog(input: StripeVerifyInput): BillingVerifyResu
       }
     }
   }
-  if (!badLinks) add("linked_id", "postgres_provider", "ok", "links", `${linked} prices linked, all live and priced as the rows say`);
+  // A pack's price is one-time, on a product tagged with the pack. An instance older than packs answers without them.
+  const packRows = catalog.packs ?? [];
+  let packsLinked = 0;
+  for (const row of packRows.filter((entry) => entry.status !== "retired")) {
+    for (const price of row.prices.filter((entry) => entry.retired_at === null && entry.provider_ref !== null)) {
+      packsLinked += 1;
+      const subject = `${row.code}/${price.currency}`;
+      const found = prices.get(price.provider_ref!);
+      const product = found ? products.get(found.product) : undefined;
+      const problem = !found ? "isn't in this Stripe account"
+        : !found.active ? "is archived"
+        : product?.metadata[stripeTags.brand] !== file.brand || product.metadata[stripeTags.pack] !== row.code ? `belongs to product ${found.product}, which isn't tagged ${file.brand} pack ${row.code}`
+        : found.recurring !== null ? `bills every ${found.recurring.interval_count} ${found.recurring.interval}, while a pack is paid once`
+        : found.unit_amount !== price.cents || found.currency !== price.currency ? `doesn't sell ${money(price.cents, price.currency)} once`
+        : null;
+      if (problem) {
+        badLinks += 1;
+        add("linked_id", "postgres_provider", "drift", subject, `Pack ${subject} is linked to price ${price.provider_ref}, which ${problem}.`);
+      }
+    }
+  }
+  if (!badLinks) add("linked_id", "postgres_provider", "ok", "links", `${linked} prices${packs ? ` and ${packsLinked} pack ${packsLinked === 1 ? "price" : "prices"}` : ""} linked, all live and priced as the rows say`);
   for (const row of catalog.plans) {
     for (const price of row.prices.filter((entry) => entry.retired_at !== null && entry.provider_ref !== null)) {
       if (!prices.has(price.provider_ref!)) add("retired_id", "postgres_provider", "info", `${row.code}/${price.period}`, `The retired ${row.code} ${price.period} price ${price.provider_ref} isn't in Stripe any more.`);
+    }
+  }
+  for (const row of packRows) {
+    for (const price of row.prices.filter((entry) => entry.retired_at !== null && entry.provider_ref !== null)) {
+      if (!prices.has(price.provider_ref!)) add("retired_id", "postgres_provider", "info", `${row.code}/${price.currency}`, `The retired pack ${row.code} ${price.currency} price ${price.provider_ref} isn't in Stripe any more.`);
     }
   }
 

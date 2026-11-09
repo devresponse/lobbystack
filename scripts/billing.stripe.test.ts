@@ -67,6 +67,7 @@ function catalogOf(instance: Instance): ApiBillingCatalog {
     profile: null,
     currency: instance.prices.find((price) => price.retired_at === null)?.currency ?? null,
     plans: billingCatalogPlans(instance, instance.provider),
+    packs: [],
     polar: instance.provider === "polar" ? { env: "sandbox", org: "org_test", secret_sha256: null, product_vars: {}, last_link: null } : null,
     provider: { id: instance.provider, env: instance.stripe.env, account: instance.stripe.account, secret_sha256: instance.stripe.secret ? sha256(instance.stripe.secret) : null, objects, product_vars: null, last_link: lastLink ? (shownLink as ApiBillingCatalogRun) : null },
   };

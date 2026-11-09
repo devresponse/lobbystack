@@ -1,7 +1,7 @@
 import type { BillingProviderId } from "@lobbystack/providers/billing/types";
 import { billingProviderOf, type BillingCatalogLinkRequest, type BillingProfile, type BillingProviderEnv } from "@lobbystack/shared";
 
-import { billingDeploymentPolar, billingDeploymentStripe, providerEnvOfPolar, type BillingDeploymentPolar, type BillingDeploymentStripe, type DesiredBillingPlan } from "./billingCatalog";
+import { billingDeploymentPolar, billingDeploymentStripe, providerEnvOfPolar, type BillingDeploymentPolar, type BillingDeploymentStripe, type DesiredBillingPack, type DesiredBillingPlan } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, type DesiredPolarCatalog, type PolarPlanOptions, type PolarRefusal, type PolarStep } from "./billingPolar";
 import { stripePlanner, type StripeRefusal } from "./billingStripe";
 import { verifyBillingCatalog, type BillingVerifyInput, type BillingVerifyResult } from "./billingVerify";
@@ -14,11 +14,13 @@ import { verifyBillingCatalog, type BillingVerifyInput, type BillingVerifyResult
 export type CatalogPlanOptions = PolarPlanOptions;
 export type CatalogRefusal = PolarRefusal | StripeRefusal;
 
-/** What a planner builds the desired catalog from: the brand's file and plans, and the deployment's addresses. */
+/** What a planner builds the desired catalog from: the brand's file, plans and packs, and the deployment's addresses. */
 export type CatalogDesiredInput = {
   brand: string;
   profile: Pick<BillingProfile, "currency" | "polar" | "stripe">;
   plans: readonly DesiredBillingPlan[];
+  /** The file's packs; absent or empty for a file without them, which then makes nothing for packs. */
+  packs?: readonly DesiredBillingPack[];
   /** The address the provider's webhook calls; null when the instance's address isn't known, and then not checked. */
   webhookUrl: string | null;
   /** The brand's terms and privacy pages, which Stripe's billing portal links to; absent or null leaves the provider's as they are. */
@@ -34,11 +36,12 @@ export interface CatalogPlanner<Desired, Snapshot, Step, VerifyInput, Refusal ex
   /** The file, the tables and the provider's account, compared two at a time. */
   verify(input: VerifyInput): BillingVerifyResult;
   /**
-   * The link request's plans, in the provider's names, for a snapshot taken
-   * once the account sells what's desired; the deployment-wide objects a link
-   * records beyond them, on providers other than Polar; and what has no single object.
+   * The link request's plans and packs, in the provider's names, for a
+   * snapshot taken once the account sells what's desired; the deployment-wide
+   * objects a link records beyond them, on providers other than Polar; and
+   * what has no single object. packs is empty or absent without packs.
    */
-  linkBody(input: { desired: Desired; snapshot: Snapshot; plans: readonly DesiredBillingPlan[] }): { plans: BillingCatalogLinkRequest["plans"]; objects?: Record<string, unknown>; missing: string[] };
+  linkBody(input: { desired: Desired; snapshot: Snapshot; plans: readonly DesiredBillingPlan[] }): { plans: BillingCatalogLinkRequest["plans"]; packs?: BillingCatalogLinkRequest["packs"]; objects?: Record<string, unknown>; missing: string[] };
 }
 
 /** Polar's planner: today's functions, unchanged. */

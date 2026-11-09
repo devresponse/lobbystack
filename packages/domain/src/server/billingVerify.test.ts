@@ -67,6 +67,7 @@ async function syncedInstance(file = profile()) {
     profile: file as unknown as Record<string, unknown>,
     currency: "cad",
     plans: rows,
+    packs: [],
     polar: { env: "sandbox", org: fake.state.organization.id, secret_sha256: sha256(webhookSecret!), product_vars: productVars, last_link: run("polar", fake.state.organization.id) },
     provider: { id: "polar", env: "sandbox", account: fake.state.organization.id, secret_sha256: sha256(webhookSecret!), objects: null, product_vars: productVars, last_link: run("polar", fake.state.organization.id) },
   };

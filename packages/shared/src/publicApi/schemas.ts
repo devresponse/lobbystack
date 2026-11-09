@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { billingPlanSlugs, billingProviderEnvs, billingProviders, billingSubscriptionActions, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
-import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
+import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema, MAX_BILLING_PACKS } from "../billingProfile";
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
@@ -334,7 +334,8 @@ export const apiManagedPlanCreateSchema = z.strictObject({
 });
 
 // The billing catalog: every plan of a brand's billing.json, standard or not,
-// as migration 0108's tables hold it. The fields carry the columns' own names.
+// as migration 0108's tables hold it, and every prepaid pack, as migration
+// 0148's do. The fields carry the columns' own names.
 
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/).describe("SHA-256 as 64 lowercase hex characters.");
 const nullableCount = z.number().int().nullable();
@@ -379,6 +380,12 @@ export const apiBillingCatalogLinkSchema = z.strictObject({
       polar_id: polarObjectId.optional().describe("Polar's name for provider_ref: the Polar product. Only with provider polar."),
     })).min(1).max(2).describe("Every live price of the plan."),
   })).max(60).describe("Every sold plan that isn't retired, each with every live price."),
+  packs: z.array(z.strictObject({
+    code: z.string().min(1).max(64).describe("A pack that isn't retired."),
+    terms_hash: sha256Hex.describe("The pack's terms_hash its provider object was made from. It must be the row's."),
+    currency: z.string().regex(/^[a-z]{3}$/).describe("The currency of the pack's live price."),
+    provider_ref: providerObjectId.describe("The provider's object that sells the pack's live price: a Polar product or a Stripe price."),
+  })).max(MAX_BILLING_PACKS).optional().describe("Every pack that isn't retired, each with the object that sells its live price. Required once the catalog has packs; left out, the link names none."),
   objects: z.record(z.string(), z.unknown()).optional().describe("The provider's objects beyond plans and prices, which a Stripe link records: its meters, overage prices, billing portal configuration and webhook endpoint, with the endpoint secret's SHA-256. Not with provider polar."),
   replace_ids: z.boolean().optional().describe("true lets a live price or a plan that already has a provider object take another one: the old price row is retired with its object, and a new live row takes the new one. Defaults to false."),
   dry_run: z.boolean().optional().describe("true shows what the link would change and anything that would stop it, and changes nothing. Defaults to false."),
@@ -413,6 +420,8 @@ export type BillingCatalogLinkRequest = {
   provider_env: BillingProviderEnv;
   provider_account: string;
   plans: Array<{ code: string; terms_hash: string; provider_disc: string | null; prices: Array<{ period: "monthly" | "annual"; currency: string; provider_ref: string }> }>;
+  /** Empty when the request named no packs. */
+  packs: Array<{ code: string; terms_hash: string; currency: string; provider_ref: string }>;
   objects: Record<string, unknown> | null;
   replace_ids: boolean;
   dry_run: boolean;
@@ -435,6 +444,7 @@ export function billingCatalogLinkRequest(body: ApiBillingCatalogLink): BillingC
       provider_disc: plan.provider_disc !== undefined ? plan.provider_disc : plan.polar_disc ?? null,
       prices: plan.prices.map((price) => ({ period: price.period, currency: price.currency, provider_ref: price.provider_ref ?? price.polar_id ?? "" })),
     })),
+    packs: (body.packs ?? []).map((pack) => ({ code: pack.code, terms_hash: pack.terms_hash, currency: pack.currency, provider_ref: pack.provider_ref })),
     objects: body.objects ?? null,
     replace_ids: body.replace_ids === true,
     dry_run: body.dry_run === true,
@@ -457,11 +467,11 @@ export const apiBillingCheckSchema = z.object({
 }).describe("Something a verify found that isn't as the file says.");
 
 export const apiBillingCatalogChangeSchema = z.object({
-  table: z.enum(["billing_plans", "billing_prices"]),
-  key: z.string().describe("A plan's code, or code/period/currency for a price."),
+  table: z.enum(["billing_plans", "billing_prices", "billing_pack_plans", "billing_pack_prices"]),
+  key: z.string().describe("A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."),
   action: z.enum(["insert", "update", "retire", "restore"]),
   fields: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })).describe("For update and restore, each changed column with its old and new value. Empty otherwise."),
-  lowers_allowance: z.boolean().describe("An included amount, the storage limit, the number count or the receptionist count goes down."),
+  lowers_allowance: z.boolean().describe("An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."),
   raises_price: z.boolean().describe("A price or an overage rate goes up."),
 }).describe("One row an apply writes.");
 
@@ -577,6 +587,37 @@ export const apiBillingCatalogPlanSchema = z.object({
   prices: z.array(apiBillingCatalogPriceSchema).describe("Every price of the plan, live ones first."),
 });
 
+export const apiBillingCatalogPackPriceSchema = z.object({
+  id,
+  currency: z.string(),
+  cents: z.number().int().describe("What the pack costs, paid once."),
+  provider_ref: z.string().nullable().describe("The provider's object that sells it, once linked: a Polar product or a Stripe price."),
+  retired_at: nullableTimestamp.describe("When it stopped being sold. Null for the live price. A retired price keeps its object, so packs bought through it are still recognized."),
+  created_at: timestamp,
+  updated_at: timestamp,
+});
+
+export const apiBillingCatalogPackSchema = z.object({
+  code: z.string().describe("The pack's permanent code, its key in billing.json's packs."),
+  status: z.enum(["draft", "active", "retired"]).describe("draft until the billing provider can sell it as defined, active, or retired."),
+  names: z.record(z.string(), z.string()).describe("Display names by language."),
+  voice_sec: z.number().int().describe("Voice seconds the pack holds."),
+  days: nullableCount.describe("How many days a bought pack lasts from its payment. Null means it never ends."),
+  sms_seg: z.number().int().describe("Alert SMS segments included a month."),
+  calls_out: z.number().int().describe("Outbound call attempts included a month."),
+  chat_units: z.number().int().describe("Website chat AI units included a month."),
+  kb_bytes: z.number().int().describe("Knowledge storage limit in bytes."),
+  numbers: z.number().int().describe("Business phone numbers included."),
+  receptionists: z.number().int().describe("Receptionists active at once, the default included."),
+  terms_hash: sha256Hex,
+  frozen_at: nullableTimestamp.describe("When it was first bought. From then its minutes and length can't change."),
+  sort: z.number().int(),
+  retired_at: nullableTimestamp,
+  created_at: timestamp,
+  updated_at: timestamp,
+  prices: z.array(apiBillingCatalogPackPriceSchema).describe("Every price of the pack, the live one first."),
+}).describe("A prepaid pack: voice minutes paid for once, to use within its days of the payment.");
+
 export const apiBillingCatalogPolarSchema = z.object({
   env: z.enum(billingPolarEnvs).describe("The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."),
   org: z.string().nullable().describe("POLAR_ORGANIZATION_ID. Null when unset."),
@@ -604,6 +645,7 @@ export const apiBillingCatalogSchema = z.object({
   profile: z.record(z.string(), z.unknown()).nullable().describe("The latest applied file, normalized, in its own camel case."),
   currency: z.string().nullable().describe("The live prices' currency."),
   plans: z.array(apiBillingCatalogPlanSchema).describe("Every plan, whatever its access or status, by sort then code."),
+  packs: z.array(apiBillingCatalogPackSchema).describe("Every prepaid pack, whatever its status, by sort then code. Empty when no applied file had packs."),
   polar: apiBillingCatalogPolarSchema.nullable().describe("Polar's settings, as before provider: on a Polar deployment, the same as provider; null on any other."),
   provider: apiBillingCatalogProviderSchema,
 }).describe("The plans and prices this deployment holds. Checkout, plan changes, the provider's webhook, the plan screens and usage limits read them.");
@@ -1559,6 +1601,8 @@ export type ApiBillingCatalogPolar = z.infer<typeof apiBillingCatalogPolarSchema
 export type ApiBillingCatalogProvider = z.infer<typeof apiBillingCatalogProviderSchema>;
 export type ApiBillingCheck = z.infer<typeof apiBillingCheckSchema>;
 export type ApiBillingCatalogChange = z.infer<typeof apiBillingCatalogChangeSchema>;
+export type ApiBillingCatalogPack = z.infer<typeof apiBillingCatalogPackSchema>;
+export type ApiBillingCatalogPackPrice = z.infer<typeof apiBillingCatalogPackPriceSchema>;
 export type ApiBillingCatalogPlan = z.infer<typeof apiBillingCatalogPlanSchema>;
 export type ApiBillingCatalogPrice = z.infer<typeof apiBillingCatalogPriceSchema>;
 export type ApiBillingCatalogRefusal = z.infer<typeof apiBillingCatalogRefusalSchema>;

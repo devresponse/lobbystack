@@ -375,16 +375,19 @@ export async function freezePackInTransaction(tx: DatabaseTransaction, input: { 
 
 /**
  * Closes a frozen pack's dispute: won, it is live again, or expired if its end
- * date passed meanwhile; lost, the payment went back, so it ends refunded.
+ * date passed meanwhile; lost, the payment went back, so it ends refunded,
+ * also when the dispute's opening never reached LobbyStack and the pack was
+ * still live.
  */
 export async function closePackDisputeInTransaction(tx: DatabaseTransaction, input: { businessId: string; provider: "polar" | "stripe"; providerRef: string; won: boolean; at: Date }): Promise<PackChange | null> {
   await lockBusinessPacks(tx, input.businessId);
   const pack = await packByPayment(tx, input.businessId, input.provider, input.providerRef);
   if (!pack) return null;
-  if (pack.status !== "frozen") return { packId: pack.id, status: pack.status, previous: pack.status };
+  const lostWhileLive = !input.won && pack.status === "active";
+  if (pack.status !== "frozen" && !lostWhileLive) return { packId: pack.id, status: pack.status, previous: pack.status };
   if (!input.won) {
     await tx.update(billingPacks).set(endedColumns(pack, "refunded", input.at, pack.amountCents)).where(eq(billingPacks.id, pack.id));
-    return { packId: pack.id, status: "refunded", previous: "frozen" };
+    return { packId: pack.id, status: "refunded", previous: pack.status };
   }
   if (pack.endsAt !== null && pack.endsAt <= input.at) {
     await tx.update(billingPacks).set(endedColumns(pack, "expired", pack.endsAt, pack.refundedCents)).where(eq(billingPacks.id, pack.id));
@@ -453,8 +456,11 @@ export async function schedulePackNumberReleaseInTransaction(tx: DatabaseTransac
  * kept. Returns how many numbers it kept.
  */
 export async function clearPackNumberReleaseInTransaction(tx: DatabaseTransaction, businessId: string): Promise<number> {
-  const kept = await tx.update(phoneNumbers).set({ reclaimScheduledAt: null, reclaimReason: null, updatedAt: new Date() })
-    .where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.reclaimReason, PACK_RECLAIM_REASON)))
-    .returning({ id: phoneNumbers.id });
-  return kept.length;
+  // Read first, so a business that never had a pack has nothing written.
+  const set = await tx.select({ id: phoneNumbers.id }).from(phoneNumbers)
+    .where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.reclaimReason, PACK_RECLAIM_REASON)));
+  if (!set.length) return 0;
+  await tx.update(phoneNumbers).set({ reclaimScheduledAt: null, reclaimReason: null, updatedAt: new Date() })
+    .where(and(eq(phoneNumbers.businessId, businessId), inArray(phoneNumbers.id, set.map((number) => number.id))));
+  return set.length;
 }

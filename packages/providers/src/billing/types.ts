@@ -166,6 +166,8 @@ export type NormalizedBillingEvent = {
     discountRef?: string | null; subscriptionModifiedAt?: string; periodStart?: string; periodEnd?: string;
     cancelAt?: string | null; nextChange?: { planCode: string; billingInterval: BillingInterval; at: string } | null; checkoutRequestId?: string; checkoutOutcome?: "completed" | "expired";
     payment?: { id: string; status: string; amountCents: number; refundedCents: number; currency: string; invoiceUrl: string | null; subscriptionId: string | null; description: string | null; occurredAt: string };
+    /** The payment intent a pack's checkout or a dispute names (Stripe): a pack's row is keyed on it. */
+    paymentRef?: string;
   };
   /**
    * What gets stored: the provider's object with the normalized fields beside it at

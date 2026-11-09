@@ -112,6 +112,7 @@ export const WORKFLOW_EVENT_NAMES = [
 
 export const BILLING_EVENT_NAMES = [
   "billing.subscription_started",
+  "billing.pack_purchased",
 ] as const;
 
 export const OPERATIONS_EVENT_NAMES = [
@@ -365,6 +366,9 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "web.activation.upgrade_prompt_clicked": ["businessId", "deploymentMode", "trigger"],
   "web.activation.abandon_intent": ["businessId", "deploymentMode", "trigger"],
   "billing.subscription_started": ["businessId", "plan", "billingInterval", "previousPlan"],
+  // A prepaid pack bought, once per payment. days: its length, or never; previousPlan: the plan in
+  // force before it (prepaid for a top-up), or the subscription it replaced or waits beside.
+  "billing.pack_purchased": ["businessId", "pack", "days", "provider", "previousPlan"],
   "voice.call_started": [
     "businessId",
     "deploymentMode",

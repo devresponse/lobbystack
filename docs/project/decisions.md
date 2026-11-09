@@ -69,3 +69,4 @@ The original project recorded these; they still describe the code.
 | [0008](../adr/0008-gpt-live-voice.md) | GPT-Live answers phone and browser calls, with one agent core | Accepted |
 | [0009](../adr/0009-ai-conversation-traces.md) | A trace of each AI turn kept in Postgres, not in logs or analytics | Accepted, 2026-10-19 (the fork's) |
 | [0010](../adr/0010-billing-provider-per-deployment.md) | One billing provider per deployment, behind an interface, with provider-neutral storage | Accepted, 2026-11-08 (the fork's) |
+| [0011](../adr/0011-prepaid-packs-ledger.md) | Prepaid minutes kept in LobbyStack's own ledger, the provider only taking a one-time payment | Accepted, 2026-11-09 (the fork's) |

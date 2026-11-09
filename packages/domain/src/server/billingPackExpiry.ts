@@ -1,10 +1,10 @@
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
-import { auditLogs, billingAccounts, billingPackPlans, billingPacks, businesses, enqueueOutbox, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, enqueueOutbox, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingPlanName, normalizeInterfaceLocale } from "@lobbystack/shared";
 
 import { isLiveSubscriptionState, lockBillingAccount } from "./billing";
-import { expirePackInTransaction, lockBusinessPacks, newestLivePack, PACK_LOW_BALANCE_SHARE, PACK_RECLAIM_REASON, packBalance, packSecondsLeft, readLivePacks, schedulePackNumberReleaseInTransaction, type LivePack, type PackBalance } from "./billingPacks";
+import { expirePackInTransaction, lockBusinessPacks, newestLivePack, PACK_LOW_BALANCE_SHARE, PACK_NOTICE_RUN_DELAY_MS, PACK_RECLAIM_REASON, packBalance, packSecondsLeft, readLivePacks, schedulePackNumberReleaseInTransaction, type LivePack, type PackBalance } from "./billingPacks";
 import type { DomainContext } from "./context";
 import { lockBusinessNumberClaims } from "./phoneNumbers";
 import { enqueueReceptionistAllowanceCheck } from "./receptionists";
@@ -25,7 +25,8 @@ import { loadBusinessPlanLimits } from "./usage";
 //    A pack a subscription replaced is never settled here: the business moved
 //    to a plan, and reconcile handled it.
 // 3. Emails the owners the reminders due: at a fifth of the balance left, at
-//    none, and 30 and 7 days before a pack ends.
+//    none, both read without what calls still running hold, and 30 and 7
+//    days before a pack ends.
 // 4. Asks the provider again to end a subscription a pack replaced while it
 //    still shows it live (decision 6).
 //
@@ -184,7 +185,8 @@ async function sendDueReminders(tx: DatabaseTransaction, input: { businessId: st
   const noticeRows = await tx.select({ id: billingPacks.id, notices: billingPacks.notices }).from(billingPacks)
     .where(and(eq(billingPacks.businessId, businessId), inArray(billingPacks.id, live.map((pack) => pack.id))));
   const noticesOf = new Map(noticeRows.map((row) => [row.id, row.notices]));
-  const balance = packBalance(live);
+  // low and empty read the balance without what calls still running hold; a pack's end, the packs as they are.
+  const balance = packBalance(await withoutOpenReservations(tx, { businessId, now: input.now, live }));
   const due = packRemindersDue({ live: live.map((pack) => ({ ...pack, notices: noticesOf.get(pack.id) ?? [] })), balance, now: input.now });
   if (!due.length) return 0;
   const [business] = await tx.select({ status: businesses.status }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
@@ -236,6 +238,30 @@ async function sendDueReminders(tx: DatabaseTransaction, input: { businessId: st
     await tx.update(billingPacks).set({ notices, updatedAt: new Date() }).where(and(eq(billingPacks.businessId, businessId), eq(billingPacks.id, packId)));
   }
   return emails;
+}
+
+/**
+ * The live packs as the balance reminders read them: with the seconds calls
+ * still running drew up front given back, since a call's finish settles what
+ * it really used, so a call holding the last minutes doesn't read as none
+ * left. A call's usage row on a pack that isn't final yet is running only
+ * within the longest call and a margin of its start, the wait of the run its
+ * draw queued: past that it is stuck, and what it drew counts as used, so it
+ * can't hide the balance for good.
+ */
+async function withoutOpenReservations(tx: DatabaseTransaction, input: { businessId: string; now: Date; live: readonly LivePack[] }): Promise<LivePack[]> {
+  const open = await tx.select({ packId: billingPackDraws.packId, seconds: sql<number>`sum(${billingPackDraws.seconds})`.mapWith(Number) }).from(billingPackDraws)
+    .innerJoin(billingUsageEvents, and(eq(billingUsageEvents.businessId, billingPackDraws.businessId), eq(billingUsageEvents.sourceKey, billingPackDraws.sourceKey)))
+    .where(and(
+      eq(billingPackDraws.businessId, input.businessId),
+      eq(billingUsageEvents.usageKind, "voice_seconds"),
+      eq(billingUsageEvents.planAtRecordTime, "prepaid"),
+      eq(billingUsageEvents.isFinal, false),
+      gt(billingUsageEvents.createdAt, new Date(input.now.getTime() - PACK_NOTICE_RUN_DELAY_MS)),
+    ))
+    .groupBy(billingPackDraws.packId);
+  const held = new Map(open.map((row) => [row.packId, row.seconds]));
+  return input.live.map((pack) => ({ ...pack, secondsUsed: Math.max(0, pack.secondsUsed - (held.get(pack.id) ?? 0)) }));
 }
 
 /**

@@ -4,7 +4,7 @@ import { isUuid } from "@lobbystack/shared";
 
 import { BillingProviderError } from "../billing/errors";
 import type { BillingEnv, BillingProvider, BillingRefusal, CustomerRef, OverageKind, PlanChangeProration, PlanChangeResult, PriceRef, ProviderSubscription } from "../billing/types";
-import { cancelStripePlan, keepStripePlan, resumeStripePlan } from "./cancel";
+import { cancelStripePlan, endStripePlanForPack, keepStripePlan, resumeStripePlan } from "./cancel";
 import { createStripeCheckout, createStripePackCheckout } from "./checkout";
 import { stripeLocale, type StripeApi } from "./client";
 import { isStripeAlreadyCanceled, isStripeMissing, stripeRefusalFor } from "./errors";
@@ -129,6 +129,11 @@ export class StripeBilling implements BillingProvider {
       if (isStripeMissing(error) || isStripeAlreadyCanceled(error)) return "already_ended";
       throw error;
     }
+  }
+
+  /** Ends a plan a prepaid pack replaced now; endsAt goes unused, since Stripe ends it at once. */
+  async endForPack(input: { subscriptionId: string; overageSubscriptionId: string | null; endsAt: Date; requestId: string }): Promise<ProviderSubscription | null> {
+    return await endStripePlanForPack(this.api, input);
   }
 
   /**

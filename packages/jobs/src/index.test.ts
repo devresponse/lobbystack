@@ -112,4 +112,12 @@ describe("enqueueJob job ids", () => {
     // Someone waits on a checkout's page, so it gives up as fast as the queue does.
     for (const short of options.slice(6)) expect(short).not.toHaveProperty("attempts");
   });
+
+  it("runs the end of a subscription a prepaid pack replaced on the critical queue and retries it for hours, since the business pays for both until it ends", async () => {
+    expect(queueForJobType["billing.endPlanForPack"]).toBe("critical");
+    const { queue, add } = createQueueStub("critical");
+    await enqueueJob(queue, { type: "billing.endPlanForPack", businessId: "3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3e", payload: { subscriptionId: "sub_1" }, idempotencyKey: "end-plan-for-pack:sub_1" });
+    const [, , options] = add.mock.calls[0] as unknown as [string, unknown, Record<string, unknown>];
+    expect(options).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
+  });
 });

@@ -58,7 +58,7 @@ export function createQueue(
   });
 }
 
-const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "billing.expirePacks", "conversation.finalizeSession", "billing.revokeSubscription", "billing.ensureOverage", "billing.changeSubscription", "phoneNumber.releaseDeleted", "privacy.deleteStoredObjects"]);
+const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "billing.expirePacks", "conversation.finalizeSession", "billing.revokeSubscription", "billing.endPlanForPack", "billing.ensureOverage", "billing.changeSubscription", "phoneNumber.releaseDeleted", "privacy.deleteStoredObjects"]);
 
 export async function enqueueJob(
   queue: Queue<JobEnvelope>,
@@ -84,7 +84,9 @@ export async function enqueueJob(
   // "a change is still pending", for about 3 hours instead; the billing sweep
   // queues billing work again after that, and the next daily run a pack's. So
   // do the jobs a deleted business leaves: ending its plan, and releasing its
-  // numbers and files, which nothing queues again.
+  // numbers and files, which nothing queues again; and ending a subscription a
+  // prepaid pack replaced, which the daily pack job queues again while the
+  // account still shows it live.
   const options: JobsOptions = {
     jobId,
     ...(input.delayMs !== undefined ? { delay: input.delayMs } : {}),

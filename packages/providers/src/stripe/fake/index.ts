@@ -24,6 +24,7 @@ import { fakeSubscriptions } from "./subscriptions";
 export { chargeFakeCard, fakeCardOutcomes, type FakeCard } from "./cards";
 export { emptyFakeCatalog, loadFakeCatalog, type FakeCatalogState } from "./catalog";
 export { FakeClock } from "./clock";
+export { permissionDenied } from "./errors";
 export { stripeInvoiceObject, stripePriceObject, stripeScheduleObject, stripeSubscriptionObject, type FakeSubscriptionInput } from "./objects";
 
 export type FakeStripe = StripeApi & StripeCatalogApi & {

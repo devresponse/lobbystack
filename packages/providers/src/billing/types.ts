@@ -115,6 +115,16 @@ export interface BillingProvider {
   removeDiscount(input: { subscriptionId: string; requestId: string }): Promise<ProviderSubscription>;
   /** Ends the subscription now, as for a business being deleted. */
   revoke(input: { subscriptionId: string; requestId: string }): Promise<"ended" | "already_ended">;
+  /**
+   * Ends a subscription a prepaid pack replaced (decision 6), with its usage
+   * so far billed and nothing credited for the rest of its period.
+   * overageSubscriptionId is Stripe's separate overage subscription, which
+   * ends with its month; null when overage bills on the plan itself or on
+   * Polar. endsAt is when it ends where the provider ends a subscription only
+   * at its period's end (Polar). Null once it has ended; otherwise the
+   * subscription as it stands, which ends at its cancelAt.
+   */
+  endForPack(input: { subscriptionId: string; overageSubscriptionId: string | null; endsAt: Date; requestId: string }): Promise<ProviderSubscription | null>;
 
   /** The worker's startup check (Stripe): null when the credentials are the deployment's own account, else the account expected and the one found. */
   checkAccount?(): Promise<{ expected: string; found: string } | null>;

@@ -12,6 +12,11 @@ export function invalid(message: string, param?: string): Stripe.errors.StripeIn
   return new Stripe.errors.StripeInvalidRequestError({ type: "invalid_request_error", message, ...(param ? { param } : {}) });
 }
 
+/** A restricted key without the permission the call needs, which a test throws from a call it spies on. */
+export function permissionDenied(): Stripe.errors.StripePermissionError {
+  return new Stripe.errors.StripePermissionError({ type: "invalid_request_error", message: "The provided key does not have the required permissions for this endpoint. Having the 'rak_subscription_write' permission would allow this request to continue." });
+}
+
 /** A card the issuer declines. */
 export function declined(): Stripe.errors.StripeCardError {
   return new Stripe.errors.StripeCardError({ type: "card_error", code: "card_declined", decline_code: "generic_decline", message: "Your card was declined." });

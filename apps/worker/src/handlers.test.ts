@@ -39,6 +39,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     sweepBillingWork: vi.fn(),
     releaseBillingCheckoutRequest: vi.fn(),
     loadPromoEndWork: vi.fn(),
+    loadPlanEndForPackWork: vi.fn(),
     recordPromoEnd: vi.fn(),
     expireBusinessPacks: vi.fn(),
     loadAppointmentChangeOtpTarget: vi.fn(),

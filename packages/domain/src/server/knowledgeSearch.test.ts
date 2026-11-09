@@ -324,6 +324,8 @@ describe("v1 knowledge search", () => {
     const withReceptionists: DomainContext = { ...context(), snapshotCache: { get: vi.fn(async () => shared as never), set: vi.fn(async () => undefined) } };
     const result = await searchKnowledgeForApi(withReceptionists, caller, { query: "parking", receptionist_id: valet }, { callAnswer: () => undefined });
     expect(result.receptionist_id).toBe(valet);
+    // An id in capitals names the same receptionist.
+    expect((await searchKnowledgeForApi(withReceptionists, caller, { query: "parking", receptionist_id: valet.toUpperCase() }, { callAnswer: () => undefined })).receptionist_id).toBe(valet);
     expect(result.receptionist_result.matches.map((match) => match.title)).toEqual(["Parking", "Hours"]);
     // The documents come from the valet's reader.
     expect(statements.some((value) => value.includes("WITH reader AS ("))).toBe(true);

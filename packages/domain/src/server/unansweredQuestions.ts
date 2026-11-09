@@ -193,7 +193,6 @@ export async function listOpenUnansweredQuestions(
   input: { userId: string; businessId: string; receptionistId?: string | null | undefined; limit?: number | undefined; offset?: number | undefined },
 ): Promise<UnansweredQuestionsPage> {
   const { userId, businessId } = input;
-  if (input.receptionistId && !isUuid(input.receptionistId)) throw failure("receptionist must be a receptionist id.", 400, "invalid_receptionist");
   return await withBusinessTransaction(context.db, { userId, businessId, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, { userId, businessId });
     return await listOpenUnansweredQuestionsInTransaction(tx, input);
@@ -202,10 +201,14 @@ export async function listOpenUnansweredQuestions(
 
 export type UnansweredQuestionsPage = { questions: OpenUnansweredQuestion[]; openCount: number; openByReceptionist: Record<string, number> };
 
-/** listOpenUnansweredQuestions in a transaction whose caller may read the business: the dashboard's members, or an API key. */
+/**
+ * listOpenUnansweredQuestions in a transaction whose caller may read the
+ * business: the dashboard's members, or an API key. counts: false leaves
+ * openByReceptionist empty, for a caller that shows no filter.
+ */
 export async function listOpenUnansweredQuestionsInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; receptionistId?: string | null | undefined; limit?: number | undefined; offset?: number | undefined },
+  input: { businessId: string; receptionistId?: string | null | undefined; limit?: number | undefined; offset?: number | undefined; counts?: boolean | undefined },
 ): Promise<UnansweredQuestionsPage> {
   const { businessId } = input;
   const limit = Number.isFinite(input.limit) ? Math.min(Math.max(Math.trunc(input.limit!), 1), OPEN_QUESTIONS_LIMIT) : OPEN_QUESTIONS_LIMIT;
@@ -234,7 +237,7 @@ export async function listOpenUnansweredQuestionsInTransaction(
   return {
     questions: rows.map((row) => ({ ...row, askedOf: askers.get(row.id) ?? [] })),
     openCount: count?.value ?? 0,
-    openByReceptionist: await countOpenByReceptionist(tx, businessId),
+    openByReceptionist: input.counts === false ? {} : await countOpenByReceptionist(tx, businessId),
   };
 }
 

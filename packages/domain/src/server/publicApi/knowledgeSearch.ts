@@ -42,10 +42,12 @@ export async function searchKnowledgeForApi(
   input: ApiKnowledgeSearch,
   options: { callAnswer: (query: string, result: KnowledgeToolResult) => string | undefined },
 ): Promise<ApiKnowledgeSearchResult> {
-  const [snapshot, { result, trace }] = await Promise.all([
-    getCachedReceptionistSnapshot(context, { businessId: caller.businessId, receptionistId: input.receptionist_id ?? null }),
-    traceKnowledgeSearch(context, { businessId: caller.businessId, query: input.query, source: "api", receptionistId: input.receptionist_id ?? null }),
-  ]);
+  const named = input.receptionist_id?.toLowerCase() ?? null;
+  // The snapshot decides who answers, as at the start of a call: a paused,
+  // archived or unknown receptionist, or one the cached snapshot doesn't know
+  // yet, is the default. The search then runs as that same receptionist.
+  const snapshot = await getCachedReceptionistSnapshot(context, { businessId: caller.businessId, receptionistId: named });
+  const { result, trace } = await traceKnowledgeSearch(context, { businessId: caller.businessId, query: input.query, source: "api", receptionistId: snapshot?.receptionist?.id ?? named });
   const receptionistResult = knowledgeToolResult(result, matchKnowledgeSnippets(snapshot?.knowledgeSnippets, input.query));
   const candidates = new Map(trace.candidates.map((candidate) => [candidate.passage.chunkId, candidate]));
   return {

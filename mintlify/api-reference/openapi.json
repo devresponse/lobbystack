@@ -1148,7 +1148,7 @@
       "post": {
         "operationId": "createReceptionist",
         "summary": "Add a receptionist",
-        "description": "Adds an active receptionist with the default receptionist's greeting, instructions and booking, or those of copy_from_id. It goes last in the order, or into name order while the receptionists go by name. A 409 when the plan's active receptionists are all in use, or the business already keeps the deployment's most.",
+        "description": "Adds an active receptionist with the default receptionist's greeting, instructions and booking, or those of copy_from_id. It goes last in the order, or into name order while the receptionists go by name. A 409 plan_limit_reached when the plan's active receptionists are all in use, which a plan with more fixes, and a 409 conflict when the business already keeps the deployment's most or the page address is taken.",
         "tags": [
           "Receptionist"
         ],
@@ -1665,7 +1665,7 @@
       "post": {
         "operationId": "resumeReceptionist",
         "summary": "Resume a receptionist",
-        "description": "It answers its numbers, widget keys and QR links again. A 409 when the plan's active receptionists are all in use.",
+        "description": "It answers its numbers, widget keys and QR links again. A 409 plan_limit_reached when the plan's active receptionists are all in use.",
         "tags": [
           "Receptionist"
         ],
@@ -15644,7 +15644,7 @@
       "post": {
         "operationId": "searchKnowledge",
         "summary": "Search knowledge as the receptionist does",
-        "description": "Runs the receptionist's knowledge search for a query, with the same code a call or website chat runs, and shows every stage. It searches as the business's default receptionist, with the articles, text entries and FAQs that receptionist may use. evidence is what the search returned from the database after ranking: the passages the receptionist's searchKnowledge tool gets. receptionist_result is what its model receives, with the business's text entries and FAQs added, and call_answer what a phone call's voice model hears. trace has the keyword and semantic searches' results with their scores, and every candidate with what became of it. Nothing in the business changes, so the same query can be compared before and after a change to the knowledge.",
+        "description": "Runs the receptionist's knowledge search for a query, with the same code a call or website chat runs, and shows every stage. It searches as the receptionist receptionist_id names, or the default one, with the articles, text entries and FAQs that receptionist may use; a paused, archived or unknown one searches as the default, as its calls would. evidence is what the search returned from the database after ranking: the passages the receptionist's searchKnowledge tool gets. receptionist_result is what its model receives, with the business's text entries and FAQs added, and call_answer what a phone call's voice model hears. trace has the keyword and semantic searches' results with their scores, and every candidate with what became of it. Nothing in the business changes, so the same query can be compared before and after a change to the knowledge.",
         "tags": [
           "Knowledge"
         ],

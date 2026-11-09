@@ -336,8 +336,9 @@ async function syncReceptionistSettings(run: Run, name: string, receptionistId: 
  * The receptionists besides the default one, found again by name. A new one
  * is added, and one the business has gets the fields that differ, then its own
  * settings. An archived one is left as it is: restoring it is the owner's call.
- * A refusal, such as the plan's receptionists all in use, waits for the paid
- * plan the manifest buys, or is noted, and the run goes on.
+ * The plan's receptionists all in use waits for the paid plan the manifest
+ * buys; any other refusal is reported, and the run goes on. An entry named
+ * like the default receptionist is refused: it isn't one of the others.
  */
 async function syncReceptionists(run: Run): Promise<void> {
   const wanted = run.manifest.receptionists;
@@ -349,6 +350,11 @@ async function syncReceptionists(run: Run): Promise<void> {
   for (const { settings, ...receptionist } of wanted) {
     const step = `receptionist:${nameKey(receptionist.name)}`;
     let existing = current.find((row) => sameName(row.name, receptionist.name));
+    if (existing?.is_default) {
+      delete run.state.keys[step];
+      fail(run, `${receptionist.name} is the default receptionist, which receptionists leaves out: its settings go in receptionist, and its name and description are changed on AI agents.`);
+      continue;
+    }
     if (existing?.archived_at) {
       delete run.state.keys[step];
       run.log({ step: "receptionists", action: "archived", detail: receptionist.name });
@@ -374,8 +380,8 @@ async function syncReceptionists(run: Run): Promise<void> {
       if (settings) await syncReceptionistSettings(run, receptionist.name, String(existing.id), settings);
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 409) throw error;
-      // A paid plan the manifest buys may include more receptionists, so the next run, after the checkout, tries again.
-      if (run.planPending) run.log({ step: "receptionists", action: "waiting", detail: `${receptionist.name}: ${error.message}` });
+      // A paid plan the manifest buys may include more receptionists, so the next run, after the checkout, tries again. Other refusals, such as a page address already taken, need a change to the manifest.
+      if (run.planPending && error.code === "plan_limit_reached") run.log({ step: "receptionists", action: "waiting", detail: `${receptionist.name}: ${error.message}` });
       else fail(run, `${receptionist.name}: ${error.message}`);
     }
   }

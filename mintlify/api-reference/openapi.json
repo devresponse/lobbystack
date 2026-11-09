@@ -41,6 +41,9 @@
       "name": "Public profile"
     },
     {
+      "name": "QR links"
+    },
+    {
       "name": "Calendars"
     },
     {
@@ -2259,6 +2262,548 @@
           },
           "404": {
             "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr-links": {
+      "get": {
+        "operationId": "listQrLinks",
+        "summary": "List QR links",
+        "description": "The business's QR links, newest first, all in one page, each with its scans.",
+        "tags": [
+          "QR links"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "receptionist_id",
+            "in": "query",
+            "description": "Only the links that name this receptionist.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "active or paused.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "paused"
+              ]
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/QrLink"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createQrLink",
+        "summary": "Make a QR link",
+        "description": "Makes a short link to a receptionist's page, for a printed sign. A 404 when the receptionist is unknown or archived; a paused one is fine, and its link opens the default receptionist until it resumes. A 409 once the business keeps 1,000 links.",
+        "tags": [
+          "QR links"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QrLinkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/QrLink"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qr-links/{qr_link_id}": {
+      "get": {
+        "operationId": "getQrLink",
+        "summary": "Get a QR link",
+        "description": "With its scans per day.",
+        "tags": [
+          "QR links"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "qr_link_id",
+            "in": "path",
+            "required": true,
+            "description": "The QR link id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "How many UTC days of scans, today included: 1 to 400. Scans are kept 13 months.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 400,
+              "default": 30
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/QrLinkDetail"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateQrLink",
+        "summary": "Update a QR link",
+        "description": "Changes its receptionist, label or status. Its code never changes, so printed signs keep working. Values it already has change nothing.",
+        "tags": [
+          "QR links"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "qr_link_id",
+            "in": "path",
+            "required": true,
+            "description": "The QR link id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QrLinkUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/QrLink"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -24529,6 +25074,243 @@
         "required": [
           "receptionist_ids"
         ],
+        "additionalProperties": false
+      },
+      "QrLink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "code": {
+            "type": "string",
+            "description": "The code its address ends with."
+          },
+          "url": {
+            "type": "string",
+            "description": "Its address, which the QR code carries: the dashboard's /q/<code>."
+          },
+          "label": {
+            "type": "string",
+            "description": "Where its sign hangs, such as Front door. Empty when none was given."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused"
+            ],
+            "description": "active opens its receptionist's page. paused opens the business page. Links are paused, never deleted, so a printed sign always reaches someone."
+          },
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist it names."
+          },
+          "opens_receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist it opens now: the one it names, or the default receptionist while the link or that receptionist is paused or archived."
+          },
+          "scans_last_30_days": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Scans in the last 30 UTC days, today included."
+          },
+          "scans_kept": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Scans in the 13 months kept."
+          },
+          "last_scanned_on": {
+            "description": "The last UTC day it was scanned, as YYYY-MM-DD.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "url",
+          "label",
+          "status",
+          "receptionist_id",
+          "opens_receptionist_id",
+          "scans_last_30_days",
+          "scans_kept",
+          "last_scanned_on",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "description": "A QR short link to one receptionist's page, for a printed sign. Scans are counted per link and UTC day, with nothing about the visitor."
+      },
+      "QrLinkDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "code": {
+            "type": "string",
+            "description": "The code its address ends with."
+          },
+          "url": {
+            "type": "string",
+            "description": "Its address, which the QR code carries: the dashboard's /q/<code>."
+          },
+          "label": {
+            "type": "string",
+            "description": "Where its sign hangs, such as Front door. Empty when none was given."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused"
+            ],
+            "description": "active opens its receptionist's page. paused opens the business page. Links are paused, never deleted, so a printed sign always reaches someone."
+          },
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist it names."
+          },
+          "opens_receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist it opens now: the one it names, or the default receptionist while the link or that receptionist is paused or archived."
+          },
+          "scans_last_30_days": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Scans in the last 30 UTC days, today included."
+          },
+          "scans_kept": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Scans in the 13 months kept."
+          },
+          "last_scanned_on": {
+            "description": "The last UTC day it was scanned, as YYYY-MM-DD.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "scans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "description": "A UTC day, YYYY-MM-DD."
+                },
+                "scans": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "day",
+                "scans"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Its scans per UTC day over the days asked, today included, oldest first. Days without scans are left out."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "url",
+          "label",
+          "status",
+          "receptionist_id",
+          "opens_receptionist_id",
+          "scans_last_30_days",
+          "scans_kept",
+          "last_scanned_on",
+          "created_at",
+          "updated_at",
+          "scans"
+        ],
+        "additionalProperties": false,
+        "description": "A QR link with its scans per day."
+      },
+      "QrLinkCreate": {
+        "type": "object",
+        "properties": {
+          "receptionist_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The receptionist it opens: any that isn't archived."
+          },
+          "label": {
+            "description": "Where its sign hangs, such as Front door. Whitespace runs become one space.",
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "receptionist_id"
+        ],
+        "additionalProperties": false
+      },
+      "QrLinkUpdate": {
+        "type": "object",
+        "properties": {
+          "receptionist_id": {
+            "description": "Any receptionist that isn't archived. The code stays, so printed signs keep working.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "description": "Where its sign hangs, such as Front door. Whitespace runs become one space.",
+            "type": "string",
+            "maxLength": 80
+          },
+          "status": {
+            "description": "paused opens the business page instead.",
+            "type": "string",
+            "enum": [
+              "active",
+              "paused"
+            ]
+          }
+        },
         "additionalProperties": false
       },
       "Rule": {

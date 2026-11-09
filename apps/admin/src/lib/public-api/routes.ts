@@ -24,6 +24,7 @@ import {
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
   changeReceptionistForApi,
+  createQrLinkForApi,
   createReceptionistForApi,
   createRuleForApi,
   createServiceForApi,
@@ -54,6 +55,7 @@ import {
   getOnboardingForApi,
   getPlatformMeForApi,
   getPublicProfileForApi,
+  getQrLinkForApi,
   getReceptionistForApi,
   getReceptionistProfileForApi,
   getTeamForApi,
@@ -83,6 +85,7 @@ import {
   listRulesForApi,
   listServicesForApi,
   listStaffForApi,
+  listQrLinksForApi,
   listReceptionistsForApi,
   listWidgetKeysForApi,
   listWebhookEndpoints,
@@ -109,6 +112,7 @@ import {
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
   updateNotificationPreferencesForApi,
+  updateQrLinkForApi,
   updateReceptionistForApi,
   updateReceptionistProfileForApi,
   updateRuleForApi,
@@ -156,6 +160,8 @@ import {
   apiKnowledgeSourceUpdateSchema,
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
+  apiQrLinkCreateSchema,
+  apiQrLinkUpdateSchema,
   apiReceptionistCreateSchema,
   apiReceptionistProfileUpdateSchema,
   apiReceptionistReorderSchema,
@@ -345,6 +351,13 @@ function booleanParam(request: Request, name: string): boolean | undefined {
   return value === "true";
 }
 
+function integerParam(request: Request, name: string, min: number, max: number): number | undefined {
+  const value = queryParam(request, name);
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value) || Number(value) < min || Number(value) > max) throw new PublicApiError(400, "invalid_request", `${name} must be a whole number from ${min} to ${max}.`);
+  return Number(value);
+}
+
 function enumParam<T extends string>(request: Request, name: string, values: readonly T[]): T | undefined {
   const value = queryParam(request, name);
   if (value === undefined) return undefined;
@@ -528,6 +541,13 @@ export const v1 = {
   updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => {
     const receptionistId = receptionistQuery(request);
     return { body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema), { receptionistId })) };
+  }),
+  listQrLinks: (request: Request) => handleApiRequest(request, "listQrLinks", async ({ context, caller }) => ({ body: { data: await listQrLinksForApi(context, caller, { receptionistId: receptionistQuery(request), status: enumParam(request, "status", ["active", "paused"] as const) }, { appOrigin: appOrigin(request) }), next_cursor: null, has_more: false } })),
+  createQrLink: (request: Request) => handleApiRequest(request, "createQrLink", async ({ context, caller }) => ({ body: data(await createQrLinkForApi(context, caller, await readApiBody(request, apiQrLinkCreateSchema), { appOrigin: appOrigin(request) })) })),
+  getQrLink: (request: Request, { params }: Params<"qr_link_id">) => handleApiRequest(request, "getQrLink", async ({ context, caller }) => ({ body: data(await getQrLinkForApi(context, caller, uuidParam((await params).qr_link_id, "qr_link_id"), { appOrigin: appOrigin(request), days: integerParam(request, "days", 1, 400) })) })),
+  updateQrLink: (request: Request, { params }: Params<"qr_link_id">) => handleApiRequest(request, "updateQrLink", async ({ context, caller }) => {
+    const qrLinkId = uuidParam((await params).qr_link_id, "qr_link_id");
+    return { body: data(await updateQrLinkForApi(context, caller, qrLinkId, await readApiBody(request, apiQrLinkUpdateSchema), { appOrigin: appOrigin(request) })) };
   }),
   listReceptionists: (request: Request) => handleApiRequest(request, "listReceptionists", async ({ context, caller }) => ({ body: { data: await listReceptionistsForApi(context, caller, { archived: booleanParam(request, "archived") }), next_cursor: null, has_more: false } })),
   createReceptionist: (request: Request) => handleApiRequest(request, "createReceptionist", async ({ context, caller }) => ({ body: data(await createReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistCreateSchema))) })),

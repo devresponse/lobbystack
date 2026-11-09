@@ -5,7 +5,7 @@ import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingP
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
-import { MAX_RECEPTIONISTS_PER_REQUEST, RECEPTIONIST_DESCRIPTION_MAX_LENGTH, RECEPTIONIST_HANDLE_MAX_LENGTH, RECEPTIONIST_HANDLE_PATTERN, RECEPTIONIST_NAME_MAX_LENGTH, receptionistKnowledgeScopes, receptionistStatuses } from "../receptionists";
+import { ENTRY_LINK_LABEL_MAX_LENGTH, entryLinkStatuses, MAX_RECEPTIONISTS_PER_REQUEST, RECEPTIONIST_DESCRIPTION_MAX_LENGTH, RECEPTIONIST_HANDLE_MAX_LENGTH, RECEPTIONIST_HANDLE_PATTERN, RECEPTIONIST_NAME_MAX_LENGTH, receptionistKnowledgeScopes, receptionistStatuses } from "../receptionists";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
@@ -207,6 +207,38 @@ export const apiReceptionistProfileUpdateSchema = z.strictObject({
 
 export const apiReceptionistReorderSchema = z.strictObject({
   receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).describe("Every receptionist that isn't archived, once, in the new order."),
+});
+
+export const apiQrLinkSchema = z.object({
+  id,
+  code: z.string().describe("The code its address ends with."),
+  url: z.string().describe("Its address, which the QR code carries: the dashboard's /q/<code>."),
+  label: z.string().describe("Where its sign hangs, such as Front door. Empty when none was given."),
+  status: z.enum(entryLinkStatuses).describe("active opens its receptionist's page. paused opens the business page. Links are paused, never deleted, so a printed sign always reaches someone."),
+  receptionist_id: id.describe("The receptionist it names."),
+  opens_receptionist_id: id.describe("The receptionist it opens now: the one it names, or the default receptionist while the link or that receptionist is paused or archived."),
+  scans_last_30_days: z.number().int().describe("Scans in the last 30 UTC days, today included."),
+  scans_kept: z.number().int().describe("Scans in the 13 months kept."),
+  last_scanned_on: z.string().nullable().describe("The last UTC day it was scanned, as YYYY-MM-DD."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A QR short link to one receptionist's page, for a printed sign. Scans are counted per link and UTC day, with nothing about the visitor.");
+
+export const apiQrLinkDetailSchema = apiQrLinkSchema.extend({
+  scans: z.array(z.object({ day: z.string().describe("A UTC day, YYYY-MM-DD."), scans: z.number().int() })).describe("Its scans per UTC day over the days asked, today included, oldest first. Days without scans are left out."),
+}).describe("A QR link with its scans per day.");
+
+const qrLinkLabel = z.string().max(ENTRY_LINK_LABEL_MAX_LENGTH).transform((value) => value.replace(/\s+/g, " ").trim()).describe("Where its sign hangs, such as Front door. Whitespace runs become one space.");
+
+export const apiQrLinkCreateSchema = z.strictObject({
+  receptionist_id: id.describe("The receptionist it opens: any that isn't archived."),
+  label: qrLinkLabel.optional(),
+});
+
+export const apiQrLinkUpdateSchema = z.strictObject({
+  receptionist_id: id.optional().describe("Any receptionist that isn't archived. The code stays, so printed signs keep working."),
+  label: qrLinkLabel.optional(),
+  status: z.enum(entryLinkStatuses).optional().describe("paused opens the business page instead."),
 });
 
 export const apiRuleSchema = z.object({
@@ -1433,6 +1465,10 @@ export type ApiUser = z.infer<typeof apiUserSchema>;
 export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
 export type ApiReceptionist = z.infer<typeof apiReceptionistSchema>;
 export type ApiReceptionistProfile = z.infer<typeof apiReceptionistProfileSchema>;
+export type ApiQrLink = z.infer<typeof apiQrLinkSchema>;
+export type ApiQrLinkDetail = z.infer<typeof apiQrLinkDetailSchema>;
+export type ApiQrLinkCreate = z.infer<typeof apiQrLinkCreateSchema>;
+export type ApiQrLinkUpdate = z.infer<typeof apiQrLinkUpdateSchema>;
 export type ApiReceptionistCreate = z.infer<typeof apiReceptionistCreateSchema>;
 export type ApiReceptionistProfileUpdate = z.infer<typeof apiReceptionistProfileUpdateSchema>;
 export type ApiReceptionistReorder = z.infer<typeof apiReceptionistReorderSchema>;

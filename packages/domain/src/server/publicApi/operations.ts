@@ -74,6 +74,10 @@ import {
   type ApiPhoneNumberSearch,
   type ApiPublicProfile,
   type ApiPublicProfileUpdate,
+  type ApiQrLink,
+  type ApiQrLinkCreate,
+  type ApiQrLinkDetail,
+  type ApiQrLinkUpdate,
   type ApiReceptionist,
   type ApiReceptionistCreate,
   type ApiReceptionistProfile,
@@ -131,6 +135,7 @@ import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "
 import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
+import { createEntryLinkInTransaction, getEntryLinkInTransaction, listEntryLinkScansInTransaction, listEntryLinksInTransaction, updateEntryLinkInTransaction, type EntryLink, type EntryLinkPatch } from "../entryLinks";
 import { setPhoneNumberReceptionistInTransaction, setWidgetKeyReceptionistInTransaction } from "../receptionistEntryPoints";
 import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "../receptionistInput";
 import { loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch, type ReceptionistView } from "../receptionistProfile";
@@ -1595,6 +1600,77 @@ export async function reorderReceptionistsForApi(context: DomainContext, caller:
     await reorderReceptionistsInTransaction(tx, { businessId: caller.businessId, receptionistIds });
     await audit(tx, caller, { eventType: "api.receptionists.reordered", entityType: "receptionist_profile", payload: { receptionistIds } });
     return await listReceptionistProfiles(tx, caller.businessId, false);
+  });
+}
+
+// QR links
+
+const QR_LINK_PAGE_SIZE = 50;
+
+function serializeQrLink(link: EntryLink, appOrigin: string): ApiQrLink {
+  return {
+    id: link.id,
+    code: link.code,
+    url: `${appOrigin}/q/${link.code}`,
+    label: link.label,
+    status: link.status,
+    receptionist_id: link.receptionistId,
+    opens_receptionist_id: link.opensReceptionistId,
+    scans_last_30_days: link.scansLast30Days,
+    scans_kept: link.scansKept,
+    last_scanned_on: link.lastScannedOn,
+    created_at: link.createdAt.toISOString(),
+    updated_at: link.updatedAt.toISOString(),
+  };
+}
+
+/** Every QR link, as the QR code page lists them, read a page at a time. */
+export async function listQrLinksForApi(context: DomainContext, caller: ApiCaller, filters: { receptionistId?: string | undefined; status?: "active" | "paused" | undefined }, options: { appOrigin: string }): Promise<ApiQrLink[]> {
+  return await inBusiness(context, caller, async (tx) => {
+    const links: EntryLink[] = [];
+    for (let page = 1; ; page += 1) {
+      const result = await listEntryLinksInTransaction(tx, { businessId: caller.businessId, receptionistId: filters.receptionistId?.toLowerCase(), status: filters.status, page, pageSize: QR_LINK_PAGE_SIZE });
+      links.push(...result.links);
+      if (!result.links.length || links.length >= result.total) break;
+    }
+    return links.map((link) => serializeQrLink(link, options.appOrigin));
+  });
+}
+
+/** A link with its scans per day: the last 30 days unless days says otherwise, up to the 13 months kept. */
+export async function getQrLinkForApi(context: DomainContext, caller: ApiCaller, qrLinkId: string, options: { appOrigin: string; days?: number | undefined }): Promise<ApiQrLinkDetail> {
+  return await inBusiness(context, caller, async (tx) => {
+    const link = await getEntryLinkInTransaction(tx, { businessId: caller.businessId, linkId: qrLinkId.toLowerCase() });
+    if (!link) throw notFound("QR link");
+    const scans = await listEntryLinkScansInTransaction(tx, { businessId: caller.businessId, linkId: link.id, ...(options.days !== undefined ? { days: options.days } : {}) });
+    return { ...serializeQrLink(link, options.appOrigin), scans: scans.map((scan) => ({ day: scan.day, scans: scan.scans })) };
+  });
+}
+
+/** Makes a link with the dashboard's rules: an archived receptionist or the business's 1,000th link is a 409. */
+export async function createQrLinkForApi(context: DomainContext, caller: ApiCaller, input: ApiQrLinkCreate, options: { appOrigin: string }): Promise<ApiQrLink> {
+  return await inBusiness(context, caller, async (tx) => {
+    const link = await asApiErrors(() => createEntryLinkInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, link: { receptionistId: input.receptionist_id.toLowerCase(), label: input.label ?? "" } }));
+    await audit(tx, caller, { eventType: "api.qr_link.created", entityType: "entry_link", entityId: link.id });
+    return serializeQrLink(link, options.appOrigin);
+  });
+}
+
+/** Changes the fields sent; values the link already has change nothing. */
+export async function updateQrLinkForApi(context: DomainContext, caller: ApiCaller, qrLinkId: string, input: ApiQrLinkUpdate, options: { appOrigin: string }): Promise<ApiQrLink> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const current = await getEntryLinkInTransaction(tx, { businessId: caller.businessId, linkId: qrLinkId.toLowerCase() });
+    if (!current) throw notFound("QR link");
+    const patch: EntryLinkPatch = {
+      ...(input.receptionist_id !== undefined && input.receptionist_id.toLowerCase() !== current.receptionistId ? { receptionistId: input.receptionist_id.toLowerCase() } : {}),
+      ...(input.label !== undefined && input.label !== current.label ? { label: input.label } : {}),
+      ...(input.status !== undefined && input.status !== current.status ? { status: input.status } : {}),
+    };
+    if (!Object.keys(patch).length) return serializeQrLink(current, options.appOrigin);
+    const link = await asApiErrors(() => updateEntryLinkInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, linkId: current.id, patch }));
+    await audit(tx, caller, { eventType: "api.qr_link.updated", entityType: "entry_link", entityId: link.id, payload: { fields: Object.keys(patch).sort() } });
+    return serializeQrLink(link, options.appOrigin);
   });
 }
 

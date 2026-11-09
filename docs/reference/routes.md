@@ -2555,6 +2555,35 @@ Reads and updates the business's public page at `/profile/<slug>`, including pub
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/publicProfiles.ts`, `packages/domain/src/server/publicApi/resources.ts`.
 
+### QR links
+
+| Method | Address | Operation | What it does | Scope | Notes | Entry file |
+|---|---|---|---|---|---|---|
+| GET | `https://demo.alloplace.com/api/v1/qr-links` | `listQrLinks` | List QR links | `business:read` | `?receptionist_id=` and `?status=` keep some; all in one page | `apps/admin/app/api/v1/qr-links/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/qr-links` | `createQrLink` | Make a QR link | `business:write` | `Idempotency-Key` optional; answers 201 | `apps/admin/app/api/v1/qr-links/route.ts` |
+| GET | `https://demo.alloplace.com/api/v1/qr-links/{qr_link_id}` | `getQrLink` | Get a QR link | `business:read` | `?days=` of scans, 1 to 400, 30 by default | `apps/admin/app/api/v1/qr-links/[qr_link_id]/route.ts` |
+| PATCH | `https://demo.alloplace.com/api/v1/qr-links/{qr_link_id}` | `updateQrLink` | Update a QR link | `business:write` | | `apps/admin/app/api/v1/qr-links/[qr_link_id]/route.ts` |
+
+#### Entry files
+
+**`apps/admin/app/api/v1/qr-links/route.ts`**
+
+Public API (v1) endpoint for the business's QR links (fork PR #129): the short `/q/<code>` addresses that **Settings > QR code** makes for printed signs, each opening one receptionist's page. The `lobbystack` CLI uses it in `qr-links list` and `qr-links create`.
+
+- `GET /api/v1/qr-links`: Needs `business:read`. `?receptionist_id=` must be a UUID and `?status=` `active` or `paused` (400 otherwise). `listQrLinksForApi` (`packages/domain/src/server/publicApi/operations.ts`) reads every link, newest first, 50 at a time with `listEntryLinksInTransaction` (`packages/domain/src/server/entryLinks.ts`), the QR code page's own, each with the receptionist it names, the one it opens now and its scans, and adds its `url` on the app origin (`APP_BASE_URL` or the request's). Answers 200 `{ data, next_cursor: null, has_more: false }`.
+- `POST /api/v1/qr-links`: Needs `business:write`; `Idempotency-Key` optional. `readApiBody` checks `apiQrLinkCreateSchema` (`receptionist_id`, and `label` up to 80 characters, its whitespace runs made one space). `createQrLinkForApi` calls `createEntryLinkInTransaction`, which takes the links lock, answers 404 `not_found` for a receptionist that's unknown or archived and 409 `conflict` at the business's 1,000th link, and picks a code no other link uses. An `api.qr_link.created` audit row follows the domain's `entry_link.created`. Answers 201 `{ data }`. PUT, PATCH and DELETE answer 405.
+
+Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/entryLinks.ts`.
+
+**`apps/admin/app/api/v1/qr-links/[qr_link_id]/route.ts`**
+
+Public API (v1) endpoint for one QR link. The `lobbystack` CLI uses it in `qr-links get` and `qr-links update`.
+
+- `GET /api/v1/qr-links/{qr_link_id}`: Needs `business:read`. `?days=` must be a whole number from 1 to 400 (400 otherwise). `getQrLinkForApi` answers 404 `not_found` for an unknown link or another business's, and adds its scans per UTC day from `entry_link_daily_scans` (`listEntryLinkScansInTransaction`) over the last 30 days, or the days asked. Answers 200 `{ data }`.
+- `PATCH /api/v1/qr-links/{qr_link_id}`: Needs `business:write`. `readApiBody` checks `apiQrLinkUpdateSchema` (`receptionist_id`, `label`, `status`); an empty body answers 400. Values the link already has change nothing and write no audit row. `updateEntryLinkInTransaction` changes the rest and answers 404 `not_found` for a receptionist that's unknown or archived; the code never changes, so printed signs keep working. An `api.qr_link.updated` audit row lists the fields. Answers 200 `{ data }`. POST, PUT and DELETE answer 405.
+
+Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/entryLinks.ts`.
+
 ### Calendars
 
 | Method | Address | Operation | What it does | Scope | Notes | Entry file |

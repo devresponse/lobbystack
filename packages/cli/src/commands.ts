@@ -415,6 +415,12 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "make-default": { operation: "makeDefaultReceptionist" },
     reorder: { operation: "reorderReceptionists", args: ["...receptionist_ids"], columns: columns("id", "name", "status", "is_default") },
   }),
+  group("qr-links", "QR short links to a receptionist's page, for printed signs.", {
+    list: { operation: "listQrLinks", columns: columns("id", "label", "status", "receptionist_id", "url", "scans_last_30_days") },
+    get: { operation: "getQrLink" },
+    create: { operation: "createQrLink", show: (data) => `Made ${String(data.url)}. Print its QR code from Settings > QR code.` },
+    update: { operation: "updateQrLink" },
+  }),
   group("services", "The services customers can book.", {
     list: { operation: "listServices", columns: columns("id", "name", "duration_minutes", "active", "staff_ids") },
     add: { operation: "createService", args: ["name"] },

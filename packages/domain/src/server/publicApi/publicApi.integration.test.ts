@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, entryLinkDailyScans, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiQrLinkDetailSchema, apiQrLinkSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
@@ -17,7 +17,7 @@ import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
 import { searchKnowledgeForApi } from "./knowledgeSearch";
-import { cancelAppointmentForApi, listCallsForApi, updatePhoneNumberForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, createQrLinkForApi, getQrLinkForApi, listQrLinksForApi, updateQrLinkForApi, listCallsForApi, updatePhoneNumberForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -746,6 +746,70 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       for (const name of ["Gastown", "Yaletown", "Kerrisdale"]) await createReceptionistForApi(context, caller, { name });
       await expectApiError(createReceptionistForApi(context, caller, { name: "Main Street" }), 409, "conflict");
       expect(await listReceptionistsForApi(context, caller)).toHaveLength(5);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
+    }
+  });
+
+  it("makes, lists, changes and pauses QR links, with their scans, as the QR code page does", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("qr-links");
+    const { caller } = fixture;
+    const options = { appOrigin: "https://app.lobbystack.example" };
+    try {
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic" });
+
+      // A link opens the receptionist it names, at the dashboard's /q/<code>.
+      const door = await createQrLinkForApi(context, caller, { receptionist_id: front!.id, label: "Front door" }, options);
+      expect(door).toMatchObject({ label: "Front door", status: "active", receptionist_id: front!.id, opens_receptionist_id: front!.id, scans_last_30_days: 0, scans_kept: 0, last_scanned_on: null, url: `https://app.lobbystack.example/q/${door.code}` });
+      expect(apiQrLinkSchema.safeParse(door).success).toBe(true);
+      const desk = await createQrLinkForApi(context, caller, { receptionist_id: kits.id }, options);
+      expect(desk).toMatchObject({ label: "", receptionist_id: kits.id, opens_receptionist_id: kits.id });
+      expect(await getReceptionistProfileForApi(context, caller, kits.id)).toMatchObject({ entry_links: 1 });
+      await expectApiError(createQrLinkForApi(context, caller, { receptionist_id: randomUUID() }, options), 404, "not_found");
+
+      // Newest first, and filtered by receptionist or status.
+      expect((await listQrLinksForApi(context, caller, {}, options)).map((link) => link.id)).toEqual([desk.id, door.id]);
+      expect((await listQrLinksForApi(context, caller, { receptionistId: front!.id }, options)).map((link) => link.id)).toEqual([door.id]);
+
+      // Scans are counted per UTC day; the detail lists the last 30 days unless asked for more.
+      const today = new Date().toISOString().slice(0, 10);
+      const fortyDaysAgo = new Date(Date.now() - 40 * 86_400_000).toISOString().slice(0, 10);
+      await admin!.db.insert(entryLinkDailyScans).values([{ businessId: fixture.businessId, entryLinkId: door.id, day: today, scans: 3 }, { businessId: fixture.businessId, entryLinkId: door.id, day: fortyDaysAgo, scans: 2 }]);
+      const detail = await getQrLinkForApi(context, caller, door.id, options);
+      expect(detail).toMatchObject({ scans_last_30_days: 3, scans_kept: 5, last_scanned_on: today, scans: [{ day: today, scans: 3 }] });
+      expect(apiQrLinkDetailSchema.safeParse(detail).success).toBe(true);
+      expect((await getQrLinkForApi(context, caller, door.id, { ...options, days: 60 })).scans).toEqual([{ day: fortyDaysAgo, scans: 2 }, { day: today, scans: 3 }]);
+
+      // Values it already has change nothing; a paused link, or one naming a paused receptionist, opens the default.
+      expect(await updateQrLinkForApi(context, caller, desk.id, { receptionist_id: kits.id, status: "active" }, options)).toEqual(desk);
+      const paused = await updateQrLinkForApi(context, caller, desk.id, { status: "paused", label: "Reception desk" }, options);
+      expect(paused).toMatchObject({ status: "paused", label: "Reception desk", code: desk.code, receptionist_id: kits.id, opens_receptionist_id: front!.id });
+      expect((await listQrLinksForApi(context, caller, { status: "paused" }, options)).map((link) => link.id)).toEqual([desk.id]);
+      const resumed = await updateQrLinkForApi(context, caller, desk.id, { status: "active" }, options);
+      expect(resumed.opens_receptionist_id).toBe(kits.id);
+      await changeReceptionistForApi(context, caller, kits.id, "pause");
+      expect((await getQrLinkForApi(context, caller, desk.id, options)).opens_receptionist_id).toBe(front!.id);
+      await changeReceptionistForApi(context, caller, kits.id, "resume");
+      const audits = await admin!.db.select({ eventType: auditLogs.eventType, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, fixture.businessId), eq(auditLogs.entityId, desk.id), eq(auditLogs.eventType, "api.qr_link.updated")));
+      expect(audits.map((row) => (row.payload as { fields: string[] }).fields)).toEqual(expect.arrayContaining([["label", "status"], ["status"]]));
+      expect(audits).toHaveLength(2);
+
+      // A link moves to another receptionist, keeping its code, but never to an archived one.
+      expect(await updateQrLinkForApi(context, caller, door.id, { receptionist_id: kits.id }, options)).toMatchObject({ code: door.code, receptionist_id: kits.id, opens_receptionist_id: kits.id });
+      const archived = await createReceptionistForApi(context, caller, { name: "Old store" });
+      await changeReceptionistForApi(context, caller, archived.id, "archive");
+      await expectApiError(updateQrLinkForApi(context, caller, door.id, { receptionist_id: archived.id }, options), 404, "not_found");
+      await expectApiError(createQrLinkForApi(context, caller, { receptionist_id: archived.id }, options), 404, "not_found");
+      await expectApiError(updateQrLinkForApi(context, caller, door.id, {}, options), 400, "invalid_request");
+
+      // Another business's key sees none of it.
+      await expectApiError(getQrLinkForApi(context, b.caller, door.id, options), 404, "not_found");
+      await expectApiError(updateQrLinkForApi(context, b.caller, door.id, { label: "Mine" }, options), 404, "not_found");
+      expect(await listQrLinksForApi(context, b.caller, {}, options)).toEqual([]);
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));

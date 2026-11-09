@@ -290,6 +290,70 @@ GRANT SELECT, UPDATE ON public.billing_packs TO lobbystack_app;
 GRANT SELECT, INSERT, UPDATE ON public.billing_packs TO lobbystack_worker;
 GRANT SELECT, INSERT, UPDATE ON public.billing_pack_draws TO lobbystack_app, lobbystack_worker;
 
+-- A number stops answering once the business's last pack ended. The daily
+-- expiry job sets the business's numbers to go back to Twilio 30 days after
+-- its last pack ended, with reclaim_reason pack_ended, and from then on, as
+-- with a canceled business's numbers (0130), calls and texts to them find no
+-- business and no receptionist, and the incoming call webhook turns a call
+-- away with a 404 instead of leaving it ringing. A new pack or a plan clears
+-- the reason, and the number answers again. These are the three resolvers of
+-- 0130 and 0137 with that one condition added, so every number without that
+-- reason resolves exactly as before; their grants stay as they were.
+CREATE OR REPLACE FUNCTION app.resolve_business_by_phone(phone_e164 text)
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+  SELECT number.business_id
+  FROM public.phone_numbers number
+  INNER JOIN public.businesses business ON business.id = number.business_id
+  WHERE number.e164 = phone_e164 AND number.status = 'active' AND business.status = 'active'
+    AND number.reclaim_reason IS DISTINCT FROM 'pack_ended'
+  LIMIT 1
+$$;
+
+REVOKE ALL ON FUNCTION app.resolve_business_by_phone(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.resolve_business_by_phone(text) TO lobbystack_app, lobbystack_worker;
+
+CREATE OR REPLACE FUNCTION app.is_closed_business_phone(phone_e164 text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.phone_numbers number
+    INNER JOIN public.businesses business ON business.id = number.business_id
+    WHERE number.e164 = phone_e164 AND number.status = 'active'
+      AND (business.status <> 'active' OR number.reclaim_reason = 'pack_ended')
+  )
+$$;
+
+REVOKE ALL ON FUNCTION app.is_closed_business_phone(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.is_closed_business_phone(text) TO lobbystack_app;
+
+CREATE OR REPLACE FUNCTION app.resolve_receptionist_by_phone(phone_e164 text)
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+  SELECT app.effective_receptionist(number.business_id, number.receptionist_id)
+  FROM public.phone_numbers number
+  INNER JOIN public.businesses business ON business.id = number.business_id
+  WHERE number.e164 = phone_e164 AND number.status = 'active' AND business.status = 'active'
+    AND number.reclaim_reason IS DISTINCT FROM 'pack_ended'
+  LIMIT 1
+$$;
+
+REVOKE ALL ON FUNCTION app.resolve_receptionist_by_phone(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.resolve_receptionist_by_phone(text) TO lobbystack_app, lobbystack_worker;
+
 -- 0112's function with one new first step: while the business has a live
 -- pack and no live subscription that the pack didn't replace, it returns the
 -- number limit copied onto the pack, and a subscription a pack replaced counts

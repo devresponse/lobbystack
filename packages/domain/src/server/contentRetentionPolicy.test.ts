@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { billingAccounts, type DatabaseTransaction } from "@lobbystack/db";
 
-import { contentExpiryForPlan, getContentRetentionPolicy, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
+import { contentExpiryForPlan, contentRetentionDays, getContentRetentionPolicy, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
-function planTx(account: { plan: string; subscriptionState: string } | null, deploymentMode = "cloud") {
+function planTx(account: { plan: string; subscriptionState: string } | null, deploymentMode = "cloud", packs: unknown[] = []) {
   const rows = (table: unknown) => (table === billingAccounts ? (account ? [account] : []) : [{ deploymentMode }]);
-  return { select: () => ({ from: (table: unknown) => ({ where: () => ({ limit: async () => rows(table) }) }) }) } as unknown as DatabaseTransaction;
+  // The live packs are the one query that orders its rows.
+  return { select: () => ({ from: (table: unknown) => ({ where: () => ({ limit: async () => rows(table), orderBy: async () => packs }) }) }) } as unknown as DatabaseTransaction;
 }
 
 describe("business billing plan resolution", () => {
@@ -17,6 +18,12 @@ describe("business billing plan resolution", () => {
   it("uses a paid plan only while its subscription is live", async () => {
     expect(await resolveBusinessBillingPlan(planTx({ plan: "pro", subscriptionState: "active" }), businessId)).toBe("pro");
     expect(await resolveBusinessBillingPlan(planTx({ plan: "pro", subscriptionState: "canceled" }), businessId)).toBe("free_cloud");
+  });
+
+  it("keeps the content of a business on a prepaid pack as a paying plan does", async () => {
+    const pack = { id: "pack", pack: "pack_250_90", secondsTotal: 15_000, secondsUsed: 0, amountCents: 5_500, refundedCents: 0, paidAt: new Date(), endsAt: null, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20_971_520, numbers: 1, receptionists: 1 };
+    expect(await resolveBusinessBillingPlan(planTx({ plan: "free_cloud", subscriptionState: "" }, "cloud", [pack]), businessId)).toBe("prepaid");
+    expect(contentRetentionDays("prepaid", "messages", null)).toBe(contentRetentionDays("starter", "messages", null));
   });
 
   it("falls back to the deployment mode", async () => {

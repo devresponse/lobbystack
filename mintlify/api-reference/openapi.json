@@ -4092,6 +4092,264 @@
         }
       }
     },
+    "/billing/packs/checkout": {
+      "post": {
+        "operationId": "createPackCheckout",
+        "summary": "Start a checkout for a prepaid pack",
+        "description": "Asks the billing provider for a page where the customer pays once for a prepaid pack of minutes. Poll GET /billing/packs/checkout/{checkout_id} until status is ready, then send them checkout_url. A free business, one on a pack already, and one on a monthly Starter or Pro plan can buy one; on a monthly plan, the pack replaces the plan once paid, and the plan ends. A business that pays for a yearly plan is a 409 until that plan ends, as is one with a payment past due until it is settled, and one whose upgrade still waits for its payment. A managed plan, a self-hosted deployment, the Enterprise plan and a pack this deployment doesn't sell are a 409 too. A business makes one purchase at a time, so a new checkout while a plan checkout, a subscription change or another pack checkout of the business is pending or processing is a 409. The same pack and billing_email asked for again while that person's checkout is still pending or processing returns that checkout, which counts nothing. Each new checkout is a call to the provider, and counts toward a checkout's limits: past them it is a 429. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409. Each business has its own customer at the provider, made on its first checkout with the payer's email or billing_email. On Polar, which keeps one customer per email, a checkout whose email already belongs to another business's customer fails, and another with a separate billing_email works.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackCheckoutCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PackCheckout"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/packs/checkout/{checkout_id}": {
+      "get": {
+        "operationId": "getPackCheckout",
+        "summary": "Check a checkout for a prepaid pack",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "checkout_id",
+            "in": "path",
+            "required": true,
+            "description": "The pack checkout id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PackCheckout"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/billing/cancellation": {
       "post": {
         "operationId": "cancelBillingPlan",
@@ -18986,7 +19244,8 @@
               "free_cloud",
               "starter",
               "pro",
-              "enterprise"
+              "enterprise",
+              "prepaid"
             ],
             "description": "The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."
           },
@@ -19381,6 +19640,98 @@
         "required": [
           "plan",
           "interval"
+        ],
+        "additionalProperties": false
+      },
+      "PackCheckout": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "pack": {
+            "type": "string",
+            "description": "The pack's code."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "ready",
+              "paid",
+              "failed",
+              "expired"
+            ],
+            "description": "pending or processing: the billing provider is making the page. ready: checkout_url is set until expires_at. paid: the payment arrived and the business has the pack. failed: the provider made no page, or the business moved to a managed plan; error says why, and another checkout can be started. expired: the checkout waited too long to run, or its page expired unpaid; another can be started."
+          },
+          "checkout_url": {
+            "description": "The billing provider's page where the customer pays once for the pack. Send it to them. Null unless status is ready.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "true once the payment arrived and the business has the pack."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the checkout stops being open: 15 minutes after it was asked for while the provider makes the page, then when the page expires."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "id",
+          "pack",
+          "status",
+          "checkout_url",
+          "error",
+          "paid",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "description": "A checkout for a prepaid pack, paid once through the billing provider."
+      },
+      "PackCheckoutCreate": {
+        "type": "object",
+        "properties": {
+          "pack": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "The pack's code in the deployment's billing catalog, such as pack_250_90."
+          },
+          "billing_email": {
+            "description": "The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here.",
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          }
+        },
+        "required": [
+          "pack"
         ],
         "additionalProperties": false
       },
@@ -22146,6 +22497,112 @@
                     "names",
                     "sold",
                     "prices"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "packs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "names": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "fr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "es": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "sr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        }
+                      },
+                      "required": [
+                        "en",
+                        "fr",
+                        "es",
+                        "sr"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minutes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    },
+                    "days": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1095
+                    },
+                    "priceCents": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000000
+                    },
+                    "included": {
+                      "type": "object",
+                      "properties": {
+                        "alertSmsSegments": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "outboundCallAttempts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "chatAiUnits": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000000
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "knowledgeStorageMb": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1024
+                        },
+                        "businessNumbers": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "receptionists": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "names",
+                    "minutes",
+                    "priceCents"
                   ],
                   "additionalProperties": false
                 }

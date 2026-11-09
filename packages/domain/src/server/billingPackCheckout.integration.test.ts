@@ -2,12 +2,16 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, billingPackPlans, billingPackPrices, billingPacks, businessMemberships, businesses, createDatabaseClient, outboxMessages, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, auditLogs, billingAccounts, billingCheckoutRequests, billingPackCheckouts, billingPackPlans, billingPackPrices, billingPacks, businessMemberships, businesses, createDatabaseClient, outboxMessages, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiPackCheckoutSchema } from "@lobbystack/shared";
 
 import { createBillingCheckoutRequestInTransaction, loadBillingCheckoutRequest, OPEN_PURCHASE_REFUSAL, setManagedPlanInTransaction } from "./billing";
 import { claimPackCheckout, createPackCheckoutRequest, createPackCheckoutRequestInTransaction, loadPackCheckoutRequest, markPackCheckoutFailed, markPackCheckoutPaidInTransaction, markPackCheckoutReady, PACK_CHECKOUT_PAGE_MS, readPackCheckoutInTransaction, releasePackCheckout } from "./billingPackCheckout";
 import { createBillingSubscriptionRequestInTransaction } from "./billingSubscription";
 import { workUnderWay } from "./businessDeletion";
+import { generateApiKey } from "./publicApi/apiKeys";
+import { PublicApiError } from "./publicApi/errors";
+import { createPackCheckoutForApi, getPackCheckoutForApi, type ApiKeyCaller, type PlatformKeyCaller } from "./publicApi/operations";
 
 // Prepaid pack checkouts against PostgreSQL: who may buy a pack, the one open
 // purchase a business makes at a time across packs and plans, and the steps
@@ -349,7 +353,9 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       expect(ready.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + PACK_CHECKOUT_PAGE_MS + 1_000);
 
       expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id })).toMatchObject({ status: "ready", checkoutUrl: "https://polar.test/checkout/1", error: null });
-      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id }, new Date(ready.expiresAt.getTime() + 1_000))).toMatchObject({ status: "ready", checkoutUrl: null });
+      // Left unpaid past its expiry, the page reads as expired, as nobody can pay on it.
+      expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: id }, new Date(ready.expiresAt.getTime() + 1_000))).toMatchObject({ status: "expired", checkoutUrl: null, error: "This payment page expired." });
+      expect((await row(tx, id)).status).toBe("ready");
       // Another business's, or no such checkout.
       expect(await readPackCheckoutInTransaction(tx, { businessId: await business(tx), checkoutId: id })).toBeNull();
       expect(await readPackCheckoutInTransaction(tx, { businessId, checkoutId: "not-a-checkout" })).toBeNull();
@@ -419,6 +425,54 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       // Paid, failed or expired ones are done.
       await tx.update(billingPackCheckouts).set({ status: "paid", expiresAt: new Date(Date.now() + 30 * MINUTE) }).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId)));
       expect(await workUnderWay(tx, businessId)).toBeNull();
+    });
+  });
+
+  it("starts the API's pack checkout as the dashboard's, made out to the key's creator, audited once, with its refusals as 409s", async () => {
+    await rollbackTest(async (tx) => {
+      const sold = await pack(tx);
+      const businessId = await business(tx);
+      const ownerId = await person(tx, businessId);
+      const generated = generateApiKey();
+      const [key] = await tx.insert(apiKeys).values({ businessId, name: "billing", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["billing:manage"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
+      const caller: ApiKeyCaller = { businessId, apiKeyId: key!.id };
+      const checkLimit = vi.fn(async () => undefined);
+      const audited = async () => await tx.select({ entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "api.billing.pack_checkout_started")));
+
+      // The API runs as the worker's login, with the worker's actor.
+      const checkout = await as(tx, "lobbystack_worker", (context) => createPackCheckoutForApi(context, caller, { pack: sold.code, billing_email: "billing@example.invalid" }, { available: true, checkLimit }));
+      expect(apiPackCheckoutSchema.safeParse(checkout).success).toBe(true);
+      expect(checkout).toMatchObject({ pack: sold.code, status: "pending", checkout_url: null, error: null, paid: false });
+      expect(await row(tx, checkout.id)).toMatchObject({ requestedByUserId: ownerId, billingEmail: "billing@example.invalid", priceId: sold.priceId });
+      expect(checkLimit).toHaveBeenCalledExactlyOnceWith({ businessId, userId: ownerId });
+      expect(await audited()).toEqual([{ entityId: checkout.id, payload: expect.objectContaining({ pack: sold.code, payerUserId: ownerId }) }]);
+      // Asked again, the same open checkout comes back, counted and audited once.
+      const again = await as(tx, "lobbystack_worker", (context) => createPackCheckoutForApi(context, caller, { pack: sold.code, billing_email: "billing@example.invalid" }, { available: true, checkLimit }));
+      expect(again.id).toBe(checkout.id);
+      expect(checkLimit).toHaveBeenCalledTimes(1);
+      expect(await audited()).toHaveLength(1);
+      expect(await as(tx, "lobbystack_worker", (context) => getPackCheckoutForApi(context, caller, checkout.id))).toEqual(checkout);
+
+      // Paid, it reads as paid; another business's key doesn't find it.
+      await tx.update(billingPackCheckouts).set({ status: "paid" }).where(eq(billingPackCheckouts.id, checkout.id));
+      expect(await as(tx, "lobbystack_worker", (context) => getPackCheckoutForApi(context, caller, checkout.id))).toMatchObject({ status: "paid", paid: true });
+      const stranger = await business(tx);
+      const strangerOwner = await person(tx, stranger);
+      const strangerKey = generateApiKey();
+      const [other] = await tx.insert(apiKeys).values({ businessId: stranger, name: "billing", prefix: strangerKey.prefix, keyHash: strangerKey.keyHash, scopes: ["billing:manage"], createdByUserId: strangerOwner }).returning({ id: apiKeys.id });
+      await expect(as(tx, "lobbystack_worker", (context) => getPackCheckoutForApi(context, { businessId: stranger, apiKeyId: other!.id }, checkout.id))).rejects.toMatchObject({ status: 404, code: "not_found" });
+
+      // The dashboard's refusals are the API's 409, with their sentence.
+      await tx.update(billingAccounts).set({ plan: "starter", subscriptionId: `sub_${businessId}`, subscriptionState: "active", billingInterval: "annual" }).where(eq(billingAccounts.businessId, businessId));
+      const yearly = await as(tx, "lobbystack_worker", (context) => createPackCheckoutForApi(context, caller, { pack: sold.code }, { available: true })).catch((error: unknown) => error);
+      expect(yearly).toBeInstanceOf(PublicApiError);
+      expect(yearly).toMatchObject({ status: 409, code: "conflict", message: "This business pays for a yearly plan. Set it to end at its renewal, and buy a pack once it ends." });
+      // A deployment that doesn't sell packs refuses before anything else.
+      await expect(as(tx, "lobbystack_worker", (context) => createPackCheckoutForApi(context, caller, { pack: sold.code }, { available: false }))).rejects.toMatchObject({ status: 409, code: "conflict", message: expect.stringMatching(/^This deployment doesn't sell packs through /) });
+
+      // A platform key makes it out to the business's own owner, and refuses while the business has none but the key's account.
+      const operator: PlatformKeyCaller = { businessId: stranger, platformKeyId: randomUUID(), partnerId: "lobbystack", actingUserId: strangerOwner, actor: "platform_key" };
+      await expect(as(tx, "lobbystack_worker", (context) => createPackCheckoutForApi(context, operator, { pack: sold.code }, { available: true }))).rejects.toMatchObject({ status: 409, message: "Only the business's own owner can pay for a pack, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan." });
     });
   });
 });

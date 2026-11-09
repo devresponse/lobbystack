@@ -44,6 +44,9 @@ export const PACK_NOT_ON_SALE = "This pack isn't on sale right now.";
 /** Why a checkout that waited too long for its job failed: nobody waits on its page any more. */
 const PACK_CHECKOUT_WAITED = "This request waited too long to run.";
 
+/** Why a page left unpaid past its expiry reads as expired: the provider no longer takes a payment on it. */
+export const PACK_CHECKOUT_PAGE_EXPIRED = "This payment page expired.";
+
 /**
  * How long a page the provider gives no expiry for stays open, as Polar's
  * checkouts do: an hour from when it was made.
@@ -315,6 +318,7 @@ export async function markPackCheckoutPaidInTransaction(tx: DatabaseTransaction,
 export type PackCheckoutView = {
   id: string;
   pack: string;
+  /** The row's status, except that a page left unpaid past its expiry reads as expired. */
   status: PackCheckoutStatus;
   /** Where the business pays: only while the page is ready and hasn't expired. */
   checkoutUrl: string | null;
@@ -331,13 +335,16 @@ export async function readPackCheckoutInTransaction(tx: DatabaseTransaction, inp
   const [row] = await tx.select({ id: billingPackCheckouts.id, pack: billingPackCheckouts.pack, status: billingPackCheckouts.status, checkoutUrl: billingPackCheckouts.checkoutUrl, error: billingPackCheckouts.error, expiresAt: billingPackCheckouts.expiresAt, createdAt: billingPackCheckouts.createdAt, updatedAt: billingPackCheckouts.updatedAt })
     .from(billingPackCheckouts).where(and(eq(billingPackCheckouts.id, input.checkoutId), eq(billingPackCheckouts.businessId, input.businessId))).limit(1);
   if (!row) return null;
-  const status = isPackCheckoutStatus(row.status) ? row.status : "pending";
+  const stored = isPackCheckoutStatus(row.status) ? row.status : "pending";
+  // The row stays ready once its page is made; past the page's expiry nobody can pay on it.
+  const lapsed = stored === "ready" && row.expiresAt.getTime() <= now.getTime();
+  const status = lapsed ? "expired" : stored;
   return {
     id: row.id,
     pack: row.pack,
     status,
-    checkoutUrl: status === "ready" && row.expiresAt.getTime() > now.getTime() ? row.checkoutUrl : null,
-    error: status === "failed" || status === "expired" ? row.error : null,
+    checkoutUrl: status === "ready" ? row.checkoutUrl : null,
+    error: lapsed ? PACK_CHECKOUT_PAGE_EXPIRED : status === "failed" || status === "expired" ? row.error : null,
     expiresAt: row.expiresAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

@@ -319,6 +319,25 @@ export const apiCheckoutSchema = z.object({
   updated_at: timestamp,
 }).describe("A checkout for a plan, through the billing provider.");
 
+const packCheckoutStatuses = ["pending", "processing", "ready", "paid", "failed", "expired"] as const;
+
+export const apiPackCheckoutCreateSchema = z.strictObject({
+  pack: z.string().trim().min(1).max(48).describe("The pack's code in the deployment's billing catalog, such as pack_250_90."),
+  billing_email: z.email().max(320).optional().describe("The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here."),
+});
+
+export const apiPackCheckoutSchema = z.object({
+  id,
+  pack: z.string().describe("The pack's code."),
+  status: z.enum(packCheckoutStatuses).describe("pending or processing: the billing provider is making the page. ready: checkout_url is set until expires_at. paid: the payment arrived and the business has the pack. failed: the provider made no page, or the business moved to a managed plan; error says why, and another checkout can be started. expired: the checkout waited too long to run, or its page expired unpaid; another can be started."),
+  checkout_url: z.string().nullable().describe("The billing provider's page where the customer pays once for the pack. Send it to them. Null unless status is ready."),
+  error: z.string().nullable(),
+  paid: z.boolean().describe("true once the payment arrived and the business has the pack."),
+  expires_at: timestamp.describe("When the checkout stops being open: 15 minutes after it was asked for while the provider makes the page, then when the page expires."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A checkout for a prepaid pack, paid once through the billing provider.");
+
 export const apiSubscriptionChangeSchema = z.object({
   id,
   action: z.enum(billingSubscriptionActions).describe("cancel: the plan ends at its renewal. resume: a plan set to end renews again. keep: a plan change waiting for the renewal, such as a downgrade, is dropped."),
@@ -1570,6 +1589,8 @@ export type ApiBillingCodeCreate = z.infer<typeof apiBillingCodeCreateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiSubscriptionChange = z.infer<typeof apiSubscriptionChangeSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
+export type ApiPackCheckout = z.infer<typeof apiPackCheckoutSchema>;
+export type ApiPackCheckoutCreate = z.infer<typeof apiPackCheckoutCreateSchema>;
 export type ApiWidgetConfig = z.infer<typeof apiWidgetConfigSchema>;
 export type ApiWidgetKey = z.infer<typeof apiWidgetKeySchema>;
 export type ApiWidgetKeyCreated = z.infer<typeof apiWidgetKeyCreatedSchema>;

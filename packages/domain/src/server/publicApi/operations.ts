@@ -501,10 +501,11 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
 
 /**
  * Asks Polar for a page where the customer pays. Like the dashboard, it sells
- * any plan to a free business and Pro to a Starter one, which the worker does
+ * any plan to a free business or one on a prepaid pack, whose packs the new
+ * subscription ends, and Pro to a Starter one, which the worker does
  * by changing the Starter subscription rather than with a page; other changes
  * to a paid plan happen in Polar's billing portal. A promo code's plan is sold
- * to a free, Starter or Pro business alike. Callers say whether this
+ * to a free, prepaid, Starter or Pro business alike. Callers say whether this
  * deployment sells a standard plan and interval, and limit promo code tries
  * in checkPromoCode, which runs once the key may pay for the business, before
  * the code is looked up, so a key that is refused spends none of its tries.

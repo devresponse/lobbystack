@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, createDatabaseClient, outboxMessages, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, calls, createDatabaseClient, outboxMessages, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { correctAlertSmsUsage, getBillingUsageStatus, reserveAlertSmsUsage } from "./billing";
 import { applyPackRefundInTransaction, closePackDisputeInTransaction, expirePackInTransaction, freezePackInTransaction, listBusinessPacks, PACK_NOTICE_RUN_DELAY_MS, replaceLivePacksInTransaction } from "./billingPacks";
@@ -257,6 +257,65 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
       await inBusiness(tx, businessId, (scoped) => correctUsageInTransaction(scoped, { businessId, sourceKey: packText, usageKind: "alert_sms_segments", quantity: 1 }));
       const [own] = await tx.select({ planAtRecordTime: billingUsageEvents.planAtRecordTime, syncStatus: billingUsageEvents.syncStatus }).from(billingUsageEvents).where(eq(billingUsageEvents.sourceKey, packText));
       expect(own).toEqual({ planAtRecordTime: "prepaid", syncStatus: "skipped" });
+    });
+  });
+
+  it("records a call that began on Starter without a spending cap before a pack replaced it under Starter, just before the switch, drawing nothing from the pack", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx, { plan: "starter" });
+      // Without a cap Starter reserves nothing, so the call has no usage row until it ends.
+      const started = await asWorker(tx, (context) => startLivePhoneCall(context, call(businessId, "+14165550134")));
+      expect(started.maxDurationMs).toBeUndefined();
+      await tx.update(calls).set({ startedAt: new Date(Date.now() - 10 * 60_000) }).where(eq(calls.id, started.callId));
+      // The pack's payment replaced the subscription five minutes ago, mid-call.
+      const bought = await pack(tx, businessId, { seconds: 3_000 });
+      const switchedAt = new Date(Date.now() - 5 * 60_000);
+      await tx.update(billingAccounts).set({ replacedSubscriptionId: `sub_${businessId}`, allowancesSince: switchedAt }).where(eq(billingAccounts.businessId, businessId));
+
+      await asWorker(tx, (context) => finishLiveCall(context, { businessId, callId: started.callId, seconds: 600, end: "caller_hung_up" }));
+      const usageRow = async (callId: string) => (await tx.select({ id: billingUsageEvents.id, planAtRecordTime: billingUsageEvents.planAtRecordTime, billingIntervalAtRecordTime: billingUsageEvents.billingIntervalAtRecordTime, syncStatus: billingUsageEvents.syncStatus, quantity: billingUsageEvents.quantity, createdAt: billingUsageEvents.createdAt }).from(billingUsageEvents).where(eq(billingUsageEvents.sourceKey, `voice:${callId}`)))[0]!;
+      const row = await usageRow(started.callId);
+      expect(row).toMatchObject({ planAtRecordTime: "starter", billingIntervalAtRecordTime: "month", syncStatus: "pending", quantity: 600, createdAt: new Date(switchedAt.getTime() - 1) });
+      expect(await draws(tx, started.callId)).toEqual({});
+      expect((await packRow(tx, bought.id)).secondsUsed).toBe(0);
+      // It goes to the provider, which bills the plan the pack replaced.
+      const syncs = await tx.select({ aggregateId: outboxMessages.aggregateId }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.syncUsage")));
+      expect(syncs).toEqual([{ aggregateId: row.id }]);
+      // Nor does it count against the pack's month.
+      expect((await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }))).voiceSecondsUsed).toBe(0);
+
+      // A business that never bought a pack records such a call when it ends, as before.
+      const without = await business(tx, { plan: "starter" });
+      const plain = await asWorker(tx, (context) => startLivePhoneCall(context, call(without, "+14165550135")));
+      await tx.update(calls).set({ startedAt: new Date(Date.now() - 10 * 60_000) }).where(eq(calls.id, plain.callId));
+      const finishedAt = new Date();
+      await asWorker(tx, (context) => finishLiveCall(context, { businessId: without, callId: plain.callId, seconds: 600, end: "caller_hung_up" }));
+      const plainRow = await usageRow(plain.callId);
+      expect(plainRow).toMatchObject({ planAtRecordTime: "starter", syncStatus: "pending", quantity: 600 });
+      expect(plainRow.createdAt.getTime()).toBeGreaterThanOrEqual(finishedAt.getTime());
+    });
+  });
+
+  it("records such a call that ended after the month turned in the month before the switch, counted with that month's Starter usage", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx, { plan: "starter" });
+      await pack(tx, businessId, { seconds: 3_000 });
+      // The pack replaced the subscription as the month turned; the call began ten minutes before.
+      const now = new Date();
+      const turn = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      const lastMonth = periodKeyFor(new Date(turn.getTime() - 1));
+      await tx.update(billingAccounts).set({ replacedSubscriptionId: `sub_${businessId}`, allowancesSince: turn }).where(eq(billingAccounts.businessId, businessId));
+      const [started] = await tx.insert(calls).values({ businessId, providerCallId: `live_${randomUUID()}`, transport: "voice", startedAt: new Date(turn.getTime() - 10 * 60_000) }).returning({ id: calls.id });
+      // That month's Starter minutes were used up already.
+      const { tiers } = await inBusiness(tx, businessId, (scoped) => loadBusinessPlanLimits(scoped, businessId));
+      await tx.insert(billingUsageEvents).values({ businessId, periodKey: lastMonth, sourceKey: `voice:seed:${businessId}`, usageKind: "voice_seconds", quantity: tiers.starter.voiceSecondsIncluded!, planAtRecordTime: "starter", isFinal: true, syncStatus: "synced", createdAt: new Date(turn.getTime() - DAY) });
+
+      // The call ends 20 minutes into the new month.
+      const sourceKey = `voice:${started!.id}`;
+      await inBusiness(tx, businessId, (scoped) => correctUsageInTransaction(scoped, { businessId, sourceKey, usageKind: "voice_seconds", quantity: 600, recordedAt: new Date(turn.getTime() + 20 * 60_000) }));
+      const [row] = await tx.select({ periodKey: billingUsageEvents.periodKey, planAtRecordTime: billingUsageEvents.planAtRecordTime, billableQuantity: billingUsageEvents.billableQuantity, createdAt: billingUsageEvents.createdAt }).from(billingUsageEvents).where(eq(billingUsageEvents.sourceKey, sourceKey));
+      // All 600 seconds are past that month's allowance, so all of them are billed.
+      expect(row).toEqual({ periodKey: lastMonth, planAtRecordTime: "starter", billableQuantity: 600, createdAt: new Date(turn.getTime() - 1) });
     });
   });
 

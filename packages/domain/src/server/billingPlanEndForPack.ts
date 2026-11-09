@@ -1,6 +1,6 @@
-import { and, asc, count, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
-import { billingAccounts, billingUsageEvents, withBusinessTransaction } from "@lobbystack/db";
+import { billingAccounts, billingUsageEvents, calls, withBusinessTransaction } from "@lobbystack/db";
 
 import type { DomainContext } from "./context";
 
@@ -29,7 +29,12 @@ export type PlanEndForPackWork = {
   switchedAt: Date | null;
   /** The business's final Starter and Pro usage rows still to send, oldest first; a newer subscription's rows go early, which changes nothing. */
   pendingUsage: string[];
-  /** Starter and Pro rows not final yet that began by switchedAt: calls still running and text estimates. */
+  /**
+   * What began by switchedAt and hasn't settled: Starter and Pro rows not final
+   * yet, such as calls that reserved minutes and text estimates, and calls
+   * still running, which on a plan without a spending cap have no row until
+   * they end. A running call with a row counts twice, which changes nothing.
+   */
   unsettled: number;
 };
 
@@ -71,9 +76,13 @@ export async function loadPlanEndForPackWork(context: DomainContext, input: { bu
       .innerJoin(billingAccounts, eq(billingAccounts.businessId, billingUsageEvents.businessId))
       .where(and(starterOrPro, eq(billingUsageEvents.syncStatus, "pending"), eq(billingUsageEvents.isFinal, true)))
       .orderBy(asc(billingUsageEvents.createdAt), asc(billingUsageEvents.id));
+    const by = switchedAt ?? input.now ?? new Date();
     const [open] = await tx.select({ unsettled: count() }).from(billingUsageEvents)
       .innerJoin(billingAccounts, eq(billingAccounts.businessId, billingUsageEvents.businessId))
-      .where(and(starterOrPro, eq(billingUsageEvents.isFinal, false), lte(billingUsageEvents.createdAt, switchedAt ?? input.now ?? new Date())));
+      .where(and(starterOrPro, eq(billingUsageEvents.isFinal, false), lte(billingUsageEvents.createdAt, by)));
+    // A call on Starter or Pro without a spending cap reserves nothing, so only the call itself says it is running.
+    const [running] = await tx.select({ calls: count() }).from(calls)
+      .where(and(eq(calls.businessId, input.businessId), isNull(calls.endedAt), lte(calls.startedAt, by)));
     return {
       current,
       overageSubscriptionId: current ? account.overageSubscriptionId : null,
@@ -82,7 +91,7 @@ export async function loadPlanEndForPackWork(context: DomainContext, input: { bu
       periodEnd: current ? account.periodEnd : null,
       switchedAt,
       pendingUsage: pending.map((row) => row.id),
-      unsettled: Number(open?.unsettled ?? 0),
+      unsettled: Number(open?.unsettled ?? 0) + Number(running?.calls ?? 0),
     };
   }, { accessMode: "read only" });
 }

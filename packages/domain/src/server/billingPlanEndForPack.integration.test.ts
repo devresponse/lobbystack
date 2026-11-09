@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingUsageEvents, businesses, createDatabaseClient, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingUsageEvents, businesses, calls, createDatabaseClient, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { loadPlanEndForPackWork } from "./billingPlanEndForPack";
 
@@ -69,6 +69,13 @@ async function usage(tx: DatabaseTransaction, businessId: string, input: { minut
   return row!.id;
 }
 
+/** A phone call that began `minutes` from the switch, still running unless it says otherwise. */
+async function call(tx: DatabaseTransaction, businessId: string, input: { minutes: number; ended?: boolean }) {
+  const startedAt = new Date(switchedAt.getTime() + input.minutes * 60_000);
+  const [row] = await tx.insert(calls).values({ businessId, providerCallId: `call_${randomUUID()}`, transport: "voice", startedAt, ...(input.ended ? { status: "completed", endedAt: new Date(startedAt.getTime() + 60_000) } : {}) }).returning({ id: calls.id });
+  return row!.id;
+}
+
 describe.skipIf(!testUrl)("the work of ending a subscription a prepaid pack replaced, against PostgreSQL", () => {
   it("reads a replaced subscription that is still the account's own with its overage subscription, interval, state, period's end and the switch's time", async () => {
     await rollbackTest(async (tx) => {
@@ -123,6 +130,25 @@ describe.skipIf(!testUrl)("the work of ending a subscription a prepaid pack repl
 
       const work = await asWorker(tx, (context) => loadPlanEndForPackWork(context, { businessId, subscriptionId: "sub_plan" }));
       expect(work).toMatchObject({ pendingUsage: [oldest, accountPlan, later, afterSwitch], unsettled: 2 });
+    });
+  });
+
+  it("counts a call that began by the switch and is still running, which a plan without a spending cap records only when it ends", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      // Starter without a cap reserved nothing for it, so it has no usage row to wait for.
+      const running = await call(tx, businessId, { minutes: -10 });
+      // Not unsettled: one that ended, one that began after the switch, and another business's.
+      await call(tx, businessId, { minutes: -20, ended: true });
+      await call(tx, businessId, { minutes: 5 });
+      await call(tx, await business(tx), { minutes: -10 });
+
+      const read = () => asWorker(tx, (context) => loadPlanEndForPackWork(context, { businessId, subscriptionId: "sub_plan" }));
+      await expect(read()).resolves.toMatchObject({ pendingUsage: [], unsettled: 1 });
+      // Once it ends, its usage is a row like any other, and nothing is left to wait for.
+      await tx.update(calls).set({ status: "completed", endedAt: new Date(switchedAt.getTime() + 5 * 60_000) }).where(eq(calls.id, running));
+      const usageId = await usage(tx, businessId, { minutes: -1 });
+      await expect(read()).resolves.toMatchObject({ pendingUsage: [usageId], unsettled: 0 });
     });
   });
 

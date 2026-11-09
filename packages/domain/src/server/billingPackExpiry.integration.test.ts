@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { auditLogs, billingAccounts, billingPackPlans, billingPacks, businessMemberships, businesses, createDatabaseClient, outboxMessages, phoneNumbers, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businessMemberships, businesses, createDatabaseClient, outboxMessages, phoneNumbers, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { setManagedPlanInTransaction } from "./billing";
 import { expireBusinessPacks } from "./billingPackExpiry";
@@ -95,6 +95,14 @@ async function pack(tx: DatabaseTransaction, businessId: string, input: PackInpu
     refundedCents: input.status === "refunded" ? 9_900 : 0, endedAt: ended ? input.endedAt ?? new Date(input.paidAt.getTime() + DAY) : null, unusedSeconds: ended ? 30_000 - (input.secondsUsed ?? 0) : null, notices: input.notices ?? [],
   }).returning({ id: billingPacks.id, endsAt: billingPacks.endsAt });
   return row!;
+}
+
+/** A call on the pack that began at `at` and holds `seconds` it drew up front: its usage row, not final until the call settles, and its draw, which the pack's seconds_used already counts. */
+async function reservation(tx: DatabaseTransaction, businessId: string, packId: string, input: { seconds: number; at: Date }) {
+  const sourceKey = `voice:${randomUUID()}`;
+  await tx.insert(billingUsageEvents).values({ businessId, periodKey: input.at.toISOString().slice(0, 7), sourceKey, usageKind: "voice_seconds", quantity: input.seconds, billableQuantity: input.seconds, planAtRecordTime: "prepaid", isFinal: false, syncStatus: "skipped", createdAt: input.at });
+  await tx.insert(billingPackDraws).values({ packId, businessId, sourceKey, seconds: input.seconds });
+  return sourceKey;
 }
 
 async function packRow(tx: DatabaseTransaction, id: string) {
@@ -316,6 +324,47 @@ describe.skipIf(!testUrl)("the daily end of prepaid packs against PostgreSQL", (
       // 5,000 seconds are about 83 minutes, on all the business's live packs.
       expect(low[0]?.payload).toMatchObject({ variables: { reminder: "low", minutesLeft: "83" } });
       expect((await packRow(tx, ending.id)).notices).toEqual(["ends_30", "ends_7", "low"]);
+    });
+  });
+
+  it("reads the balance reminders without what a call still running holds, so its last minutes reserved aren't none left until it settles", async () => {
+    await rollbackTest(async (tx) => {
+      const now = new Date();
+      const { businessId } = await business(tx);
+      const { userId } = await owner(tx, businessId);
+      // A call that began five minutes ago took the pack's last 300 seconds up front.
+      const last = await pack(tx, businessId, { paidAt: new Date(now.getTime() - 10 * DAY), secondsUsed: 30_000 });
+      const sourceKey = await reservation(tx, businessId, last.id, { seconds: 300, at: new Date(now.getTime() - 5 * 60_000) });
+
+      // Before the call, 300 of 30,000 seconds were left: low, not empty.
+      const low = { dedupeKey: `billing-pack:${last.id}:low:${userId}`, payload: { variables: { reminder: "low", minutesLeft: "5" } } };
+      expect(await expire(tx, businessId, now)).toMatchObject({ emails: 1 });
+      expect(await outbox(tx, businessId, "email.send")).toMatchObject([low]);
+      expect((await packRow(tx, last.id)).notices).toEqual(["low"]);
+      // Still running ten minutes on, it still holds them.
+      const later = new Date(now.getTime() + 10 * 60_000);
+      expect(await expire(tx, businessId, later)).toMatchObject({ emails: 0 });
+
+      // It settles having used all 300: none is left, and the owners hear it.
+      await tx.update(billingUsageEvents).set({ isFinal: true }).where(and(eq(billingUsageEvents.businessId, businessId), eq(billingUsageEvents.sourceKey, sourceKey)));
+      expect(await expire(tx, businessId, later)).toMatchObject({ emails: 1 });
+      expect(await outbox(tx, businessId, "email.send")).toMatchObject([{ dedupeKey: `billing-pack:${last.id}:empty:${userId}`, payload: { variables: { reminder: "empty", minutesLeft: "0" } } }, low]);
+      expect((await packRow(tx, last.id)).notices).toEqual(["low", "empty"]);
+    });
+  });
+
+  it("counts what a call's reservation drew as used once it is older than the longest call and a margin, so a stuck one can't hide an empty balance", async () => {
+    await rollbackTest(async (tx) => {
+      const now = new Date();
+      const { businessId } = await business(tx);
+      const { userId } = await owner(tx, businessId);
+      const last = await pack(tx, businessId, { paidAt: new Date(now.getTime() - 10 * DAY), secondsUsed: 30_000, notices: ["low"] });
+      // Never settled, 40 minutes after it began: no call runs that long.
+      await reservation(tx, businessId, last.id, { seconds: 300, at: new Date(now.getTime() - 40 * 60_000) });
+
+      expect(await expire(tx, businessId, now)).toMatchObject({ emails: 1 });
+      expect((await outbox(tx, businessId, "email.send")).map((row) => row.dedupeKey)).toEqual([`billing-pack:${last.id}:empty:${userId}`]);
+      expect((await packRow(tx, last.id)).notices).toEqual(["low", "empty"]);
     });
   });
 

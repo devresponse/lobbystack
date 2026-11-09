@@ -32,7 +32,8 @@ async function openPage({ role = "business_owner", businesses = [{ businessId: "
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
   client.setQueryData(["businesses"], { businesses });
-  if (cached) client.setQueryData(unansweredQuestionsQueryKey("business"), open);
+  // The page opens at its first page of 10.
+  if (cached) client.setQueryData(unansweredQuestionsQueryKey("business", null, { pageIndex: 0, pageSize: 10 }), open);
   const fetchMock = vi.fn(async (_url: string) => Response.json(open));
   vi.stubGlobal("fetch", fetchMock);
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><AgentLayout><AgentQuestionsPage /></AgentLayout></QueryClientProvider></I18nextProvider>);
@@ -70,7 +71,7 @@ describe("the Questions page at /agent/questions", () => {
     const { fetchMock } = await openPage({ cached: false, businesses: [{ businessId: "other", name: "Other", slug: "other", active: false, role: "business_owner" }, { businessId: "business", name: "Clinic", slug: "clinic", active: true, role: "business_owner" }] });
     expect(await screen.findByText("Do you validate parking?")).toBeTruthy();
     const urls = fetchMock.mock.calls.map(([url]) => url);
-    expect(urls.filter((url) => url.startsWith("/api/knowledge/questions"))).toEqual(["/api/knowledge/questions?businessId=business"]);
+    expect(urls.filter((url) => url.startsWith("/api/knowledge/questions"))).toEqual(["/api/knowledge/questions?businessId=business&limit=10&offset=0"]);
     // The receptionist filter lists the active business's receptionists too.
     expect(urls.filter((url) => !url.startsWith("/api/knowledge/questions"))).toEqual(["/api/receptionists/choices?businessId=business"]);
   });

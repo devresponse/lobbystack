@@ -389,7 +389,8 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
       const over = await pack(tx, businessId, { seconds: 600, days: 1, paidDaysAgo: 2 });
       const replaced = await inBusiness(tx, businessId, (scoped) => replaceLivePacksInTransaction(scoped, { businessId, at: new Date() }));
       expect(replaced.map((ended) => ended.id).sort()).toEqual([live.id, forever.id].sort());
-      expect(replaced.find((ended) => ended.id === live.id)).toEqual({ id: live.id, pack: "pack_test", unusedSeconds: 3_000 });
+      // With the payment it came with, which the start reports for a refund when the pack was paid after it.
+      expect(replaced.find((ended) => ended.id === live.id)).toEqual({ id: live.id, pack: "pack_test", unusedSeconds: 3_000, paidAt: expect.any(Date), provider: "stripe", providerRef: live.ref, amountCents: 10_000, currency: "cad" });
       expect(await packRow(tx, live.id)).toMatchObject({ status: "replaced", unusedSeconds: 3_000 });
       // Each ended pack leaves an audit row with the seconds it still held, as an expired one does.
       const audits = await tx.select({ entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "billing.pack_replaced")));

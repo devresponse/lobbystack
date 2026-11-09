@@ -58,9 +58,20 @@ A sandbox showed each of these on a paid test subscription ([Stripe billing](../
    pnpm billing apply --brand <brand> --stripe sandbox --railway-file .env.stripe
    ```
 
-   `apply` makes the products, prices, coupons, the three meters with their overage prices, the billing portal's configuration, the webhook endpoint and the meter error destination, then links them in the catalog. `--railway-file` saves `STRIPE_ACCOUNT_ID` for the admin and the worker, and the two signing secrets Stripe shows only once, `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET`, for the admin. Set them with `node devops/railway-vars.mjs .env.stripe`, then delete the file.
+   `apply` makes the products, prices, coupons, the three meters with their overage prices, the billing portal's configuration, the webhook endpoint and the meter error destination, then the packs' products and prices ([below](#know-what-apply-makes-for-packs)), then links them in the catalog. `--railway-file` saves `STRIPE_ACCOUNT_ID` for the admin and the worker, and the two signing secrets Stripe shows only once, `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET`, for the admin. Set them with `node devops/railway-vars.mjs .env.stripe`, then delete the file.
 7. **What Stripe's API can't set,** which `plan` and `verify` list, in the Dashboard: the tax registrations and origin address, the grace period of `usageGraceHours` before an invoice with usage is finalized, the retries after a failed payment and what follows the last one, and the branding, support email and statement descriptor that checkout, invoices and the portal show.
 8. **Check:** `pnpm billing verify --brand <brand> --stripe sandbox` should end `Result: in sync (exit 0)`. It reads with `STRIPE_READ_KEY`, else the setup key.
+
+## Know what apply makes for packs
+
+For each of the file's [prepaid packs](../../brands/README.md#prepaid-packs), `pnpm billing apply` makes a product of its own and one price on it, after every other object, so a file without packs gets exactly the calls it got before packs existed.
+
+| Object | What it is |
+| --- | --- |
+| Product | Named as the pack, with the file's tax code, tagged `lobbystack_brand` and `lobbystack_pack` |
+| Price | One-time, the pack's price before tax, under the lookup key `lsp_<brand>_<pack>_<currency>_<first 8 of the terms hash>`, tagged with the pack and its terms |
+
+The link records each pack's price, and the billing portal never offers a pack. Stripe never changes a price, so new terms for a pack, such as a new price or allowance, make a new price under a new lookup key: the run archives the old price only with `--allow-archive`, and links the new one only with `--allow-replace`, as for a plan. A price found under a pack's lookup key that bills on a cycle is replaced only with `--allow-replace`. Packs bought through an old price keep their minutes. Verify checks that each linked pack price is live, one-time, on its pack's product and at the row's price.
 
 ## Know the keys
 

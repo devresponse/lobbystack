@@ -128,5 +128,65 @@ export type BillingUsageViewModel = {
     overageSpendingCapCents: number | null;
     overageSpendingCapReached: boolean;
     usageComplete: boolean;
+    /** The live prepaid packs' seconds on the prepaid tier, which calls draw instead of a monthly allowance; absent or null otherwise. */
+    pack?: PackUsageViewModel | null;
   } | null;
+};
+
+/** What a business's live packs hold, as GET /api/billing's usage status reports it on the prepaid tier. */
+export type PackUsageViewModel = {
+  secondsTotal: number;
+  secondsUsed: number;
+  secondsLeft: number;
+  /** When the live pack that ends first ends; null when none ends. */
+  nextEndsAt: string | null;
+  /** When the last live pack ends; null when one never ends. */
+  lastEndsAt: string | null;
+};
+
+/** A prepaid pack on sale, as GET /api/billing answers it. */
+export type BillingPackOfferViewModel = {
+  code: string;
+  /** Display names by language: en, fr, es and sr. */
+  names: Record<string, string>;
+  /** The voice minutes the pack holds for its whole length. */
+  minutes: number;
+  voiceSeconds: number;
+  /** How long it lasts from the payment, in days; null when it never ends. */
+  days: number | null;
+  amountCents: number;
+  currency: string;
+  /** What it gives each UTC month while it lasts. */
+  smsSegments: number;
+  outboundCalls: number;
+  chatUnits: number;
+  /** Its limits while it lasts. */
+  knowledgeStorageBytes: number;
+  numbers: number;
+  receptionists: number;
+  /** The provider sells it here and the viewer may buy it now. */
+  checkoutAvailable: boolean;
+};
+
+/** A pack the business holds with time left: live, or frozen while a dispute holds its payment. */
+export type BillingPackViewModel = {
+  id: string;
+  code: string;
+  names: Record<string, string>;
+  status: "active" | "frozen";
+  /** The seconds it holds after refunds. */
+  secondsTotal: number;
+  secondsLeft: number;
+  paidAt: string;
+  /** null when it never ends. */
+  endsAt: string | null;
+};
+
+/** Why a business may not buy a pack now, as GET /api/billing answers it. */
+export type PackCheckoutRefusal = "managed_plan" | "pack_not_sold_on_plan" | "pack_yearly_plan" | "pack_past_due" | "plan_change_payment_waiting";
+
+/** Whether the business may buy a pack now, and the Starter or Pro subscription a pack's payment would end. */
+export type PackCheckoutViewModel = {
+  refusal: PackCheckoutRefusal | null;
+  endsSubscription: { plan: "starter" | "pro"; promo: boolean; periodEnd: string | null } | null;
 };

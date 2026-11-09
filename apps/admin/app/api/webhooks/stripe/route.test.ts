@@ -2,9 +2,9 @@ import { createHmac } from "node:crypto";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 
-const mocks = vi.hoisted(() => ({ lookup: vi.fn(), store: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn(), customer: vi.fn(), packPayment: vi.fn() }));
-// storeBillingWebhookEvent's own tests run it against PostgreSQL.
-vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog, storeBillingWebhookEvent: mocks.store }));
+const mocks = vi.hoisted(() => ({ lookup: vi.fn(), store: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn(), customer: vi.fn(), packPayment: vi.fn(), packPriceLinked: vi.fn() }));
+// storeBillingWebhookEvent's and hasLinkedPackPrice's own tests run them against PostgreSQL.
+vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog, storeBillingWebhookEvent: mocks.store, hasLinkedPackPrice: mocks.packPriceLinked }));
 vi.mock("@/lib/api-helpers", () => ({ getDispatcherDatabase: () => ({ db: {} }), getWorkerDatabase: () => ({ db: {} }) }));
 vi.mock("@lobbystack/db", async importOriginal => ({
   ...await importOriginal<typeof import("@lobbystack/db")>(),
@@ -62,6 +62,8 @@ beforeEach(() => {
   mocks.catalog.mockResolvedValue({ plans: [], prices: [] });
   mocks.customer.mockResolvedValue(businessId);
   mocks.packPayment.mockResolvedValue(businessId);
+  // A deployment that sells packs: a link recorded their prices.
+  mocks.packPriceLinked.mockResolvedValue(true);
   // The first delivery is new, and Stripe's next one a duplicate.
   mocks.store.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
   logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -96,6 +98,23 @@ it("reads a disputed payment back for its business only when it paid for a pack,
   mocks.packPayment.mockResolvedValue(null);
   expect(await (await POST(signed(disputeEvent("charge.dispute.closed")))).json()).toEqual({ accepted: true, ignored: true });
   expect(errors()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "stripe", eventType: "charge.dispute.closed", reason: "no_reference", businessReference: "ch_1" }]);
+});
+
+it("asks Stripe nothing about a dispute on a deployment that never linked a pack's price, and drops it as before packs", async () => {
+  mocks.packPriceLinked.mockResolvedValue(false);
+  const answer = await POST(signed(disputeEvent("charge.dispute.created")));
+  expect(answer.status).toBe(200);
+  expect(await answer.json()).toEqual({ accepted: true, ignored: true });
+  expect(mocks.packPriceLinked).toHaveBeenCalledTimes(1);
+  // Read as the worker, as the catalog is, since the dispatcher can't read the pack catalog.
+  expect(mocks.scope.mock.calls).toEqual([[{ actorType: "worker" }], [{ actorType: "worker" }]]);
+  expect(mocks.packPayment).not.toHaveBeenCalled();
+  expect(mocks.store).not.toHaveBeenCalled();
+  expect(errors()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "stripe", eventType: "charge.dispute.created", reason: "no_reference", businessReference: "ch_1" }]);
+  // Only a dispute without a business needs to know: a subscription's event and a charge's refund don't ask.
+  await POST(signed(subscriptionEvent()));
+  await POST(signed(refundEvent));
+  expect(mocks.packPriceLinked).toHaveBeenCalledTimes(1);
 });
 
 it("refuses a bad, old or missing signature, another secret, the other mode and no secret, and takes either secret during a rotation", async () => {

@@ -9,7 +9,7 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfi
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { getBillingUsageStatus, getWebVoiceBillingAllowance } from "./billing";
 import { applyBillingCatalogForApi, billingDeploymentPolar, billingDeploymentStripe, desiredBillingPacks, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, loadStripeSelling, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
-import { billingPlanList, brandBillingCatalog, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
+import { billingPlanList, brandBillingCatalog, hasLinkedPackPrice, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
 import { desiredStripeCatalog, planStripeChanges, stripeLinkBody } from "./billingStripe";
@@ -895,6 +895,27 @@ describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
       // A deployment pointed at another account later keeps the first one's.
       const moved = await refusal(send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_other" }, stripeDeployment({ STRIPE_ACCOUNT_ID: "acct_other" })));
       expect(moved.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_changed provider_account"]);
+    });
+  });
+
+  it("tells the webhook no pack was sold until a link records a pack's price, a retired one too, read as the worker since the dispatcher can't", async () => {
+    await rollbackTest(async (tx) => {
+      // As Stripe's webhook route reads it: the worker's role, as the worker actor.
+      const linked = async () => await withBusinessTransaction(tx as unknown as Database, { actorType: "worker" }, (scoped) => hasLinkedPackPrice(scoped));
+      expect(await linked()).toBe(false);
+      const withStripe = file((value) => { value.stripe = stripeBlock; });
+      await apply(tx, withStripe, { deployment: stripeDeployment() });
+      // The apply writes each pack's price; only a link records the Stripe price that sells it.
+      expect(await count(tx, "billing_pack_prices")).toBe(9);
+      expect(await linked()).toBe(false);
+      const { plans, packs, objects } = seededStripe(withStripe);
+      await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: hashOf(withStripe), provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", plans, packs, objects }), deployment: stripeDeployment() });
+      expect(await linked()).toBe(true);
+      // A retired price keeps its link, and a pack bought through it may still be disputed.
+      await byHand(tx, sql`update public.billing_pack_prices set retired_at = now()`);
+      expect(await linked()).toBe(true);
+      await as(tx, "lobbystack_dispatcher");
+      expect(await failure(tx, sql`select exists (select 1 from public.billing_pack_prices where provider_ref is not null)`)).toMatchObject({ code: "42501" });
     });
   });
 

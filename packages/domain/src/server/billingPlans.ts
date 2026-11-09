@@ -128,6 +128,18 @@ export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promi
   };
 }
 
+/**
+ * Whether a link ever recorded the provider's object for a prepaid pack's
+ * price, a retired price's too. A pack sells only through a linked price, so
+ * a deployment without one has sold no pack, and Stripe's webhook asks Stripe
+ * nothing about a dispute there. The app, the worker and the read-only role
+ * may read it; the dispatcher may not.
+ */
+export async function hasLinkedPackPrice(tx: DatabaseTransaction): Promise<boolean> {
+  const rows = (await tx.execute<Row>(sql`select exists (select 1 from public.billing_pack_prices where provider_ref is not null) as linked`)).rows;
+  return rows[0]?.linked === true;
+}
+
 /** Which Polar product sells a plan and interval, and which plan and interval a product sells. */
 export type PolarProductLinks = {
   productFor(plan: HostedCheckoutPlanSlug, interval: BillingInterval): string | null;

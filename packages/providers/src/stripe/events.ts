@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type Stripe from "stripe";
 
 import { stripeEventSchema, stripeThinEventSchema, type StripeThinEvent } from "@lobbystack/contracts";
-import { isUuid, STRIPE_WEBHOOK_EVENTS } from "@lobbystack/shared";
+import { isUuid, STRIPE_PACK_WEBHOOK_EVENTS, STRIPE_WEBHOOK_EVENTS } from "@lobbystack/shared";
 
 import { BillingWebhookRefusal } from "../billing/errors";
 import type { BillingEnv, BillingWebhook, NormalizedBillingEvent, PriceLinks, VerifiedDelivery } from "../billing/types";
@@ -62,6 +62,9 @@ function orderStatusOf(status: string | undefined): string {
 /** The business a hint names, when it's a business ID. */
 const businessOf = (...hints: unknown[]): string | undefined => hints.map(text).find(isUuid);
 
+/** The events the route takes: the endpoint's, and the ones it adds for a file with prepaid packs. */
+const takenEvents: readonly string[] = [...STRIPE_WEBHOOK_EVENTS, ...STRIPE_PACK_WEBHOOK_EVENTS];
+
 export class StripeWebhook implements BillingWebhook {
   readonly provider = "stripe" as const;
 
@@ -88,7 +91,7 @@ export class StripeWebhook implements BillingWebhook {
 
   /** The events LobbyStack uses in reconcile's terms; null for any other, which is answered 202 and not stored. */
   normalize(delivery: VerifiedDelivery, links: Pick<PriceLinks, "planFor">): NormalizedBillingEvent | null {
-    if (!(STRIPE_WEBHOOK_EVENTS as readonly string[]).includes(delivery.type)) return null;
+    if (!takenEvents.includes(delivery.type)) return null;
     const object = delivery.object;
     if (delivery.type.startsWith("customer.subscription.")) return subscriptionEvent(delivery, links);
     if (delivery.type.startsWith("invoice.")) return invoiceEvent(object);

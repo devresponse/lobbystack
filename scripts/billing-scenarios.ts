@@ -36,7 +36,7 @@ import { createStripeCatalogClient, type StripeSnapshot } from "../packages/prov
 import { createStripeClient } from "../packages/providers/src/stripe/client";
 import { StripeWebhook } from "../packages/providers/src/stripe/events";
 import { BRANDS } from "../packages/shared/src/brands/generated";
-import { billingProfileForProvider, billingProfileSchema, priceUsage, STRIPE_WEBHOOK_EVENTS, type BillingProfile, type PricedUsageKind } from "../packages/shared/src/index";
+import { billingProfileForProvider, billingProfileSchema, priceUsage, STRIPE_PACK_WEBHOOK_EVENTS, STRIPE_WEBHOOK_EVENTS, type BillingProfile, type PricedUsageKind } from "../packages/shared/src/index";
 import {
   checkoutRequest,
   expectedOverageCents,
@@ -430,11 +430,13 @@ async function checkEvents(ctx: Context, businesses: readonly Business[], since:
   expectThat(businesses.length > 0, "no scenario made a business, so there are no events to check: run events with the others");
   const byCustomer = new Map(businesses.map((business) => [business.customerId, business]));
   const webhook = new StripeWebhook({ secrets: ["unused"], env: "sandbox" });
+  // The endpoint's events, and the ones it adds for a file with prepaid packs, as the route takes them.
+  const taken: readonly string[] = [...STRIPE_WEBHOOK_EVENTS, ...STRIPE_PACK_WEBHOOK_EVENTS];
   const events = await ctx.stripe.events.list({ created: { gte: seconds(since) - 60 }, limit: 100 }).autoPagingToArray({ limit: 10_000 });
   const ours = events.filter((event) => {
     const customer = (event.data.object as { customer?: unknown }).customer;
     const id = typeof customer === "string" ? customer : (customer as { id?: string } | null | undefined)?.id;
-    return (STRIPE_WEBHOOK_EVENTS as readonly string[]).includes(event.type) && id !== undefined && byCustomer.has(id);
+    return taken.includes(event.type) && id !== undefined && byCustomer.has(id);
   });
   const seen = new Set<string>();
   for (const event of ours) {

@@ -1052,7 +1052,8 @@ async function stripeKeysStep(run) {
   await step(run, "stripe.keys", "Stripe's two restricted keys, both of one account and of the deployment's mode (Stripe makes them only in its Dashboard)", async () => {
     if (!given("STRIPE_ADMIN_KEY") || !given("STRIPE_WORKER_KEY")) await byHand([
       `In the deployment's Stripe ${s.STRIPE === "live" ? "account, in live mode" : "sandbox"}, Developers > API keys > Create restricted key, make two keys (guide 3.7, "Selling plans (Stripe)", step 3):`,
-      `"${baseName(s)} admin", which opens the billing portal and reads customers, and "${baseName(s)} worker", which makes customers,`,
+      `"${baseName(s)} admin", which opens the billing portal and reads customers and PaymentIntents (to find the business of a disputed`,
+      `prepaid pack payment), and "${baseName(s)} worker", which makes customers,`,
       "Checkout Sessions, subscriptions, subscription schedules, invoices and meter events, and reads the catalog for its daily check.",
       "docs/providers/stripe.md lists each key's permissions.",
     ]);

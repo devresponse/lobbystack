@@ -236,14 +236,12 @@ export function stripeKeyMode(key: string): BillingProviderEnv | null {
 
 /**
  * The events LobbyStack's Stripe webhook endpoint subscribes to: pnpm billing
- * makes the endpoint with them, and the webhook route takes no others.
+ * makes the endpoint with them, and the webhook route takes no others but the
+ * prepaid packs' below.
  */
 export const STRIPE_WEBHOOK_EVENTS = [
   "checkout.session.completed",
   "checkout.session.expired",
-  // A prepaid pack paid by a method that settles later, such as a bank debit.
-  "checkout.session.async_payment_succeeded",
-  "checkout.session.async_payment_failed",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -259,6 +257,17 @@ export const STRIPE_WEBHOOK_EVENTS = [
   "invoice.marked_uncollectible",
   "charge.refunded",
   "charge.dispute.created",
+] as const;
+
+/**
+ * The events only prepaid packs need. pnpm billing adds them to the endpoint
+ * for a billing.json with packs, so a file without packs keeps the endpoint it
+ * had before packs, and the webhook route takes them as well.
+ */
+export const STRIPE_PACK_WEBHOOK_EVENTS = [
+  // A prepaid pack paid by a method that settles later, such as a bank debit.
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
   // A prepaid pack a dispute froze comes back when the dispute is won.
   "charge.dispute.closed",
 ] as const;

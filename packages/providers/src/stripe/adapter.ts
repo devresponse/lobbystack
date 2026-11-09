@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 
 import { isUuid } from "@lobbystack/shared";
+import { reportWarning } from "@lobbystack/telemetry/node";
 
 import { BillingProviderError } from "../billing/errors";
 import type { BillingEnv, BillingProvider, BillingRefusal, CustomerRef, OverageKind, PlanChangeProration, PlanChangeResult, PriceRef, ProviderSubscription } from "../billing/types";
@@ -211,7 +212,10 @@ export class StripeBilling implements BillingProvider {
   /**
    * The business a pack's payment intent names, as createPackCheckout writes
    * it on payment_intent_data; null for a payment intent that isn't a pack's,
-   * or one Stripe no longer has.
+   * or one Stripe no longer has. A key that can't read payment intents gets
+   * null too, with a warning, so the dispute stays unattributed as a plan's
+   * does. Any other error, such as a rate limit or a lost connection, is
+   * thrown, so the webhook fails and Stripe sends the event again.
    */
   async businessOfPackPayment(paymentRef: string): Promise<string | null> {
     if (!paymentRef.startsWith("pi_")) return null;
@@ -222,7 +226,9 @@ export class StripeBilling implements BillingProvider {
       return business && isUuid(business) ? business : null;
     } catch (error) {
       if (isStripeMissing(error)) return null;
-      throw error;
+      if (stripeRefusalFor(error) !== "token_scope") throw error;
+      await reportWarning(new Error("The admin's Stripe key can't read PaymentIntents, so a dispute can't be matched to the prepaid pack it may be about, and no pack is frozen. Give the admin's STRIPE_API_KEY read access to PaymentIntents."), { operation: "billing.webhook", paymentIntent: paymentRef });
+      return null;
     }
   }
 

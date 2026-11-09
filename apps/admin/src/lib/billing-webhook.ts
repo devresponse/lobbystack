@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
 import { businesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
-import { polarProductLinks, readBillingCatalogSnapshot, storeBillingWebhookEvent } from "@lobbystack/domain";
+import { hasLinkedPackPrice, polarProductLinks, readBillingCatalogSnapshot, storeBillingWebhookEvent } from "@lobbystack/domain";
 import { BillingWebhookRefusal, type BillingWebhookRefusalReason } from "@lobbystack/providers/billing/errors";
 import { createBillingProvider, readBillingProviderId } from "@lobbystack/providers/billing/factory";
 import type { BillingProviderId, BillingWebhook } from "@lobbystack/providers/billing/types";
@@ -53,6 +53,14 @@ function recordUnresolvedWebhook(input: { provider: BillingProviderId; eventType
   }));
 }
 
+/**
+ * Whether the deployment ever linked a prepaid pack's price, read as the
+ * catalog is, by the worker: the dispatcher can't read the pack catalog.
+ */
+async function packPriceLinked(): Promise<boolean> {
+  return await withBusinessTransaction(getWorkerDatabase().db, { actorType: "worker" }, (tx) => hasLinkedPackPrice(tx), { accessMode: "read only" });
+}
+
 /** Handles one delivery to a billing provider's webhook route, such as /api/webhooks/polar. */
 export async function handleBillingWebhook(request: Request, webhookFor: () => BillingWebhook, options: { route: string; provider: BillingProviderId }): Promise<NextResponse> {
   let eventType: string | undefined;
@@ -80,11 +88,12 @@ export async function handleBillingWebhook(request: Request, webhookFor: () => B
     const allowLegacyReference = webhook.provider === "polar" && process.env.POLAR_ACCEPT_LEGACY_BUSINESS_IDS === "true";
     // A Stripe charge names only its customer, whose metadata names the business: the provider reads it back.
     // A dispute names neither, only its payment: a prepaid pack's payment names the business, and any other stays unattributed.
+    // A deployment that never linked a pack's price sold no pack, so it asks Stripe nothing about a dispute, as before packs.
     const customerId = normalized.fields.customerId;
     const disputedPayment = normalized.kind === "dispute" ? normalized.fields.paymentRef : undefined;
     const resolvedBusinessId = normalized.businessId
       ?? (customerId ? await createBillingProvider(process.env)?.businessOfCustomer?.(customerId) : null)
-      ?? (disputedPayment ? await createBillingProvider(process.env)?.businessOfPackPayment?.(disputedPayment) : null)
+      ?? (disputedPayment && await packPriceLinked() ? await createBillingProvider(process.env)?.businessOfPackPayment?.(disputedPayment) : null)
       ?? null;
     const condition = resolvedBusinessId
       ? eq(businesses.id, resolvedBusinessId)

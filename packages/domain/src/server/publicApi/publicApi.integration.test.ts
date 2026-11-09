@@ -745,7 +745,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
 
       // The plan's 5 active receptionists: a sixth is refused.
       for (const name of ["Gastown", "Yaletown", "Kerrisdale"]) await createReceptionistForApi(context, caller, { name });
-      await expectApiError(createReceptionistForApi(context, caller, { name: "Main Street" }), 409, "conflict");
+      await expectApiError(createReceptionistForApi(context, caller, { name: "Main Street" }), 409, "plan_limit_reached");
       expect(await listReceptionistsForApi(context, caller)).toHaveLength(5);
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
@@ -893,9 +893,12 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: randomUUID(), path_prefix: "/", receptionist_id: kits.id }), 404, "not_found");
       await expectApiError(createWebsiteRuleForApi(context, b.caller, { source_id: site.id, path_prefix: "/", receptionist_id: kits.id }), 404, "not_found");
 
-      // Choosing the rule's receptionist makes the choice someone's own, which stays when the rule goes;
-      // a page only the rule chose goes back to everyone.
-      expect(await updateKnowledgeSourceForApi(context, caller, kitsPage!.id, { audience: "chosen", receptionist_ids: [kits.id] })).toMatchObject({ receptionist_ids: [kits.id] });
+      // Sending back what GET shows changes nothing, whether a rule chose the receptionist or someone did;
+      // a replace in bulk makes the rule's choice someone's own, which stays when the rule goes,
+      // and a page only the rule chose goes back to everyone.
+      const shown = await getKnowledgeSourceForApi(context, caller, kitsPage!.id);
+      expect(await updateKnowledgeSourceForApi(context, caller, kitsPage!.id, { active: true, audience: shown.audience, receptionist_ids: shown.receptionist_ids })).toEqual(shown);
+      expect(await changeKnowledgeAudienceForApi(context, caller, { source_ids: [kitsPage!.id], audience: "chosen", receptionist_ids: [kits.id] })).toEqual({ entries: 0, sources: 1 });
       expect(await deleteWebsiteRuleForApi(context, caller, rule.id)).toBeUndefined();
       expect(await getKnowledgeSourceForApi(context, caller, kitsPage!.id)).toMatchObject({ audience: "chosen", receptionist_ids: [kits.id] });
       await deleteWebsiteRuleForApi(context, caller, valetRule.id);
@@ -938,6 +941,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect((await listUnansweredQuestionsForApi(context, caller, { receptionistId: kits.id })).data.map((question) => question.question)).toEqual(["Do you sell gift cards?", "Is there parking?"]);
       expect((await listUnansweredQuestionsForApi(context, b.caller, {})).data).toEqual([]);
       await expectApiError(listUnansweredQuestionsForApi(context, caller, { limit: 51 }), 400, "invalid_request");
+      await expect(listUnansweredQuestionsForApi(context, caller, { limit: 150 })).rejects.toMatchObject({ message: "limit must be an integer from 1 to 50." });
       await expectApiError(listUnansweredQuestionsForApi(context, caller, { cursor: "nope" }), 400, "invalid_request");
 
       // An answer becomes a text entry titled with the question; asked keeps it to the receptionists that heard it.

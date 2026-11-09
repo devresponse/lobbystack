@@ -168,7 +168,8 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
     if (route === "POST /receptionists") {
       // The free plan includes one active receptionist, the paid ones five.
       const included = paid() ? 5 : 1;
-      if (world.receptionists.filter((row) => !row.archived_at && row.status === "active").length >= included) return error(409, "conflict", `Your plan includes ${included} active receptionist${included === 1 ? "" : "s"}. Upgrade for more.`);
+      if (body!.handle && world.receptionists.some((row) => row.handle === body!.handle)) return error(409, "conflict", "Another receptionist already uses this page address.");
+      if (world.receptionists.filter((row) => !row.archived_at && row.status === "active").length >= included) return error(409, "plan_limit_reached", `Your plan includes ${included} active receptionist${included === 1 ? "" : "s"}. Upgrade for more.`);
       const receptionist = { id: id(), description: "", handle: null, is_default: false, status: "active", listed: true, position: world.receptionists.length, locale: null, knowledge_scope: "audience", phone_numbers: 0, widget_keys: 0, entry_links: 0, archived_at: null, ...body };
       world.receptionists.push(receptionist);
       // A new receptionist starts with the default's greeting, instructions and booking.
@@ -481,6 +482,19 @@ describe("lobbystack onboard", () => {
     const paid = await onboard(["--yes"], fetch);
     expect(paid.out).toMatch(/receptionists\s+added\s+Emergency line/);
     expect(world.receptionists.map((row) => row.name)).toEqual(["Receptionist", "Emergency line", "Valet desk"]);
+  });
+
+  it("refuses an entry named like the default receptionist, and a page address that's taken even while a plan is on its way", async () => {
+    const { world, fetch } = fakeWorld();
+    world.receptionists[0]!.handle = "front";
+    await writeFile(manifest, `${checkoutYaml}receptionists:\n  - { name: receptionist, description: The front desk }\n  - { name: Emergency line, handle: front }\n`);
+    const run = await onboard(["--yes"], fetch);
+    expect(run.code).toBe(exitCodes.failed);
+    expect(run.out).toContain("receptionist is the default receptionist, which receptionists leaves out");
+    expect(run.out).toContain("Emergency line: Another receptionist already uses this page address.");
+    expect(run.out).not.toMatch(/receptionists\s+waiting/);
+    expect(world.writes.filter((write) => /\/receptionists/.test(write))).toEqual(["POST /receptionists"]);
+    expect(world.receptionists[0]).toMatchObject({ name: "Receptionist", description: "" });
   });
 
   it("reports a receptionist the plan has no room for, and finishes the rest", async () => {

@@ -5,6 +5,7 @@ import { DateTime } from "luxon";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPlans, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocumentReceptionists, knowledgeDocuments, knowledgeSnippetReceptionists, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
+  isUuid,
   CONTACT_PASSCODE_DEFAULT_LENGTH,
   CONTACT_PASSCODE_MAX_LENGTH,
   CONTACT_PASSCODE_MIN_LENGTH,
@@ -1375,15 +1376,17 @@ export async function reorderRulesForApi(context: DomainContext, caller: ApiCall
 }
 
 /**
- * The dashboard's refusals as the v1 API words them: a 409, such as the
- * plan's limit or an archived receptionist, is a conflict, a 404 not_found
- * and a 400 invalid_request, with the dashboard's own message.
+ * The dashboard's refusals as the v1 API words them, with the dashboard's own
+ * message: the plan's receptionists all in use is plan_limit_reached, since a
+ * plan with more fixes it; any other 409, such as an archived receptionist, a
+ * conflict; a 404 not_found; and a 400 invalid_request.
  */
 async function asApiErrors<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
-    const status = error instanceof Error ? (error as { status?: unknown }).status : undefined;
+    const { status, code } = error instanceof Error ? (error as { status?: unknown; code?: unknown }) : { status: undefined, code: undefined };
+    if (status === 409 && code === "receptionist_limit") throw new PublicApiError(409, "plan_limit_reached", (error as Error).message);
     if (status === 409) throw conflict((error as Error).message);
     if (status === 404) throw new PublicApiError(404, "not_found", (error as Error).message);
     if (status === 400) throw invalidRequest((error as Error).message);
@@ -1393,7 +1396,6 @@ async function asApiErrors<T>(work: () => Promise<T>): Promise<T> {
 
 // Receptionist settings
 
-const RECEPTIONIST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiReceptionistUpdate> = {
   greeting: "greeting",
@@ -1417,7 +1419,7 @@ const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiRec
  * (migration 0143), so none means the business is out of sight.
  */
 async function loadSettingsReceptionist(tx: DatabaseTransaction, businessId: string, lock: boolean, receptionistId?: string | undefined): Promise<ReceptionistView> {
-  if (receptionistId !== undefined && !RECEPTIONIST_ID.test(receptionistId)) throw notFound("Receptionist");
+  if (receptionistId !== undefined && !isUuid(receptionistId)) throw notFound("Receptionist");
   const receptionist = await loadReceptionistView(tx, { businessId, lock, ...(receptionistId ? { receptionistId: receptionistId.toLowerCase() } : {}) });
   if (!receptionist) throw notFound(receptionistId ? "Receptionist" : "Business");
   return receptionist;
@@ -1495,7 +1497,7 @@ function serializeReceptionistProfile(row: ReceptionistListItem): ApiReceptionis
 }
 
 async function loadReceptionistProfile(tx: DatabaseTransaction, businessId: string, receptionistId: string): Promise<ApiReceptionistProfile> {
-  if (!RECEPTIONIST_ID.test(receptionistId)) throw notFound("Receptionist");
+  if (!isUuid(receptionistId)) throw notFound("Receptionist");
   const [row] = (await listReceptionistsInTransaction(tx, { businessId, receptionistId: receptionistId.toLowerCase(), pageSize: 1 })).receptionists;
   if (!row) throw notFound("Receptionist");
   return serializeReceptionistProfile(row);
@@ -1657,7 +1659,7 @@ export async function getQrLinkForApi(context: DomainContext, caller: ApiCaller,
   });
 }
 
-/** Makes a link with the dashboard's rules: an archived receptionist or the business's 1,000th link is a 409. */
+/** Makes a link with the dashboard's rules: an unknown or archived receptionist is a 404, the business's 1,000th link a 409. */
 export async function createQrLinkForApi(context: DomainContext, caller: ApiCaller, input: ApiQrLinkCreate, options: { appOrigin: string }): Promise<ApiQrLink> {
   return await inBusiness(context, caller, async (tx) => {
     const link = await asApiErrors(() => createEntryLinkInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, link: { receptionistId: input.receptionist_id.toLowerCase(), label: input.label ?? "" } }));
@@ -1745,11 +1747,11 @@ function serializeUnansweredQuestion(question: OpenUnansweredQuestion): ApiUnans
 
 /** The open questions, most asked first, a page at a time, with the Questions page's own query. */
 export async function listUnansweredQuestionsForApi(context: DomainContext, caller: ApiCaller, request: PageRequest & { receptionistId?: string | undefined }): Promise<Page<ApiUnansweredQuestion>> {
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1 || request.limit > QUESTIONS_PAGE_MAX)) throw invalidRequest(`limit must be an integer from 1 to ${QUESTIONS_PAGE_MAX}.`);
   const limit = pageSize(request.limit);
-  if (limit > QUESTIONS_PAGE_MAX) throw invalidRequest(`limit must be an integer from 1 to ${QUESTIONS_PAGE_MAX}.`);
   const offset = decodeQuestionsCursor(request.cursor);
   return await inBusiness(context, caller, async (tx) => {
-    const page = await asApiErrors(() => listOpenUnansweredQuestionsInTransaction(tx, { businessId: caller.businessId, receptionistId: request.receptionistId?.toLowerCase() ?? null, limit, offset }));
+    const page = await asApiErrors(() => listOpenUnansweredQuestionsInTransaction(tx, { businessId: caller.businessId, receptionistId: request.receptionistId?.toLowerCase() ?? null, limit, offset, counts: false }));
     const next = offset + page.questions.length;
     const hasMore = page.questions.length > 0 && next < page.openCount;
     return { data: page.questions.map(serializeUnansweredQuestion), next_cursor: hasMore ? encodeQuestionsCursor(next) : null, has_more: hasMore };
@@ -2362,18 +2364,19 @@ function audienceChoice(input: { audience?: "everyone" | "chosen" | undefined; r
 }
 
 /**
- * Whether an article is already for exactly who choice names. A link a
- * website rule made counts as a change, since choosing makes it someone's
- * choice, which stays when the rule goes.
+ * Whether an article is already for exactly who choice names: the same
+ * receptionists, whether someone chose them or a website rule did, since GET
+ * shows them alike, so sending back what GET returned changes nothing.
+ * POST /knowledge/audience with replace makes a rule's choice someone's own.
  */
 async function hasAudience(tx: DatabaseTransaction, businessId: string, article: { kind: KnowledgeArticleKind; id: string; audience: string }, choice: KnowledgeAudienceChoice): Promise<boolean> {
   if (choice.audience === "everyone") return article.audience !== "chosen";
   if (article.audience !== "chosen") return false;
   const links = article.kind === "snippet"
-    ? (await tx.select({ receptionistId: knowledgeSnippetReceptionists.receptionistId }).from(knowledgeSnippetReceptionists).where(and(eq(knowledgeSnippetReceptionists.businessId, businessId), eq(knowledgeSnippetReceptionists.snippetId, article.id)))).map((row) => ({ ...row, websiteRuleId: null }))
-    : await tx.select({ receptionistId: knowledgeDocumentReceptionists.receptionistId, websiteRuleId: knowledgeDocumentReceptionists.websiteRuleId }).from(knowledgeDocumentReceptionists).where(and(eq(knowledgeDocumentReceptionists.businessId, businessId), eq(knowledgeDocumentReceptionists.documentId, article.id)));
+    ? await tx.select({ receptionistId: knowledgeSnippetReceptionists.receptionistId }).from(knowledgeSnippetReceptionists).where(and(eq(knowledgeSnippetReceptionists.businessId, businessId), eq(knowledgeSnippetReceptionists.snippetId, article.id)))
+    : await tx.select({ receptionistId: knowledgeDocumentReceptionists.receptionistId }).from(knowledgeDocumentReceptionists).where(and(eq(knowledgeDocumentReceptionists.businessId, businessId), eq(knowledgeDocumentReceptionists.documentId, article.id)));
   const wanted = new Set(choice.receptionistIds);
-  return links.length === wanted.size && links.every((link) => link.websiteRuleId === null && wanted.has(link.receptionistId));
+  return links.length === wanted.size && links.every((link) => wanted.has(link.receptionistId));
 }
 
 /** Sets who an article is for with the Knowledge page's rules: an unknown receptionist is a 404, an archived one a 409. */

@@ -67,6 +67,7 @@ export function toolError(error: unknown, toolName: string): ToolError {
   const status = typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : 500;
   if (status === 403) return { code: "forbidden", message: "This connection cannot do that." };
   if (status === 404) return { code: "not_found", message: error instanceof Error ? error.message : "Not found." };
+  if (status === 409) return { code: "conflict", message: error instanceof Error ? error.message : "The request conflicts with the current state." };
   if (status >= 400 && status < 500) return { code: "invalid_request", message: error instanceof Error ? error.message : "The request is invalid." };
   const errorId = crypto.randomUUID();
   void reportServerError(error, { operation: `mcp.${toolName}`, errorId }).catch(() => undefined);

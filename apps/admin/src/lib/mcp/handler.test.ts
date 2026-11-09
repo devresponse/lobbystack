@@ -390,6 +390,8 @@ describe("MCP tool errors", () => {
     ["slot_unavailable", new PublicApiError(409, "slot_unavailable", "That time is not available."), "reschedule_appointment", { appointment_id: id, starts_at: later }, "rescheduleAppointmentForApi"],
     ["conflict", new PublicApiError(409, "conflict", "A contact with this phone number already exists."), "create_contact", { phone: "+14165550134" }, "createContactForApi"],
     ["booking_disabled", new PublicApiError(409, "booking_disabled", "Booking is turned off."), "book_appointment", { service_id: id, starts_at: at, contact_phone: "+14165550134" }, "createAppointmentForApi"],
+    // A refusal that carries only its status, as the dashboard's do.
+    ["conflict", Object.assign(new Error("This question was already answered or dismissed."), { status: 409 }), "answer_question", { question_id: id, answer: "Yes." }, "answerUnansweredQuestionForApi"],
   ] as const)("maps %s", async (code, thrown, tool, args, operation) => {
     (operations[operation] as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(thrown);
     const client = await connect("lsk_aaaaaaaa_full");

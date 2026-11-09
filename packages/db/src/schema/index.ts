@@ -1803,7 +1803,7 @@ export const billingPacks = pgTable(
     endedAt: timestamp("ended_at", { withTimezone: true }),
     /** The seconds left when it ended, for the accounts. */
     unusedSeconds: integer("unused_seconds"),
-    /** The reminder emails already sent about the pack: low, empty, ends_30 and ends_7. */
+    /** What the daily expiry job already did about the pack: the reminders it sent (low, empty, ends_30, ends_7), and ended once it settled the pack's end. */
     notices: text("notices").array().default(sql`'{}'::text[]`).notNull(),
     ...timestamps,
   },

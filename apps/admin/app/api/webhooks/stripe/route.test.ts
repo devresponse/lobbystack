@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 
-const mocks = vi.hoisted(() => ({ lookup: vi.fn(), store: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn(), customer: vi.fn() }));
+const mocks = vi.hoisted(() => ({ lookup: vi.fn(), store: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn(), customer: vi.fn(), packPayment: vi.fn() }));
 // storeBillingWebhookEvent's own tests run it against PostgreSQL.
 vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog, storeBillingWebhookEvent: mocks.store }));
 vi.mock("@/lib/api-helpers", () => ({ getDispatcherDatabase: () => ({ db: {} }), getWorkerDatabase: () => ({ db: {} }) }));
@@ -14,10 +14,10 @@ vi.mock("@lobbystack/db", async importOriginal => ({
     return callback({});
   },
 }));
-// The admin's Stripe key reads a charge's customer back for its business.
+// The admin's Stripe key reads a charge's customer, or a disputed pack payment, back for its business.
 vi.mock("@lobbystack/providers/billing/factory", async importOriginal => {
   const actual = await importOriginal<typeof import("@lobbystack/providers/billing/factory")>();
-  return { ...actual, createBillingProvider: () => ({ businessOfCustomer: mocks.customer }) };
+  return { ...actual, createBillingProvider: () => ({ businessOfCustomer: mocks.customer, businessOfPackPayment: mocks.packPayment }) };
 });
 
 import { POST } from "./route";
@@ -49,6 +49,8 @@ const subscriptionEvent = (fields: Record<string, unknown> = {}) => JSON.stringi
   ...fields,
 });
 
+const disputeEvent = (type: string) => JSON.stringify({ id: type === "charge.dispute.closed" ? "evt_dispute2" : "evt_dispute1", object: "event", type, created: Math.floor(Date.now() / 1000), livemode: false, data: { object: { id: "dp_1", object: "dispute", charge: "ch_1", payment_intent: "pi_pack", amount: 8700, currency: "cad", status: type === "charge.dispute.closed" ? "lost" : "needs_response", metadata: {} } } });
+
 const refundEvent = JSON.stringify({ id: "evt_2", object: "event", type: "charge.refunded", created: Math.floor(Date.now() / 1000), livemode: false, data: { object: { id: "ch_1", object: "charge", customer: "cus_1", payment_intent: "pi_1", amount: 8700, amount_refunded: 8700, currency: "cad", refunded: true, metadata: {} } } });
 
 beforeEach(() => {
@@ -59,6 +61,7 @@ beforeEach(() => {
   mocks.lookup.mockResolvedValue([{ id: businessId }]);
   mocks.catalog.mockResolvedValue({ plans: [], prices: [] });
   mocks.customer.mockResolvedValue(businessId);
+  mocks.packPayment.mockResolvedValue(businessId);
   // The first delivery is new, and Stripe's next one a duplicate.
   mocks.store.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
   logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -82,6 +85,17 @@ it("reads a charge's customer back for its business, and drops it when the custo
   mocks.customer.mockResolvedValue(null);
   expect(await (await POST(signed(refundEvent))).json()).toEqual({ accepted: true, ignored: true });
   expect(errors()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "stripe", eventType: "charge.refunded", reason: "no_reference" }]);
+});
+
+it("reads a disputed payment back for its business only when it paid for a pack, and drops any other dispute as before", async () => {
+  expect((await POST(signed(disputeEvent("charge.dispute.created")))).status).toBe(200);
+  expect(mocks.packPayment).toHaveBeenCalledWith("pi_pack");
+  expect(mocks.customer).not.toHaveBeenCalled();
+  expect(mocks.store).toHaveBeenCalledWith({}, expect.objectContaining({ businessId, eventType: "charge.dispute.created", payload: expect.objectContaining({ kind: "dispute", paymentRef: "pi_pack", disputeOutcome: "opened" }) }));
+  // A plan's payment names no pack, so its dispute stays unattributed, as it was before packs.
+  mocks.packPayment.mockResolvedValue(null);
+  expect(await (await POST(signed(disputeEvent("charge.dispute.closed")))).json()).toEqual({ accepted: true, ignored: true });
+  expect(errors()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "stripe", eventType: "charge.dispute.closed", reason: "no_reference", businessReference: "ch_1" }]);
 });
 
 it("refuses a bad, old or missing signature, another secret, the other mode and no secret, and takes either secret during a rotation", async () => {

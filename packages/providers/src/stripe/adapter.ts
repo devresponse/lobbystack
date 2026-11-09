@@ -199,6 +199,24 @@ export class StripeBilling implements BillingProvider {
     }
   }
 
+  /**
+   * The business a pack's payment intent names, as createPackCheckout writes
+   * it on payment_intent_data; null for a payment intent that isn't a pack's,
+   * or one Stripe no longer has.
+   */
+  async businessOfPackPayment(paymentRef: string): Promise<string | null> {
+    if (!paymentRef.startsWith("pi_")) return null;
+    try {
+      const intent = await this.api.paymentIntents.retrieve(paymentRef);
+      if (intent.metadata?.lobbystack_role !== "pack") return null;
+      const business = intent.metadata.lobbystack_business;
+      return business && isUuid(business) ? business : null;
+    } catch (error) {
+      if (isStripeMissing(error)) return null;
+      throw error;
+    }
+  }
+
   /** The invoice a payment intent paid, through its invoice payment. */
   async invoiceOfPayment(paymentRef: string): Promise<string | null> {
     if (!paymentRef.startsWith("pi_")) return null;

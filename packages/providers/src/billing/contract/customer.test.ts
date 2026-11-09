@@ -101,5 +101,21 @@ describe("the billing provider contract: the customer", () => {
     it("keeps no customer per email, so a billing email is never refused", () => {
       expect(stripeHarness().billing.can.uniqueCustomerEmail).toBe(false);
     });
+
+    it("names the business a pack's payment intent names, for a dispute, and none for any other payment", async () => {
+      const { billing, stripe } = stripeHarness();
+      const businessId = "4f0d7c43-8a54-4d7e-9b0f-3c1f1e2a9b11";
+      const intent = (id: string, metadata: Record<string, string>) => ({ id, object: "payment_intent", status: "succeeded", metadata }) as never;
+      stripe.state.paymentIntents.set("pi_pack", intent("pi_pack", { lobbystack_business: businessId, lobbystack_role: "pack", lobbystack_pack: "pack_500_90" }));
+      stripe.state.paymentIntents.set("pi_plan", intent("pi_plan", { lobbystack_business: businessId }));
+      stripe.state.paymentIntents.set("pi_bad", intent("pi_bad", { lobbystack_business: "not-a-business", lobbystack_role: "pack" }));
+      await expect(billing.businessOfPackPayment!("pi_pack")).resolves.toBe(businessId);
+      // A plan's payment, a pack naming no business, one Stripe no longer has, and a charge ID name none.
+      await expect(billing.businessOfPackPayment!("pi_plan")).resolves.toBeNull();
+      await expect(billing.businessOfPackPayment!("pi_bad")).resolves.toBeNull();
+      await expect(billing.businessOfPackPayment!("pi_gone")).resolves.toBeNull();
+      await expect(billing.businessOfPackPayment!("ch_1")).resolves.toBeNull();
+      expect(stripe.requests.map((request) => request.call)).toEqual(["paymentIntents.retrieve", "paymentIntents.retrieve", "paymentIntents.retrieve", "paymentIntents.retrieve"]);
+    });
   });
 });

@@ -7,6 +7,7 @@ import { completeFakeCheckout, fakeCheckout } from "./checkout";
 import { FakeClock } from "./clock";
 import { FakeStripeContext, type FakeStripeRequest, type FakeStripeState } from "./context";
 import { addFakeCustomer, fakeCustomers } from "./customers";
+import { missing } from "./errors";
 import { stripeInvoiceObject, stripeScheduleObject, stripeSubscriptionObject, type FakeSubscriptionInput } from "./objects";
 import { fakeBalanceTransactions, fakeEventSummaries, fakeMeterEvents } from "./meterEvents";
 import { dropFakePendingUpdate, fakeInvoices, payFakeInvoice } from "./pendingUpdates";
@@ -70,6 +71,14 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
         has_more: false,
       })),
     } as unknown as FakeStripe["invoicePayments"],
+    paymentIntents: {
+      // A payment intent a payment-mode checkout made, as for a prepaid pack.
+      retrieve: async (id: string) => await fake.call("paymentIntents.retrieve", { id }, null, () => {
+        const intent = fake.state.paymentIntents.get(id);
+        if (!intent) throw missing("payment_intent", id);
+        return intent;
+      }),
+    } as unknown as FakeStripe["paymentIntents"],
     state: fake.state,
     requests: fake.requests,
     clock: fake.clock,

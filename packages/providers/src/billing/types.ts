@@ -143,6 +143,12 @@ export interface BillingProvider {
   businessOfCustomer?(customerId: string): Promise<string | null>;
   /** The invoice a payment paid, for a refund that names only the payment (Stripe's charges). Null when there's none. */
   invoiceOfPayment?(paymentRef: string): Promise<string | null>;
+  /**
+   * The business a prepaid pack's payment names, for an event that names only
+   * the payment (Stripe's disputes). Null for any other payment, such as a
+   * plan's invoice, so those events stay unattributed as before.
+   */
+  businessOfPackPayment?(paymentRef: string): Promise<string | null>;
 }
 
 /** A webhook delivery whose signature checked out. */

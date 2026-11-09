@@ -25,6 +25,8 @@ export type FakeStripeState = {
   catalog: FakeCatalogState;
   /** Subscriptions a Managed Payments checkout made, whose card the API can't set. */
   managedPayments: Set<string>;
+  /** Payment intents a payment-mode checkout made, as for a prepaid pack. */
+  paymentIntents: Map<string, Stripe.PaymentIntent>;
 };
 
 /** One call the adapter made, with its parameters and idempotency key. */
@@ -38,7 +40,7 @@ export class FakeStripeContext {
   private counter = 0;
 
   constructor(readonly clock: FakeClock, accountId: string) {
-    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], pendingUpdates: new Map(), meterEvents: [], balanceTransactions: [], catalog: emptyFakeCatalog(), managedPayments: new Set() };
+    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], pendingUpdates: new Map(), meterEvents: [], balanceTransactions: [], catalog: emptyFakeCatalog(), managedPayments: new Set(), paymentIntents: new Map() };
   }
 
   /** A new ID with Stripe's prefix for the kind of object, numbered in the order the fake made them. */

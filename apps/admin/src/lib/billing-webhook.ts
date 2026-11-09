@@ -79,8 +79,13 @@ export async function handleBillingWebhook(request: Request, webhookFor: () => B
     // cutover when the environment explicitly enables compatibility routing.
     const allowLegacyReference = webhook.provider === "polar" && process.env.POLAR_ACCEPT_LEGACY_BUSINESS_IDS === "true";
     // A Stripe charge names only its customer, whose metadata names the business: the provider reads it back.
+    // A dispute names neither, only its payment: a prepaid pack's payment names the business, and any other stays unattributed.
     const customerId = normalized.fields.customerId;
-    const resolvedBusinessId = normalized.businessId ?? (customerId ? await createBillingProvider(process.env)?.businessOfCustomer?.(customerId) : null) ?? null;
+    const disputedPayment = normalized.kind === "dispute" ? normalized.fields.paymentRef : undefined;
+    const resolvedBusinessId = normalized.businessId
+      ?? (customerId ? await createBillingProvider(process.env)?.businessOfCustomer?.(customerId) : null)
+      ?? (disputedPayment ? await createBillingProvider(process.env)?.businessOfPackPayment?.(disputedPayment) : null)
+      ?? null;
     const condition = resolvedBusinessId
       ? eq(businesses.id, resolvedBusinessId)
       : allowLegacyReference && normalized.businessReference

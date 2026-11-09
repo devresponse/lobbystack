@@ -699,6 +699,22 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       });
     });
 
+    it("leaves a promo subscription a prepaid pack replaced to the job that ends it", async () => {
+      await rollbackTest(async (tx) => {
+        await promoCatalog(tx);
+        const { businessId } = await ownedBusiness(tx, "replaced");
+        const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
+        await polarEvent(tx, businessId, "subscription.active", { plan: "starter", planCode: "salons-half-off", currentPeriodStart: new Date(Date.now() - 10 * 86_400_000).toISOString(), currentPeriodEnd: new Date(Date.now() + 20 * 86_400_000).toISOString() });
+        await as(tx, "owner");
+        await tx.execute(sql`update public.billing_accounts set replaced_subscription_id = subscription_id where business_id = ${businessId}::uuid`);
+        await as(tx, "lobbystack_worker");
+        // The provider still reports it active, yet no promo email goes and the provider isn't told to move it to a tier.
+        expect(await thrown(endPromoPlanForApi(context(tx), apiCaller))).toMatchObject({ status: 404 });
+        expect(await outbox(tx, businessId, "billing.endPromoPlan")).toEqual([]);
+        expect(await loadPromoEndWork(context(tx), { businessId })).toBeNull();
+      });
+    });
+
     it("sends no second email when an operator ends a plan in the week its owners heard it ends", async () => {
       await rollbackTest(async (tx) => {
         await promoCatalog(tx);

@@ -1298,6 +1298,10 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       const ending = await getBillingForApi(context, caller);
       expect(ending).toMatchObject({ cancels_at: "2026-12-01T00:00:00.000Z", next_change: null, provider: "polar", provider_name: "Polar" });
       expect(apiBillingSchema.safeParse(ending).success).toBe(true);
+      // A subscription a prepaid pack replaced ends at the provider shortly, so its own end date doesn't show.
+      await admin!.db.update(billingAccounts).set({ subscriptionId: "sub_replaced", replacedSubscriptionId: "sub_replaced" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await getBillingForApi(context, caller)).toMatchObject({ cancels_at: null, next_change: null });
+      await admin!.db.update(billingAccounts).set({ subscriptionId: null, replacedSubscriptionId: null }).where(eq(billingAccounts.businessId, businessId));
       await admin!.db.update(billingAccounts).set({ subscriptionState: "canceled" }).where(eq(billingAccounts.businessId, businessId));
       expect(await getBillingForApi(context, caller)).toMatchObject({ cancels_at: null });
       await admin!.db.update(billingAccounts).set({ cancelAt: null }).where(eq(billingAccounts.businessId, businessId));

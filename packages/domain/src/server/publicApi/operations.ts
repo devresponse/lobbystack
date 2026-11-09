@@ -375,7 +375,9 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 /** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
 async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  // A subscription a prepaid pack replaced ends at the provider shortly, whatever its own end date or next change says.
+  const replaced = Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
   // A promo plan's end, and what its renewal does; a plan that keeps going has neither.
   const [promo] = planCode ? await tx.select({ ends: billingPlans.ends }).from(billingPlans).where(eq(billingPlans.code, planCode)).limit(1) : [];
   const planEndsWith = planCode && account?.planEnds ? promoPlanEnding(account.endWith, promo?.ends) : null;
@@ -394,8 +396,8 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
     subscription_state: account?.subscriptionState ?? null,
     billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
     current_period_end: paid && account?.currentPeriodEnd ? account.currentPeriodEnd.toISOString() : null,
-    cancels_at: account?.cancelAt && isLiveSubscriptionState(account.subscriptionState) ? account.cancelAt.toISOString() : null,
-    next_change: account?.nextPlanCode && (account.nextInterval === "monthly" || account.nextInterval === "annual") && account.nextChangeAt ? { plan: account.nextPlanCode, interval: account.nextInterval, at: account.nextChangeAt.toISOString() } : null,
+    cancels_at: account?.cancelAt && isLiveSubscriptionState(account.subscriptionState) && !replaced ? account.cancelAt.toISOString() : null,
+    next_change: !replaced && account?.nextPlanCode && (account.nextInterval === "monthly" || account.nextInterval === "annual") && account.nextChangeAt ? { plan: account.nextPlanCode, interval: account.nextInterval, at: account.nextChangeAt.toISOString() } : null,
     payment_action_url: await loadPlanChangePayment(tx, { businessId, subscriptionId: account?.subscriptionId ?? null }),
     spending_cap_cents: cap,
     overage_spend_cents: spend,

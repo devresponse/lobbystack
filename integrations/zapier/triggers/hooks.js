@@ -10,7 +10,13 @@ const SAMPLE_PAGE_SIZE = 25;
 // Builds a REST hook trigger. Subscribing creates a v1 webhook endpoint for one
 // event; the payload's `data` is the same object the list endpoint returns, so
 // performList gives Zapier real sample data in the same shape.
-const createHookTrigger = ({ key, noun, label, description, event, resource, listPath, listParams = {}, filter }) => {
+// receptionist names what the trigger lists (calls, messages) when its events say which
+// receptionist answered: the trigger then takes a Receptionist to keep only that one's.
+const createHookTrigger = ({ key, noun, label, description, event, resource, listPath, listParams = {}, filter, receptionist }) => {
+  const chosenReceptionist = (bundle) => {
+    const value = receptionist && bundle.inputData ? bundle.inputData.receptionist_id : undefined;
+    return value ? String(value).trim().toLowerCase() : '';
+  };
   const performSubscribe = async (z, bundle) => {
     const response = await z.request({
       url: apiUrl(bundle, '/webhooks'),
@@ -56,11 +62,14 @@ const createHookTrigger = ({ key, noun, label, description, event, resource, lis
     }
     // Ignore test pings and anything that is not the subscribed event.
     if (!payload || payload.type !== event || !payload.data || typeof payload.data !== 'object') return [];
+    const only = chosenReceptionist(bundle);
+    if (only && String(payload.data.receptionist_id || '').toLowerCase() !== only) return [];
     return [payload.data];
   };
 
   const performList = async (z, bundle) => {
-    const body = await listPage(z, bundle, listPath, { limit: SAMPLE_PAGE_SIZE, ...listParams });
+    const only = chosenReceptionist(bundle);
+    const body = await listPage(z, bundle, listPath, { limit: SAMPLE_PAGE_SIZE, ...listParams, ...(only ? { receptionist_id: only } : {}) });
     const items = Array.isArray(body.data) ? body.data : [];
     return filter ? items.filter(filter) : items;
   };
@@ -71,6 +80,19 @@ const createHookTrigger = ({ key, noun, label, description, event, resource, lis
     display: { label, description },
     operation: {
       type: 'hook',
+      ...(receptionist
+        ? {
+            inputFields: [
+              {
+                key: 'receptionist_id',
+                label: 'Receptionist',
+                dynamic: 'receptionist_list.id.name',
+                required: false,
+                helpText: `Only the ${receptionist} this receptionist answered. Leave it empty for every receptionist's.`,
+              },
+            ],
+          }
+        : {}),
       performSubscribe,
       performUnsubscribe,
       perform,

@@ -202,6 +202,16 @@ describe('add_knowledge', () => {
     scope.done();
   });
 
+  it('adds an entry for the receptionists chosen', async () => {
+    const ids = ['8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c5d', '9e8d7c6b-5a4f-4b3a-8d2c-1b0a9f8e7d6c'];
+    const scope = api()
+      .post('/knowledge', { type: 'faq', question: 'Is there valet parking?', answer: 'Yes, at the front door.', audience: 'chosen', receptionist_ids: ids })
+      .reply(201, { data: { ...samples.knowledgeEntry, audience: 'chosen', receptionist_ids: ids } });
+    const result = await appTester(operation.perform, bundleWith({ inputData: { type: 'faq', question: 'Is there valet parking?', answer: 'Yes, at the front door.', receptionist_ids: [ids[0], ` ${ids[1]} `, ids[0]] } }));
+    expect(result.receptionist_ids).toEqual(ids);
+    scope.done();
+  });
+
   it('adds a text entry', async () => {
     const scope = api()
       .post('/knowledge', { type: 'text', title: 'Parking', content: 'Free parking behind the building.' })

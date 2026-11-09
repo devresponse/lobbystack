@@ -445,6 +445,15 @@
           "communication": "rpcs/list-calls/list-calls.communication.iml.json",
           "params": null
         }
+      },
+      "listReceptionists": {
+        "label": "List receptionists",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "rpcs/list-receptionists/list-receptionists.communication.iml.json",
+          "params": null
+        }
       }
     },
     "function": {},

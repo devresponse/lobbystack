@@ -182,5 +182,51 @@
     "doneHint_other": "{{count}} páginas están listas para responder preguntas.",
     "failedTitle": "No pudimos leer {{host}}",
     "failedHint": "Añada los datos de su negocio a mano o vuelva a intentar la importación desde su panel."
+  },
+  "planDisplay": {
+    "custom": "a medida",
+    "storage": {
+      "megabytes": "{{amount}} MB",
+      "gigabytes": "{{amount}} GB"
+    },
+    "bullets": {
+      "voiceMinutes_one": "{{amount}} minuto de voz incluido",
+      "voiceMinutes_many": "{{amount}} minutos de voz incluidos",
+      "voiceMinutes_other": "{{amount}} minutos de voz incluidos",
+      "voiceMinutesThen_one": "{{amount}} minuto de voz incluido\nLuego {{rate}}/min",
+      "voiceMinutesThen_many": "{{amount}} minutos de voz incluidos\nLuego {{rate}}/min",
+      "voiceMinutesThen_other": "{{amount}} minutos de voz incluidos\nLuego {{rate}}/min",
+      "browserVoiceMinutes_one": "{{amount}} minuto de voz en el navegador incluido",
+      "browserVoiceMinutes_many": "{{amount}} minutos de voz en el navegador incluidos",
+      "browserVoiceMinutes_other": "{{amount}} minutos de voz en el navegador incluidos",
+      "browserVoiceMinutesThen_one": "{{amount}} minuto de voz en el navegador incluido\nLuego {{rate}}/min",
+      "browserVoiceMinutesThen_many": "{{amount}} minutos de voz en el navegador incluidos\nLuego {{rate}}/min",
+      "browserVoiceMinutesThen_other": "{{amount}} minutos de voz en el navegador incluidos\nLuego {{rate}}/min",
+      "voiceMinutesCustom": "Minutos de voz a medida",
+      "receptionists_one": "{{amount}} recepcionista",
+      "receptionists_many": "{{amount}} recepcionistas",
+      "receptionists_other": "{{amount}} recepcionistas",
+      "receptionistsCustom": "Número de recepcionistas a medida",
+      "businessNumbers_one": "{{amount}} número del negocio dedicado",
+      "businessNumbers_many": "{{amount}} números del negocio dedicados",
+      "businessNumbers_other": "{{amount}} números del negocio dedicados",
+      "businessNumbersNone": "Sin número de teléfono",
+      "businessNumbersCustom": "Varios números dedicados",
+      "alertSmsSegments_one": "{{amount}} segmento de SMS de alerta",
+      "alertSmsSegments_many": "{{amount}} segmentos de SMS de alerta",
+      "alertSmsSegments_other": "{{amount}} segmentos de SMS de alerta",
+      "alertSmsSegmentsCustom": "Segmentos de SMS de alerta a medida",
+      "outboundCallAttempts_one": "{{amount}} intento de transferencia",
+      "outboundCallAttempts_many": "{{amount}} intentos de transferencia",
+      "outboundCallAttempts_other": "{{amount}} intentos de transferencia",
+      "outboundCallAttemptsCustom": "Intentos de transferencia a medida",
+      "chatAiUnits_one": "{{amount}} conversación de chat del sitio web",
+      "chatAiUnits_many": "{{amount}} conversaciones de chat del sitio web",
+      "chatAiUnits_other": "{{amount}} conversaciones de chat del sitio web",
+      "chatAiUnitsCustom": "Chat del sitio web a medida",
+      "knowledgeStorageMegabytes": "{{amount}} MB de base de conocimiento",
+      "knowledgeStorageGigabytes": "{{amount}} GB de base de conocimiento",
+      "knowledgeStorageCustom": "Base de conocimiento a medida"
+    }
   }
 }

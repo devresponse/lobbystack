@@ -18,6 +18,7 @@ const fixture = vi.hoisted(() => ({
   loadPackOffers: vi.fn(),
   loadBusinessPacks: vi.fn(),
   packCheckoutEligibility: vi.fn(),
+  planDisplay: null as Row | null,
 }));
 
 /** A transaction whose selects answer from the fixture by table, recording which tables were read. */
@@ -45,6 +46,7 @@ vi.mock("@lobbystack/domain", () => ({
   billingAccess: () => ({ hasBillingManagementAccess: fixture.admin, hasCustomerPortalAccess: false, hasCheckoutAccess: fixture.admin }),
   billingPlanList: () => ({ currency: "usd", plans: [] }),
   deploymentBrandCatalog: () => null,
+  deploymentPlanDisplay: () => fixture.planDisplay,
   getKnowledgeStorageUsageBytes: async () => 0,
   isLiveSubscriptionState: (state: string | null | undefined) => ["active", "trialing", "past_due"].includes(state ?? ""),
   isReplacedSubscription: (account: { subscriptionId: string | null; replacedSubscriptionId?: string | null } | null | undefined) => Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId,
@@ -69,7 +71,7 @@ const offer = (code: string, checkoutAvailable = true) => ({ code, names: { en: 
 const subscription = { source: "stripe", customerId: "cus_1", subscriptionId: "sub_1", plan: "starter", billingKey: "business:business", billingInterval: "monthly", subscriptionState: "active", currentPeriodStart: null, currentPeriodEnd: null, overageSpendingCapCents: null, cancelAt: new Date("2026-12-01T00:00:00.000Z"), nextPlanCode: "pro", nextInterval: "monthly", nextChangeAt: new Date("2026-12-01T00:00:00.000Z"), planCode: null, replacedSubscriptionId: null };
 
 beforeEach(() => {
-  Object.assign(fixture, { account: null, nextPlan: null, plan: "free_cloud", admin: true, packsConfigured: true, offers: [], packs: [], eligibility: { refusal: null, endsSubscription: null }, reads: [] });
+  Object.assign(fixture, { account: null, nextPlan: null, plan: "free_cloud", admin: true, packsConfigured: true, offers: [], packs: [], eligibility: { refusal: null, endsSubscription: null }, reads: [], planDisplay: null });
   fixture.loadPackOffers.mockImplementation(async (_tx: unknown, input: { checkout: boolean }) => fixture.offers.map((row) => ({ ...row, checkoutAvailable: input.checkout && row.checkoutAvailable === true })));
   fixture.loadBusinessPacks.mockImplementation(async () => fixture.packs);
   fixture.packCheckoutEligibility.mockImplementation(async () => fixture.eligibility);
@@ -140,5 +142,14 @@ describe("the billing summary's prepaid packs", () => {
     expect(account).not.toHaveProperty("replacedSubscriptionId");
     fixture.account = null;
     expect((await get()).account).toBeNull();
+  });
+});
+
+describe("the plan screens' words", () => {
+  it("answers the brand's display section for every member, and null for a brand without one", async () => {
+    expect(await get()).toMatchObject({ planDisplay: null });
+    fixture.planDisplay = { defaultInterval: "monthly", plans: [{ plan: "starter" }, { plan: "pro", popular: true }] };
+    fixture.admin = false;
+    expect((await get()).planDisplay).toEqual({ defaultInterval: "monthly", plans: [{ plan: "starter" }, { plan: "pro", popular: true }] });
   });
 });

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 
 import { billingAccounts, billingPlans, billingTransactions, billingUsageEvents } from "@lobbystack/db";
-import { billingAccess, billingPlanList, isLiveSubscriptionState, isReplacedSubscription, deploymentBrandCatalog, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPacks, loadBusinessPlanLimits, loadBusinessPromoPlan, loadPackOffers, loadPlanChangePayment, packCheckoutConfigured, packCheckoutEligibility, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap, type PackCheckoutEligibility } from "@lobbystack/domain";
+import { billingAccess, billingPlanList, isLiveSubscriptionState, isReplacedSubscription, deploymentBrandCatalog, deploymentPlanDisplay, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPacks, loadBusinessPlanLimits, loadBusinessPromoPlan, loadPackOffers, loadPlanChangePayment, packCheckoutConfigured, packCheckoutEligibility, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap, type PackCheckoutEligibility } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -37,6 +37,8 @@ export async function GET(request: Request) {
       // The plans as the catalog has them, or before an apply as the brand's billing.json sets them in this build. A price can be bought here when a Polar product sells it.
       const { catalog, links } = await loadBillingCatalog(tx, process.env);
       const plans = billingPlanList(catalog, { checkout: permissions.hasCheckoutAccess, links, brandCatalog: deploymentBrandCatalog() });
+      // The plan screens' words and layout from the brand's billing.json, which the build carries; null keeps the built-in ones.
+      const planDisplay = deploymentPlanDisplay();
       const availableCheckoutIntervals: HostedCheckoutPlanIntervals = { starter: [], pro: [] };
       for (const plan of hostedCheckoutPlanSlugs) {
         for (const interval of billingIntervals) {
@@ -59,7 +61,7 @@ export async function GET(request: Request) {
       const provider = billingProviderOf(process.env);
       // Cancel plan, Resume and Keep my plan, where the provider lets the app do them, for those who can buy plans.
       const planActions = permissions.hasCheckoutAccess && inAppPlanActions(provider);
-      return { provider, providerName: billingProviderNames[provider], planActions, cancelsAt, nextChange, paymentActionUrl, availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [], packOffers, packs, packCheckout };
+      return { provider, providerName: billingProviderNames[provider], planActions, cancelsAt, nextChange, paymentActionUrl, availableCheckoutPlans, availableCheckoutIntervals, plans, planDisplay, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [], packOffers, packs, packCheckout };
     }));
   } catch (error) {
     return asApiResponse(error);

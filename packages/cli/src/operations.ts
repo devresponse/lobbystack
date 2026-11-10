@@ -29,6 +29,8 @@ export type OperationSpec = {
   fixed?: Record<string, unknown>;
   /** Text fields that can also come from a file, as --content-file for content. */
   files?: string[];
+  /** Changes the body just before it's sent, as the catalog commands leave billing.json's display section out. */
+  prepare?(body: Row): Row;
   columns?: Column[];
   /** How people see one answer. Defaults to one line per field. */
   show?(data: Row): string;
@@ -207,9 +209,10 @@ export function operationCommand(path: string, spec: OperationSpec): Command {
       const idempotencyKey = typedKey ?? madeUpKey;
 
       const { client } = await context.connect();
+      const sent = takesBody && spec.prepare ? spec.prepare(body) : body;
       const call = async (callQuery: Record<string, string>) => await client.call(spec.operation as never, {
         ...(names.length ? { params } : {}),
-        ...(takesBody ? { body } : {}),
+        ...(takesBody ? { body: sent } : {}),
         ...(Object.keys(callQuery).length ? { query: callQuery } : {}),
         ...(idempotencyKey ? { idempotencyKey } : {}),
       } as never) as { data: unknown; next_cursor?: string | null; has_more?: boolean };

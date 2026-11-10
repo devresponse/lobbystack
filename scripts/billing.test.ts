@@ -365,6 +365,16 @@ describe("pnpm billing", () => {
     expect(context.fake.state.products.find((product) => product.name === "Pro monthly")!.prices.find((price) => price.amount_type === "fixed" && !price.is_archived)!.price_amount).toBe(12000);
   });
 
+  it("leaves billing.json's display section out of what it sends, so a deployment built before the section still takes the file", async () => {
+    const context = await setUp({ brand: "realinfobot" });
+    expect(JSON.parse(await readFile(join(root, "brands", "realinfobot", "billing.json"), "utf8"))).toHaveProperty("display");
+    const result = await billing(["plan", "--brand", "realinfobot", "--polar", "sandbox", "--json", "--adopt", "--allow-replace"], context);
+    expect(result.code).toBe(0);
+    const sent = context.instance.requests.flatMap((request) => (request.body && typeof request.body === "object" && "billing_file" in request.body ? [(request.body as { billing_file: object }).billing_file] : []));
+    expect(sent.length).toBeGreaterThan(0);
+    for (const file of sent) expect(file).not.toHaveProperty("display");
+  });
+
   it("asks before changing anything, and changes nothing on another answer", async () => {
     const context = await setUp();
     expect(await billing(["apply", ...sandbox, "--adopt", "--allow-replace"], context)).toMatchObject({ code: 2, err: "Add --yes to apply without a question." });

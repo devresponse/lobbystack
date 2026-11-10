@@ -6,13 +6,14 @@ import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { brandLinks, contactEmailFor, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, type BillingDisplay, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "@/components/billing-email-form";
 import { PackEndsPlanDialog, PackPicker } from "@/components/billing-packs";
+import { useBranding } from "@/components/branding-provider";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import { OnboardingPlanComparison } from "@/components/onboarding-plan-comparison";
@@ -20,6 +21,7 @@ import { PromoCodeEntry } from "@/components/promo-code-entry";
 import { useTelemetry } from "@/components/product-analytics";
 import { paidPackToastKey, usePackCheckout, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
+import { cardBullets, cardText, displayText, openingInterval, pageTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
 import type { BillingPackOfferViewModel, PackCheckoutViewModel } from "@/lib/page-view-models";
 import { cn } from "@/lib/utils";
 
@@ -27,14 +29,15 @@ type BillingInterval = "monthly" | "annual";
 type Plan = "free_cloud" | "starter" | "pro" | "enterprise";
 type Checkout = { id: string; status: string; checkoutUrl: string | null; error: string | null; refusal: PlanChangeRefusal | null };
 type CheckoutInput = { target: "starter" | "pro"; billingEmail?: string };
-type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList; packOffers?: BillingPackOfferViewModel[]; packCheckout?: PackCheckoutViewModel | null; limits?: { includedBusinessNumbers: number | null } };
+type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList; planDisplay?: BillingDisplay | null; packOffers?: BillingPackOfferViewModel[]; packCheckout?: PackCheckoutViewModel | null; limits?: { includedBusinessNumbers: number | null } };
 
-const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
-  { slug: "free_cloud", features: ["voiceMinutes", "receptionists", "bookingContacts", "support"] },
-  { slug: "starter", features: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"] },
-  { slug: "pro", highlight: true, features: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"] },
-  { slug: "enterprise", features: ["phoneNumbers", "customReceptionists", "selfHosted", "support"] },
-];
+// The built-in bullets, which a card shows when billing.json's display section gives it none.
+const builtInFeatures: Record<Plan, string[]> = {
+  free_cloud: ["voiceMinutes", "receptionists", "bookingContacts", "support"],
+  starter: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"],
+  pro: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"],
+  enterprise: ["phoneNumbers", "customReceptionists", "selfHosted", "support"],
+};
 
 const REPORTED_CHECKOUT_KEY = "lobbystack.onboarding.checkoutReported";
 
@@ -69,8 +72,10 @@ export function OnboardingPlanSurface() {
   const { t: billingT } = useTranslation("settings");
   const { navigate, navigating, router } = useStepNavigation();
   const telemetry = useTelemetry();
+  const { appName } = useBranding();
   const searchParams = useSearchParams();
-  const [interval, setInterval] = useState<BillingInterval>("annual");
+  // The tab the person picked; until then the plan step opens on billing.json's choice, else Annual.
+  const [chosenInterval, setChosenInterval] = useState<BillingInterval | null>(null);
   const [checkoutRequestId, setCheckoutRequestId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   // A checkout Polar couldn't make this business's customer for starts again with a billing email.
@@ -84,6 +89,14 @@ export function OnboardingPlanSurface() {
   const { business } = useActiveBusiness();
   const queryClient = useQueryClient();
   const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<BillingStatus>(billingUrl(business!.businessId)), enabled: Boolean(business) });
+  // The cards and their words: billing.json's display section, else the built-in four.
+  const display = billing.data?.planDisplay ?? null;
+  const cards = planCards(display);
+  const configuredIntervals = billing.data?.availableCheckoutIntervals;
+  // A tab for each interval a plan has a price for; where some tab can be bought, the one shown can.
+  const tabs = billing.data?.plans ? pricedIntervals(billing.data.plans, cards) : [];
+  const availableIntervals = tabs.filter(value => !configuredIntervals || configuredIntervals.starter.includes(value) || configuredIntervals.pro.includes(value));
+  const interval = shownInterval(chosenInterval ?? openingInterval(display), tabs, availableIntervals);
   const checkout = useQuery({
     queryKey: ["onboarding-checkout", business?.businessId, checkoutRequestId],
     queryFn: () => requestJson<Checkout>(`/api/billing/checkout?businessId=${encodeURIComponent(business!.businessId)}&requestId=${encodeURIComponent(checkoutRequestId!)}`),
@@ -195,12 +208,6 @@ export function OnboardingPlanSurface() {
     return () => window.removeEventListener("pageshow", onPageShow);
   }, []);
 
-  const configuredIntervals = billing.data?.availableCheckoutIntervals;
-  const availableIntervals = (["monthly", "annual"] as const).filter(value => !configuredIntervals || configuredIntervals.starter.includes(value) || configuredIntervals.pro.includes(value));
-  useEffect(() => {
-    if (availableIntervals.length && !availableIntervals.includes(interval)) setInterval(availableIntervals[0]!);
-  }, [availableIntervals, interval]);
-
   const pendingPlan = selectFree.isPending || navigating ? "free_cloud" : startCheckout.isPending || checkoutRequestId ? "paid" : packCheckout.pending ? "pack" : null;
 
   function act(plan: Plan) {
@@ -265,7 +272,14 @@ export function OnboardingPlanSurface() {
     </section>;
   }
   const locale = i18n.language;
+  const translate: PlanDisplayTranslate = (key, options) => t(key, options ?? {});
   const annualBadgeText = annualBadge(plans, (key, options) => t(key, options), "plan.billingInterval.freeMonths", "plan.billingInterval.save");
+  // The page's own words from billing.json print any plan's values, such as {{free_cloud.voiceMinutes}}.
+  const pageValues = display ? pageTextValues(plans, locale, translate, appName) : {};
+  const packText = (field: "title" | "description" | "button", builtIn: string) => {
+    const value = display?.packs?.[field];
+    return value ? displayText(value, locale, pageValues) : t(builtIn);
+  };
 
   return (
     <div className="flex flex-col gap-12">
@@ -273,38 +287,42 @@ export function OnboardingPlanSurface() {
       {packReturnId && packReturn.outcome === "processing" ? <div className="flex flex-col items-center gap-3 text-center" role="status"><p className="max-w-md text-sm leading-relaxed text-muted-foreground">{t("plan.packs.processing")}</p><Button className="rounded-full" onClick={packReturn.checkAgain} size="sm" type="button" variant="outline">{t("plan.packs.checkAgain")}</Button></div> : null}
       {packReturnFailed ? <FieldError className="text-center">{t(packReturnFailed === "refunded" ? "plan.packs.refunded" : "plan.packs.failed")}</FieldError> : null}
 
-      <div className="flex justify-center">
+      {/* No tab for an interval no plan has a price for, such as Annual where plans sell monthly only. */}
+      {tabs.length > 0 ? <div className="flex justify-center">
         {/* On a narrow phone the Annual tab puts its badge under its name, and wraps it if need be, rather than overflow the screen. */}
         <div aria-label={t("plan.billingInterval.label")} className="inline-flex max-w-full rounded-full border border-border bg-input/30 p-1" role="tablist">
-          {(["monthly", "annual"] as const).map((value) => <Button aria-selected={interval === value} className={cn("h-auto min-h-9 shrink flex-wrap gap-x-2 gap-y-0.5 whitespace-normal rounded-full px-3 py-1 sm:px-4", interval === value ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan) || (availableIntervals.length > 0 && !availableIntervals.includes(value))} key={value} onClick={() => setInterval(value)} role="tab" size="sm" type="button" variant="outline">{t(`plan.billingInterval.${value}`)}{value === "annual" && annualBadgeText !== null ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-center text-xs font-medium text-emerald-700">{annualBadgeText}</span> : null}</Button>)}
+          {tabs.map((value) => <Button aria-selected={interval === value} className={cn("h-auto min-h-9 shrink flex-wrap gap-x-2 gap-y-0.5 whitespace-normal rounded-full px-3 py-1 sm:px-4", interval === value ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan) || (availableIntervals.length > 0 && !availableIntervals.includes(value))} key={value} onClick={() => setChosenInterval(value)} role="tab" size="sm" type="button" variant="outline">{t(`plan.billingInterval.${value}`)}{value === "annual" && annualBadgeText !== null ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-center text-xs font-medium text-emerald-700">{annualBadgeText}</span> : null}</Button>)}
         </div>
-      </div>
+      </div> : null}
       {/* A promo link's code waits here from sign-up, filled in and checked. */}
       {business && billing.data?.checkoutAvailable ? <div className="-mt-6 flex justify-center"><PromoCodeEntry businessId={business.businessId} /></div> : null}
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-        {tiers.map((tier) => {
-          const paid = tier.slug === "starter" || tier.slug === "pro";
-          const busy = tier.slug === "free_cloud" ? pendingPlan === "free_cloud" : paid && pendingPlan === "paid";
-          const offer = findPlan(plans, tier.slug);
+      <div className={cn("grid gap-6", planCardColumns(cards.length))}>
+        {cards.map(({ plan: slug, popular, display: card }) => {
+          const paid = slug === "starter" || slug === "pro";
+          const busy = slug === "free_cloud" ? pendingPlan === "free_cloud" : paid && pendingPlan === "paid";
+          const offer = findPlan(plans, slug);
           const values = planValues(offer, plans.currency, locale);
           // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
           const monthly = paid ? monthlyPriceCents(offer, interval) : undefined;
-          const price = tier.slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : paid && !offer?.custom ? (monthly === undefined ? "—" : formatMoney(monthly, plans.currency, locale)) : t("plan.tiers.enterprise.price");
-          const description = paid ? t(`plan.tiers.${tier.slug}.description.${interval}`, { minutes: values.minutes }) : t(`plan.tiers.${tier.slug}.description`);
-          const cta = paid ? t(`plan.tiers.${tier.slug}.cta.${interval}`) : t(`plan.tiers.${tier.slug}.cta`);
-          return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", tier.highlight ? "border-foreground/30 shadow-sm" : "border-border/60")} key={tier.slug}>
-            {tier.highlight ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{t("plan.popular")}</div> : null}
-            <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{t(`plan.tiers.${tier.slug}.name`)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{price}</span><span className="text-sm text-muted-foreground">{t(`plan.tiers.${tier.slug}.period`)}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{description}</p></div>
-            <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || (paid && (!billing.data?.checkoutAvailable || (configuredIntervals && !configuredIntervals[tier.slug as "starter" | "pro"].includes(interval))))} onClick={() => act(tier.slug)} type="button" variant={tier.highlight ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{cta}<ArrowRight className="ml-1 size-4" /></>}</Button>
-            <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{tier.features.map((feature) => <li className="flex items-start gap-2.5 text-sm" key={feature}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{t(`plan.tiers.${tier.slug}.highlights.${feature}`, planStringValues(feature, values))}</span></li>)}</ul></div>
+          const price = slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : paid && !offer?.custom ? (monthly === undefined ? "—" : formatMoney(monthly, plans.currency, locale)) : t("plan.tiers.enterprise.price");
+          // billing.json's words for the card where it gives them, with this plan's values; the built-in words for the rest.
+          const textValues = card ? planTextValues(offer, plans.currency, locale, translate, appName) : {};
+          const description = card?.description ? cardText(card.description, interval, locale, textValues) : paid ? t(`plan.tiers.${slug}.description.${interval}`, { minutes: values.minutes }) : t(`plan.tiers.${slug}.description`);
+          const cta = card?.button ? cardText(card.button, interval, locale, textValues) : paid ? t(`plan.tiers.${slug}.cta.${interval}`) : t(`plan.tiers.${slug}.cta`);
+          const bullets = card?.bullets ? cardBullets(card.bullets, offer, plans.currency, locale, translate, textValues) : builtInFeatures[slug].map((feature) => t(`plan.tiers.${slug}.highlights.${feature}`, planStringValues(feature, values)));
+          return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", popular ? "border-foreground/30 shadow-sm" : "border-border/60")} key={slug}>
+            {popular ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{t("plan.popular")}</div> : null}
+            <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{t(`plan.tiers.${slug}.name`)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{price}</span><span className="text-sm text-muted-foreground">{t(`plan.tiers.${slug}.period`)}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{description}</p></div>
+            <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || (paid && (!billing.data?.checkoutAvailable || (configuredIntervals && !configuredIntervals[slug].includes(interval))))} onClick={() => act(slug)} type="button" variant={popular ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{cta}<ArrowRight className="ml-1 size-4" /></>}</Button>
+            <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{bullets.map((bullet, index) => <li className="flex items-start gap-2.5 text-sm" key={index}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{bullet}</span></li>)}</ul></div>
           </section>;
         })}
       </div>
       {selectedPack ? <section className="mx-auto flex w-full max-w-3xl flex-col gap-5 rounded-2xl border border-border/60 bg-background p-8">
-        <div><h3 className="font-heading text-lg font-semibold tracking-tight">{t("plan.packs.title")}</h3><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t("plan.packs.description")}</p></div>
+        <div><h3 className="font-heading text-lg font-semibold tracking-tight">{packText("title", "plan.packs.title")}</h3><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{packText("description", "plan.packs.description")}</p></div>
         <PackPicker disabled={Boolean(pendingPlan)} offers={packOffers} onChange={setChosenPack} value={selectedPack.code} />
         <div className="flex flex-col items-start gap-2">
-          <Button className="w-full rounded-full sm:w-auto" disabled={!business || Boolean(pendingPlan) || !selectedPack.checkoutAvailable} onClick={buyPack} type="button" variant="outline">{pendingPlan === "pack" ? <LoaderCircle className="size-4 animate-spin" /> : <>{t("plan.packs.cta")}<ArrowRight className="ml-1 size-4" /></>}</Button>
+          <Button className="w-full rounded-full sm:w-auto" disabled={!business || Boolean(pendingPlan) || !selectedPack.checkoutAvailable} onClick={buyPack} type="button" variant="outline">{pendingPlan === "pack" ? <LoaderCircle className="size-4 animate-spin" /> : <>{packText("button", "plan.packs.cta")}<ArrowRight className="ml-1 size-4" /></>}</Button>
           {selectedPack.checkoutAvailable ? null : <p className="text-sm text-muted-foreground">{packRefusal ? billingT(`billing.packs.refusals.${packRefusal}`) : billingT("billing.packs.unavailable")}</p>}
         </div>
         {packPrompt ? <BillingEmailForm key={packPrompt.pack} onCancel={packCheckout.dismissEmailPrompt} onSubmit={(billingEmail) => packCheckout.start(packPrompt.pack, billingEmail)} pending={pendingPlan === "pack"} refusal={packPrompt.refusal} refusedEmail={packPrompt.email} /> : null}
@@ -312,7 +330,7 @@ export function OnboardingPlanSurface() {
       </section> : null}
       {emailPrompt ? <div className="flex justify-center"><BillingEmailForm key={emailPrompt.target} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => startCheckout.mutate({ target: emailPrompt.target, billingEmail })} pending={pendingPlan === "paid"} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /></div> : null}
       {selectFree.isError || startCheckout.isError || checkoutError ? <FieldError>{selectFree.error?.message ?? startCheckout.error?.message ?? checkoutError ?? t("plan.continueFailed")}</FieldError> : null}
-      <OnboardingPlanComparison locale={locale} plans={plans} t={t} />
+      <OnboardingPlanComparison display={display} locale={locale} plans={plans} t={t} />
     </div>
   );
 }

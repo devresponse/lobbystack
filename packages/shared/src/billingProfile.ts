@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { billingPlanCatalog, MAX_PACK_DAYS, type BillingInterval, type BillingProvider } from "./billing";
+import { billingDisplaySchema, checkBillingDisplay } from "./billingDisplay";
 import type { InterfaceLocale } from "./locales";
 
 // brands/<brand>/billing.json: every plan a brand sells, standard or not, and
@@ -136,6 +137,9 @@ const billingProfileShape = z.strictObject({
   plans: z.object({ free_cloud: freePlan, starter: tierPlan, pro: tierPlan, enterprise: customPlan }).catchall(additionalPlan),
   // Prepaid packs by code; a file without the key sells none.
   packs: z.record(z.string(), pack).optional(),
+  // The plan screens' words and layout (billingDisplay.ts). It sells nothing:
+  // the hash, the apply and the stored profile leave it out.
+  display: billingDisplaySchema.optional(),
 });
 
 type ProfileShape = z.output<typeof billingProfileShape>;
@@ -204,6 +208,8 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
     if (Object.hasOwn(profile.plans, code)) packIssue([], "a plan already has this code");
   }
   packs.slice(MAX_BILLING_PACKS).forEach((code) => context.addIssue({ code: "custom", path: ["packs", code], message: `a file holds at most ${MAX_BILLING_PACKS} packs` }));
+  // C11: the display section's cards, rows and {{names}}.
+  if (profile.display) checkBillingDisplay(profile.display, { starter: profile.plans.starter.sold, pro: profile.plans.pro.sold }, (path, message) => context.addIssue({ code: "custom", path: ["display", ...path], message }));
   if (profile.stripe) {
     // C8: Managed Payments sells through Checkout alone, so overage can't be a subscription of its own.
     if (profile.stripe.managedPayments && profile.stripe.overage !== "checkout") context.addIssue({ code: "custom", path: ["stripe", "overage"], message: "with managedPayments, overage is checkout: Managed Payments sells only through Checkout" });
@@ -237,8 +243,8 @@ export function billingProfileForProvider<T extends Pick<z.output<typeof billing
 
 /** A billing.json as checked. */
 export type BillingProfile = z.output<typeof billingProfileSchema>;
-/** A checked file without its $schema, every object's keys in order. */
-export type NormalizedBillingProfile = Omit<BillingProfile, "$schema">;
+/** A checked file without its $schema and its display section, every object's keys in order. */
+export type NormalizedBillingProfile = Omit<BillingProfile, "$schema" | "display">;
 
 function sortedKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortedKeys);
@@ -251,13 +257,27 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortedKeys(value));
 }
 
-/** The checked file without $schema, keys in order: what a run stores and the profile hash covers. */
+/**
+ * The file as the billing commands send it to a deployment: without its
+ * display section, which sells nothing, so a deployment built before the
+ * section existed takes the file too.
+ */
+export function billingProfileWithoutDisplay<T extends { display?: unknown }>(profile: T): Omit<T, "display"> {
+  const { display: _screens, ...rest } = profile;
+  return rest;
+}
+
+/**
+ * The checked file without $schema and display, keys in order: what a run
+ * stores and the profile hash covers. Neither sells anything, so editing the
+ * plan screens' words never changes the hash, needs an apply or shows drift.
+ */
 export function normalizeBillingProfile(profile: BillingProfile): NormalizedBillingProfile {
-  const { $schema: _editorHint, ...rest } = profile;
+  const { $schema: _editorHint, display: _screens, ...rest } = profile;
   return sortedKeys(rest) as NormalizedBillingProfile;
 }
 
-/** The text the profile hash is the SHA-256 of. Whitespace, key order and $schema never change it. */
+/** The text the profile hash is the SHA-256 of. Whitespace, key order, $schema and display never change it. */
 export function canonicalBillingProfileJson(profile: BillingProfile): string {
   return canonicalJson(normalizeBillingProfile(profile));
 }

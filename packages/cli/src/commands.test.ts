@@ -436,6 +436,13 @@ describe("billing catalog", () => {
     expect(result.out).toContain(`--replaces-hash ${"b".repeat(64)}`);
   });
 
+  it("leaves billing.json's display section out of what it sends, since it sells nothing", async () => {
+    const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { body: { data: { ...run, id: null, status: "preview", prev_hash: "b".repeat(64), changes: [] } } } });
+    const file = { version: 1, currency: "cad", plans: {}, display: { defaultInterval: "monthly" } };
+    await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", JSON.stringify(file)], { fetch: api.fetch });
+    expect(api.sent[0]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: { version: 1, currency: "cad", plans: {} } });
+  });
+
   it("lists every refusal a preview found", async () => {
     const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { body: { data: { ...run, id: null, status: "preview", changes: [], blocked_by: [{ code: "file_not_deployed", message: "Deploy it first.", path: "billing_file" }] } } } });
     const result = await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", "{}"], { fetch: api.fetch });

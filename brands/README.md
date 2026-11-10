@@ -10,7 +10,7 @@ See [docs/branding.md](../docs/branding.md) for the fields and how a deployment 
 
 ## billing.json
 
-A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. It may also hold [prepaid packs](#prepaid-packs). `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
+A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. It may also hold [prepaid packs](#prepaid-packs), and the [words of the plan screens](#the-plan-screens-words). `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
 
 It also holds the settings of the billing providers its deployments use: the `polar` block and the `stripe` block ([Stripe billing](../docs/providers/stripe.md)). An apply refuses a file without the block of its deployment's provider. Once a Stripe deployment is linked, an apply refuses a change to `stripe.overage` or `managedPayments` (`selling_mode_changed`): its customers' subscriptions were made that way. AlloPlace's and RealInfoBot's `stripe` blocks sell with Stripe as the merchant of record (`managedPayments`, with `overage` on the plan's checkout), so their Stripe deployments sell monthly prices only, while their Polar deployments sell the yearly ones too.
 
@@ -60,6 +60,44 @@ A pack is voice minutes a business pays for once and uses within a number of day
 Once a pack has been bought, its minutes and length can't change: an apply refuses it (`plan_frozen`), so put new minutes or a new length under a new code. Its names, price, monthly allowances and limits may change. Any change but a name is new terms, which takes the pack off sale until `pnpm billing apply` has the provider sell them and links it again. Stripe never changes a price, so there new terms make a new price, and a pack already linked needs `--allow-archive` for the old price and `--allow-replace` to link the new one ([Stripe billing](../docs/providers/stripe.md#know-what-apply-makes-for-packs)); Polar keeps the pack's own product, with a new price on it when the price changes ([Polar billing](../docs/providers/polar.md#create-the-hosted-products)). To stop selling a pack, remove its entry: its row is retired, not deleted, and `pnpm billing apply` archives its provider object only with `--allow-archive`, refusing to run without it. Packs already bought keep their minutes, and a pack put back in the file gets its row, its price and its provider object back.
 
 `pnpm billing apply` makes each pack a product of its own at the provider, after everything the plans need, and links it: a one-time price on Stripe ([Stripe billing](../docs/providers/stripe.md#know-what-apply-makes-for-packs)), a private one-time product on Polar ([Polar billing](../docs/providers/polar.md#create-the-hosted-products)). A pack is on sale once that link has made it active. Deploy the code first: an instance built before migration `0148` refuses a file with `packs`. `lobbystack billing catalog` lists the packs with the plans.
+
+### The plan screens' words
+
+The optional `display` section holds the words and the layout of the onboarding plan step (`/onboarding/plan`) and of the **Upgrade plan** dialog the dashboard opens from Settings > Plan and elsewhere: which plans get a card and in what order, the popular one, the tab they open on, the cards' words and bullets, the comparison table and the prepaid packs' box. A file without it shows the built-in screens, and the screens use their built-in words for whatever it leaves out. RealInfoBot's starts as a copy of the built-in words, so its screens look as they did until someone edits it.
+
+It sells nothing. The file's hash, the apply, `pnpm billing verify` and the daily check leave it out, and `pnpm billing` and `lobbystack billing catalog-preview` and `catalog-apply` leave it out of what they send, so a deployment built before the section still takes the file. `pnpm brands:build` writes it into the code beside the plans, and `GET /api/billing` hands the deployment's own to the screens as `planDisplay`, so a change goes live with the next deploy, with no apply. The numbers always come from the plan list, the catalog's after an apply: a bullet or a row that names an allowance prints that plan's own, so an apply that changes it changes the screens too.
+
+```json
+"display": {
+  "defaultInterval": "annual",
+  "plans": [
+    { "plan": "free_cloud", "bullets": ["voiceMinutes", "receptionists", "businessNumbers", { "en": "Community support", "fr": "Support communautaire", "es": "Soporte de la comunidad", "sr": "Podrška zajednice" }] },
+    { "plan": "pro", "popular": true,
+      "description": { "en": "Includes {{voiceMinutes}} voice minutes, then {{voiceMinuteRate}} a minute.", "fr": "...", "es": "...", "sr": "..." },
+      "button": { "monthly": { "en": "Go Pro monthly", "fr": "...", "es": "...", "sr": "..." }, "annual": { "en": "Go Pro annual", "fr": "...", "es": "...", "sr": "..." } },
+      "bullets": ["voiceMinutes", "receptionists", "businessNumbers", "alertSmsSegments"] }
+  ],
+  "comparison": [
+    { "group": { "en": "Usage & limits", "fr": "...", "es": "...", "sr": "..." },
+      "rows": ["voiceMinutes", { "row": "outboundCallAttempts", "values": { "free_cloud": false } }, "contentRetention"] },
+    { "group": { "en": "Booking", "fr": "...", "es": "...", "sr": "..." },
+      "rows": [{ "label": { "en": "Appointment confirmation texts", "fr": "...", "es": "...", "sr": "..." }, "values": { "free_cloud": false, "pro": true } }] }
+  ]
+}
+```
+
+- `plans` lists the cards in their order, which is also the order of the comparison's columns: `free_cloud`, `starter`, `pro` or `enterprise`, each once. A plan left out gets neither a card nor a column. `popular` marks one card at most, with the badge on the card and its column. A Starter or Pro card needs the plan sold in the file; Free and Enterprise are never sold and may always have one.
+- A card's `description` and `button` are one text for both tabs, or a `monthly` and an `annual` one. Its `bullets`, 1 to 12, are each an allowance's name or a text.
+- An allowance's name prints the plan's number in the visitor's language with its plural: `voiceMinutes` (with the overage rate, and as browser minutes on a plan without a business number), `receptionists`, `businessNumbers` ("No telephone number" at 0), `alertSmsSegments`, `outboundCallAttempts` (transfer attempts), `chatAiUnits` (website chats) and `knowledgeStorage`. A custom allowance says so, as Enterprise's do.
+- `defaultInterval` is the tab the screens open on, `monthly` or `annual`, where a plan can be bought on it. A tab shows only where a plan with a card has a price for it, so a deployment selling monthly prices only, as on Stripe as the merchant of record, shows no Annual tab.
+- `comparison` lists the table's groups, up to 12, each with its `group` name and 1 to 40 `rows`. A row is a name the page fills, an allowance or `contentRetention` (how long transcripts and recordings are kept) or `shortCalls` (calls too short to bill), both from the code that enforces them; or such a name with its own `label` and some plans' `values`; or a row of the brand's own, a `label` with a value for every plan with a card. A value is `true`, `false`, `"unlimited"`, `"custom"`, `"multiple"` or a text. Without `comparison` the built-in table shows, with a column for each card, and an empty list shows no comparison. `comparisonTitle` and `comparisonIntro` replace the title and the line under it.
+- `packs` holds the `title`, `description` and `button` of the prepaid packs' box on the plan step.
+
+Every text has all four languages, `en`, `fr`, `es` and `sr`, up to 300 characters each. A text can print values as `{{name}}`. Text about one plan, its card and its cells, names them bare: its allowances, as above, its rates `voiceMinuteRate`, `alertSmsSegmentRate` and `outboundCallAttemptRate`, and `appName`. Text about the whole page, the group names, labels, title, intro and packs' box, names the plan first, such as `{{free_cloud.voiceMinutes}}`. A custom allowance prints the word for custom, and a rate the plan doesn't bill prints a dash.
+
+What stays in the code: the plans' names, Starter and Pro, which the checkout and receipts use; the prices, the Annual tab's badge and which intervals can be bought, from the plan list; "/mo", Enterprise's "Custom" price and its **Contact us** mail to the brand's sales address; and in the **Upgrade plan** dialog, the short line under each price and the buttons, which follow the business's current plan. The dialog shows the cards, their order, the popular one, the opening tab and the bullets from the section.
+
+`pnpm brands:build` refuses a section with a language missing, an unknown plan, allowance or field, a plan's second card, a second popular card, a Starter or Pro card the file doesn't sell, an unknown `{{name}}`, a value for a plan without a card, or a row of the brand's own without a value for a plan with a card.
 
 ### Promo codes
 

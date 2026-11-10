@@ -2,6 +2,7 @@
 // Every value has already passed the checks the matching environment variable
 // gets (branding.ts and brandLinks.ts), so code can use it as it stands.
 
+import type { BillingDisplay } from "../billingDisplay";
 import type { BillingPlanTier, ResolvedBillingPlan } from "../billingProfile";
 
 /** Settings for hosts whose first label matches a pattern, such as dev01 for "dev*". */
@@ -56,3 +57,6 @@ export type BrandIndex = {
   /** Apex domain, such as alloplace.com, to brand id. */
   domains: Record<string, string>;
 };
+
+/** A brand's billing.json display section: the plan screens' words and layout, which sell nothing. */
+export type BrandPlanDisplay = BillingDisplay;

@@ -25,15 +25,13 @@
       "limits": { "knowledgeStorageMb": 1, "businessNumbers": 0, "receptionists": 1 }
     },
     "starter": {
-      "sold": true,
-      "prices": { "monthlyCents": 3700, "annualCents": 37000 },
+      "sold": false,
       "included": { "voiceMinutes": 150, "alertSmsSegments": 50, "outboundCallAttempts": 20, "chatAiUnits": 50 },
       "limits": { "knowledgeStorageMb": 5, "businessNumbers": 1, "receptionists": 1 },
       "overageCents": { "voiceMinute": 20, "alertSmsSegment": 2, "outboundCallAttempt": 2 }
     },
     "pro": {
-      "sold": true,
-      "prices": { "monthlyCents": 8700, "annualCents": 87000 },
+      "sold": false,
       "included": { "voiceMinutes": 500, "alertSmsSegments": 200, "outboundCallAttempts": 100, "chatAiUnits": 200 },
       "limits": { "knowledgeStorageMb": 20, "businessNumbers": 1, "receptionists": 5 },
       "overageCents": { "voiceMinute": 18, "alertSmsSegment": 2, "outboundCallAttempt": 2 }
@@ -41,68 +39,50 @@
     "enterprise": { "sold": false, "custom": true }
   },
   "packs": {
-    "pack_250_90": {
-      "names": { "en": "250 minutes, 90 days", "fr": "250 minutes, 90 jours", "es": "250 minutos, 90 días", "sr": "250 minuta, 90 dana" },
+    "listing_1_180": {
+      "names": { "en": "Try it: 1 listing, 180 days", "fr": "Essai : 1 inscription, 180 jours", "es": "Prueba: 1 propiedad, 180 días", "sr": "Proba: 1 oglas, 180 dana" },
       "minutes": 250,
-      "days": 90,
-      "priceCents": 5500,
-      "limits": { "knowledgeStorageMb": 20 }
-    },
-    "pack_250_180": {
-      "names": { "en": "250 minutes, 180 days", "fr": "250 minutes, 180 jours", "es": "250 minutos, 180 días", "sr": "250 minuta, 180 dana" },
-      "minutes": 250,
-      "days": 180,
-      "priceCents": 5900,
-      "limits": { "knowledgeStorageMb": 20 }
-    },
-    "pack_250_365": {
-      "names": { "en": "250 minutes, 365 days", "fr": "250 minutes, 365 jours", "es": "250 minutos, 365 días", "sr": "250 minuta, 365 dana" },
-      "minutes": 250,
-      "days": 365,
-      "priceCents": 6500,
-      "limits": { "knowledgeStorageMb": 20 }
-    },
-    "pack_500_90": {
-      "names": { "en": "500 minutes, 90 days", "fr": "500 minutes, 90 jours", "es": "500 minutos, 90 días", "sr": "500 minuta, 90 dana" },
-      "minutes": 500,
-      "days": 90,
-      "priceCents": 9500,
-      "limits": { "knowledgeStorageMb": 20 }
-    },
-    "pack_500_180": {
-      "names": { "en": "500 minutes, 180 days", "fr": "500 minutes, 180 jours", "es": "500 minutos, 180 días", "sr": "500 minuta, 180 dana" },
-      "minutes": 500,
       "days": 180,
       "priceCents": 9900,
-      "limits": { "knowledgeStorageMb": 20 }
+      "included": { "alertSmsSegments": 50, "outboundCallAttempts": 20, "chatAiUnits": 50 },
+      "limits": { "knowledgeStorageMb": 20, "businessNumbers": 1, "receptionists": 1 }
     },
-    "pack_500_365": {
-      "names": { "en": "500 minutes, 365 days", "fr": "500 minutes, 365 jours", "es": "500 minutos, 365 días", "sr": "500 minuta, 365 dana" },
-      "minutes": 500,
+    "listings_3_365": {
+      "names": { "en": "3 listings, 365 days", "fr": "3 inscriptions, 365 jours", "es": "3 propiedades, 365 días", "sr": "3 oglasa, 365 dana" },
+      "minutes": 750,
       "days": 365,
-      "priceCents": 10900,
-      "limits": { "knowledgeStorageMb": 20 }
+      "priceCents": 24900,
+      "included": { "alertSmsSegments": 150, "outboundCallAttempts": 60, "chatAiUnits": 150 },
+      "limits": { "knowledgeStorageMb": 60, "businessNumbers": 1, "receptionists": 3 }
     },
-    "pack_1000_90": {
-      "names": { "en": "1,000 minutes, 90 days", "fr": "1 000 minutes, 90 jours", "es": "1.000 minutos, 90 días", "sr": "1.000 minuta, 90 dana" },
-      "minutes": 1000,
-      "days": 90,
-      "priceCents": 17900,
-      "limits": { "knowledgeStorageMb": 20 }
-    },
-    "pack_1000_180": {
-      "names": { "en": "1,000 minutes, 180 days", "fr": "1 000 minutes, 180 jours", "es": "1.000 minutos, 180 días", "sr": "1.000 minuta, 180 dana" },
-      "minutes": 1000,
-      "days": 180,
-      "priceCents": 18900,
-      "limits": { "knowledgeStorageMb": 20 }
-    },
-    "pack_1000_365": {
-      "names": { "en": "1,000 minutes, 365 days", "fr": "1 000 minutes, 365 jours", "es": "1.000 minutos, 365 días", "sr": "1.000 minuta, 365 dana" },
-      "minutes": 1000,
+    "listings_6_365": {
+      "names": { "en": "Pro: 6 listings, 365 days", "fr": "Pro : 6 inscriptions, 365 jours", "es": "Pro: 6 propiedades, 365 días", "sr": "Pro: 6 oglasa, 365 dana" },
+      "minutes": 1500,
       "days": 365,
-      "priceCents": 19900,
-      "limits": { "knowledgeStorageMb": 20 }
+      "priceCents": 44900,
+      "included": { "alertSmsSegments": 300, "outboundCallAttempts": 120, "chatAiUnits": 300 },
+      "limits": { "knowledgeStorageMb": 120, "businessNumbers": 1, "receptionists": 6 }
+    }
+  },
+  "display": {
+    "plans": [
+      {
+        "plan": "free_cloud",
+        "description": { "en": "Try {{appName}} with enough usage to see it work.", "fr": "Essayez {{appName}} avec assez d'utilisation pour le voir en action.", "es": "Pruebe {{appName}} con suficiente uso para verlo en acción.", "sr": "Isprobajte {{appName}} uz dovoljno potrošnje da vidite kako radi." },
+        "button": { "en": "Start free", "fr": "Commencer gratuitement", "es": "Empezar gratis", "sr": "Počnite besplatno" },
+        "bullets": [
+          "voiceMinutes",
+          "receptionists",
+          "businessNumbers",
+          { "en": "Community support", "fr": "Support communautaire", "es": "Soporte de la comunidad", "sr": "Podrška zajednice" }
+        ]
+      }
+    ],
+    "comparison": [],
+    "packs": {
+      "title": { "en": "Upgrade with a listing pack", "fr": "Passez à un pack d'inscriptions", "es": "Mejore con un paquete de propiedades", "sr": "Nadogradite uz dopunu za oglase" },
+      "description": { "en": "One payment, no subscription. Try it: 1 listing with 250 minutes for 180 days. Or 3 listings with 750 minutes, or 6 listings with 1,500 minutes, each good for 12 months.", "fr": "Un seul paiement, sans abonnement. Essai : 1 inscription avec 250 minutes pendant 180 jours. Ou 3 inscriptions avec 750 minutes, ou 6 inscriptions avec 1 500 minutes, valables 12 mois.", "es": "Un solo pago, sin suscripción. Prueba: 1 propiedad con 250 minutos durante 180 días. O 3 propiedades con 750 minutos, o 6 propiedades con 1.500 minutos, válidos por 12 meses.", "sr": "Jedno plaćanje, bez pretplate. Proba: 1 oglas sa 250 minuta na 180 dana. Ili 3 oglasa sa 750 minuta ili 6 oglasa sa 1.500 minuta, koji važe 12 meseci." },
+      "button": { "en": "Buy pack", "fr": "Acheter le pack", "es": "Comprar el paquete", "sr": "Kupi dopunu" }
     }
   }
 }

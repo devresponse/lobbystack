@@ -45,7 +45,7 @@ What it can't reach: OpenAI's own copy of each call's recording, kept 30 days; T
 | That password isn't right | Your sign-in password. The name stays typed and the password clears |
 | A phone number is still being set up | A number bought after the delete would belong to no business. Try again in a few minutes |
 | A call is in progress | Try again when it ends |
-| A plan purchase started less than an hour ago | Polar's checkout page stays payable for an hour, and a payment after the delete would buy a plan for a business that's gone |
+| A plan purchase started less than an hour ago | Polar's checkout page stays payable for an hour, and a payment after the delete would buy a plan for a business that's gone. A prepaid pack's payment page holds it the same way until the page expires, even once a plan's start closed the pack's checkout, since the page may still be paid |
 | The plan is billed outside the app | A plan the deployment's operator set by hand (`managed`). Support ends it first |
 | The plan is being canceled | The worker is canceling it. Try again in a moment |
 | The plan couldn't be canceled | The worker has tried for 10 minutes. Usually the worker's Polar token lacks `subscriptions:write`, which the worker's warning in PostHog says |

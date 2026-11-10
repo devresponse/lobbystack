@@ -1,5 +1,6 @@
 {
   "id": "7e2d4c6a-1b3f-4a5e-8d9c-0f1e2d3c4b5a",
+  "receptionist_id": "8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
   "channel": "phone",
   "status": "completed",
   "outcome": "appointment_booked",

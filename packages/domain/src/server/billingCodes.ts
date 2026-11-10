@@ -11,6 +11,7 @@ import {
   builtInBillingPlanLimits,
   discountedCents,
   isBillingCode,
+  isReplacedSubscription,
   isUuid,
   liveSubscriptionStates,
   normalizeBillingCode,
@@ -124,7 +125,10 @@ export async function billingCodeCheckout(tx: DatabaseTransaction, input: { busi
 }
 
 async function paysForPlan(tx: DatabaseTransaction, businessId: string, plan: string): Promise<boolean> {
-  const [account] = (await tx.execute<Row>(sql`select plan_code, subscription_state from public.billing_accounts where business_id = ${businessId}::uuid`)).rows;
+  const [account] = (await tx.execute<Row>(sql`select plan_code, subscription_state, subscription_id, replaced_subscription_id from public.billing_accounts where business_id = ${businessId}::uuid`)).rows;
+  // A subscription a pack's payment replaced is over for the business, though the provider may still call it live
+  // until its end lands, as app.billing_code_offers counts it (migration 0149).
+  if (isReplacedSubscription({ subscriptionId: textOrNull(account?.subscription_id), replacedSubscriptionId: textOrNull(account?.replaced_subscription_id) })) return false;
   return account?.plan_code === plan && (liveSubscriptionStates as readonly string[]).includes(String(account.subscription_state));
 }
 

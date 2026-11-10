@@ -4,6 +4,7 @@ import { withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/d
 import {
   billingIntervals,
   brandBillingPlans,
+  brandPlanDisplay,
   builtInBillingPlanLimits,
   builtInBillingPlanList,
   cloudBillingPlanSlugs,
@@ -11,6 +12,7 @@ import {
   hostedCheckoutPlanSlugs,
   perMonthCents,
   type ApiBillingPlans,
+  type BillingDisplay,
   type BillingInterval,
   type BillingPlanLimits,
   type BillingPlanLimitTable,
@@ -128,6 +130,18 @@ export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promi
   };
 }
 
+/**
+ * Whether a link ever recorded the provider's object for a prepaid pack's
+ * price, a retired price's too. A pack sells only through a linked price, so
+ * a deployment without one has sold no pack, and Stripe's webhook ignores the
+ * events only packs need and asks Stripe nothing about a dispute there. The
+ * app, the worker and the read-only role may read it; the dispatcher may not.
+ */
+export async function hasLinkedPackPrice(tx: DatabaseTransaction): Promise<boolean> {
+  const rows = (await tx.execute<Row>(sql`select exists (select 1 from public.billing_pack_prices where provider_ref is not null) as linked`)).rows;
+  return rows[0]?.linked === true;
+}
+
 /** Which Polar product sells a plan and interval, and which plan and interval a product sells. */
 export type PolarProductLinks = {
   productFor(plan: HostedCheckoutPlanSlug, interval: BillingInterval): string | null;
@@ -220,6 +234,16 @@ export function brandBillingCatalog(brandId: string): BillingCatalogSnapshot | n
 /** The catalog this deployment's brand file would apply: the plans it shows and enforces until its first apply. */
 export function deploymentBrandCatalog(): BillingCatalogSnapshot | null {
   return brandBillingCatalog(currentBrand().id);
+}
+
+/**
+ * The plan screens' words and layout from this deployment's brand file, as
+ * the build carries them: its display section, which never reaches the
+ * catalog, so it holds before and after an apply alike. Null for a brand
+ * whose file has none, whose screens keep their built-in words.
+ */
+export function deploymentPlanDisplay(): BillingDisplay | null {
+  return brandPlanDisplay(currentBrand().id);
 }
 
 /**

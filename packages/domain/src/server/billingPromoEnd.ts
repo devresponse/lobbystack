@@ -31,6 +31,8 @@ export type PromoEndFacts = {
   subscriptionState: string | null;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
+  /** A prepaid pack replaced the subscription, which LobbyStack treats as ended while the provider ends it. */
+  replaced?: boolean;
 };
 
 export type PromoEndStep =
@@ -50,7 +52,7 @@ export type PromoEndStep =
 /** What a promo plan's ending needs now. It is due a week before the renewal that ends it, and at once when an operator ended it. */
 export function promoEndStep(facts: PromoEndFacts, now = new Date()): PromoEndStep {
   if (!facts.planCode || facts.planCode === facts.plan || !facts.planEnds) return { due: false };
-  if (facts.source === MANAGED_BILLING_SOURCE || !isLiveSubscriptionState(facts.subscriptionState)) return { due: false };
+  if (facts.source === MANAGED_BILLING_SOURCE || !isLiveSubscriptionState(facts.subscriptionState) || facts.replaced) return { due: false };
   const ending = promoPlanEnding(facts.endWith, facts.planEnding);
   if (!ending) return { due: false };
   const endsAt = promoPlanEndRenewal(facts.planEnds, facts.currentPeriodEnd);
@@ -79,6 +81,8 @@ type AccountRow = {
   plan: string | null; plan_code: string | null; plan_ends: Date | string | null; end_with: string | null; end_notice_at: Date | string | null; end_set_at: Date | string | null;
   source: string | null; subscription_state: string | null; subscription_id: string | null; billing_interval: string | null;
   current_period_start: Date | string | null; current_period_end: Date | string | null; plan_ending: string | null;
+  /** The subscription a prepaid pack replaced is this one: it ends at the provider, never at a promo's renewal. */
+  replaced: boolean | null;
 };
 
 const dateOrNull = (value: Date | string | null | undefined): Date | null => value === null || value === undefined ? null : value instanceof Date ? value : new Date(value);
@@ -86,7 +90,8 @@ const dateOrNull = (value: Date | string | null | undefined): Date | null => val
 async function readPromoAccount(tx: DatabaseTransaction, businessId: string): Promise<AccountRow | undefined> {
   return (await tx.execute<AccountRow>(sql`
     select a.plan, a.plan_code, a.plan_ends, a.end_with, a.end_notice_at, a.end_set_at, a.source, a.subscription_state, a.subscription_id,
-      a.billing_interval, a.current_period_start, a.current_period_end, p.ends as plan_ending
+      a.billing_interval, a.current_period_start, a.current_period_end, p.ends as plan_ending,
+      a.replaced_subscription_id is not null and a.replaced_subscription_id = a.subscription_id as replaced
     from public.billing_accounts a
     left join public.billing_plans p on p.code = a.plan_code
     where a.business_id = ${businessId}::uuid`)).rows[0];
@@ -96,7 +101,7 @@ function factsOf(row: AccountRow): PromoEndFacts {
   return {
     plan: row.plan, planCode: row.plan_code, planEnds: dateOrNull(row.plan_ends), planEnding: row.plan_ending, endWith: row.end_with,
     endNoticeAt: dateOrNull(row.end_notice_at), endSetAt: dateOrNull(row.end_set_at), source: row.source, subscriptionState: row.subscription_state,
-    currentPeriodStart: dateOrNull(row.current_period_start), currentPeriodEnd: dateOrNull(row.current_period_end),
+    currentPeriodStart: dateOrNull(row.current_period_start), currentPeriodEnd: dateOrNull(row.current_period_end), replaced: row.replaced === true,
   };
 }
 
@@ -209,7 +214,7 @@ async function queuePromoEndNotice(
 export async function endPromoPlanInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<{ plan: string; ending: PromoPlanEnding; planEnds: Date } | null> {
   await lockBillingAccount(tx, input.businessId);
   const row = await readPromoAccount(tx, input.businessId);
-  if (!row?.plan_code || row.plan_code === row.plan || row.source === MANAGED_BILLING_SOURCE || !isLiveSubscriptionState(row.subscription_state)) return null;
+  if (!row?.plan_code || row.plan_code === row.plan || row.source === MANAGED_BILLING_SOURCE || !isLiveSubscriptionState(row.subscription_state) || row.replaced === true) return null;
   const ending = promoPlanEnding(row.end_with, row.plan_ending) ?? "tier";
   const now = new Date();
   const current = dateOrNull(row.plan_ends);

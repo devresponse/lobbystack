@@ -311,6 +311,30 @@ describe("v1 knowledge search", () => {
     expect(statements.some(value => value.includes("WITH reader AS ("))).toBe(true);
   });
 
+  it("answers as the receptionist named, with the text entries it may use, and says which one it ran as", async () => {
+    lexical = []; semantic = [];
+    const front = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e51";
+    const valet = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e52";
+    const each = { status: "active", listed: true, description: "", locale: null, greeting: null, voiceInstructions: null, smsInstructions: null, chatInstructions: null, bookingPolicy: null, bookingMode: "request", transferPolicy: null };
+    const shared = {
+      ...snapshot,
+      knowledgeSnippets: [{ id: "parking", title: "Parking", content: "Parking is free after 6 pm.", priority: 0 }, { id: "hours", title: "Hours", content: "Parking lot hours: open daily.", priority: 0 }],
+      receptionists: [{ ...each, id: front, name: "Front desk", isDefault: true, snippetIds: ["hours"] }, { ...each, id: valet, name: "Valet", isDefault: false, snippetIds: ["parking", "hours"] }],
+    };
+    const withReceptionists: DomainContext = { ...context(), snapshotCache: { get: vi.fn(async () => shared as never), set: vi.fn(async () => undefined) } };
+    const result = await searchKnowledgeForApi(withReceptionists, caller, { query: "parking", receptionist_id: valet }, { callAnswer: () => undefined });
+    expect(result.receptionist_id).toBe(valet);
+    // An id in capitals names the same receptionist.
+    expect((await searchKnowledgeForApi(withReceptionists, caller, { query: "parking", receptionist_id: valet.toUpperCase() }, { callAnswer: () => undefined })).receptionist_id).toBe(valet);
+    expect(result.receptionist_result.matches.map((match) => match.title)).toEqual(["Parking", "Hours"]);
+    // The documents come from the valet's reader.
+    expect(statements.some((value) => value.includes("WITH reader AS ("))).toBe(true);
+    // Without a name, the default answers, without the valet's entry.
+    const fallback = await searchKnowledgeForApi(withReceptionists, caller, { query: "parking" }, { callAnswer: () => undefined });
+    expect(fallback.receptionist_id).toBe(front);
+    expect(fallback.receptionist_result.matches.map((match) => match.title)).toEqual(["Hours"]);
+  });
+
   it("keeps the business's entries when the search finds nothing, and says when a call would get nothing", async () => {
     lexical = []; semantic = [];
     const empty = await searchKnowledgeForApi(withSnapshot(), caller, { query: "parking" }, { callAnswer: () => undefined });

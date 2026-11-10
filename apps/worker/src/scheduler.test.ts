@@ -19,9 +19,9 @@ describe("worker schedulers", () => {
 
     await configureSchedulers(queues, [{ id: "business-a", active: true }, { id: "business-b", active: true }]);
 
-    expect(upsertJobScheduler).toHaveBeenCalledTimes(28);
+    expect(upsertJobScheduler).toHaveBeenCalledTimes(30);
     const tenantCalls = upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId !== null);
-    expect(tenantCalls).toHaveLength(22);
+    expect(tenantCalls).toHaveLength(24);
     expect(tenantCalls.filter((call) => call[2].data.type === "api.retention")).toHaveLength(2);
     for (const call of tenantCalls) {
       expect(call[2].data.businessId).toMatch(/^business-[ab]$/);
@@ -60,10 +60,12 @@ describe("worker schedulers", () => {
       "outbox-backlog-sample:dormant",
     ]);
     const tenantTypes = upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId === "dormant").map((call) => call[2].data.type);
-    expect(tenantTypes).toHaveLength(9);
+    expect(tenantTypes).toHaveLength(10);
     expect(tenantTypes).toContain("privacy.scrubMessage");
     // A dormant business can still pay for a promo plan that ends.
     expect(upsertJobScheduler).toHaveBeenCalledWith("promo-plan-end:dormant", { every: 24 * 60 * 60_000 }, expect.anything());
+    // And still have a pack that ends, or reminders due before it does.
+    expect(upsertJobScheduler).toHaveBeenCalledWith("pack-expiry:dormant", { every: 24 * 60 * 60_000 }, expect.anything());
     expect(upsertJobScheduler).toHaveBeenCalledWith("telemetry-flush:dormant", { every: 60 * 60_000 }, expect.anything());
   });
 
@@ -78,6 +80,7 @@ describe("worker schedulers", () => {
       "live-orphan-recovery:closed",
       "operator-daily-summary:closed",
       "outbox-backlog-sample:closed",
+      "pack-expiry:closed",
       "promo-plan-end:closed",
       "usage-totals-check:closed",
     ]);
@@ -96,7 +99,7 @@ describe("worker schedulers", () => {
     await configureSchedulers(queues, [{ id: "closed", active: false, closed: true }], applied);
     upsertJobScheduler.mockClear();
     await configureSchedulers(queues, [{ id: "closed", active: true, closed: false }], applied);
-    expect(upsertJobScheduler.mock.calls.map((call) => call[0]).sort()).toEqual(["calendar-reconcile:closed", "operator-daily-summary:closed", "outbox-backlog-sample:closed", "promo-plan-end:closed", "telemetry-flush:closed", "usage-totals-check:closed"]);
+    expect(upsertJobScheduler.mock.calls.map((call) => call[0]).sort()).toEqual(["calendar-reconcile:closed", "operator-daily-summary:closed", "outbox-backlog-sample:closed", "pack-expiry:closed", "promo-plan-end:closed", "telemetry-flush:closed", "usage-totals-check:closed"]);
   });
 
   it("calls Redis on a refresh only for what changed", async () => {
@@ -123,6 +126,7 @@ describe("worker schedulers", () => {
     expect(removeJobScheduler.mock.calls.map((call) => call[0]).sort()).toEqual([
       "api-retention:b",
       "calendar-reconcile:b",
+      "pack-expiry:b",
       "pending-upload-cleanup:b",
       "phone-number-reclaim:b",
       "privacy-retention-sweep:b",

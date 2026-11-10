@@ -188,7 +188,7 @@ It ends with the address, and with any step still waiting for you. A **BY HAND**
 
 **Options:**
 
-- `--yes` doesn't stop at questions or at **BY HAND** steps. A step it didn't wait at isn't recorded as done: `up` lists it at the end, `status` shows it as `OPEN`, and it runs again, and waits, the next time you run without `--yes`. A value the script needs, such as a token, is still asked for.
+- `--yes` doesn't stop at questions or at **BY HAND** steps. A step it didn't wait at isn't recorded as done: `up` and `connect` list it at the end with the command that finishes it, `status` shows it as `OPEN`, and it runs again, and waits, the next time you run that command without `--yes`. A value the script needs, such as a token, is still asked for.
 - `--verbose` shows each API call.
 - `--dry-run` shows the steps and calls nothing.
 
@@ -420,12 +420,10 @@ Git ignores all of them. Once the environment works, copy the state and variable
 
 ## What isn't confirmed
 
-The real runs on 1 and 2 November 2026 settled how Railway behaves (templates, volumes that appear a few seconds late, the admin's address, custom domains and their records, variables that apply at once with no **Deploy** banner), Cloudflare's DNS and Turnstile updates, OpenAI's project and key, Twilio's subaccount and trunk, Resend's domain, `connect`, `pnpm billing` against Polar's sandbox, and a phone call answered through the trunk and the webhook. Not yet run against a real service:
+The real runs on 1 and 2 November 2026 settled how Railway behaves (templates, volumes that appear a few seconds late, the admin's address, custom domains and their records, variables that apply at once with no **Deploy** banner), Cloudflare's DNS and Turnstile updates, OpenAI's project and key, Twilio's subaccount and trunk, Resend's domain, `connect`, `pnpm billing` against Polar's sandbox, and a phone call answered through the trunk and the webhook. A fresh run on 5 November 2026 settled names taken from `APP_BASE_URL`, including the first Railway project with a dot in its name, and creating a Turnstile widget through Cloudflare's API. On 7 November 2026 that environment's number answered 10 scripted calls through the OpenAI project the script made, with the webhook made by hand in that project and no request to OpenAI support. Not yet run against a real service:
 
-- **Whether a project the script makes takes phone calls with no request to OpenAI.** On 2 November 2026 the first test calls rang unanswered: the webhook had been made in a different OpenAI project from the one the trunk sends calls to. With the deployment moved to the webhook's project, which was made by hand in OpenAI's dashboard, the next call was answered, with no request to OpenAI support. The project the script made never got a webhook, so it's untested.
 - **The checks added on 2 November 2026,** against the real services rather than stand-ins: the deployment-trigger warning (Railway's `deploymentTriggers` query was read once against a real project), the lock, the deleted-project stop, and the full names given to DNS records that Railway names relative to the zone.
-- **Names taken from `APP_BASE_URL`,** such as `demo.example.com`, on a fresh run. OpenAI, Twilio and Cloudflare already hold things named that way, but no Railway project has been made with a dot in its name. If Railway refuses one, the run stops at `railway.project` with Railway's message. The environment set up so far keeps the names it was made with.
 - **The variables step on a running deployment,** which sets only what differs and deploys the worker again for the admin's values. It uses the same two Railway calls as the one-off move of that environment to another OpenAI project on 2 November 2026, where the admin and the worker deployed again with the new key.
 - **Resend's field that limits a key to one domain** (`domain_id`). The environment set up so far took its sending key from its secrets file. If Resend refuses it, the run stops at `resend.key` with the workaround.
-- **Creating a Turnstile widget,** since that environment gave its keys, and **buying the toll-free number.**
+- **Buying the toll-free number.**
 - **`fullName`,** which turns Resend's record names into names in the zone. Check the email records in Cloudflare after the first run.

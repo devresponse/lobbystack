@@ -7,7 +7,7 @@ vi.mock("@lobbystack/db", async () => ({
   ...(await import("../packages/db/src/schema/index")), withBusinessTransaction: mocks.transaction,
   createDatabaseClient: vi.fn(),
 }));
-import { billingAccounts, messages, storageObjects, transcripts } from "@lobbystack/db";
+import { billingAccounts, billingPacks, messages, storageObjects, transcripts } from "@lobbystack/db";
 import { backfillContentRetention, parseContentRetentionArgs } from "./content-retention-backfill";
 
 const businessId = "00000000-0000-4000-8000-000000000001";
@@ -33,6 +33,8 @@ beforeEach(() => {
   limit = vi.fn().mockResolvedValue([{ id: rowId, createdAt: new Date("2019-01-01T00:00:00Z") }]);
   select = vi.fn(() => ({ from: (table: unknown) => ({ where: (predicate: SQL) => {
     predicates.push({ table, predicate });
+    // A Free business's plan in force reads its live prepaid packs too: it has none.
+    if (table === billingPacks) return { orderBy: () => Object.assign(Promise.resolve([]), { for: async () => [] }) };
     return { orderBy: () => ({ limit }), limit: async () => (table === billingAccounts ? [{ plan: accountPlan, subscriptionState: "active" }] : []) };
   } }) }));
   update = vi.fn((table: unknown) => ({ set: (value: unknown) => {

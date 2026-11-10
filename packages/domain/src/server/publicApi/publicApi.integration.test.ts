@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPackPlans, billingPacks, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, entryLinkDailyScans, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, unansweredQuestions, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiReceptionistProfileSchema, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiQrLinkDetailSchema, apiQrLinkSchema, apiReceptionistSchema, apiUnansweredQuestionSchema, apiWebsiteRuleSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
@@ -13,11 +13,12 @@ import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT, searchKnowledgeEvid
 import { defaultOperatorNotificationEventPreferences, getNotificationPreferences, setNotificationPreferences } from "../notifications";
 import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNumbers";
 import { acceptInvitation } from "../tenancy";
+import { recordUnansweredQuestion } from "../unansweredQuestions";
 import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
 import { searchKnowledgeForApi } from "./knowledgeSearch";
-import { cancelAppointmentForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, answerUnansweredQuestionForApi, dismissUnansweredQuestionForApi, listUnansweredQuestionsForApi, changeKnowledgeAudienceForApi, createWebsiteRuleForApi, deleteWebsiteRuleForApi, listWebsiteRulesForApi, createQrLinkForApi, getQrLinkForApi, listQrLinksForApi, updateQrLinkForApi, listCallsForApi, updatePhoneNumberForApi, changeReceptionistForApi, createReceptionistForApi, getReceptionistProfileForApi, listReceptionistsForApi, reorderReceptionistsForApi, updateReceptionistProfileForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -659,6 +660,320 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     }
   });
 
+  it("adds, changes, pauses, archives, restores, orders and makes default receptionists, within the plan's limit", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("receptionists");
+    const { caller } = fixture;
+    try {
+      // A Pro plan allows 5 active receptionists.
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      expect(front).toMatchObject({ is_default: true, status: "active", listed: true, phone_numbers: 0, widget_keys: 0, entry_links: 0, archived_at: null });
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic", description: "Our clinic on West 4th", locale: "fr" });
+      expect(kits).toMatchObject({ name: "Kitsilano clinic", description: "Our clinic on West 4th", handle: "kitsilano-clinic", is_default: false, status: "active", locale: "fr", knowledge_scope: "audience", listed: true });
+      expect(apiReceptionistProfileSchema.safeParse(kits).success).toBe(true);
+      expect(await getReceptionistProfileForApi(context, caller, kits.id)).toEqual(kits);
+      await expectApiError(createReceptionistForApi(context, caller, { name: "Another", handle: "kitsilano-clinic" }), 409, "conflict");
+
+      // Values it already has change nothing; a new name keeps the page address.
+      expect(await updateReceptionistProfileForApi(context, caller, kits.id, { name: "Kitsilano clinic" })).toEqual(kits);
+      expect(await updateReceptionistProfileForApi(context, caller, kits.id, { name: "West 4th clinic", listed: false })).toMatchObject({ name: "West 4th clinic", handle: "kitsilano-clinic", listed: false });
+      await expectApiError(updateReceptionistProfileForApi(context, caller, front!.id, { listed: false }), 409, "conflict");
+
+      // Pausing twice changes nothing; the default can't be paused, nor a paused one made the default.
+      expect(await changeReceptionistForApi(context, caller, kits.id, "pause")).toMatchObject({ status: "paused" });
+      expect(await changeReceptionistForApi(context, caller, kits.id, "pause")).toMatchObject({ status: "paused" });
+      await expectApiError(changeReceptionistForApi(context, caller, front!.id, "pause"), 409, "conflict");
+      await expectApiError(changeReceptionistForApi(context, caller, kits.id, "make_default"), 409, "conflict");
+      expect(await changeReceptionistForApi(context, caller, kits.id, "resume")).toMatchObject({ status: "active" });
+      expect(await changeReceptionistForApi(context, caller, kits.id, "make_default")).toMatchObject({ is_default: true, locale: null, knowledge_scope: "all" });
+      expect(await getReceptionistProfileForApi(context, caller, front!.id)).toMatchObject({ is_default: false });
+
+      // An archived receptionist lists apart and takes no change until it's restored.
+      expect(await changeReceptionistForApi(context, caller, front!.id, "archive")).toMatchObject({ archived_at: expect.any(String) });
+      expect(await changeReceptionistForApi(context, caller, front!.id, "archive")).toMatchObject({ archived_at: expect.any(String) });
+      expect((await listReceptionistsForApi(context, caller)).map((receptionist) => receptionist.id)).toEqual([kits.id]);
+      expect((await listReceptionistsForApi(context, caller, { archived: true })).map((receptionist) => receptionist.id)).toEqual([front!.id]);
+      await expectApiError(updateReceptionistProfileForApi(context, caller, front!.id, { name: "Back" }), 409, "conflict");
+      await expectApiError(changeReceptionistForApi(context, caller, front!.id, "pause"), 409, "conflict");
+      expect(await changeReceptionistForApi(context, caller, front!.id, "restore")).toMatchObject({ archived_at: null, status: "active" });
+
+      // The order names every receptionist that isn't archived, once.
+      // Lists put the default receptionist first; the positions keep the order sent.
+      const reordered = await reorderReceptionistsForApi(context, caller, { receptionist_ids: [front!.id, kits.id] });
+      expect(reordered.map((receptionist) => receptionist.id)).toEqual([kits.id, front!.id]);
+      expect(reordered[1]!.position).toBeLessThan(reordered[0]!.position);
+      await expectApiError(reorderReceptionistsForApi(context, caller, { receptionist_ids: [kits.id] }), 400, "invalid_request");
+      await expectApiError(getReceptionistProfileForApi(context, b.caller, kits.id), 404, "not_found");
+
+      // Each receptionist has its own greeting; the summary and the recording notice are the business's.
+      const frontSettings = await getReceptionistForApi(context, caller, { receptionistId: front!.id });
+      expect(frontSettings.receptionist_id).toBe(front!.id);
+      const kitsSettings = await updateReceptionistForApi(context, caller, { greeting: "Bonjour, clinique de Kitsilano.", recording_notice: false }, { receptionistId: kits.id });
+      expect(kitsSettings).toMatchObject({ receptionist_id: kits.id, greeting: "Bonjour, clinique de Kitsilano.", recording_notice: false });
+      expect(await getReceptionistForApi(context, caller, { receptionistId: front!.id })).toMatchObject({ greeting: frontSettings.greeting, recording_notice: false });
+      expect((await getReceptionistForApi(context, caller)).receptionist_id).toBe(kits.id);
+      await expectApiError(getReceptionistForApi(context, b.caller, { receptionistId: kits.id }), 404, "not_found");
+
+      // Who answers a number and a widget key: any receptionist that isn't archived.
+      const [number] = await admin!.db.insert(phoneNumbers).values({ businessId: fixture.businessId, e164: testNumber() }).returning({ id: phoneNumbers.id });
+      expect(await updatePhoneNumberForApi(context, caller, number!.id, { receptionist_id: front!.id })).toMatchObject({ id: number!.id, receptionist_id: front!.id });
+      expect((await listPhoneNumbersForApi(context, caller)).find((entry) => entry.id === number!.id)?.receptionist_id).toBe(front!.id);
+      expect(await getReceptionistProfileForApi(context, caller, front!.id)).toMatchObject({ phone_numbers: 1 });
+      await expectApiError(updatePhoneNumberForApi(context, caller, number!.id, { receptionist_id: randomUUID() }), 404, "not_found");
+      await expectApiError(updatePhoneNumberForApi(context, b.caller, number!.id, { receptionist_id: front!.id }), 404, "not_found");
+      const options = { appOrigin: "https://app.lobbystack.example" };
+      const widget = await createWidgetKeyForApi(context, caller, { allowed_origins: ["https://example.com"], receptionist_id: front!.id }, options);
+      expect(widget.receptionist_id).toBe(front!.id);
+      expect(await updateWidgetKeyForApi(context, caller, widget.id, { receptionist_id: kits.id }, options)).toMatchObject({ receptionist_id: kits.id });
+      expect(await updateWidgetKeyForApi(context, caller, widget.id, { receptionist_id: kits.id, label: "Clinic" }, options)).toMatchObject({ receptionist_id: kits.id, label: "Clinic" });
+      const archived = await createReceptionistForApi(context, caller, { name: "Old store" });
+      await changeReceptionistForApi(context, caller, archived.id, "archive");
+      await expectApiError(updateWidgetKeyForApi(context, caller, widget.id, { receptionist_id: archived.id }, options), 409, "conflict");
+
+      // Calls and messages name the receptionist that answered, and their lists filter by it.
+      await admin!.db.insert(calls).values([
+        { businessId: fixture.businessId, receptionistId: front!.id, providerCallId: randomUUID(), transport: "sip", startedAt: new Date(Date.now() - 60_000), endedAt: new Date() },
+        { businessId: fixture.businessId, receptionistId: kits.id, providerCallId: randomUUID(), transport: "sip", startedAt: new Date(Date.now() - 30_000), endedAt: new Date() },
+      ]);
+      const allCalls = await listCallsForApi(context, caller, {});
+      expect(allCalls.data.map((call) => call.receptionist_id).sort()).toEqual([front!.id, kits.id].sort());
+      expect((await listCallsForApi(context, caller, { receptionistId: kits.id })).data.map((call) => call.receptionist_id)).toEqual([kits.id]);
+      await admin!.db.insert(inboxItems).values({ businessId: fixture.businessId, receptionistId: kits.id, kind: "voice_message", status: "open", title: "Voice message", body: "Call me back" });
+      expect((await listMessagesForApi(context, caller, { receptionistId: kits.id })).data).toMatchObject([{ receptionist_id: kits.id }]);
+      expect((await listMessagesForApi(context, caller, { receptionistId: front!.id })).data).toEqual([]);
+
+      // The plan's 5 active receptionists: a sixth is refused.
+      for (const name of ["Gastown", "Yaletown", "Kerrisdale"]) await createReceptionistForApi(context, caller, { name });
+      await expectApiError(createReceptionistForApi(context, caller, { name: "Main Street" }), 409, "plan_limit_reached");
+      expect(await listReceptionistsForApi(context, caller)).toHaveLength(5);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
+    }
+  });
+
+  it("makes, lists, changes and pauses QR links, with their scans, as the QR code page does", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("qr-links");
+    const { caller } = fixture;
+    const options = { appOrigin: "https://app.lobbystack.example" };
+    try {
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic" });
+
+      // A link opens the receptionist it names, at the dashboard's /q/<code>.
+      const door = await createQrLinkForApi(context, caller, { receptionist_id: front!.id, label: "Front door" }, options);
+      expect(door).toMatchObject({ label: "Front door", status: "active", receptionist_id: front!.id, opens_receptionist_id: front!.id, scans_last_30_days: 0, scans_kept: 0, last_scanned_on: null, url: `https://app.lobbystack.example/q/${door.code}` });
+      expect(apiQrLinkSchema.safeParse(door).success).toBe(true);
+      const desk = await createQrLinkForApi(context, caller, { receptionist_id: kits.id }, options);
+      expect(desk).toMatchObject({ label: "", receptionist_id: kits.id, opens_receptionist_id: kits.id });
+      expect(await getReceptionistProfileForApi(context, caller, kits.id)).toMatchObject({ entry_links: 1 });
+      await expectApiError(createQrLinkForApi(context, caller, { receptionist_id: randomUUID() }, options), 404, "not_found");
+
+      // Newest first, and filtered by receptionist or status.
+      expect((await listQrLinksForApi(context, caller, {}, options)).map((link) => link.id)).toEqual([desk.id, door.id]);
+      expect((await listQrLinksForApi(context, caller, { receptionistId: front!.id }, options)).map((link) => link.id)).toEqual([door.id]);
+
+      // Scans are counted per UTC day; the detail lists the last 30 days unless asked for more.
+      const today = new Date().toISOString().slice(0, 10);
+      const fortyDaysAgo = new Date(Date.now() - 40 * 86_400_000).toISOString().slice(0, 10);
+      await admin!.db.insert(entryLinkDailyScans).values([{ businessId: fixture.businessId, entryLinkId: door.id, day: today, scans: 3 }, { businessId: fixture.businessId, entryLinkId: door.id, day: fortyDaysAgo, scans: 2 }]);
+      const detail = await getQrLinkForApi(context, caller, door.id, options);
+      expect(detail).toMatchObject({ scans_last_30_days: 3, scans_kept: 5, last_scanned_on: today, scans: [{ day: today, scans: 3 }] });
+      expect(apiQrLinkDetailSchema.safeParse(detail).success).toBe(true);
+      expect((await getQrLinkForApi(context, caller, door.id, { ...options, days: 60 })).scans).toEqual([{ day: fortyDaysAgo, scans: 2 }, { day: today, scans: 3 }]);
+
+      // Values it already has change nothing; a paused link, or one naming a paused receptionist, opens the default.
+      expect(await updateQrLinkForApi(context, caller, desk.id, { receptionist_id: kits.id, status: "active" }, options)).toEqual(desk);
+      const paused = await updateQrLinkForApi(context, caller, desk.id, { status: "paused", label: "Reception desk" }, options);
+      expect(paused).toMatchObject({ status: "paused", label: "Reception desk", code: desk.code, receptionist_id: kits.id, opens_receptionist_id: front!.id });
+      expect((await listQrLinksForApi(context, caller, { status: "paused" }, options)).map((link) => link.id)).toEqual([desk.id]);
+      const resumed = await updateQrLinkForApi(context, caller, desk.id, { status: "active" }, options);
+      expect(resumed.opens_receptionist_id).toBe(kits.id);
+      await changeReceptionistForApi(context, caller, kits.id, "pause");
+      expect((await getQrLinkForApi(context, caller, desk.id, options)).opens_receptionist_id).toBe(front!.id);
+      await changeReceptionistForApi(context, caller, kits.id, "resume");
+      const audits = await admin!.db.select({ eventType: auditLogs.eventType, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, fixture.businessId), eq(auditLogs.entityId, desk.id), eq(auditLogs.eventType, "api.qr_link.updated")));
+      expect(audits.map((row) => (row.payload as { fields: string[] }).fields)).toEqual(expect.arrayContaining([["label", "status"], ["status"]]));
+      expect(audits).toHaveLength(2);
+
+      // A link moves to another receptionist, keeping its code, but never to an archived one.
+      expect(await updateQrLinkForApi(context, caller, door.id, { receptionist_id: kits.id }, options)).toMatchObject({ code: door.code, receptionist_id: kits.id, opens_receptionist_id: kits.id });
+      const archived = await createReceptionistForApi(context, caller, { name: "Old store" });
+      await changeReceptionistForApi(context, caller, archived.id, "archive");
+      await expectApiError(updateQrLinkForApi(context, caller, door.id, { receptionist_id: archived.id }, options), 404, "not_found");
+      await expectApiError(createQrLinkForApi(context, caller, { receptionist_id: archived.id }, options), 404, "not_found");
+      await expectApiError(updateQrLinkForApi(context, caller, door.id, {}, options), 400, "invalid_request");
+
+      // Another business's key sees none of it.
+      await expectApiError(getQrLinkForApi(context, b.caller, door.id, options), 404, "not_found");
+      await expectApiError(updateQrLinkForApi(context, b.caller, door.id, { label: "Mine" }, options), 404, "not_found");
+      expect(await listQrLinksForApi(context, b.caller, {}, options)).toEqual([]);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
+    }
+  });
+
+  it("chooses who knowledge is for, one at a time or in bulk, and gives a website's pages under a path to a receptionist", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("audience");
+    const { caller } = fixture;
+    try {
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic" });
+      const valet = await createReceptionistForApi(context, caller, { name: "Valet" });
+      const archived = await createReceptionistForApi(context, caller, { name: "Old store" });
+      await changeReceptionistForApi(context, caller, archived.id, "archive");
+
+      // An entry is for everyone unless audience chosen names receptionists, in any letter case.
+      const parking = await createKnowledgeEntryForApi(context, caller, { type: "text", title: "Parking", content: "Valet at the door.", audience: "chosen", receptionist_ids: [valet.id.toUpperCase()] });
+      expect(parking).toMatchObject({ audience: "chosen", receptionist_ids: [valet.id] });
+      expect(apiKnowledgeEntrySchema.safeParse(parking).success).toBe(true);
+      const hours = await createKnowledgeEntryForApi(context, caller, { type: "faq", question: "When are you open?", answer: "Daily." });
+      expect(hours).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "chosen" }), 400, "invalid_request");
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", receptionist_ids: [kits.id] }), 400, "invalid_request");
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "everyone", receptionist_ids: [kits.id] }), 400, "invalid_request");
+      // A refused receptionist leaves no entry behind.
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "chosen", receptionist_ids: [randomUUID()] }), 404, "not_found");
+      await expectApiError(createKnowledgeEntryForApi(context, caller, { type: "text", title: "T", content: "C", audience: "chosen", receptionist_ids: [archived.id] }), 409, "conflict");
+      expect((await listKnowledgeEntriesForApi(context, caller, {})).data.map((entry) => [entry.id, entry.audience, entry.receptionist_ids])).toEqual([[hours.id, "everyone", []], [parking.id, "chosen", [valet.id]]]);
+
+      // Who an entry is for changes like its other fields: the same choice again writes nothing.
+      expect((await updateKnowledgeEntryForApi(context, caller, parking.id, { audience: "chosen", receptionist_ids: [kits.id, valet.id] })).receptionist_ids.sort()).toEqual([kits.id, valet.id].sort());
+      expect((await updateKnowledgeEntryForApi(context, caller, parking.id, { audience: "chosen", receptionist_ids: [valet.id, kits.id] })).receptionist_ids.sort()).toEqual([kits.id, valet.id].sort());
+      expect(await updateKnowledgeEntryForApi(context, caller, parking.id, { audience: "everyone" })).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+      const entryAudits = await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.entityId, parking.id), eq(auditLogs.eventType, "api.knowledge.updated")));
+      expect(entryAudits.map((row) => (row.payload as { fields: string[] }).fields)).toEqual([["audience"], ["audience"]]);
+
+      // Sources: a website, the pages its crawl read, and who each is for.
+      const site = await createKnowledgeSourceForApi(context, caller, { type: "website", url: "https://maple-audience.example" });
+      expect(site).toMatchObject({ type: "website", audience: "everyone", receptionist_ids: [] });
+      const [kitsPage, aboutPage, valetPage] = await admin!.db.insert(knowledgeDocuments).values([
+        { businessId: fixture.businessId, sourceType: "website", title: "Kitsilano hours", sourceUrl: "https://maple-audience.example/stores/kitsilano/hours", status: "indexed" },
+        { businessId: fixture.businessId, sourceType: "website", title: "About", sourceUrl: "https://maple-audience.example/about", status: "indexed" },
+        { businessId: fixture.businessId, sourceType: "website", title: "Valet desk", sourceUrl: "https://maple-audience.example/valet/desk", status: "indexed" },
+      ]).returning({ id: knowledgeDocuments.id });
+      expect(await updateKnowledgeSourceForApi(context, caller, aboutPage!.id, { audience: "chosen", receptionist_ids: [kits.id] })).toMatchObject({ type: "page", active: true, audience: "chosen", receptionist_ids: [kits.id] });
+      expect(apiKnowledgeSourceSchema.safeParse(await getKnowledgeSourceForApi(context, caller, aboutPage!.id)).success).toBe(true);
+      await expectApiError(updateKnowledgeSourceForApi(context, caller, aboutPage!.id, {}), 400, "invalid_request");
+
+      // In bulk: replace by default; add only to those already chosen; remove from one for everyone leaves the rest.
+      expect(await changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id, randomUUID()], source_ids: [site.id], audience: "chosen", receptionist_ids: [valet.id] })).toEqual({ entries: 1, sources: 1 });
+      expect(await getKnowledgeEntryForApi(context, caller, hours.id)).toMatchObject({ audience: "chosen", receptionist_ids: [valet.id] });
+      expect(await changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id, parking.id], audience: "chosen", mode: "add", receptionist_ids: [kits.id] })).toEqual({ entries: 2, sources: 0 });
+      expect((await getKnowledgeEntryForApi(context, caller, hours.id)).receptionist_ids.sort()).toEqual([kits.id, valet.id].sort());
+      expect(await getKnowledgeEntryForApi(context, caller, parking.id)).toMatchObject({ audience: "everyone" });
+      await changeKnowledgeAudienceForApi(context, caller, { entry_ids: [parking.id], audience: "chosen", mode: "remove", receptionist_ids: [valet.id] });
+      expect((await getKnowledgeEntryForApi(context, caller, parking.id)).receptionist_ids.sort()).toEqual([front!.id, kits.id].sort());
+      expect(await changeKnowledgeAudienceForApi(context, caller, { source_ids: [site.id], audience: "everyone" })).toEqual({ entries: 0, sources: 1 });
+      await expectApiError(changeKnowledgeAudienceForApi(context, caller, { audience: "everyone" }), 400, "invalid_request");
+      await expectApiError(changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id], audience: "everyone", mode: "add" }), 400, "invalid_request");
+      await expectApiError(changeKnowledgeAudienceForApi(context, caller, { entry_ids: [hours.id], audience: "chosen", mode: "add", receptionist_ids: [archived.id] }), 409, "conflict");
+      // Another business's key changes nothing of this one's.
+      expect(await changeKnowledgeAudienceForApi(context, b.caller, { entry_ids: [hours.id], audience: "everyone" })).toEqual({ entries: 0, sources: 0 });
+      expect(await getKnowledgeEntryForApi(context, caller, hours.id)).toMatchObject({ audience: "chosen" });
+
+      // A website rule gives the site's pages under a path to a receptionist, now and on every crawl.
+      const rule = await createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "stores/kitsilano", receptionist_id: kits.id });
+      expect(rule).toMatchObject({ source_id: site.id, path_prefix: "/stores/kitsilano/", receptionist_id: kits.id, pages: 1 });
+      expect(apiWebsiteRuleSchema.safeParse(rule).success).toBe(true);
+      expect(await getKnowledgeSourceForApi(context, caller, kitsPage!.id)).toMatchObject({ audience: "chosen", receptionist_ids: [kits.id] });
+      const valetRule = await createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "https://maple-audience.example/valet/", receptionist_id: valet.id });
+      expect(valetRule).toMatchObject({ path_prefix: "/valet/", pages: 1 });
+      expect(await listWebsiteRulesForApi(context, caller)).toEqual([rule, valetRule]);
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "/stores/kitsilano/", receptionist_id: kits.id }), 409, "conflict");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "/stores/", receptionist_id: archived.id }), 409, "conflict");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: aboutPage!.id, path_prefix: "/", receptionist_id: kits.id }), 400, "invalid_request");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: site.id, path_prefix: "/stores?id=1", receptionist_id: kits.id }), 400, "invalid_request");
+      await expectApiError(createWebsiteRuleForApi(context, caller, { source_id: randomUUID(), path_prefix: "/", receptionist_id: kits.id }), 404, "not_found");
+      await expectApiError(createWebsiteRuleForApi(context, b.caller, { source_id: site.id, path_prefix: "/", receptionist_id: kits.id }), 404, "not_found");
+
+      // Sending back what GET shows changes nothing, whether a rule chose the receptionist or someone did;
+      // a replace in bulk makes the rule's choice someone's own, which stays when the rule goes,
+      // and a page only the rule chose goes back to everyone.
+      const shown = await getKnowledgeSourceForApi(context, caller, kitsPage!.id);
+      expect(await updateKnowledgeSourceForApi(context, caller, kitsPage!.id, { active: true, audience: shown.audience, receptionist_ids: shown.receptionist_ids })).toEqual(shown);
+      expect(await changeKnowledgeAudienceForApi(context, caller, { source_ids: [kitsPage!.id], audience: "chosen", receptionist_ids: [kits.id] })).toEqual({ entries: 0, sources: 1 });
+      expect(await deleteWebsiteRuleForApi(context, caller, rule.id)).toBeUndefined();
+      expect(await getKnowledgeSourceForApi(context, caller, kitsPage!.id)).toMatchObject({ audience: "chosen", receptionist_ids: [kits.id] });
+      await deleteWebsiteRuleForApi(context, caller, valetRule.id);
+      expect(await getKnowledgeSourceForApi(context, caller, valetPage!.id)).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+      expect(await listWebsiteRulesForApi(context, caller)).toEqual([]);
+      await expectApiError(deleteWebsiteRuleForApi(context, caller, rule.id), 404, "not_found");
+      expect(await listWebsiteRulesForApi(context, b.caller)).toEqual([]);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
+    }
+  });
+
+  it("lists, answers and dismisses unanswered questions as the Questions page does, a page at a time", async () => {
+    const context = { db: worker!.db };
+    const fixture = await createFixture("questions");
+    const { caller } = fixture;
+    try {
+      await admin!.db.insert(billingAccounts).values({ businessId: fixture.businessId, billingKey: `business:${fixture.businessId}`, plan: "pro", subscriptionState: "active", source: "polar" });
+      const [front] = await listReceptionistsForApi(context, caller);
+      const kits = await createReceptionistForApi(context, caller, { name: "Kitsilano clinic" });
+      const valet = await createReceptionistForApi(context, caller, { name: "Valet" });
+      const now = Date.now();
+      // Gift cards asked at two stores, however it's written; parking at one; wifi of the valet.
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "Do you sell gift cards?", channel: "voice", receptionistId: kits.id, now: new Date(now - 60_000) });
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "do you sell GIFT cards", channel: "web_chat", now: new Date(now - 30_000) });
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "Is there parking?", channel: "voice", receptionistId: kits.id, now: new Date(now - 20_000) });
+      await recordUnansweredQuestion(context, { businessId: fixture.businessId, question: "Do you have wifi?", channel: "web_voice", receptionistId: valet.id, now: new Date(now - 10_000) });
+
+      // Most asked first, then the latest, a page at a time.
+      const first = await listUnansweredQuestionsForApi(context, caller, { limit: 2 });
+      expect(first.data.map((question) => question.question)).toEqual(["Do you sell gift cards?", "Do you have wifi?"]);
+      expect(first.data[0]).toMatchObject({ times_asked: 2, last_channel: "web_chat", last_call_id: null, last_conversation_id: null });
+      expect(first.data[0]!.asked_of.map((asker) => [asker.receptionist_id, asker.archived, asker.times_asked])).toEqual([[front!.id, false, 1], [kits.id, false, 1]]);
+      expect(apiUnansweredQuestionSchema.safeParse(first.data[0]).success).toBe(true);
+      expect(first.has_more).toBe(true);
+      const second = await listUnansweredQuestionsForApi(context, caller, { limit: 2, cursor: first.next_cursor! });
+      expect(second).toMatchObject({ has_more: false, next_cursor: null });
+      expect(second.data.map((question) => question.question)).toEqual(["Is there parking?"]);
+      expect((await listUnansweredQuestionsForApi(context, caller, { receptionistId: kits.id })).data.map((question) => question.question)).toEqual(["Do you sell gift cards?", "Is there parking?"]);
+      expect((await listUnansweredQuestionsForApi(context, b.caller, {})).data).toEqual([]);
+      await expectApiError(listUnansweredQuestionsForApi(context, caller, { limit: 51 }), 400, "invalid_request");
+      await expect(listUnansweredQuestionsForApi(context, caller, { limit: 150 })).rejects.toMatchObject({ message: "limit must be an integer from 1 to 50." });
+      await expectApiError(listUnansweredQuestionsForApi(context, caller, { cursor: "nope" }), 400, "invalid_request");
+
+      // An answer becomes a text entry titled with the question; asked keeps it to the receptionists that heard it.
+      const [gift, wifi] = first.data;
+      const parking = second.data[0]!;
+      const entry = await answerUnansweredQuestionForApi(context, caller, gift!.id, { answer: "  Yes, at the front desk.  ", audience: "asked" });
+      expect(entry).toMatchObject({ type: "text", title: "Do you sell gift cards?", content: "Yes, at the front desk.", audience: "chosen" });
+      expect(entry.receptionist_ids.sort()).toEqual([front!.id, kits.id].sort());
+      expect(apiKnowledgeEntrySchema.safeParse(entry).success).toBe(true);
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, gift!.id, { answer: "Again" }), 409, "conflict");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes", audience: "asked", receptionist_ids: [kits.id] }), 400, "invalid_request");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes", audience: "chosen" }), 400, "invalid_request");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "   " }), 400, "invalid_request");
+      // Asked only of a receptionist since archived, asked has no one left to answer for.
+      await changeReceptionistForApi(context, caller, valet.id, "archive");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes", audience: "asked" }), 409, "conflict");
+      expect(await answerUnansweredQuestionForApi(context, caller, wifi!.id, { answer: "Yes, ask for the code.", audience: "chosen", receptionist_ids: [kits.id] })).toMatchObject({ audience: "chosen", receptionist_ids: [kits.id] });
+
+      // Dismissed, a question leaves the list; another business's key can't reach it.
+      await expectApiError(dismissUnansweredQuestionForApi(context, b.caller, parking.id), 404, "not_found");
+      expect(await dismissUnansweredQuestionForApi(context, caller, parking.id)).toBeUndefined();
+      await expectApiError(dismissUnansweredQuestionForApi(context, caller, parking.id), 409, "conflict");
+      await expectApiError(answerUnansweredQuestionForApi(context, caller, randomUUID(), { answer: "Yes" }), 404, "not_found");
+      expect((await listUnansweredQuestionsForApi(context, caller, {})).data).toEqual([]);
+      const statuses = await admin!.db.select({ status: unansweredQuestions.status }).from(unansweredQuestions).where(eq(unansweredQuestions.businessId, fixture.businessId));
+      expect(statuses.map((row) => row.status).sort()).toEqual(["answered", "answered", "dismissed"]);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, fixture.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, fixture.businessId));
+    }
+  });
+
   it("reads and changes the receptionist, refreshing the snapshot only when something changes", async () => {
     const context = { db: worker!.db };
     const before = await getReceptionistForApi(context, a.caller);
@@ -959,6 +1274,35 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     }
   });
 
+  it("lists a business's prepaid packs in its billing, with the prepaid tier while one has time left", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-packs-${businessId}`, name: "Packs test", timezone: "UTC", businessType: "test" });
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
+    const generated = generateApiKey();
+    const [key] = await admin!.db.insert(apiKeys).values({ businessId, name: "billing", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["billing:manage"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: key!.id };
+    try {
+      // A business that never bought one reads as before, with an empty list.
+      const none = await getBillingForApi(context, caller);
+      expect(none).toMatchObject({ plan: "free_cloud", packs: [] });
+      expect(apiBillingSchema.safeParse(none).success).toBe(true);
+      await admin!.db.insert(billingPackPlans).values({ code: "pack_api_test", status: "active", names: { en: "API test pack", fr: "API test pack", es: "API test pack", sr: "API test pack" }, voiceSec: 30_000, days: 90, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, termsHash: "0".repeat(64) }).onConflictDoNothing();
+      const paidAt = new Date(Date.now() - 86_400_000);
+      await admin!.db.insert(billingPacks).values({ businessId, pack: "pack_api_test", days: 90, provider: "stripe", providerRef: `pi_${randomUUID()}`, amountCents: 10_450, currency: "cad", secondsTotal: 30_000, secondsUsed: 600, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, paidAt, endsAt: new Date(paidAt.getTime() + 90 * 86_400_000) });
+      const held = await getBillingForApi(context, caller);
+      expect(held).toMatchObject({ plan: "prepaid", billing_interval: null, spending_cap_cents: null, packs: [{ pack: "pack_api_test", status: "active", seconds_total: 30_000, seconds_used: 600, seconds_left: 29_400, days: 90, currency: "cad", amount_cents: 10_450, refunded_cents: 0, ended_at: null, names: { en: "API test pack" } }] });
+      expect(apiBillingSchema.safeParse(held).success).toBe(true);
+      // A monthly subscription the pack replaced counts as ended while the provider ends it.
+      await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", plan: "starter", subscriptionId: "sub_replaced", subscriptionState: "active", billingInterval: "monthly", replacedSubscriptionId: "sub_replaced", cancelAt: new Date(Date.now() + 86_400_000) });
+      expect(await getBillingForApi(context, caller)).toMatchObject({ plan: "prepaid", subscription_state: null, cancels_at: null, payment_action_url: null });
+    } finally {
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+      // The catalog tests read every pack on sale, so the test's own goes once its business took its packs with it.
+      await admin!.db.delete(billingPackPlans).where(eq(billingPackPlans.code, "pack_api_test"));
+    }
+  });
+
   it("reads billing, keeps a managed plan apart from Polar, and makes checkouts out to the business's own owner", async () => {
     const context = { db: worker!.db };
     // A business of its own, owned at first by the operator, as a platform key's businesses start out.
@@ -987,6 +1331,10 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       const ending = await getBillingForApi(context, caller);
       expect(ending).toMatchObject({ cancels_at: "2026-12-01T00:00:00.000Z", next_change: null, provider: "polar", provider_name: "Polar" });
       expect(apiBillingSchema.safeParse(ending).success).toBe(true);
+      // A subscription a prepaid pack replaced ends at the provider shortly, so its own end date doesn't show.
+      await admin!.db.update(billingAccounts).set({ subscriptionId: "sub_replaced", replacedSubscriptionId: "sub_replaced" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await getBillingForApi(context, caller)).toMatchObject({ cancels_at: null, next_change: null });
+      await admin!.db.update(billingAccounts).set({ subscriptionId: null, replacedSubscriptionId: null }).where(eq(billingAccounts.businessId, businessId));
       await admin!.db.update(billingAccounts).set({ subscriptionState: "canceled" }).where(eq(billingAccounts.businessId, businessId));
       expect(await getBillingForApi(context, caller)).toMatchObject({ cancels_at: null });
       await admin!.db.update(billingAccounts).set({ cancelAt: null }).where(eq(billingAccounts.businessId, businessId));

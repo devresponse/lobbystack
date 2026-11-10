@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
-import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
+import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingPackCheckouts, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isReplacedSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 
@@ -15,6 +15,9 @@ import { recordProductEventInTransaction } from "./productEvents";
 import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
+import { dateField, numberField, recordObject, stringField } from "./billingFields";
+import { applyPackEventInTransaction, applyStripePackRefundInTransaction, packsGiveWayToSubscriptionInTransaction, subscriptionLiveSince, type PackEventInput } from "./billingPackEvents";
+import { clearPackNumberReleaseInTransaction } from "./billingPacks";
 import { limitsFor, polarProductLinks, readBillingCatalogSnapshot, readBillingPlanLimitBook } from "./billingPlans";
 import { readBillingDeployment } from "./billingProvider";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
@@ -167,7 +170,9 @@ export type BillingCheckoutLimit = (subject: { businessId: string; userId: strin
  * click or a retry asks Polar for nothing; created says which. A business that
  * pays through Polar changes plan one request at a time, so two admins at once
  * can't both change its subscription: another open request is a 409
- * plan_change_pending. checkLimit runs only before a new request is made.
+ * plan_change_pending. So is a pack checkout still being made, for any
+ * business (openPackCheckout). checkLimit runs only before a new request is
+ * made.
  */
 export async function createBillingCheckoutRequestInTransaction(
   tx: DatabaseTransaction,
@@ -176,7 +181,7 @@ export async function createBillingCheckoutRequestInTransaction(
 ): Promise<{ id: string; created: boolean }> {
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId, plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId, replacedSubscriptionId: billingAccounts.replacedSubscriptionId, plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
   if (isManagedBillingAccount(account)) throw Object.assign(new Error("This business is on a managed plan, billed directly by the operator."), { status: 409 });
   if (!input.promo && !standardCheckoutAllowed((await loadBillingContext(tx, input.businessId)).plan, input.target)) throw Object.assign(new Error(PAID_PLAN_CHECKOUT_REFUSAL), { status: 409 });
   // Under the lock, so two clicks at once make one request. One older than its 15 minutes fails rather than runs.
@@ -200,6 +205,8 @@ export async function createBillingCheckoutRequestInTransaction(
     )).limit(1);
     if (other) throw Object.assign(new Error("Another plan change for this business is in progress. Try again in a minute."), { status: 409, code: "plan_change_pending" });
   }
+  // One purchase at a time across plans and packs: a pack checkout still being made holds the business too.
+  if (await openPackCheckout(tx, input.businessId)) throw Object.assign(new Error(OPEN_PURCHASE_REFUSAL), { status: 409, code: "plan_change_pending" });
   await input.checkLimit?.({ businessId: input.businessId, userId: input.userId });
   // The account the subscription will land on, billed through the deployment's provider.
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}`, source: readBillingDeployment(env, { withSecret: false }).provider }).onConflictDoNothing({ target: billingAccounts.businessId });
@@ -226,11 +233,12 @@ export async function createBillingCheckoutRequestInTransaction(
 
 /**
  * Whether a business can buy a plan without a promo code: any plan while it is
- * free, and Pro from Starter, as the plan screens offer. Other changes to a
- * paid plan happen in Polar's billing portal.
+ * free or on a prepaid pack, which the subscription then replaces, and Pro
+ * from Starter, as the plan screens offer. Other changes to a paid plan
+ * happen in Polar's billing portal.
  */
 export function standardCheckoutAllowed(current: BillingPlanSlug, target: BillingCheckoutTarget): boolean {
-  return current === "free_cloud" || (current === "starter" && target === "pro");
+  return current === "free_cloud" || current === "prepaid" || (current === "starter" && target === "pro");
 }
 
 export const PAID_PLAN_CHECKOUT_REFUSAL = "This business already pays for a plan. Change it in the billing portal.";
@@ -246,10 +254,17 @@ export function isLiveSubscriptionState(state: string | null | undefined): boole
   return (liveSubscriptionStates as readonly string[]).includes(state ?? "");
 }
 
-/** Whether a business pays for Starter or Pro with a live Polar subscription, which a checkout request then changes instead of starting another. */
-function paysThroughPolar(account: { source: string | null; subscriptionState: string | null; subscriptionId: string | null; plan: string | null } | undefined): account is { source: string | null; subscriptionState: string; subscriptionId: string; plan: "starter" | "pro" } {
-  return Boolean(account?.subscriptionId) && account?.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account?.subscriptionState) && (account?.plan === "starter" || account?.plan === "pro");
+/**
+ * Whether a business pays for Starter or Pro with a live Polar subscription,
+ * which a checkout request then changes instead of starting another. One a
+ * prepaid pack replaced counts as ended while the provider confirms it.
+ */
+function paysThroughPolar(account: { source: string | null; subscriptionState: string | null; subscriptionId: string | null; replacedSubscriptionId: string | null; plan: string | null } | undefined): account is { source: string | null; subscriptionState: string; subscriptionId: string; replacedSubscriptionId: string | null; plan: "starter" | "pro" } {
+  return Boolean(account?.subscriptionId) && account?.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account?.subscriptionState) && !isReplacedSubscription(account) && (account?.plan === "starter" || account?.plan === "pro");
 }
+
+// Whether the account's subscription is the one a prepaid pack replaced: in @lobbystack/shared, so the pack modules this one imports use it too.
+export { isReplacedSubscription };
 
 /** Whether a billing account is on a managed plan now. An ended managed plan keeps its source, for the finance export, but isn't live. */
 export function isManagedBillingAccount(account: { source?: string | null; subscriptionState: string | null } | null | undefined): boolean {
@@ -280,6 +295,10 @@ export async function setManagedPlanInTransaction(tx: DatabaseTransaction, input
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}`, ...managed }).onConflictDoUpdate({ target: billingAccounts.businessId, set: { ...managed, updatedAt: now } });
   // Checkouts Polar hasn't made a page for yet would sell a plan the operator now bills, so they stop here.
   await tx.update(billingCheckoutRequests).set({ status: "canceled", error: "The business moved to a managed plan.", updatedAt: now }).where(and(eq(billingCheckoutRequests.businessId, input.businessId), inArray(billingCheckoutRequests.status, ["pending", "processing", "error"])));
+  // So do pack checkouts still being made.
+  await tx.update(billingPackCheckouts).set({ status: "failed", error: "The business moved to a managed plan.", updatedAt: now }).where(and(eq(billingPackCheckouts.businessId, input.businessId), inArray(billingPackCheckouts.status, ["pending", "processing"])));
+  // Enterprise includes numbers, so a number set to go back to Twilio because the last prepaid pack ended stays, and answers again.
+  await clearPackNumberReleaseInTransaction(tx, input.businessId);
   await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `billing:${input.businessId}:managed:${now.getTime()}`, payload: { type: "billing.updated", entityId: input.businessId } });
   return "set";
 }
@@ -351,6 +370,7 @@ export async function loadBillingCheckoutRequest(
       currentPlanCode: billingAccounts.planCode,
       currentInterval: billingAccounts.billingInterval,
       subscriptionState: billingAccounts.subscriptionState,
+      replacedSubscriptionId: billingAccounts.replacedSubscriptionId,
       source: billingAccounts.source,
       businessName: businesses.name,
       onboardingStage: businesses.onboardingStage,
@@ -361,8 +381,8 @@ export async function loadBillingCheckoutRequest(
       .where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId)))
       .limit(1))[0];
     if (!row || !isBillingCheckoutTarget(row.target) || !isBillingInterval(row.billingInterval)) return null;
-    const { billingKey, subscriptionId, plan, currentPlanCode, currentInterval, subscriptionState, source, ...request } = row;
-    const account = { subscriptionId, plan, subscriptionState, source };
+    const { billingKey, subscriptionId, plan, currentPlanCode, currentInterval, subscriptionState, replacedSubscriptionId, source, ...request } = row;
+    const account = { subscriptionId, plan, subscriptionState, replacedSubscriptionId, source };
     return {
       ...request,
       target: row.target,
@@ -386,6 +406,25 @@ export const BILLING_CHECKOUT_CLAIM_STALE_MS = 5 * 60_000;
  * request fails instead, and they can ask again.
  */
 export const BILLING_CHECKOUT_EXPIRES_MS = 15 * 60_000;
+
+/** A business's purchases go one at a time, across plan checkouts, subscription changes and pack checkouts. */
+export const OPEN_PURCHASE_REFUSAL = "Another purchase or plan change for this business is in progress. Try again in a minute.";
+
+/**
+ * Whether the business has a pack checkout still pending or processing, and
+ * younger than BILLING_CHECKOUT_EXPIRES_MS, which holds its plan checkouts
+ * and subscription changes (billingPackCheckout.ts makes them). A page
+ * already made doesn't count, so one left unpaid holds nothing. A business
+ * that never bought a pack has none.
+ */
+export async function openPackCheckout(tx: DatabaseTransaction, businessId: string): Promise<boolean> {
+  const [open] = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts).where(and(
+    eq(billingPackCheckouts.businessId, businessId),
+    inArray(billingPackCheckouts.status, ["pending", "processing"]),
+    gte(billingPackCheckouts.createdAt, new Date(Date.now() - BILLING_CHECKOUT_EXPIRES_MS)),
+  )).limit(1);
+  return Boolean(open);
+}
 
 /**
  * A claimed request, or one this run can't work on: retryAt says when the
@@ -780,30 +819,6 @@ function subscriptionScheduleFields(payload: Record<string, unknown>): { cancelA
   return fields;
 }
 
-function recordObject(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
-}
-
-function stringField(source: Record<string, unknown>, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.length > 0) return value;
-  }
-  return undefined;
-}
-
-function numberField(source: Record<string, unknown>, ...keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string" && value.trim().length > 0) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-  }
-  return undefined;
-}
-
 /**
  * What Polar refunded on an order. The order total includes tax, and Polar
  * reports refunded tax apart from the refunded amount.
@@ -822,13 +837,6 @@ export function orderRefundedCents(order: Record<string, unknown>, payload: Reco
  */
 function orderStatusRank(status: SQLWrapper): SQL {
   return sql`array_position(array['draft', 'pending', 'paid', 'partially_refunded', 'refunded']::text[], (case when ${status} in ('void', 'uncollectible') then 'pending' else ${status} end)::text)`;
-}
-
-function dateField(source: Record<string, unknown>, ...keys: string[]): Date | undefined {
-  const value = stringField(source, ...keys);
-  if (!value) return undefined;
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? undefined : date;
 }
 
 export type SubscriptionStart = { plan: string; billingInterval: string | null; previousPlan: string | null };
@@ -996,11 +1004,14 @@ export type OverageWork = {
 
 export async function loadOverageWork(context: DomainContext, input: { businessId: string }): Promise<OverageWork | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const [account] = await tx.select({ source: billingAccounts.source, customerId: billingAccounts.customerId, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, cancelAt: billingAccounts.cancelAt, overageSubscriptionId: billingAccounts.overageSubscriptionId, periodStart: billingAccounts.currentPeriodStart })
+    const [row] = await tx.select({ source: billingAccounts.source, customerId: billingAccounts.customerId, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, cancelAt: billingAccounts.cancelAt, overageSubscriptionId: billingAccounts.overageSubscriptionId, periodStart: billingAccounts.currentPeriodStart, replacedSubscriptionId: billingAccounts.replacedSubscriptionId })
       .from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
-    if (!account) return null;
+    if (!row) return null;
+    const { replacedSubscriptionId, ...account } = row;
     const catalog = await readBillingCatalogSnapshot(tx);
-    return { ...account, currency: catalog.prices.find((price) => !price.retired)?.currency ?? null };
+    // A subscription a prepaid pack replaced counts as ended (decision 6): it gets no new overage, and its own ends with its month.
+    const replaced = isReplacedSubscription({ subscriptionId: account.subscriptionId, replacedSubscriptionId });
+    return { ...account, ...(replaced ? { subscriptionState: "canceled" } : {}), currency: catalog.prices.find((price) => !price.retired)?.currency ?? null };
   }, { accessMode: "read only" });
 }
 
@@ -1101,6 +1112,7 @@ export async function reconcileBillingProviderEvent(
       currentPeriodStart: billingAccounts.currentPeriodStart,
       endSetAt: billingAccounts.endSetAt,
       overageSubscriptionId: billingAccounts.overageSubscriptionId,
+      replacedSubscriptionId: billingAccounts.replacedSubscriptionId,
     }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1))[0];
     // The billing key is the external ID that usage and the billing portal name the business's Polar
     // customer by, and the checkout makes that customer with it, so an event never changes it. Polar
@@ -1114,6 +1126,10 @@ export async function reconcileBillingProviderEvent(
       // The subscription the event is about; an order may name none.
       const eventSubscriptionId = stringField(transactionPayload, "subscriptionId", "subscription_id") ?? stringField(payload, "subscriptionId", "subscription_id") ?? stringField(subscription, "id");
       const subscriptionId = eventSubscriptionId ?? existing?.subscriptionId;
+      // Decision 6: the subscription a prepaid pack replaced, which the provider may still be ending. An event
+      // about it never starts a plan or queues work for it. Null for every business that never switched.
+      const replaced = existing?.replacedSubscriptionId ?? null;
+      const aboutReplaced = replaced !== null && subscriptionId === replaced;
       // The webhook names the plan of a product the catalog linked when the event arrived, a retired
       // price's product too. One linked while the event waited names its plan now.
       // The price or Polar product the subscription sells: priceRef since the provider seam, productId before.
@@ -1156,7 +1172,7 @@ export async function reconcileBillingProviderEvent(
       // such as Pro after a switch in Polar's billing portal to a product made by hand. Its event stays
       // received, with the account as it was, until the catalog links the product: the sweep runs it
       // again each hour, and the worker reports it.
-      if (!plan && productId && isLiveSubscriptionState(subscriptionState) && !stale && !keepsManagedPlan) return { result: "held", started: null };
+      if (!plan && productId && isLiveSubscriptionState(subscriptionState) && !stale && !keepsManagedPlan && !aboutReplaced) return { result: "held", started: null };
       const polarFields = stale || keepsManagedPlan ? {} : {
         ...(takesOver ? { source: event.provider } : {}),
         ...(subscriptionId ? { subscriptionId } : {}),
@@ -1174,11 +1190,13 @@ export async function reconcileBillingProviderEvent(
       };
       // A standard product that kept a promo plan's discount, as a switch in Polar's billing portal leaves it, loses it.
       const discountId = stringField(payload, "discountId");
-      if (plan && (!planCode || planCode === plan) && !stale && !keepsManagedPlan && live && subscriptionId && discountId && await isPromoPlanDiscount(tx, discountId)) {
+      if (plan && (!planCode || planCode === plan) && !stale && !keepsManagedPlan && !aboutReplaced && live && subscriptionId && discountId && await isPromoPlanDiscount(tx, discountId)) {
         await enqueueOutbox(tx, { topic: "billing.endPromoPlan", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `promo-discount-drop:${subscriptionId}:${discountId}`, payload: { dropDiscount: discountId, subscriptionId } });
       }
-      // A takeover starts a Polar subscription even though the managed plan already counted as paid.
-      startedSubscription = stale || keepsManagedPlan ? null : detectSubscriptionStart(takesOver ? { plan: existing?.plan ?? null, subscriptionState: null } : existing, {
+      // A takeover starts a Polar subscription even though the managed plan already counted as paid, and so does a
+      // new subscription while the one a pack replaced is still being ended, which counts as ended already.
+      const replacedStillOn = replaced !== null && existing?.subscriptionId === replaced && !aboutReplaced;
+      startedSubscription = stale || keepsManagedPlan || aboutReplaced ? null : detectSubscriptionStart(takesOver || replacedStillOn ? { plan: existing?.plan ?? null, subscriptionState: null } : existing, {
         plan: plan ?? existing?.plan ?? null,
         subscriptionState: subscriptionState ?? existing?.subscriptionState ?? null,
         billingInterval: billingInterval ?? existing?.billingInterval ?? null,
@@ -1201,11 +1219,18 @@ export async function reconcileBillingProviderEvent(
       // A plan with fewer receptionists pauses the newest ones past its number, in a job of its
       // own so nothing about receptionists can hold up the payment.
       if (polarFields.plan || polarFields.subscriptionState) await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_reconcile");
+      // Decision 6, pack to subscription: a subscription that starts ends the live prepaid packs in this transaction,
+      // and a pack paid after it went live is reported for a refund, whichever event came first. When it went live is
+      // read from the event as stored, since a read-back's time is only when LobbyStack looked.
+      if (startedSubscription) {
+        const subscription = subscriptionId ? { id: subscriptionId, liveSince: subscriptionLiveSince(stored, { eventCreatedAt: event.createdAt, readAt: fresh?.readAt, newToAccount: subscriptionId !== existing?.subscriptionId }) } : undefined;
+        await packsGiveWayToSubscriptionInTransaction(tx, { businessId: input.businessId, at: new Date(), ...(subscription ? { subscription } : {}) });
+      }
       // On Stripe, overage is a subscription of its own (the Stripe plan's step 13). billing.ensureOverage gives a
       // live plan without one its overage subscription, takes back an end set while the plan wasn't live, and ends
       // it with its month once the plan has ended. Each plan event that finds one of those to do queues it once.
       const planEvent = kind === "subscription" || fresh !== undefined;
-      if (event.provider === "stripe" && planEvent && subscriptionId && !stale && !keepsManagedPlan) {
+      if (event.provider === "stripe" && planEvent && subscriptionId && !stale && !keepsManagedPlan && !(live && aboutReplaced)) {
         const overageWork = live ? !existing?.overageSubscriptionId || !isLiveSubscriptionState(existing.subscriptionState) : Boolean(existing?.overageSubscriptionId);
         if (overageWork) await enqueueOutbox(tx, { topic: "billing.ensureOverage", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `ensure-overage:${event.id}`, payload: { subscriptionId } });
       }
@@ -1237,16 +1262,23 @@ export async function reconcileBillingProviderEvent(
           properties: { provider: "stripe", overageSubscriptionId },
         });
       }
-    } else if (event.provider === "stripe" && overageSubscriptionId && existing?.source === "stripe" && existing.subscriptionId && !existing.overageSubscriptionId && isLiveSubscriptionState(existing.subscriptionState)) {
+    } else if (event.provider === "stripe" && overageSubscriptionId && existing?.source === "stripe" && existing.subscriptionId && !existing.overageSubscriptionId && isLiveSubscriptionState(existing.subscriptionState) && !isReplacedSubscription(existing)) {
       // An overage subscription live again once its invoice is paid, or the invoice of one Stripe ended paid, voided
       // or marked uncollectible, while the plan pays on without one: billing.ensureOverage records the live one, or
       // makes a new one, so overage is billed again without waiting for the plan's next event, a year off for some.
       await enqueueOutbox(tx, { topic: "billing.ensureOverage", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `ensure-overage:${event.id}`, payload: { subscriptionId: existing.subscriptionId } });
     }
 
+    // A Stripe refund of a prepaid pack's payment shrinks or ends the pack, matched on the PaymentIntent it names.
+    // Stripe as merchant of record makes no invoice for a pack, so that payment keys the pack's order row too.
+    // A refund that ends a pack ends it when its event arrived: the event's occurredAt is the charge's own time,
+    // which is the payment's, and the number's release is counted from the pack's end.
+    const refundPayment = kind === "refund" && event.provider === "stripe" ? stringField(payload, "paymentRef") : undefined;
+    const packRefund = refundPayment ? await applyStripePackRefundInTransaction(tx, { businessId: input.businessId, paymentRef: refundPayment, refundedCents: numberField(payload, "refundedAmount") ?? 0, at: event.createdAt }) : null;
+    const refundSource = input.refundInvoice ?? (packRefund ? refundPayment : undefined);
     // A Stripe refund names its payment, and the worker read back the invoice it paid: the invoice's order row
     // gets the refund, which only adds up, made first when the refund came before the payment.
-    if (kind === "refund" && input.refundInvoice) {
+    if (kind === "refund" && refundSource) {
       const refunded = numberField(payload, "refundedAmount") ?? 0;
       const chargeCents = numberField(payload, "amount") ?? refunded;
       const refundCurrency = (stringField(payload, "currency") ?? "").toLowerCase();
@@ -1255,8 +1287,8 @@ export async function reconcileBillingProviderEvent(
       const [order] = await tx.insert(billingTransactions).values({
         businessId: input.businessId,
         kind: "order",
-        sourceId: input.refundInvoice,
-        orderId: input.refundInvoice,
+        sourceId: refundSource,
+        orderId: refundSource,
         status: refunded >= chargeCents ? "refunded" : "partially_refunded",
         amountCents: chargeCents,
         refundedAmountCents: refunded,
@@ -1274,11 +1306,13 @@ export async function reconcileBillingProviderEvent(
         },
       }).returning({ id: billingTransactions.id, status: billingTransactions.status, amountCents: billingTransactions.amountCents, refundedAmountCents: billingTransactions.refundedAmountCents, currency: billingTransactions.currency, occurredAt: billingTransactions.occurredAt });
       if (!order) throw new Error("Billing transaction could not be persisted.");
-      await recordAffiliateCommissionInTransaction(tx, { businessId: input.businessId, billingTransactionId: order.id, kind: "order", sourceId: input.refundInvoice, status: order.status, amountCents: order.amountCents - order.refundedAmountCents, currency: order.currency, occurredAt: order.occurredAt });
+      await recordAffiliateCommissionInTransaction(tx, { businessId: input.businessId, billingTransactionId: order.id, kind: "order", sourceId: refundSource, status: order.status, amountCents: order.amountCents - order.refundedAmountCents, currency: order.currency, occurredAt: order.occurredAt });
     }
 
     // Polar's refunds arrive as order.refunded (refund.* payloads name no business, so the webhook route drops them).
     const transactionKind = kind === "payment" ? "order" : undefined;
+    // The order a Polar pack's events name, which the pack step reads.
+    let packOrder: PackEventInput["order"];
     const sourceId = stringField(transactionPayload, "id", "orderId") ?? stringField(payload, "id", "orderId") ?? event.providerEventId;
     const amountCents = numberField(transactionPayload, "totalAmount", "total_amount", "amountCents", "amount") ?? numberField(payload, "totalAmount", "total_amount", "amountCents", "amount");
     const currency = stringField(transactionPayload, "currency") ?? stringField(payload, "currency");
@@ -1336,6 +1370,39 @@ export async function reconcileBillingProviderEvent(
         amountCents: amountCents - refundedCents,
         currency,
         occurredAt,
+      });
+      packOrder = {
+        transactionId: transaction.id,
+        orderId: sourceId,
+        status,
+        amountCents,
+        refundedCents,
+        currency: currency.toLowerCase(),
+        occurredAt,
+        productId: stringField(transactionPayload, "priceRef", "productId", "product_id") ?? stringField(payload, "priceRef", "productId", "product_id"),
+        metadata: recordObject(transactionPayload.metadata ?? payload.metadata),
+        checkoutId: stringField(transactionPayload, "checkoutId", "checkout_id") ?? stringField(payload, "checkoutId", "checkout_id"),
+      };
+    }
+
+    // Prepaid packs: a pack's payment, a dispute of one, or a pack checkout's outcome. Nothing for any other event.
+    if (billingKey) {
+      await applyPackEventInTransaction(tx, {
+        businessId: input.businessId,
+        provider: event.provider,
+        kind,
+        eventId: event.id,
+        eventCreatedAt: event.createdAt,
+        payload,
+        account: existing ? {
+          subscriptionId: existing.subscriptionId,
+          plan: existing.plan,
+          subscriptionState: existing.subscriptionState,
+          billingInterval: existing.billingInterval,
+          managed: isManagedBillingAccount(existing),
+          replacedSubscriptionId: existing.replacedSubscriptionId ?? null,
+        } : undefined,
+        order: packOrder,
       });
     }
 

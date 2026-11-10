@@ -56,9 +56,9 @@ export async function uploadKnowledgeFile(client: Client, options: UploadDetails
 }
 
 /** What an uploaded document is called and tagged. */
-export type UploadDetails = { title?: string | undefined; tags?: string[] | undefined };
+export type UploadDetails = { title?: string | undefined; tags?: string[] | undefined; audience?: string | undefined; receptionistIds?: string[] | undefined };
 
 /** Makes an upload that has arrived a source. Completing it again returns the same source. */
 export async function completeUpload(client: Client, uploadId: string, details: UploadDetails): Promise<Row> {
-  return (await client.call("completeKnowledgeUpload", { params: { upload_id: uploadId }, body: { ...(details.title ? { title: details.title } : {}), ...(details.tags?.length ? { tags: details.tags } : {}) } })).data as Row;
+  return (await client.call("completeKnowledgeUpload", { params: { upload_id: uploadId }, body: { ...(details.title ? { title: details.title } : {}), ...(details.tags?.length ? { tags: details.tags } : {}), ...(details.audience ? { audience: details.audience as "everyone" | "chosen" } : {}), ...(details.receptionistIds?.length ? { receptionist_ids: details.receptionistIds } : {}) } })).data as Row;
 }

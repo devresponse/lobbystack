@@ -3,11 +3,13 @@ import type Stripe from "stripe";
 import type { BillingProvider, ProviderSubscription } from "../billing/types";
 import type { StripeApi } from "./client";
 import { isStripeAlreadyCanceled, isStripeMissing } from "./errors";
+import { endStripeOverage } from "./overage";
 import { isStripeOveragePrice, providerSubscriptionFromStripe } from "./subscriptions";
 
 // Cancelling at the renewal, resuming, and keeping the plan (the Stripe
-// plan's step 15), which Settings > Plan offers on Stripe. Each is keyed by
-// its request, so a retried job asks Stripe once.
+// plan's step 15), which Settings > Plan offers on Stripe, and ending a plan
+// a prepaid pack replaced (decision 6). Each is keyed by its request, so a
+// retried job asks Stripe once.
 
 const idOf = (value: string | { id: string } | null | undefined) => (typeof value === "string" ? value : value?.id ?? null);
 
@@ -37,6 +39,21 @@ export async function cancelStripePlan(api: StripeApi, input: Parameters<Billing
   if (schedule) await api.subscriptionSchedules.release(schedule, {}, { idempotencyKey: `cancel:${input.requestId}:release` });
   if (!subscription.cancel_at_period_end) await api.subscriptions.update(subscription.id, { cancel_at_period_end: true }, { idempotencyKey: `cancel:${input.requestId}` });
   return providerSubscriptionFromStripe(await readStripeSubscription(api, subscription.id));
+}
+
+/**
+ * Ends a plan a prepaid pack replaced now, crediting nothing for the rest of
+ * its period. A plan that carries the overage prices, as under merchant of
+ * record, ends with invoice_now and no proration, so its last invoice bills
+ * the usage on its meters. On Stripe directly the plan ends alone, and its
+ * separate overage subscription is set to end with its month, which still
+ * invoices the month's overage on the 1st. Null, as it has ended.
+ */
+export async function endStripePlanForPack(api: StripeApi, input: Parameters<BillingProvider["endForPack"]>[0]): ReturnType<BillingProvider["endForPack"]> {
+  await cancelStripePlan(api, { subscriptionId: input.subscriptionId, when: "now", requestId: input.requestId });
+  // Under merchant of record the plan is its own overage subscription, which just ended.
+  if (input.overageSubscriptionId && input.overageSubscriptionId !== input.subscriptionId) await endStripeOverage(api, { subscriptionId: input.overageSubscriptionId, when: "period_end" });
+  return null;
 }
 
 /** Undoes an end at the renewal, while the period lasts: the plan renews again. */

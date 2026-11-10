@@ -46,8 +46,9 @@ export async function sweepBilling(_job: JobEnvelope, dependencies: WorkerDepend
   await recordBillingSweep(outcome, Boolean(dependencies.billing));
   // The next try sweeps again and finds the rows it couldn't queue; its last one reports the error.
   if (outcome.failed > 0) throw outcome.error;
-  const queued = outcome.queued.provider_event + outcome.queued.usage_event + outcome.queued.checkout_request;
-  return { status: queued + outcome.overdue.checkout_request > 0 ? "completed" : "skipped", entityId: `${queued}:${outcome.overdue.checkout_request}` };
+  const queued = outcome.queued.provider_event + outcome.queued.usage_event + outcome.queued.checkout_request + outcome.queued.pack_checkout;
+  const expired = outcome.overdue.checkout_request + outcome.overdue.pack_checkout;
+  return { status: queued + expired > 0 ? "completed" : "skipped", entityId: `${queued}:${expired}` };
 }
 
 /**
@@ -55,9 +56,9 @@ export async function sweepBilling(_job: JobEnvelope, dependencies: WorkerDepend
  * longer than it should to PostHog error tracking, once a run: a Polar event
  * that never applied is a business that paid without getting its plan, or
  * kept one it cancelled; usage never sent is usage never billed; and a
- * checkout request that never ran is someone who couldn't pay. A worker
- * without Polar's settings leaves usage unsent without failing a job, so the
- * report says whether it has them.
+ * checkout request or pack checkout that never ran is someone who couldn't
+ * pay. A worker without Polar's settings leaves usage unsent without failing
+ * a job, so the report says whether it has them.
  */
 async function recordBillingSweep(outcome: BillingSweepOutcome, polarConfigured: boolean): Promise<void> {
   const counts = {
@@ -68,11 +69,13 @@ async function recordBillingSweep(outcome: BillingSweepOutcome, polarConfigured:
     usageOverdue: outcome.overdue.usage_event,
     checkoutsExpired: outcome.overdue.checkout_request,
     failed: outcome.failed,
+    // Only a deployment whose businesses buy packs has pack checkouts to count.
+    ...(outcome.queued.pack_checkout || outcome.overdue.pack_checkout ? { packCheckoutsQueued: outcome.queued.pack_checkout, packCheckoutsExpired: outcome.overdue.pack_checkout } : {}),
   };
   if (Object.values(counts).every((count) => count === 0)) return;
-  const overdue = counts.eventsOverdue + counts.usageOverdue + counts.checkoutsExpired;
+  const overdue = counts.eventsOverdue + counts.usageOverdue + counts.checkoutsExpired + outcome.overdue.pack_checkout;
   logEvent(overdue > 0 || outcome.failed > 0 ? "warn" : "info", "ops.billing.sweep", counts);
-  for (const kind of ["provider_event", "usage_event", "checkout_request"] as const) {
+  for (const kind of ["provider_event", "usage_event", "checkout_request", "pack_checkout"] as const) {
     if (outcome.overdue[kind] > 0) overdueBillingWork.add(outcome.overdue[kind], { kind });
   }
   if (overdue > 0) await reportError(new Error(OVERDUE_BILLING_WORK), { operation: "job.billing.sweep", polarConfigured, ...counts });

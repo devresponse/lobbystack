@@ -394,6 +394,29 @@ describe("billing plans", () => {
   });
 });
 
+describe("billing status", () => {
+  const billing = { plan: "prepaid", promo_plan: null, plan_ends: null, plan_ends_with: null, managed: false, subscription_state: null, billing_interval: null, current_period_end: null, cancels_at: null, next_change: null, payment_action_url: null, spending_cap_cents: null, overage_spend_cents: 0, spending_cap_reached: false, provider: "stripe", provider_name: "Stripe" };
+  const pack = (id: string, overrides: Record<string, unknown>) => ({ id, pack: "pack_500_90", names: { en: "500 minutes, 90 days" }, status: "active", seconds_total: 30_000, seconds_used: 0, seconds_left: 30_000, days: 90, paid_at: "2026-11-01T10:00:00.000Z", ends_at: "2027-01-30T10:00:00.000Z", ended_at: null, currency: "cad", amount_cents: 10_450, refunded_cents: 0, ...overrides });
+
+  it("prints the plan, then each prepaid pack with its minutes left and when it ends", async () => {
+    const api = fakeApi({ "GET /api/v1/billing": { body: { data: { ...billing, packs: [pack("6a1f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", { seconds_used: 1_830, seconds_left: 28_170 }), pack("7b2f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", { pack: "pack_250_365", seconds_total: 15_000, seconds_left: 15_000, days: null, ends_at: null })] } } } });
+    const result = await runCli(["billing", "status"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(result.out).toMatch(/Plan:\s+prepaid/);
+    expect(result.out).toMatch(/pack_500_90\s+active\s+469\s+500\s+2026-11-01T10:00:00\.000Z\s+2027-01-30T10:00:00\.000Z/);
+    expect(result.out).toMatch(/pack_250_365\s+active\s+250\s+250\s+2026-11-01T10:00:00\.000Z\s+never ends/);
+  });
+
+  it("prints the plan alone for a business without packs, as before", async () => {
+    const api = fakeApi({ "GET /api/v1/billing": { body: { data: { ...billing, plan: "free_cloud", packs: [] } } } });
+    const result = await runCli(["billing", "status"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(result.out).toMatch(/Plan:\s+free_cloud/);
+    expect(result.out).not.toMatch(/Minutes left/);
+    expect(result.out).not.toMatch(/Packs:/);
+  });
+});
+
 describe("billing catalog", () => {
   const brandFile = new URL("../../../brands/alloplace/billing.json", import.meta.url);
   const hash = "39ad3052ec5281525db2009617afe71a8ea908973b0d29f3846ce16f86055acf";
@@ -411,6 +434,13 @@ describe("billing catalog", () => {
     expect(result.out).toContain("lowers an allowance");
     expect(result.out).toContain("Applying would make these 2 changes. Nothing was written.");
     expect(result.out).toContain(`--replaces-hash ${"b".repeat(64)}`);
+  });
+
+  it("leaves billing.json's display section out of what it sends, since it sells nothing", async () => {
+    const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { body: { data: { ...run, id: null, status: "preview", prev_hash: "b".repeat(64), changes: [] } } } });
+    const file = { version: 1, currency: "cad", plans: {}, display: { defaultInterval: "monthly" } };
+    await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", JSON.stringify(file)], { fetch: api.fetch });
+    expect(api.sent[0]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: { version: 1, currency: "cad", plans: {} } });
   });
 
   it("lists every refusal a preview found", async () => {
@@ -489,6 +519,35 @@ describe("billing catalog", () => {
     expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out.endsWith("Stripe live account acct_1, not linked yet: run pnpm billing apply.")).toBe(true);
     const body = JSON.stringify({ hash, provider: "stripe", provider_env: "live", provider_account: "acct_1", plans: [] });
     expect((await runCli(["billing", "catalog-link", "alloplace", "--data", body, "--idempotency-key", "link-2"], { fetch: api.fetch })).out).toBe(`Linked Stripe live account acct_1 with 0 changes in run ${run.id}.`);
+  });
+
+  it("lists the packs under the plans with their minutes, length, price paid once and link, and no pack table for a deployment without packs or older than them", async () => {
+    const plans = [{ code: "starter", tier: "starter", status: "active", access: "public", sold: true, prices: [{ period: "monthly", currency: "cad", cents: 3000, polar_id: null, provider_ref: "price_1", retired_at: null }] }];
+    const provider = { id: "stripe", env: "sandbox", account: "acct_1", secret_sha256: null, objects: null, product_vars: null, last_link: null };
+    const base = { brand: "alloplace", code_hash: hash, hash, matches_code: true, last_run: run, plans, polar: null, provider };
+    const price = (cents: number, ref: string | null, retired: string | null = null) => ({ currency: "cad", cents, provider_ref: ref, retired_at: retired });
+    const packs = [
+      { code: "pack_250_90", status: "active", voice_sec: 15_000, days: 90, prices: [price(5_500, "price_p2"), price(5_000, "price_p1", "2026-11-01T00:00:00.000Z")] },
+      { code: "pack_1000_keep", status: "draft", voice_sec: 60_000, days: null, prices: [price(19_900, null)] },
+    ];
+    const api = fakeApi({
+      "GET /api/v1/billing/catalog": [
+        { body: { data: { ...base, packs } } },
+        { body: { data: { ...base, packs: [] } } },
+        { body: { data: base } },
+      ],
+    });
+    const shown = (await runCli(["billing", "catalog"], { fetch: api.fetch })).out;
+    expect(shown).toMatch(/pack_250_90 +active +250 +90 +55\.00 CAD once +yes/);
+    expect(shown).toMatch(/pack_1000_keep +draft +1000 +never ends +199\.00 CAD once +no/);
+    expect(shown).not.toContain("50.00 CAD");
+    // Between the plans and the line about the applied file.
+    expect(shown.indexOf("pack_250_90")).toBeGreaterThan(shown.indexOf("starter"));
+    expect(shown.indexOf("pack_250_90")).toBeLessThan(shown.indexOf("Applied "));
+    const plain = (await runCli(["billing", "catalog"], { fetch: api.fetch })).out;
+    expect(plain).not.toContain("MINUTES");
+    expect(plain).toContain("starter");
+    expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out).toBe(plain);
   });
 
   it("links Polar's products from a file, with an Idempotency-Key, and says what it changed or what stops it", async () => {

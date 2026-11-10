@@ -28,7 +28,7 @@ The folder stays outside the pnpm workspace and has no dependencies. Its build a
 | Action | Add a knowledge entry | `POST /knowledge` |
 | Universal | Make an API call | Any path of the API |
 
-Five drop-down lists fill the service, staff member, appointment, contact and call fields from `GET /services`, `/staff`, `/appointments`, `/contacts` and `/calls`. Each of those fields also takes an ID mapped from an earlier module.
+Six drop-down lists fill the service, staff member, appointment, contact, call and receptionist fields from `GET /services`, `/staff`, `/appointments`, `/contacts`, `/calls` and `/receptionists`. Add a knowledge entry's **Who uses it** is every receptionist, or the receptionists chosen. Each of those fields also takes an ID mapped from an earlier module.
 
 Each trigger has its own webhook. Creating the webhook in Make calls `POST /webhooks` for one event, and the dashboard lists it under **Integrations > Webhooks** as "Make: " and the module's name. Deleting the webhook in Make calls `DELETE /webhooks/{id}`; turning a scenario off keeps it. A business can have 20 webhook endpoints, and Make's webhooks count toward that with Zapier's and the ones added in the dashboard.
 

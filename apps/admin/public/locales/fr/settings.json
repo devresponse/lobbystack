@@ -385,7 +385,8 @@
       "pro": "Pro",
       "proCard": "Forfait Pro",
       "enterprise": "Entreprise",
-      "enterpriseCard": "Forfait Entreprise"
+      "enterpriseCard": "Forfait Entreprise",
+      "prepaidCard": "Prépayé"
     },
     "subscriptionStates": {
       "active": "Actif",
@@ -465,13 +466,21 @@
       "includedReceptionistsCustom": "Nombre de réceptionnistes sur mesure",
       "includedSmsCustom": "Volume SMS sur mesure",
       "includedOutboundCustom": "Allocation de transferts personnalisée",
-      "includedStorage": "{{amount}} {{unit}} stockage"
+      "includedStorage": "{{amount}} {{unit}} stockage",
+      "prepaidMinutesLeft_one": "minute restante",
+      "prepaidMinutesLeft_many": "de minutes restantes",
+      "prepaidMinutesLeft_other": "minutes restantes",
+      "prepaidUntil": "Jusqu'au {{date}}",
+      "prepaidNeverEnds": "Sans date de fin"
     },
     "upgradeDialog": {
       "title": "Changer de forfait",
       "description": "Choisissez le forfait qui convient le mieux à votre équipe.",
       "changesSubscription": "Vous avez déjà un abonnement : il sera modifié au lieu d'ouvrir un paiement. Toute différence est débitée sur votre moyen de paiement enregistré.",
       "leavesPromo": "Changer de forfait met fin à {{plan}} et à sa réduction.",
+      "endsPacks_one": "Souscrire un forfait met fin à vos packs de minutes, et la {{minutes}} minute restante est perdue.",
+      "endsPacks_many": "Souscrire un forfait met fin à vos packs de minutes, et les {{minutes}} de minutes restantes sont perdues.",
+      "endsPacks_other": "Souscrire un forfait met fin à vos packs de minutes, et les {{minutes}} minutes restantes sont perdues.",
       "enterpriseSubject": "Forfait Entreprise",
       "billingIntervalLabel": "Intervalle de facturation",
       "annualDiscount": "Économisez {{percent}} %",
@@ -592,6 +601,8 @@
       "unlimited": "Illimité",
       "blocked": "Limite atteinte",
       "blockedDescription": "Limite atteinte — l'utilisation est suspendue jusqu'à la prochaine période.",
+      "packDescription": "Vos minutes viennent de vos packs de minutes et durent jusqu'à la fin de chaque pack.",
+      "packBlockedDescription": "Plus aucune minute. Les appels sonnent occupé jusqu'à l'achat d'un autre pack de minutes.",
       "overageCount": "{{count}} au-dessus de la limite",
       "overageCost": "≈ {{amount}} de dépassements",
       "noOverages": "Aucun dépassement — l'utilisation est plafonnée au volume inclus.",
@@ -626,6 +637,58 @@
       "invalidAmount": "Saisissez un montant {{currency}} positif ou nul avec au plus deux décimales.",
       "saveFailed": "Impossible d’enregistrer le plafond mensuel de dépassement.",
       "removeFailed": "Impossible de supprimer le plafond mensuel de dépassement."
+    },
+    "packs": {
+      "title": "Minutes prépayées",
+      "description": "Achetez des minutes d'avance, sans facture mensuelle. Les appels les utilisent jusqu'à épuisement ou jusqu'à la fin du pack.",
+      "minutesLabel": "Minutes",
+      "lengthLabel": "Durée",
+      "minutesOption_one": "{{minutes}} minute",
+      "minutesOption_many": "{{minutes}} de minutes",
+      "minutesOption_other": "{{minutes}} minutes",
+      "daysOption_one": "{{count}} jour",
+      "daysOption_many": "{{count}} de jours",
+      "daysOption_other": "{{count}} jours",
+      "neverEndsOption": "Sans date de fin",
+      "priceSuffix": "payé une fois",
+      "left_one": "{{left}} minute restante sur {{total}}",
+      "left_many": "{{left}} de minutes restantes sur {{total}}",
+      "left_other": "{{left}} minutes restantes sur {{total}}",
+      "endsOn": "Prend fin le {{date}}",
+      "neverEnds": "Sans date de fin",
+      "frozen": "En attente tant qu'un litige de paiement est ouvert",
+      "buy": "Acheter un pack de minutes",
+      "buyMore": "En acheter plus",
+      "unavailable": "Les packs de minutes ne peuvent pas être achetés ici pour le moment.",
+      "refusals": {
+        "managed_plan": "Votre forfait est géré pour vous, donc les packs de minutes ne peuvent pas être achetés ici.",
+        "pack_not_sold_on_plan": "Les packs de minutes ne sont pas vendus avec votre forfait.",
+        "pack_yearly_plan": "Vous avez un forfait annuel. Programmez sa fin au renouvellement, puis achetez un pack de minutes une fois qu'il a pris fin.",
+        "pack_past_due": "Un paiement de votre forfait est en retard. Réglez-le dans Gérer l'abonnement, puis achetez un pack de minutes.",
+        "plan_change_payment_waiting": "Votre banque attend toujours que vous confirmiez un paiement pour votre forfait. Terminez-le d'abord.",
+        "pack_not_on_sale": "Ce pack de minutes n'est pas en vente pour le moment.",
+        "plan_change_pending": "Un autre achat pour cette entreprise est encore en cours. Réessayez dans une minute."
+      },
+      "endsPlanDialog": {
+        "title": "Mettre fin à votre forfait {{plan}} ?",
+        "planEnds": "Payer ce pack de minutes met fin à votre forfait {{plan}} immédiatement.",
+        "noRefund": "Le reste de son mois, jusqu'au {{date}}, n'est pas remboursé. L'utilisation jusqu'ici reste facturée.",
+        "noRefundUndated": "Le reste de son mois n'est pas remboursé. L'utilisation jusqu'ici reste facturée.",
+        "promoLost": "Votre code promo est perdu pour de bon. Il ne peut plus être utilisé.",
+        "receptionistsPaused": "Toutes vos réceptionnistes sauf une sont mises en pause.",
+        "packStarts": "Les minutes et les allocations du pack commencent tout de suite.",
+        "confirm": "Mettre fin et acheter"
+      },
+      "toast": {
+        "added": "Votre pack de minutes a été ajouté.",
+        "failed": "Votre paiement n'a pas abouti, donc aucun pack de minutes n'a été ajouté.",
+        "processing": "Votre paiement est en cours de traitement. Votre pack de minutes s'affichera ici dès son arrivée.",
+        "checkoutFailed": "Impossible d'ouvrir la page de paiement. Réessayez.",
+        "checkoutExpired": "La page de paiement a expiré. Réessayez.",
+        "gaveWay": "Un forfait a démarré avant l'arrivée de ce paiement, donc aucun pack de minutes n'a été ajouté. Le paiement vous sera remboursé.",
+        "refundedFirst": "Ce paiement a été remboursé ou a fait l'objet d'une rétrofacturation, donc aucun pack de minutes n'a été ajouté.",
+        "closedForPlan": "Un forfait a démarré pour cette entreprise, donc le paiement de ce pack de minutes a été fermé."
+      }
     },
     "transactions": {
       "title": "Historique des transactions",
@@ -721,7 +784,10 @@
     "reclaim": {
       "title": "Ce numéro sera libéré le {{date}}",
       "description": "Les forfaits gratuits n'incluent pas de numéro d'entreprise dédié. Passez à Starter ou Pro avant cette date pour conserver {{number}}.",
-      "upgradeCta": "Mettre à niveau pour conserver ce numéro"
+      "upgradeCta": "Mettre à niveau pour conserver ce numéro",
+      "packDescription": "Votre dernier pack de minutes a pris fin. Achetez un pack de minutes ou choisissez un forfait avant cette date pour conserver {{number}}.",
+      "buyPackCta": "Acheter un pack de minutes",
+      "choosePlanCta": "Choisir un forfait"
     },
     "requiresPaidPlan": {
       "title": "Les numéros dédiés sont réservés aux forfaits payants",
@@ -1578,6 +1644,7 @@
       "appointments_read": "Lire les rendez-vous et les plages libres",
       "appointments_write": "Réserver, annuler et déplacer des rendez-vous",
       "messages_read": "Lire les messages pris par la réceptionniste",
+      "knowledge_read": "Lire les questions auxquelles la réceptionniste n'a pas su répondre",
       "knowledge_write": "Ajouter des entrées de connaissances et des FAQ"
     }
   }

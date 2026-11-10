@@ -124,7 +124,10 @@ The answer gap skips caller speech that ended while the receptionist was still t
 
 `billing.subscription_started` fires once, when a workspace crosses from free into a live paid plan. Renewals, plan changes between paid tiers, and recovery from `past_due` do not repeat it, so the event counts subscriptions rather than webhooks. The worker records it after the reconciling transaction commits, which means a reporting failure cannot roll back a payment.
 
+`billing.pack_purchased` fires once per prepaid pack payment, inside the transaction that records the pack, so a repeated webhook never counts twice. It carries `pack` (the catalog code), `days` (the pack's length, or `never` for a pack with no end date), `provider` and `previousPlan`, which is `prepaid` for a top-up and the plan in force before the purchase otherwise. A pack bought beside a managed, yearly or past-due subscription still reports, with that subscription's plan as `previousPlan`. A payment refunded or charged back before it arrived records none, since it switched nothing. A pack that gave way to a plan bought first still reports, and the operations event `ops.billing.pack_gave_way` names its payment for a refund by hand ([watch billing](../billing/README.md#watch-billing)). Both are product events, so neither is recorded for a business that turned off telemetry; for a pack that gave way, the worker's `ops.billing.pack_gave_way` warning line and `billing.pack_gave_way` audit row always are.
+
 - `billing.subscription_started`
+- `billing.pack_purchased`
 
 ### Operations events
 

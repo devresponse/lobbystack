@@ -39,5 +39,299 @@
       "overageCents": { "voiceMinute": 18, "alertSmsSegment": 2, "outboundCallAttempt": 2 }
     },
     "enterprise": { "sold": false, "custom": true }
+  },
+  "packs": {
+    "pack_250_90": {
+      "names": { "en": "250 minutes, 90 days", "fr": "250 minutes, 90 jours", "es": "250 minutos, 90 días", "sr": "250 minuta, 90 dana" },
+      "minutes": 250,
+      "days": 90,
+      "priceCents": 5500,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_250_180": {
+      "names": { "en": "250 minutes, 180 days", "fr": "250 minutes, 180 jours", "es": "250 minutos, 180 días", "sr": "250 minuta, 180 dana" },
+      "minutes": 250,
+      "days": 180,
+      "priceCents": 5900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_250_365": {
+      "names": { "en": "250 minutes, 365 days", "fr": "250 minutes, 365 jours", "es": "250 minutos, 365 días", "sr": "250 minuta, 365 dana" },
+      "minutes": 250,
+      "days": 365,
+      "priceCents": 6500,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_500_90": {
+      "names": { "en": "500 minutes, 90 days", "fr": "500 minutes, 90 jours", "es": "500 minutos, 90 días", "sr": "500 minuta, 90 dana" },
+      "minutes": 500,
+      "days": 90,
+      "priceCents": 9500,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_500_180": {
+      "names": { "en": "500 minutes, 180 days", "fr": "500 minutes, 180 jours", "es": "500 minutos, 180 días", "sr": "500 minuta, 180 dana" },
+      "minutes": 500,
+      "days": 180,
+      "priceCents": 9900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_500_365": {
+      "names": { "en": "500 minutes, 365 days", "fr": "500 minutes, 365 jours", "es": "500 minutos, 365 días", "sr": "500 minuta, 365 dana" },
+      "minutes": 500,
+      "days": 365,
+      "priceCents": 10900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_1000_90": {
+      "names": { "en": "1,000 minutes, 90 days", "fr": "1 000 minutes, 90 jours", "es": "1.000 minutos, 90 días", "sr": "1.000 minuta, 90 dana" },
+      "minutes": 1000,
+      "days": 90,
+      "priceCents": 17900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_1000_180": {
+      "names": { "en": "1,000 minutes, 180 days", "fr": "1 000 minutes, 180 jours", "es": "1.000 minutos, 180 días", "sr": "1.000 minuta, 180 dana" },
+      "minutes": 1000,
+      "days": 180,
+      "priceCents": 18900,
+      "limits": { "knowledgeStorageMb": 20 }
+    },
+    "pack_1000_365": {
+      "names": { "en": "1,000 minutes, 365 days", "fr": "1 000 minutes, 365 jours", "es": "1.000 minutos, 365 días", "sr": "1.000 minuta, 365 dana" },
+      "minutes": 1000,
+      "days": 365,
+      "priceCents": 19900,
+      "limits": { "knowledgeStorageMb": 20 }
+    }
+  },
+  "display": {
+    "defaultInterval": "annual",
+    "plans": [
+      {
+        "plan": "free_cloud",
+        "description": { "en": "Try {{appName}} with enough usage to see it work.", "fr": "Essayez {{appName}} avec assez d'utilisation pour le voir en action.", "es": "Pruebe {{appName}} con suficiente uso para verlo en acción.", "sr": "Isprobajte {{appName}} uz dovoljno potrošnje da vidite kako radi." },
+        "button": { "en": "Start free", "fr": "Commencer gratuitement", "es": "Empezar gratis", "sr": "Počnite besplatno" },
+        "bullets": [
+          "voiceMinutes",
+          "receptionists",
+          "businessNumbers",
+          { "en": "Community support", "fr": "Support communautaire", "es": "Soporte de la comunidad", "sr": "Podrška zajednice" }
+        ]
+      },
+      {
+        "plan": "starter",
+        "description": {
+          "monthly": { "en": "Billed monthly. Includes {{voiceMinutes}} voice minutes that reset monthly.", "fr": "Facturé mensuellement. Inclut {{voiceMinutes}} minutes vocales réinitialisées chaque mois.", "es": "Facturación mensual. Incluye {{voiceMinutes}} minutos de voz que se renuevan cada mes.", "sr": "Naplaćuje se mesečno. Uključuje {{voiceMinutes}} minuta razgovora koji se obnavljaju svakog meseca." },
+          "annual": { "en": "Billed annually. Includes {{voiceMinutes}} voice minutes that reset monthly.", "fr": "Facturé annuellement. Inclut {{voiceMinutes}} minutes vocales réinitialisées chaque mois.", "es": "Facturación anual. Incluye {{voiceMinutes}} minutos de voz que se renuevan cada mes.", "sr": "Naplaćuje se godišnje. Uključuje {{voiceMinutes}} minuta razgovora koji se obnavljaju svakog meseca." }
+        },
+        "button": {
+          "monthly": { "en": "Start monthly", "fr": "Starter mensuel", "es": "Starter mensual", "sr": "Počnite mesečno" },
+          "annual": { "en": "Start annual", "fr": "Starter annuel", "es": "Starter anual", "sr": "Počnite godišnje" }
+        },
+        "bullets": [
+          "voiceMinutes",
+          "receptionists",
+          "businessNumbers",
+          "alertSmsSegments",
+          { "en": "Email support", "fr": "Support par email", "es": "Soporte por correo electrónico", "sr": "Podrška putem imejla" }
+        ]
+      },
+      {
+        "plan": "pro",
+        "popular": true,
+        "description": {
+          "monthly": { "en": "Billed monthly. More included usage for growing call volume.", "fr": "Facturé mensuellement. Plus d'utilisation incluse pour un volume d'appels croissant.", "es": "Facturación mensual. Más uso incluido para un volumen de llamadas en aumento.", "sr": "Naplaćuje se mesečno. Više uključene potrošnje za rastući broj poziva." },
+          "annual": { "en": "Billed annually. More included usage for growing call volume.", "fr": "Facturé annuellement. Plus d'utilisation incluse pour un volume d'appels croissant.", "es": "Facturación anual. Más uso incluido para un volumen de llamadas en aumento.", "sr": "Naplaćuje se godišnje. Više uključene potrošnje za rastući broj poziva." }
+        },
+        "button": {
+          "monthly": { "en": "Go Pro monthly", "fr": "Pro mensuel", "es": "Pro mensual", "sr": "Pro mesečno" },
+          "annual": { "en": "Go Pro annual", "fr": "Pro annuel", "es": "Pro anual", "sr": "Pro godišnje" }
+        },
+        "bullets": [
+          "voiceMinutes",
+          "receptionists",
+          "businessNumbers",
+          "alertSmsSegments",
+          { "en": "Priority email support", "fr": "Support prioritaire par email", "es": "Soporte prioritario por correo electrónico", "sr": "Prioritetna podrška putem imejla" }
+        ]
+      },
+      {
+        "plan": "enterprise",
+        "description": { "en": "For higher volume, multiple numbers, or custom deployment needs.", "fr": "Pour les volumes plus élevés, plusieurs numéros ou des besoins de déploiement personnalisés.", "es": "Para mayor volumen, varios números o necesidades de despliegue personalizadas.", "sr": "Za veći obim poziva, više brojeva ili posebne zahteve za postavljanje." },
+        "button": { "en": "Contact us", "fr": "Nous contacter", "es": "Contáctenos", "sr": "Kontaktirajte nas" },
+        "bullets": [
+          "businessNumbers",
+          "receptionists",
+          { "en": "Self-hosted deployment option", "fr": "Option de déploiement auto-hébergé", "es": "Opción de despliegue con autoalojamiento", "sr": "Mogućnost samostalnog hostovanja" },
+          { "en": "Dedicated implementation support", "fr": "Accompagnement dédié", "es": "Soporte de implementación dedicado", "sr": "Namenska podrška pri uvođenju" }
+        ]
+      }
+    ],
+    "comparisonTitle": { "en": "Compare plans in detail", "fr": "Comparer les forfaits en détail", "es": "Compare los planes en detalle", "sr": "Detaljno poređenje paketa" },
+    "comparisonIntro": { "en": "Test {{free_cloud.voiceMinutes}} browser voice minutes on Free, without a telephone number. Starter and Pro include a dedicated number and monthly usage allowances.", "fr": "Testez {{free_cloud.voiceMinutes}} minutes vocales dans le navigateur sur Free, sans numéro de téléphone. Starter et Pro comprennent un numéro dédié et des volumes mensuels.", "es": "Pruebe {{free_cloud.voiceMinutes}} minutos de voz en el navegador con Free, sin número de teléfono. Starter y Pro incluyen un número dedicado y uso mensual incluido.", "sr": "Na Free paketu isprobajte {{free_cloud.voiceMinutes}} minuta razgovora u pregledaču, bez broja telefona. Starter i Pro uključuju namenski broj i mesečnu količinu potrošnje." },
+    "comparison": [
+      {
+        "group": { "en": "Usage & limits", "fr": "Utilisation et limites", "es": "Uso y límites", "sr": "Potrošnja i ograničenja" },
+        "rows": [
+          "voiceMinutes",
+          "receptionists",
+          {
+            "row": "outboundCallAttempts",
+            "values": { "free_cloud": false }
+          },
+          {
+            "row": "alertSmsSegments",
+            "values": { "free_cloud": false }
+          },
+          "knowledgeStorage",
+          "businessNumbers"
+        ]
+      },
+      {
+        "group": { "en": "Core receptionist", "fr": "Réceptionniste principale", "es": "Recepcionista básica", "sr": "Osnovne funkcije recepcionera" },
+        "rows": [
+          {
+            "label": { "en": "24/7 call answering", "fr": "Réponse aux appels 24/7", "es": "Atención de llamadas 24/7", "sr": "Javljanje na pozive 24/7" },
+            "values": {
+              "free_cloud": { "en": "Browser testing", "fr": "Tests dans le navigateur", "es": "Pruebas en el navegador", "sr": "Testiranje u pregledaču" },
+              "starter": true,
+              "pro": true,
+              "enterprise": true
+            }
+          },
+          {
+            "label": { "en": "Caller details and message capture", "fr": "Détails des appelants et prise de messages", "es": "Datos de quien llama y toma de mensajes", "sr": "Podaci o pozivaocu i primanje poruka" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Knowledge base answers", "fr": "Réponses de la base de connaissances", "es": "Respuestas de la base de conocimiento", "sr": "Odgovori iz baze znanja" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Plain-language workflows", "fr": "Flux en langage naturel", "es": "Flujos de trabajo en lenguaje sencillo", "sr": "Tokovi rada opisani običnim jezikom" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Spam filtering", "fr": "Filtrage du spam", "es": "Filtro de spam", "sr": "Filtriranje neželjenih poziva" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          },
+          "shortCalls",
+          {
+            "label": { "en": "Concurrent call handling", "fr": "Gestion des appels simultanés", "es": "Llamadas simultáneas", "sr": "Više poziva istovremeno" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Answers in the caller's language", "fr": "Répond dans la langue de l'appelant", "es": "Responde en el idioma de quien llama", "sr": "Odgovara na jeziku pozivaoca" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          }
+        ]
+      },
+      {
+        "group": { "en": "Booking", "fr": "Réservations", "es": "Reservas", "sr": "Zakazivanje" },
+        "rows": [
+          {
+            "label": { "en": "Appointment booking", "fr": "Réservation de rendez-vous", "es": "Reserva de citas", "sr": "Zakazivanje termina" },
+            "values": { "free_cloud": "unlimited", "starter": "unlimited", "pro": "unlimited", "enterprise": "unlimited" }
+          },
+          {
+            "label": { "en": "Appointment confirmation texts", "fr": "SMS de confirmation de rendez-vous", "es": "SMS de confirmación de citas", "sr": "SMS potvrde termina" },
+            "values": { "free_cloud": false, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Google Calendar integration", "fr": "Intégration Google Agenda", "es": "Integración con Google Calendar", "sr": "Integracija sa Google Calendar" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          }
+        ]
+      },
+      {
+        "group": { "en": "Routing & transfers", "fr": "Routage et transferts", "es": "Enrutamiento y transferencias", "sr": "Usmeravanje i preusmeravanje" },
+        "rows": [
+          {
+            "label": { "en": "Urgent call handoff", "fr": "Transfert des appels urgents", "es": "Derivación de llamadas urgentes", "sr": "Prosleđivanje hitnih poziva" },
+            "values": { "free_cloud": false, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Call transfers", "fr": "Transferts d'appels", "es": "Transferencia de llamadas", "sr": "Preusmeravanje poziva" },
+            "values": { "free_cloud": false, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "After-hours answering", "fr": "Réponse hors horaires", "es": "Atención fuera de horario", "sr": "Javljanje van radnog vremena" },
+            "values": { "free_cloud": false, "starter": true, "pro": true, "enterprise": true }
+          }
+        ]
+      },
+      {
+        "group": { "en": "Notifications", "fr": "Notifications", "es": "Notificaciones", "sr": "Obaveštenja" },
+        "rows": [
+          {
+            "label": { "en": "Email notifications", "fr": "Notifications par email", "es": "Notificaciones por correo electrónico", "sr": "Obaveštenja imejlom" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "SMS notifications", "fr": "Notifications SMS", "es": "Notificaciones por SMS", "sr": "SMS obaveštenja" },
+            "values": { "free_cloud": false, "starter": true, "pro": true, "enterprise": true }
+          }
+        ]
+      },
+      {
+        "group": { "en": "Data & dashboard", "fr": "Données et tableau de bord", "es": "Datos y panel", "sr": "Podaci i kontrolna tabla" },
+        "rows": [
+          {
+            "label": { "en": "Call summaries", "fr": "Résumés d'appels", "es": "Resúmenes de llamadas", "sr": "Rezimei poziva" },
+            "values": { "free_cloud": "unlimited", "starter": "unlimited", "pro": "unlimited", "enterprise": "unlimited" }
+          },
+          {
+            "label": { "en": "Call history", "fr": "Historique des appels", "es": "Historial de llamadas", "sr": "Istorija poziva" },
+            "values": { "free_cloud": "unlimited", "starter": "unlimited", "pro": "unlimited", "enterprise": "unlimited" }
+          },
+          "contentRetention",
+          {
+            "label": { "en": "Caller profiles and notes", "fr": "Profils et notes d'appelants", "es": "Perfiles y notas de quienes llaman", "sr": "Profili i beleške o pozivaocima" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Contacts", "fr": "Contacts", "es": "Contactos", "sr": "Kontakti" },
+            "values": { "free_cloud": "unlimited", "starter": "unlimited", "pro": "unlimited", "enterprise": "unlimited" }
+          },
+          {
+            "label": { "en": "Website knowledge import", "fr": "Import des connaissances du site web", "es": "Importación de conocimiento del sitio web", "sr": "Uvoz znanja sa sajta" },
+            "values": { "free_cloud": true, "starter": true, "pro": true, "enterprise": true }
+          }
+        ]
+      },
+      {
+        "group": { "en": "Deployment & support", "fr": "Déploiement et support", "es": "Despliegue y soporte", "sr": "Postavljanje i podrška" },
+        "rows": [
+          {
+            "label": { "en": "Hosting", "fr": "Hébergement", "es": "Alojamiento", "sr": "Hosting" },
+            "values": {
+              "free_cloud": { "en": "Managed cloud", "fr": "Cloud géré", "es": "Nube gestionada", "sr": "Upravljani cloud" },
+              "starter": { "en": "Managed cloud", "fr": "Cloud géré", "es": "Nube gestionada", "sr": "Upravljani cloud" },
+              "pro": { "en": "Managed cloud", "fr": "Cloud géré", "es": "Nube gestionada", "sr": "Upravljani cloud" },
+              "enterprise": { "en": "Cloud or self-hosted", "fr": "Cloud ou auto-hébergé", "es": "Nube o autoalojamiento", "sr": "Cloud ili samostalno hostovanje" }
+            }
+          },
+          {
+            "label": { "en": "Usage-based overages", "fr": "Facturation à l'usage", "es": "Excedentes según el uso", "sr": "Naplata prekoračenja po potrošnji" },
+            "values": { "free_cloud": false, "starter": true, "pro": true, "enterprise": true }
+          },
+          {
+            "label": { "en": "Support", "fr": "Support", "es": "Soporte", "sr": "Podrška" },
+            "values": {
+              "free_cloud": { "en": "Community", "fr": "Communautaire", "es": "Comunidad", "sr": "Zajednica" },
+              "starter": { "en": "Email", "fr": "Email", "es": "Correo electrónico", "sr": "Imejl" },
+              "pro": { "en": "Priority email", "fr": "Prioritaire par email", "es": "Correo prioritario", "sr": "Prioritetni imejl" },
+              "enterprise": { "en": "Dedicated implementation", "fr": "Accompagnement dédié", "es": "Implementación dedicada", "sr": "Namenska podrška pri uvođenju" }
+            }
+          }
+        ]
+      }
+    ],
+    "packs": {
+      "title": { "en": "Prefer prepaid minutes?", "fr": "Vous préférez des minutes prépayées ?", "es": "¿Prefiere minutos prepagados?", "sr": "Više volite dopunu minuta?" },
+      "description": { "en": "Buy minutes once, with no monthly bill. They last until they run out or the pack ends.", "fr": "Achetez des minutes une seule fois, sans facture mensuelle. Elles durent jusqu'à épuisement ou jusqu'à la fin du pack.", "es": "Compre minutos una sola vez, sin factura mensual. Duran hasta que se agotan o termina el paquete.", "sr": "Kupite minute jednom, bez mesečnog računa. Traju dok ih ne potrošite ili dok dopuna ne istekne." },
+      "button": { "en": "Buy pack", "fr": "Acheter un pack de minutes", "es": "Comprar paquete de minutos", "sr": "Kupi dopunu minuta" }
+    }
   }
 }

@@ -3,10 +3,11 @@ import type Stripe from "stripe";
 import type { StripeCatalogApi, StripeSnapshot } from "../catalog";
 import type { StripeApi } from "../client";
 import { fakeCatalog, loadFakeCatalog } from "./catalog";
-import { completeFakeCheckout, fakeCheckout } from "./checkout";
+import { completeFakeCheckout, completeFakePaymentCheckout, fakeCheckout } from "./checkout";
 import { FakeClock } from "./clock";
 import { FakeStripeContext, type FakeStripeRequest, type FakeStripeState } from "./context";
 import { addFakeCustomer, fakeCustomers } from "./customers";
+import { missing } from "./errors";
 import { stripeInvoiceObject, stripeScheduleObject, stripeSubscriptionObject, type FakeSubscriptionInput } from "./objects";
 import { fakeBalanceTransactions, fakeEventSummaries, fakeMeterEvents } from "./meterEvents";
 import { dropFakePendingUpdate, fakeInvoices, payFakeInvoice } from "./pendingUpdates";
@@ -23,6 +24,7 @@ import { fakeSubscriptions } from "./subscriptions";
 export { chargeFakeCard, fakeCardOutcomes, type FakeCard } from "./cards";
 export { emptyFakeCatalog, loadFakeCatalog, type FakeCatalogState } from "./catalog";
 export { FakeClock } from "./clock";
+export { permissionDenied } from "./errors";
 export { stripeInvoiceObject, stripePriceObject, stripeScheduleObject, stripeSubscriptionObject, type FakeSubscriptionInput } from "./objects";
 
 export type FakeStripe = StripeApi & StripeCatalogApi & {
@@ -35,6 +37,8 @@ export type FakeStripe = StripeApi & StripeCatalogApi & {
   addInvoice(input: { id: string; customer: string; subscription: string | null; hostedInvoiceUrl?: string | null }): void;
   /** Pays a checkout session with a card, making its subscription. */
   completeCheckout(sessionId: string, input?: { card?: string }): Stripe.Subscription;
+  /** Pays a payment-mode checkout session with a card, as for a prepaid pack, making its PaymentIntent and any invoice it asked for. */
+  completePaymentCheckout(sessionId: string, input?: { card?: string }): Stripe.PaymentIntent;
   /** Pays an open invoice, as the customer does on its page, applying the pending update it carries. */
   payInvoice(invoiceId: string): Stripe.Invoice;
   /** A pending update's expiry: its invoice voided and the update dropped. */
@@ -70,6 +74,14 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
         has_more: false,
       })),
     } as unknown as FakeStripe["invoicePayments"],
+    paymentIntents: {
+      // A payment intent a payment-mode checkout made, as for a prepaid pack.
+      retrieve: async (id: string) => await fake.call("paymentIntents.retrieve", { id }, null, () => {
+        const intent = fake.state.paymentIntents.get(id);
+        if (!intent) throw missing("payment_intent", id);
+        return intent;
+      }),
+    } as unknown as FakeStripe["paymentIntents"],
     state: fake.state,
     requests: fake.requests,
     clock: fake.clock,
@@ -84,6 +96,7 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
       fake.state.invoices.set(input.id, stripeInvoiceObject(input));
     },
     completeCheckout: (sessionId, input) => completeFakeCheckout(fake, sessionId, input),
+    completePaymentCheckout: (sessionId, input) => completeFakePaymentCheckout(fake, sessionId, input),
     payInvoice: (invoiceId) => payFakeInvoice(fake, invoiceId),
     expirePendingUpdate: (subscriptionId) => {
       dropFakePendingUpdate(fake, subscriptionId);

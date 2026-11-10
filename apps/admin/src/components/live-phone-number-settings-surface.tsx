@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -97,6 +98,8 @@ export function LivePhoneNumberSettingsSurface() {
     billingStatus?.phoneNumberReclaimScheduledAt ??
     null;
   const showReclaimBanner = Boolean(hasPhoneNumber && reclaimScheduledAt);
+  // The business's last pack ended: another pack keeps the number, as a plan does.
+  const packEnded = primaryPhoneNumber?.reclaimReason === "pack_ended";
   const showPaidPlanRequired = !hasPhoneNumber && billingStatus != null && !canClaimDedicatedNumber;
   const several = receptionists.length > 1;
   // A plan with more than one number lists the others, each with who answers it.
@@ -122,11 +125,20 @@ export function LivePhoneNumberSettingsSurface() {
               })}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {t("phoneNumber.reclaim.description", {
+              {t(packEnded ? "phoneNumber.reclaim.packDescription" : "phoneNumber.reclaim.description", {
                 number: displayPhoneNumber ?? primaryPhoneNumber?.e164,
               })}
             </p>
-            {canManageTenant ? (
+            {canManageTenant && packEnded ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button nativeButton={false} render={<Link href="/settings/plan" />} role="link" size="sm" variant="outline">
+                  {t("phoneNumber.reclaim.buyPackCta")}
+                </Button>
+                <Button onClick={openUpgradePlanDialog} size="sm" variant="outline">
+                  {t("phoneNumber.reclaim.choosePlanCta")}
+                </Button>
+              </div>
+            ) : canManageTenant ? (
               <Button
                 className="mt-3"
                 onClick={openUpgradePlanDialog}

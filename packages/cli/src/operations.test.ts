@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { apiOperations, type ApiOperationId } from "@lobbystack/shared";
+import { apiOperations, PACK_CHECKOUT_CLOSED_FOR_PLAN, type ApiOperationId } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { login, logout, profiles, whoami } from "./account";
@@ -106,6 +106,42 @@ describe("one command per endpoint", () => {
     expect(result.code).toBe(exitCodes.failed);
     expect(JSON.parse(result.out)).toMatchObject({ status: "failed" });
     expect(JSON.parse(result.err)).toEqual({ error: { message: "The claim failed: The carrier no longer offers this number. Search again for another number.", exit_code: exitCodes.failed } });
+  });
+
+  it("buys a prepaid pack, waiting for its page with --wait, and says why a checkout that failed or expired did", async () => {
+    const checkout = (status: string, extra: Record<string, unknown> = {}) => ({ body: { data: { id: otherId, pack: "pack_250_90", status, checkout_url: null, error: null, paid: false, ...extra } } });
+    const api = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: [checkout("processing"), checkout("ready", { checkout_url: "https://checkout.stripe.com/c/pay/cs_1" })] });
+    const bought = await runCli(["billing", "buy-pack", "pack_250_90", "--billing-email", "billing@example.com", "--wait"], { fetch: api.fetch });
+    expect(bought.code).toBe(exitCodes.ok);
+    expect(bought.out).toContain("Send this page to whoever pays for the pack: https://checkout.stripe.com/c/pay/cs_1");
+    expect(api.sent[0]).toMatchObject({ method: "POST", path: "/api/v1/billing/packs/checkout", body: { pack: "pack_250_90", billing_email: "billing@example.com" } });
+    expect(api.sent.map((request) => `${request.method} ${request.path}`)).toEqual(["POST /api/v1/billing/packs/checkout", `GET /api/v1/billing/packs/checkout/${otherId}`, `GET /api/v1/billing/packs/checkout/${otherId}`]);
+
+    // Without --wait it says how to check, which pack-status does.
+    const queued = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: checkout("paid", { paid: true }) });
+    expect((await runCli(["billing", "buy-pack", "pack_250_90"], { fetch: queued.fetch })).out).toContain(`lobbystack billing pack-status ${otherId}`);
+    expect(JSON.parse((await runCli(["billing", "pack-status", otherId, "--json"], { fetch: queued.fetch })).out)).toMatchObject({ status: "paid", paid: true });
+
+    // A checkout already paid says what came of the pack: added, or ended as it arrived.
+    for (const [packStatus, sentence] of [["active", "The pack is paid, and the business has it."], ["replaced", "a plan the business bought started first, so the pack ended at once"], ["refunded", "refunded or charged back before it arrived"]] as const) {
+      const paid = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: checkout("paid", { paid: packStatus === "active", pack_status: packStatus }) });
+      const result = await runCli(["billing", "buy-pack", "pack_250_90", "--wait"], { fetch: paid.fetch });
+      expect(result.out).toContain(sentence);
+    }
+
+    const planFirst = "A plan the business bought started, so the pack's checkout closed. A pack bought now would end a monthly plan; a yearly one has to end first.";
+    for (const [status, error, message] of [
+      ["failed", "Polar checkout creation failed.", "The pack's checkout failed: Polar checkout creation failed. Start another checkout."],
+      ["expired", "This request waited too long to run.", "The pack's checkout expired: This request waited too long to run. Start another checkout."],
+      // A plan's start closed it, which no provider failed: another checkout's pack would end a monthly plan.
+      ["failed", PACK_CHECKOUT_CLOSED_FOR_PLAN, planFirst],
+      ["expired", PACK_CHECKOUT_CLOSED_FOR_PLAN, planFirst],
+    ] as const) {
+      const ended = fakeApi({ "POST /api/v1/billing/packs/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/packs/checkout/${otherId}`]: checkout(status, { error }) });
+      const result = await runCli(["billing", "buy-pack", "pack_250_90", "--wait", "--json"], { fetch: ended.fetch });
+      expect(result.code).toBe(exitCodes.failed);
+      expect(JSON.parse(result.err)).toEqual({ error: { message, exit_code: exitCodes.failed } });
+    }
   });
 
   it("makes up an Idempotency-Key for every operation that takes one, and shows it to scripts when the call fails", async () => {

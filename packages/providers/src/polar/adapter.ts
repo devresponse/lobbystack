@@ -9,7 +9,7 @@ import { PolarRequestError, type PolarBillingProvider, type PolarProrationBehavi
 // worker made before the seam, which the worker's recorded-requests test keeps.
 
 /** The Polar client calls the adapter makes. A test passes only the ones its flow needs. */
-export type PolarBillingClient = Pick<PolarBillingProvider, "recordUsage"> & Partial<Pick<PolarBillingProvider, "createCheckout" | "findCustomerByExternalId" | "createCustomer" | "getSubscription" | "changeSubscriptionProduct" | "cancelSubscriptionAtPeriodEnd" | "removeSubscriptionDiscount" | "revokeSubscription" | "createCustomerPortalSession">>;
+export type PolarBillingClient = Pick<PolarBillingProvider, "recordUsage"> & Partial<Pick<PolarBillingProvider, "createCheckout" | "findCustomerByExternalId" | "createCustomer" | "getSubscription" | "changeSubscriptionProduct" | "cancelSubscriptionAtPeriodEnd" | "moveSubscriptionPeriodEnd" | "removeSubscriptionDiscount" | "revokeSubscription" | "createCustomerPortalSession">>;
 
 const polarStates: Record<string, ProviderSubscription["state"]> = {
   incomplete: "incomplete",
@@ -136,6 +136,24 @@ export class PolarBilling implements BillingProvider {
     return { id: checkout.checkoutId, url: checkout.checkoutUrl, expiresAt: null };
   }
 
+  /**
+   * The plan checkout's request for the pack's one-time product, with
+   * metadata naming the business, the pack checkout and the role pack.
+   * Polar's answer doesn't say when its page expires.
+   */
+  async createPackCheckout(input: Parameters<BillingProvider["createPackCheckout"]>[0]): Promise<{ id: string; url: string; expiresAt: Date | null }> {
+    if (!this.client.createCheckout) throw this.unsupported("make a checkout");
+    const checkout = await this.client.createCheckout({
+      productId: input.price.ref,
+      customer: input.customer.id ? { id: input.customer.id } : { email: input.email, externalId: input.customer.billingKey },
+      metadata: { ...input.metadata, lobbystack_business: input.businessId, lobbystack_pack_checkout: input.checkoutId, lobbystack_role: "pack" },
+      successUrl: input.successUrl,
+      // Someone leaving checkout hasn't paid, so it returns to the plan page without the success marker.
+      returnUrl: input.cancelUrl,
+    });
+    return { id: checkout.checkoutId, url: checkout.checkoutUrl, expiresAt: null };
+  }
+
   async getSubscription(id: string): Promise<ProviderSubscription | null> {
     if (!this.client.getSubscription) return null;
     const subscription = await this.client.getSubscription(id);
@@ -185,6 +203,42 @@ export class PolarBilling implements BillingProvider {
     if (!this.client.revokeSubscription) throw this.unsupported("end a plan");
     await this.client.revokeSubscription(input.subscriptionId);
     return "ended";
+  }
+
+  /**
+   * Polar settles a monthly plan's usage at a revoke only for plans with a
+   * meter cycle, so a revoke would most likely drop the month's overage.
+   * Instead the subscription is set to cancel at its period's end, and that
+   * end moves to endsAt: the final order bills the period's usage and refunds
+   * nothing. A retry finds both done, or gets AlreadyCanceledSubscription for
+   * the cancel, and moves the end only while it is later than endsAt. Never a
+   * revoke after the cancel: Polar refuses it with that same error, which
+   * revokeSubscription takes as ended.
+   */
+  async endForPack(input: { subscriptionId: string; overageSubscriptionId: string | null; endsAt: Date; requestId: string }): Promise<ProviderSubscription | null> {
+    if (!this.client.getSubscription || !this.client.cancelSubscriptionAtPeriodEnd || !this.client.moveSubscriptionPeriodEnd) throw this.unsupported("end a plan a prepaid pack replaced");
+    let subscription = await this.client.getSubscription(input.subscriptionId);
+    if (!subscription) return null;
+    const read = providerSubscriptionFromPolar(subscription);
+    if (read.endedAt || read.state === "canceled" || read.state === "ended") return null;
+    if (!subscription.cancelAtPeriodEnd) {
+      try {
+        subscription = await this.client.cancelSubscriptionAtPeriodEnd(input.subscriptionId);
+      } catch (error) {
+        if (!(error instanceof PolarRequestError && error.status === 403 && error.errorName === "AlreadyCanceledSubscription")) throw error;
+      }
+    }
+    const periodEnd = subscription.currentPeriodEnd ? new Date(subscription.currentPeriodEnd) : null;
+    if (periodEnd && periodEnd.getTime() > input.endsAt.getTime()) {
+      try {
+        subscription = await this.client.moveSubscriptionPeriodEnd(input.subscriptionId, input.endsAt);
+      } catch (error) {
+        // Polar's validation, such as an end no longer in the future; the next try asks with a later one.
+        if (error instanceof PolarRequestError && error.status === 422) throw new BillingProviderError("polar", "refused", "Polar refused to move the end of the replaced subscription's period.", "retry");
+        throw error;
+      }
+    }
+    return providerSubscriptionFromPolar(subscription);
   }
 
   /** One event per send, named by its meter, in units (a call's seconds over 60). Polar prices it, so amountCents goes unused. */

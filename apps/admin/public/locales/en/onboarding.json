@@ -298,12 +298,13 @@
         "alertSms": "Alert SMS segments",
         "knowledgeStorage": "Knowledge base",
         "phoneNumbers": "Phone numbers",
+        "chatAiUnits": "Website chats",
         "callAnswering": "24/7 call answering",
         "callerDetails": "Caller details and message capture",
         "knowledgeAnswers": "Knowledge base answers",
         "workflows": "Plain-language workflows",
         "spamFiltering": "Spam filtering",
-        "shortCalls": "Calls under 10s excluded from billing",
+        "shortCalls": "Calls under {{seconds}}s excluded from billing",
         "concurrentCalls": "Concurrent call handling",
         "multilingual": "Answers in the caller's language",
         "appointmentBooking": "Appointment booking",
@@ -361,6 +362,10 @@
           "phoneNumbers": {
             "dedicated_one": "{{count}} dedicated",
             "dedicated_other": "{{count}} dedicated"
+          },
+          "chatAiUnits": {
+            "included_one": "{{count}} included",
+            "included_other": "{{count}} included"
           }
         },
         "data": {
@@ -390,7 +395,19 @@
     "retry": "Try again",
     "current": {
       "title": "This business is already on the {{plan}} plan.",
-      "description": "Its plan is already set up, so you can go on to its phone number."
+      "description": "Its plan is already set up, so you can go on to its phone number.",
+      "prepaidTitle": "This business already has prepaid minutes.",
+      "prepaidDescription": "Its minutes are ready, so you can go on to its phone number."
+    },
+    "packs": {
+      "title": "Prefer prepaid minutes?",
+      "description": "Buy minutes once, with no monthly bill. They last until they run out or the pack ends.",
+      "cta": "Buy pack",
+      "waiting": "Adding your minutes...",
+      "processing": "Your payment is still processing. Check again in a few minutes.",
+      "checkAgain": "Check again",
+      "failed": "Your payment didn't go through. Choose a plan or a pack again.",
+      "refunded": "Your payment was refunded or charged back, so no pack was added. Choose a plan or a pack again."
     }
   }
 }

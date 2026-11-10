@@ -39,6 +39,7 @@ With `managedPayments: true` and `overage: checkout` in the brand's `stripe` blo
 | Yearly plans | Sold | Not sold: the deployment leaves the file's yearly prices out, which its Polar deployments still sell |
 | Usage dates | By the month's end and the grace hours | By the plan's renewal and the grace hours, with usage from before the period the last renewal ended dated now, since its invoice is final; the daily totals check's open period starts at the renewal |
 | Plan changes, cancelling | **Settings > Plan**, as on Stripe directly; a renewal schedule keeps the metered items | The same |
+| A plan a prepaid pack replaced | `billing.endPlanForPack` cancels it at once, crediting nothing, and sets the overage subscription to end with its month, whose invoice on the 1st bills the month's usage | It cancels it at once with `invoice_now` and no proration, which credits nothing and invoices the usage on its meters |
 | Cards | The portal | The portal or Link; the API can't set a subscription's card |
 | Currency | The catalog's | The customer's own abroad: Stripe's Adaptive Pricing can't be turned off, so a transaction can be in another currency than the plans |
 
@@ -58,9 +59,20 @@ A sandbox showed each of these on a paid test subscription ([Stripe billing](../
    pnpm billing apply --brand <brand> --stripe sandbox --railway-file .env.stripe
    ```
 
-   `apply` makes the products, prices, coupons, the three meters with their overage prices, the billing portal's configuration, the webhook endpoint and the meter error destination, then links them in the catalog. `--railway-file` saves `STRIPE_ACCOUNT_ID` for the admin and the worker, and the two signing secrets Stripe shows only once, `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET`, for the admin. Set them with `node devops/railway-vars.mjs .env.stripe`, then delete the file.
+   `apply` makes the products, prices, coupons, the three meters with their overage prices, the billing portal's configuration, the webhook endpoint and the meter error destination, then the packs' products and prices ([below](#know-what-apply-makes-for-packs)), then links them in the catalog. `--railway-file` saves `STRIPE_ACCOUNT_ID` for the admin and the worker, and the two signing secrets Stripe shows only once, `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET`, for the admin. Set them with `node devops/railway-vars.mjs .env.stripe`, then delete the file.
 7. **What Stripe's API can't set,** which `plan` and `verify` list, in the Dashboard: the tax registrations and origin address, the grace period of `usageGraceHours` before an invoice with usage is finalized, the retries after a failed payment and what follows the last one, and the branding, support email and statement descriptor that checkout, invoices and the portal show.
 8. **Check:** `pnpm billing verify --brand <brand> --stripe sandbox` should end `Result: in sync (exit 0)`. It reads with `STRIPE_READ_KEY`, else the setup key.
+
+## Know what apply makes for packs
+
+For each of the file's [prepaid packs](../../brands/README.md#prepaid-packs), `pnpm billing apply` makes a product of its own and one price on it, after every other object, and a file with packs adds the packs' three events to the webhook endpoint ([below](#know-the-webhook-endpoints)), so a file without packs gets exactly the calls it got before packs existed. Apply only adds events, so an endpoint keeps the packs' events after a file drops its packs, and verify doesn't count them as drift.
+
+| Object | What it is |
+| --- | --- |
+| Product | Named as the pack, with the file's tax code, tagged `lobbystack_brand` and `lobbystack_pack` |
+| Price | One-time, the pack's price before tax, under the lookup key `lsp_<brand>_<pack>_<currency>_<first 8 of the terms hash>`, tagged with the pack and its terms |
+
+The link records each pack's price, and the billing portal never offers a pack. Stripe never changes a price, so new terms for a pack, such as a new price or allowance, make a new price under a new lookup key: the run archives the old price only with `--allow-archive`, and links the new one only with `--allow-replace`, as for a plan. A price found under a pack's lookup key that bills on a cycle is replaced only with `--allow-replace`. Packs bought through an old price keep their minutes. Verify checks that each linked pack price is live, one-time, on its pack's product and at the row's price.
 
 ## Know the keys
 
@@ -68,8 +80,8 @@ Stripe's names for each permission are confirmed by the first sandbox run, so th
 
 | Key | Where | Needs | Used for |
 | --- | --- | --- | --- |
-| The admin's `STRIPE_API_KEY` | Railway, on the admin | Write on billing portal sessions, read on customers | **Manage subscription** in **Settings > Plan**, which opens Stripe's billing portal, and finding the business of a charge's customer when a refund or dispute arrives |
-| The worker's `STRIPE_API_KEY` | Railway, on the worker | Write on customers (with their balance transactions), Checkout Sessions, subscriptions, subscription schedules, invoices and meter events; read on invoice payments, meters and their event summaries, products, prices, coupons, the billing portal's configurations, and Stripe Tax's settings and registrations | Checkout, the overage subscription, plan changes, cancelling, usage, deletion, the daily checks, and its startup check of the key's account |
+| The admin's `STRIPE_API_KEY` | Railway, on the admin | Write on billing portal sessions, read on customers and PaymentIntents | **Manage subscription** in **Settings > Plan**, which opens Stripe's billing portal, finding the business of a charge's customer when a refund or dispute arrives, and finding the business of a disputed [prepaid pack](../features/prepaid-packs.md) payment by its PaymentIntent. Without the PaymentIntents permission such a dispute stays unattributed, freezes no pack and logs a warning |
+| The worker's `STRIPE_API_KEY` | Railway, on the worker | Write on customers (with their balance transactions), Checkout Sessions, subscriptions, subscription schedules, invoices and meter events; read on invoice payments, meters and their event summaries, products, prices, coupons, the billing portal's configurations, and Stripe Tax's settings and registrations | Checkout, closing a pack's payment page once a plan starts (`billing.closePackCheckout` expires the Checkout Session), the overage subscription, plan changes, cancelling, usage, deletion, the daily checks, and its startup check of the key's account |
 | `STRIPE_SETUP_KEY` | The operator's computer, for `pnpm billing apply` | Write on products, prices, coupons, meters, the billing portal's configurations, webhook endpoints and event destinations; read on Stripe Tax | Setting Stripe up from `billing.json` |
 | `STRIPE_READ_KEY` | The operator's computer, for `pnpm billing plan` and `verify` | Read on the same, and on subscriptions for `devops/reset-database.mjs` | Checking; never on a service |
 
@@ -102,7 +114,7 @@ A Polar deployment needs none of them, and a Stripe deployment none of `POLAR_*`
 
 | Endpoint | Signed with | Events |
 | --- | --- | --- |
-| `/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` | `checkout.session.completed` and `expired`; `customer.subscription.created`, `updated`, `deleted`, `paused`, `resumed`, `pending_update_applied` and `pending_update_expired`; `invoice.paid`, `payment_failed`, `finalized`, `voided` and `marked_uncollectible`; `charge.refunded` and `charge.dispute.created` (`STRIPE_WEBHOOK_EVENTS`) |
+| `/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` | `checkout.session.completed` and `expired`; `customer.subscription.created`, `updated`, `deleted`, `paused`, `resumed`, `pending_update_applied` and `pending_update_expired`; `invoice.paid`, `payment_failed`, `finalized`, `voided` and `marked_uncollectible`; `charge.refunded` and `charge.dispute.created` (`STRIPE_WEBHOOK_EVENTS`). For a file with [packs](#know-what-apply-makes-for-packs), also `checkout.session.async_payment_succeeded` and `async_payment_failed`, and `charge.dispute.closed` (`STRIPE_PACK_WEBHOOK_EVENTS`) |
 | `/api/webhooks/stripe/meter-errors` | `STRIPE_METER_WEBHOOK_SECRET` | The meter error destination's thin events, `v1.billing.meter.error_report_triggered` and `v1.billing.meter.no_meter_found` |
 
 A delivery more than 300 seconds old, or of the other mode, is refused. `/api/webhooks/polar` answers 404 on a Stripe deployment, and logs `ops.billing.webhook_wrong_provider` at most once a minute.
@@ -130,6 +142,7 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
 | `deletion` | A deleted business's two subscriptions end at once, each with its last invoice, and a retried revoke counts as ended |
 | `refund` | A refund of the plan's first payment leads back to its invoice |
 | `totals` | A usage event Stripe never got shows as a gap, a numbered correction sent twice closes it once, and a balance credit counts once |
+| `pack-plan-end` | A monthly plan a [prepaid pack](../features/prepaid-packs.md) replaced ends at once with nothing credited. With Stripe as the merchant of record, its last invoice bills the usage on its meters, to the cent before tax; directly, its overage subscription ends with its month, and the 1st's last invoice bills the usage |
 | `events` | Every webhook event of the scenarios' customers normalizes, each to its own business |
 
 1. **A sandbox of its own,** not a deployment's: the run adds the brand's catalog to it, without the webhook endpoint, and archives prices the other selling mode sold. It refuses a sandbox with any webhook endpoint or event destination, which a deployment's apply makes. In it, set Stripe Tax's origin address (**Settings > Tax**) *(name not confirmed)*: every subscription uses automatic tax, and the run stops without it.
@@ -141,7 +154,7 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
    pnpm billing:scenarios --only usage,refund
    ```
 
-   It sets the sandbox up from `brands/realinfobot/billing.json`, or the brand `--brand` names, with the recommended `stripe` block while the file has none. Four scenarios run at once (`--parallel`), most of their time a test clock advancing; the whole run takes about 15 minutes *(estimated)*. It ends `All 12 scenarios passed.` (exit 0), or with a `FAIL` line for each that didn't (exit 1); exit 2 means it couldn't start. Each scenario's test clock is deleted at the end, with its customers and subscriptions, unless `--keep`.
+   It sets the sandbox up from `brands/realinfobot/billing.json`, or the brand `--brand` names, with the recommended `stripe` block while the file has none. Four scenarios run at once (`--parallel`), most of their time a test clock advancing; the whole run takes about 15 minutes *(estimated)*. It ends `All 13 scenarios passed.` (exit 0), or with a `FAIL` line for each that didn't (exit 1); exit 2 means it couldn't start. Each scenario's test clock is deleted at the end, with its customers and subscriptions, unless `--keep`.
 
 The `Billing scenarios` workflow (`.github/workflows/billing-scenarios.yml`) runs the same by hand from GitHub, with the key in the repository secret `STRIPE_SCENARIOS_KEY`, once its file is on the default branch: GitHub lists a manual workflow only from there.
 
@@ -151,7 +164,7 @@ Two limits: the plan subscription is made through the API with Stripe's test car
 
 `pnpm billing:scenarios --merchant-of-record` runs the scenarios as a brand with `managedPayments` sells, and so does a brand whose `stripe` block sets it. Stripe starts such a subscription only from a Checkout page, so for each one the run makes the checkout through the adapter, prints a line such as `Pay the usage checkout with test card 4242 4242 4242 4242, any future date, any CVC and any address, within 20 minutes: https://checkout.stripe.com/...`, and waits until it's paid. The scenarios run one at a time.
 
-- **Which scenarios:** without `--only`, those whose Stripe calls differ from Stripe directly: `usage` (the plan's renewal invoices the month's usage with the plan's price), `upgrade-paid`, `downgrade` (the renewal keeps the overage prices), `cancel-resume`, `totals` and `events`. That's five checkouts to pay. The others run when named, and `upgrade-3ds` asks for the 3-D Secure test card, 4000 0027 6000 3184. `upgrade-declined` can't run: no API call gives a merchant of record subscription a declining card.
+- **Which scenarios:** without `--only`, those whose Stripe calls differ from Stripe directly: `usage` (the plan's renewal invoices the month's usage with the plan's price), `upgrade-paid`, `downgrade` (the renewal keeps the overage prices), `cancel-resume`, `totals`, `pack-plan-end` (ending the plan with `invoice_now` bills the usage on its own meters, the prepaid pack design's open question) and `events`. That's six checkouts to pay. The others run when named, and `upgrade-3ds` asks for the 3-D Secure test card, 4000 0027 6000 3184. `upgrade-declined` can't run: no API call gives a merchant of record subscription a declining card.
 - **Setup:** the sandbox needs no Stripe Tax origin address, since Stripe works out the tax, and yearly prices aren't made. Without the yearly prices the plans' terms differ, so their prices do too: a run in one mode archives the prices the other mode sold in the scenarios' sandbox, and a run in that mode brings them back.
 - **Where:** from a computer, with someone to pay the checkouts; the workflow would wait 20 minutes for each.
 
@@ -163,4 +176,5 @@ Two limits: the plan subscription is made through the API with Stripe's test car
 
 - The checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. [The sandbox scenarios](#run-the-sandbox-scenarios) passed twice in a row with Stripe as the merchant of record, the mode both brands use; Stripe directly hasn't run against a sandbox.
 - Stripe's names for each key's permissions, from that run.
+- A test-clock run showing that cancelling with `invoice_now` and no proration bills the usage on the meters under Managed Payments. Stripe's API reference says it does, and its cancellation guide that it doesn't. A plan a prepaid pack replaced and a deleted business's plan both end this way. If it doesn't, the fallback is to cancel a few minutes ahead (`cancel_at`) with no proration, which ends the plan through a normal final invoice.
 - The legal pages: with Stripe directly the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments; with Stripe as the merchant of record, the payment terms name Link as the seller. The landing's legal pages, which this fork doesn't publish, name only Polar or Stripe.

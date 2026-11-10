@@ -1,11 +1,12 @@
 import type Stripe from "stripe";
 
 import { isUuid } from "@lobbystack/shared";
+import { reportWarning } from "@lobbystack/telemetry/node";
 
 import { BillingProviderError } from "../billing/errors";
 import type { BillingEnv, BillingProvider, BillingRefusal, CustomerRef, OverageKind, PlanChangeProration, PlanChangeResult, PriceRef, ProviderSubscription } from "../billing/types";
-import { cancelStripePlan, keepStripePlan, resumeStripePlan } from "./cancel";
-import { createStripeCheckout } from "./checkout";
+import { cancelStripePlan, endStripePlanForPack, keepStripePlan, resumeStripePlan } from "./cancel";
+import { closeStripePackCheckout, createStripeCheckout, createStripePackCheckout } from "./checkout";
 import { stripeLocale, type StripeApi } from "./client";
 import { isStripeAlreadyCanceled, isStripeMissing, stripeRefusalFor } from "./errors";
 import { endStripeOverage, ensureStripeOverage } from "./overage";
@@ -78,6 +79,14 @@ export class StripeBilling implements BillingProvider {
     return await createStripeCheckout(this.api, input);
   }
 
+  async createPackCheckout(input: Parameters<BillingProvider["createPackCheckout"]>[0]): Promise<{ id: string; url: string; expiresAt: Date | null }> {
+    return await createStripePackCheckout(this.api, input);
+  }
+
+  async closePackCheckout(input: { checkoutId: string }): Promise<"closed" | "already_closed"> {
+    return await closeStripePackCheckout(this.api, input);
+  }
+
   /** The subscription with its schedule, discounts and latest invoice, or null when Stripe has none by that ID. */
   async getSubscription(id: string): Promise<ProviderSubscription | null> {
     try {
@@ -125,6 +134,11 @@ export class StripeBilling implements BillingProvider {
       if (isStripeMissing(error) || isStripeAlreadyCanceled(error)) return "already_ended";
       throw error;
     }
+  }
+
+  /** Ends a plan a prepaid pack replaced now; endsAt goes unused, since Stripe ends it at once. */
+  async endForPack(input: { subscriptionId: string; overageSubscriptionId: string | null; endsAt: Date; requestId: string }): Promise<ProviderSubscription | null> {
+    return await endStripePlanForPack(this.api, input);
   }
 
   /**
@@ -196,6 +210,29 @@ export class StripeBilling implements BillingProvider {
     } catch (error) {
       if (isStripeMissing(error)) return null;
       throw error;
+    }
+  }
+
+  /**
+   * The business a pack's payment intent names, as createPackCheckout writes
+   * it on payment_intent_data; null for a payment intent that isn't a pack's,
+   * or one Stripe no longer has. A key that can't read payment intents gets
+   * null too, with a warning, so the dispute stays unattributed as a plan's
+   * does. Any other error, such as a rate limit or a lost connection, is
+   * thrown, so the webhook fails and Stripe sends the event again.
+   */
+  async businessOfPackPayment(paymentRef: string): Promise<string | null> {
+    if (!paymentRef.startsWith("pi_")) return null;
+    try {
+      const intent = await this.api.paymentIntents.retrieve(paymentRef);
+      if (intent.metadata?.lobbystack_role !== "pack") return null;
+      const business = intent.metadata.lobbystack_business;
+      return business && isUuid(business) ? business : null;
+    } catch (error) {
+      if (isStripeMissing(error)) return null;
+      if (stripeRefusalFor(error) !== "token_scope") throw error;
+      await reportWarning(new Error("The admin's Stripe key can't read PaymentIntents, so a dispute can't be matched to the prepaid pack it may be about, and no pack is frozen. Give the admin's STRIPE_API_KEY read access to PaymentIntents."), { operation: "billing.webhook", paymentIntent: paymentRef });
+      return null;
     }
   }
 

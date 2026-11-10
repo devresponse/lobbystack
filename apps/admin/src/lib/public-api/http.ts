@@ -104,6 +104,7 @@ function errorResponse(error: unknown, operationId: string): NextResponse {
   const status = typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : 500;
   if (status === 403) return apiError(403, "forbidden", "This API key cannot do that.");
   if (status === 404) return apiError(404, "not_found", error instanceof Error ? error.message : "Not found.");
+  if (status === 409) return apiError(409, "conflict", error instanceof Error ? error.message : "The request conflicts with the current state.");
   if (status >= 400 && status < 500) return apiError(status, "invalid_request", error instanceof Error ? error.message : "The request is invalid.");
   const errorId = crypto.randomUUID();
   const report = () => reportServerError(error, { operation: `public_api.${operationId}`, errorId });

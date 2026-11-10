@@ -92,6 +92,16 @@ export class PolarBillingProvider {
   }
 
   /**
+   * Moves the end of a subscription's current period, earlier or later but in
+   * the future. One set to cancel at its period's end then ends on the new
+   * date. Polar refuses it on a subscription that isn't active. Needs
+   * subscriptions:write.
+   */
+  async moveSubscriptionPeriodEnd(subscriptionId: string, at: Date): Promise<PolarSubscription> {
+    return await this.patchSubscription(subscriptionId, { current_billing_period_end: at.toISOString() });
+  }
+
+  /**
    * Ends a subscription now rather than at the end of its period, as for a
    * business being deleted. One Polar no longer has, or that has already
    * ended, counts as ended; any other refusal, such as a token without the

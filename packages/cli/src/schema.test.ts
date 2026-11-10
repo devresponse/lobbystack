@@ -20,8 +20,8 @@ describe("request schemas as flags", () => {
   });
 
   it("picks the option of a union that the fixed values name", () => {
-    expect(objectFields(apiComponentSchemas.KnowledgeEntryCreate, { type: "faq" })!.map((field) => field.name)).toEqual(["type", "question", "answer"]);
-    expect(objectFields(apiComponentSchemas.KnowledgeEntryCreate, { type: "text" })!.map((field) => field.name)).toEqual(["type", "title", "content"]);
+    expect(objectFields(apiComponentSchemas.KnowledgeEntryCreate, { type: "faq" })!.map((field) => field.name)).toEqual(["type", "question", "answer", "audience", "receptionist_ids"]);
+    expect(objectFields(apiComponentSchemas.KnowledgeEntryCreate, { type: "text" })!.map((field) => field.name)).toEqual(["type", "title", "content", "audience", "receptionist_ids"]);
     expect(objectFields(apiComponentSchemas.KnowledgeEntryCreate, { type: "video" })).toBeNull();
     expect(flagName("staff_ids")).toBe("staff-ids");
   });

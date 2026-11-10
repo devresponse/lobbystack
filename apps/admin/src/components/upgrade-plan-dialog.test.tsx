@@ -59,6 +59,16 @@ describe("main upgrade dialog", () => {
     setup({ changesPlan: true, currentPlan: "starter" });
     expect(translate).not.toHaveBeenCalledWith("billing.upgradeDialog.leavesPromo", expect.anything());
   });
+  it("warns that starting a plan ends the business's packs and the minutes left on them, and marks no plan current", () => {
+    setup({ currentPlan: "prepaid", leavesPacks: { minutesLeft: 1_250 } });
+    expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.endsPacks", { count: 1_250, minutes: "1,250" });
+    expect(screen.queryByRole("button", { name: "billing.upgradeDialog.actions.currentPlan" })).toBeNull();
+    expect(screen.getByRole("button", { name: "billing.upgradeDialog.actions.starter" }).hasAttribute("disabled")).toBe(false);
+    cleanup();
+    translate.mockClear();
+    setup();
+    expect(translate).not.toHaveBeenCalledWith("billing.upgradeDialog.endsPacks", expect.anything());
+  });
   it("prices the cards and fills their allowances from the deployment's plans, in its currency", async () => {
     const plans: BillingPlanList = builtInBillingPlanList();
     plans.currency = "cad";

@@ -22,6 +22,10 @@ import {
   perMonthCents,
   meterEventTime,
   priceUsage,
+  cloudBillingPlanSlugs,
+  isBillingPlanSlug,
+  packCapacitySeconds,
+  packEndsAt,
 } from "./billing";
 
 describe("usage as money (the Stripe plan's step 16)", () => {
@@ -272,5 +276,28 @@ describe("built-in plan list", () => {
     expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000), price("annual", 30_000)] }, { prices: [price("monthly", 10_000), price("annual", 96_000)] }] as never })).toBe(16);
     expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000), price("annual", 36_000)] }] as never })).toBeNull();
     expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000)] }] as never })).toBeNull();
+  });
+});
+
+describe("prepaid packs", () => {
+  it("takes a partial refund's share of the seconds off a pack, and all of them for a full one", () => {
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 0 })).toBe(30_000);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 4950 })).toBe(15_000);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 1 })).toBe(29_996);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 9900 })).toBe(0);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 12_000 })).toBe(0);
+  });
+
+  it("ends a pack its days of 24 hours after the payment, whatever the month or the clock change", () => {
+    expect(packEndsAt(new Date("2026-11-09T06:00:00Z"), 180)?.toISOString()).toBe("2027-05-08T06:00:00.000Z");
+    expect(packEndsAt(new Date("2027-01-31T23:30:00Z"), 1)?.toISOString()).toBe("2027-02-01T23:30:00.000Z");
+    expect(packEndsAt(new Date("2026-11-09T06:00:00Z"), null)).toBeNull();
+  });
+
+  it("is a plan in force but never one on sale", () => {
+    expect(isBillingPlanSlug("prepaid")).toBe(true);
+    expect((cloudBillingPlanSlugs as readonly string[]).includes("prepaid")).toBe(false);
+    expect(builtInBillingPlanLimits.prepaid).toMatchObject({ voiceSecondsIncluded: null, overagesBillable: false, includedBusinessNumbers: 1, includedReceptionists: 1, knowledgeStorageBytes: 20 * 1024 * 1024 });
+    expect(contentRetentionDaysForPlan("prepaid", "transcripts")).toBe(contentRetentionDaysForPlan("starter", "transcripts"));
   });
 });

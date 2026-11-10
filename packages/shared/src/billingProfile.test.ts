@@ -4,10 +4,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { hostedCheckoutPlanSlugs } from "./billing";
-import { billingProfileForProvider, billingProfileSchema, canonicalBillingProfileJson, normalizeBillingProfile, planTermsJson, resolveBillingPlans, type BillingProfile, type ResolvedBillingPlan } from "./billingProfile";
+import { billingProfileForProvider, billingProfileSchema, billingProfileWithoutDisplay, canonicalBillingProfileJson, normalizeBillingProfile, packTermsJson, planTermsJson, resolveBillingPacks, resolveBillingPlans, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
+const realinfobotText = readFileSync(new URL("../../../brands/realinfobot/billing.json", import.meta.url), "utf8");
+const realinfobot = (): Record<string, any> => JSON.parse(realinfobotText);
 
 // The additional plans of the design's examples: a promo with more minutes, a money-off promo and a public plan.
 const examples = {
@@ -326,5 +328,163 @@ describe("the terms hash", () => {
     expect(termsHash(after, "inherits")).not.toBe(termsHash(before, "inherits"));
     expect(termsHash(after, "sets")).toBe(termsHash(before, "sets"));
     expect(termsHash(after, "pro")).not.toBe(termsHash(before, "pro"));
+  });
+});
+
+describe("prepaid packs", () => {
+  const packEntry = (overrides: Record<string, unknown> = {}) => ({ names: name("500 minutes"), minutes: 500, days: 180, priceCents: 9900, ...overrides });
+  const withPacks = (packs: Record<string, unknown>, change: (file: Record<string, any>) => void = () => undefined) => withPlans({}, (file) => { file.packs = packs; change(file); });
+  const pack = (file: unknown, code: string): ResolvedBillingPack => resolveBillingPacks(parse(file)).find((row) => row.code === code)!;
+  const packHash = (file: unknown, code: string) => createHash("sha256").update(packTermsJson(pack(file, code))).digest("hex");
+
+  it("sells nine packs in each brand's file, smallest and shortest first, with Starter's allowances and 20 MB of knowledge", () => {
+    for (const brand of ["alloplace", "realinfobot"]) {
+      const file = JSON.parse(readFileSync(new URL(`../../../brands/${brand}/billing.json`, import.meta.url), "utf8"));
+      const packs = resolveBillingPacks(parse(file));
+      expect(packs.map((row) => row.code)).toEqual(["pack_250_90", "pack_250_180", "pack_250_365", "pack_500_90", "pack_500_180", "pack_500_365", "pack_1000_90", "pack_1000_180", "pack_1000_365"]);
+      expect(packs.map((row) => row.sort)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 90]);
+      expect(packs.find((row) => row.code === "pack_500_180")).toEqual({
+        code: "pack_500_180",
+        names: { en: "500 minutes, 180 days", fr: "500 minutes, 180 jours", es: "500 minutos, 180 días", sr: "500 minuta, 180 dana" },
+        voice_sec: 30_000,
+        days: 180,
+        sms_seg: 50,
+        calls_out: 20,
+        chat_units: 50,
+        kb_bytes: 20 * 1_048_576,
+        numbers: 1,
+        receptionists: 1,
+        sort: 50,
+        price: { currency: "cad", cents: 9900 },
+      });
+    }
+  });
+
+  it("takes what a pack leaves out from Starter, and keeps what it sets", () => {
+    const file = withPacks({ own: packEntry({ included: { alertSmsSegments: 7 }, limits: { knowledgeStorageMb: 3, businessNumbers: 0, receptionists: 2 } }), bare: packEntry({ days: undefined }) });
+    expect(pack(file, "own")).toMatchObject({ sms_seg: 7, calls_out: 20, chat_units: 50, kb_bytes: 3 * 1_048_576, numbers: 0, receptionists: 2 });
+    expect(pack(file, "bare")).toMatchObject({ days: null, sms_seg: 50, kb_bytes: 5 * 1_048_576, numbers: 1, receptionists: 1 });
+    // A pack that never ends sorts after every length of its size.
+    expect(resolveBillingPacks(parse(file)).map((row) => row.code)).toEqual(["own", "bare"]);
+  });
+
+  it("allows a file without packs, and checks each pack's code, length and price", () => {
+    expect(resolveBillingPacks(parse(withPlans({}, (file) => { delete file.packs; })))).toEqual([]);
+    expect(problems(withPacks({ "Big-Pack": packEntry() }))).toEqual([expect.stringMatching(/^packs\.Big-Pack: a pack code is/)]);
+    expect(problems(withPacks({ starter: packEntry() }))).toEqual([expect.stringMatching(/^packs\.starter: a plan already has this code/)]);
+    const many = Object.fromEntries(Array.from({ length: 31 }, (_, index) => [`pack-${String(index).padStart(2, "0")}`, packEntry()]));
+    expect(problems(withPacks(many))).toEqual([expect.stringMatching(/^packs\.pack-30: a file holds at most 30 packs/)]);
+    const refused = (file: unknown, path: RegExp) => expect(problems(file).some((problem) => path.test(problem)), `${path} in ${problems(file).join("; ")}`).toBe(true);
+    refused(withPacks({ pk1: packEntry({ days: 0 }) }), /^packs\.pk1\.days: /);
+    refused(withPacks({ pk1: packEntry({ days: 1_096 }) }), /^packs\.pk1\.days: /);
+    refused(withPacks({ pk1: packEntry({ minutes: 0 }) }), /^packs\.pk1\.minutes: /);
+    refused(withPacks({ pk1: packEntry({ priceCents: 0 }) }), /^packs\.pk1\.priceCents: /);
+    refused(withPacks({ pk1: packEntry({ included: { voiceMinutes: 10 } }) }), /^packs\.pk1\.included: Unrecognized key/);
+    refused(withPacks({ pk1: packEntry({ limits: { businessNumbers: 2 } }) }), /^packs\.pk1\.limits\.businessNumbers: /);
+    expect(problems(withPacks({ pk1: packEntry({ days: 1_095 }) }))).toEqual([]);
+  });
+
+  it("hashes everything a buyer gets and the price, but not the names or the order", () => {
+    const base = packHash(withPacks({ pk1: packEntry() }), "pk1");
+    expect(packHash(withPacks({ pk1: packEntry({ names: name("Another name") }), pk0: packEntry({ minutes: 100 }) }), "pk1")).toBe(base);
+    const changed = [
+      packEntry({ minutes: 501 }),
+      packEntry({ days: 181 }),
+      packEntry({ days: undefined }),
+      packEntry({ priceCents: 9901 }),
+      packEntry({ included: { alertSmsSegments: 1 } }),
+      packEntry({ included: { outboundCallAttempts: 1 } }),
+      packEntry({ included: { chatAiUnits: 1 } }),
+      packEntry({ limits: { knowledgeStorageMb: 1 } }),
+      packEntry({ limits: { businessNumbers: 0 } }),
+      packEntry({ limits: { receptionists: 3 } }),
+    ].map((entry) => packHash(withPacks({ pk1: entry }), "pk1"));
+    expect(new Set([base, ...changed]).size).toBe(changed.length + 1);
+    expect(packHash(withPacks({ pk1: packEntry() }, (file) => { file.currency = "usd"; }), "pk1")).not.toBe(base);
+  });
+
+  it("leaves every plan's terms hash as it was", () => {
+    const without = withPlans({}, (file) => { delete file.packs; });
+    for (const code of ["free_cloud", "starter", "pro", "enterprise"]) expect(termsHash(alloplace(), code)).toBe(termsHash(without, code));
+  });
+});
+
+describe("the plan screens' display section", () => {
+  const words = (text: string) => ({ en: text, fr: text, es: text, sr: text });
+  const withDisplay = (display: Record<string, unknown>, change: (file: Record<string, any>) => void = () => undefined) => {
+    const file = alloplace();
+    file.display = display;
+    change(file);
+    return file;
+  };
+  // Only the section's own problems, as a path and its message.
+  const displayProblems = (file: unknown) => problems(file).filter((problem) => problem.startsWith("display"));
+
+  it("takes RealInfoBot's section, and leaves it out of the hash, the stored profile and what the billing commands send", () => {
+    const file = realinfobot();
+    expect(file.display.plans.map((card: { plan: string }) => card.plan)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
+    expect(problems(file)).toEqual([]);
+    const { display: _screens, ...withoutDisplay } = file;
+    expect(profileHash(file)).toBe(profileHash(withoutDisplay));
+    // RealInfoBot and AlloPlace sell the same plans, so the section is all that tells their files apart.
+    expect(profileHash(file)).toBe(profileHash(alloplace()));
+    expect(normalizeBillingProfile(parse(file))).not.toHaveProperty("display");
+    expect(billingProfileWithoutDisplay(file)).toEqual(withoutDisplay);
+    // Words changed on the screens change nothing sold.
+    const edited = realinfobot();
+    edited.display.plans[2].bullets.push(words("Priority onboarding call"));
+    edited.display.defaultInterval = "monthly";
+    expect(profileHash(edited)).toBe(profileHash(file));
+  });
+
+  it("takes a section with only some of its fields, or an empty comparison", () => {
+    expect(problems(withDisplay({ defaultInterval: "monthly" }))).toEqual([]);
+    expect(problems(withDisplay({ comparison: [] }))).toEqual([]);
+    expect(problems(withDisplay({ plans: [{ plan: "pro", popular: true }, { plan: "starter" }] }))).toEqual([]);
+    expect(problems(withDisplay({}))).toEqual([]);
+  });
+
+  it("refuses what the screens can't show, with the path to fix", () => {
+    // Every text in all four languages, at most 300 characters.
+    expect(displayProblems(withDisplay({ comparisonTitle: { en: "Plans" } }))).toEqual([expect.stringMatching(/^display\.comparisonTitle\.fr: /), expect.stringMatching(/^display\.comparisonTitle\.es: /), expect.stringMatching(/^display\.comparisonTitle\.sr: /)]);
+    expect(displayProblems(withDisplay({ comparisonTitle: words("x".repeat(301)) }))).toHaveLength(4);
+    // Only the allowances it knows, the plans it knows, and no field it doesn't.
+    expect(displayProblems(withDisplay({ plans: [{ plan: "pro", bullets: ["minutes"] }] }))).toEqual([expect.stringMatching(/^display\.plans\.0\.bullets\.0: /)]);
+    expect(displayProblems(withDisplay({ plans: [{ plan: "premium" }] }))).toEqual([expect.stringMatching(/^display\.plans\.0\.plan: /)]);
+    expect(displayProblems(withDisplay({ title: words("Plans") }))).toEqual([expect.stringMatching(/^display: /)]);
+    // Each card once, and one popular at most.
+    expect(displayProblems(withDisplay({ plans: [{ plan: "pro" }, { plan: "pro" }] }))).toEqual(["display.plans.1.plan: pro already has a card"]);
+    expect(displayProblems(withDisplay({ plans: [{ plan: "starter", popular: true }, { plan: "pro", popular: true }] }))).toEqual(["display.plans: only one plan can be popular"]);
+    // A Starter or Pro card only for a plan the file sells; Free and Enterprise are never sold, and always may have one.
+    const unsold = (file: Record<string, any>) => {
+      delete file.packs;
+      file.plans.starter = { sold: false, included: file.plans.starter.included, limits: file.plans.starter.limits, overageCents: file.plans.starter.overageCents };
+    };
+    expect(displayProblems(withDisplay({ plans: [{ plan: "free_cloud" }, { plan: "starter" }, { plan: "enterprise" }] }, unsold))).toEqual(["display.plans.1.plan: starter isn't sold in this file, so it can't have a card"]);
+    // Only the values a text can print: a plan's own in its card and cells, any plan's in the page's text.
+    expect(displayProblems(withDisplay({ plans: [{ plan: "starter", description: { monthly: words("Includes {{minutes}} minutes."), annual: words("Includes {{voiceMinutes}} minutes, {{voiceMinuteRate}} after, on {{appName}}.") } }] }))).toEqual([
+      expect.stringMatching(/^display\.plans\.0\.description\.monthly\.en: \{\{minutes\}\} isn't a value it knows/),
+      expect.stringMatching(/^display\.plans\.0\.description\.monthly\.fr: /),
+      expect.stringMatching(/^display\.plans\.0\.description\.monthly\.es: /),
+      expect.stringMatching(/^display\.plans\.0\.description\.monthly\.sr: /),
+    ]);
+    expect(displayProblems(withDisplay({ comparisonIntro: words("Test {{voiceMinutes}} minutes on Free.") }))).toHaveLength(4);
+    expect(displayProblems(withDisplay({ comparisonIntro: words("Test {{free_cloud.voiceMinutes}} minutes on {{appName}}.") }))).toEqual([]);
+    expect(displayProblems(withDisplay({ plans: [{ plan: "pro", bullets: [words("{{pro.voiceMinutes}} minutes")] }] }))).toHaveLength(4);
+  });
+
+  it("checks the comparison against the cards: a value only for a plan with a card, and every such plan's in a row of the brand's own", () => {
+    const cards = [{ plan: "free_cloud" }, { plan: "pro", popular: true }];
+    expect(displayProblems(withDisplay({ plans: cards, comparison: [{ group: words("Booking"), rows: [{ label: words("Booking"), values: { free_cloud: true, pro: true } }, "voiceMinutes", "shortCalls"] }] }))).toEqual([]);
+    expect(displayProblems(withDisplay({ plans: cards, comparison: [{ group: words("Booking"), rows: [{ label: words("Booking"), values: { free_cloud: true, starter: true, pro: true } }] }] }))).toEqual(["display.comparison.0.rows.0.values.starter: starter has no card, so its value never shows"]);
+    expect(displayProblems(withDisplay({ plans: cards, comparison: [{ group: words("Booking"), rows: [{ label: words("Booking"), values: { free_cloud: true } }] }] }))).toEqual(["display.comparison.0.rows.0.values.pro: a row of your own needs a value for every plan with a card: pro has none"]);
+    // Without cards, the comparison's columns are all four plans.
+    expect(displayProblems(withDisplay({ comparison: [{ group: words("Booking"), rows: [{ label: words("Booking"), values: { free_cloud: true, pro: true } }] }] }))).toEqual([
+      "display.comparison.0.rows.0.values.starter: a row of your own needs a value for every plan with a card: starter has none",
+      "display.comparison.0.rows.0.values.enterprise: a row of your own needs a value for every plan with a card: enterprise has none",
+    ]);
+    // A named row may take its own label and some plans' values; a cell's text prints that plan's values.
+    expect(displayProblems(withDisplay({ comparison: [{ group: words("Usage"), rows: [{ row: "alertSmsSegments", label: words("Texts"), values: { free_cloud: false, enterprise: words("{{alertSmsSegmentRate}} each") } }] }] }))).toEqual([]);
+    expect(displayProblems(withDisplay({ comparison: [{ group: words("Usage"), rows: [{ row: "alertSmsSegments", values: { enterprise: words("{{enterprise.alertSmsSegments}}") } }] }] }))).toHaveLength(4);
   });
 });

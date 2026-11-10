@@ -225,7 +225,7 @@ describe.skipIf(!setup.testUrl)("OAuth for MCP against PostgreSQL with RLS", () 
     expect(stored!.resources).toEqual([resource]);
 
     const client = await mcp(access);
-    expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(["add_knowledge", "get_business", "list_services", "list_staff"]);
+    expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(["add_knowledge", "answer_question", "get_business", "list_receptionists", "list_services", "list_staff"]);
     expect((await client.callTool({ name: "get_business", arguments: {} })).structuredContent).toMatchObject({ id: businessA });
     const added = await client.callTool({ name: "add_knowledge", arguments: { type: "faq", question: "Parking?", answer: "Behind the building." } });
     expect(added.isError ?? false).toBe(false);

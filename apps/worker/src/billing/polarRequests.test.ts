@@ -4,7 +4,7 @@
 // not change it; a later change to it says why in its commit.
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { PolarBillingProvider } from "@lobbystack/providers/polar/polarBilling";
-import { claimBillingCheckoutRequest, claimBillingUsageSync, confirmBillingUsageSync, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPlanChangeProration, loadPromoEndWork, markBillingCheckoutCreated, markBillingPlanChanged, polarProductLinks, readPolarProductLinks, recordDeletedBusinessPlanEnded, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
+import { claimBillingCheckoutRequest, claimBillingUsageSync, claimPackCheckout, confirmBillingUsageSync, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPackCheckoutRequest, loadPlanChangeProration, loadPlanEndForPackWork, loadPromoEndWork, markBillingCheckoutCreated, markBillingPlanChanged, markPackCheckoutReady, polarProductLinks, readPolarProductLinks, recordDeletedBusinessPlanEnded, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lobbystack/shared", async (importOriginal) => (await import("./testing")).mockShared(importOriginal));
@@ -98,6 +98,37 @@ describe("the requests Polar receives", () => {
     });
   });
 
+  // A prepaid pack's one-time checkout, which the plans' requests above leave as they were.
+  describe("a pack's checkout", () => {
+    const checkoutId = "00000000-0000-4000-8000-0000000000d1";
+
+    beforeEach(() => {
+      vi.mocked(claimPackCheckout).mockResolvedValue({ claimed: true });
+      vi.mocked(markPackCheckoutReady).mockResolvedValue(true);
+    });
+
+    function packCheckout(extra: Record<string, unknown> = {}) {
+      return { id: checkoutId, businessId, pack: "minutes_500_90", priceId: "00000000-0000-4000-8000-0000000000e1", status: "processing", priceRef: "product-pack-500-90", customerEmail: "owner@example.com", billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: null, businessName: "Allo Salon", onboardingStage: "complete", ...extra };
+    }
+
+    it("for a new customer", async () => {
+      vi.mocked(loadPackCheckoutRequest).mockResolvedValue(packCheckout());
+      answer("GET", `/v1/customers/external/business%3A${businessId}`, { detail: "Not found" }, 404);
+      answer("POST", "/v1/customers/", { id: "cus-new", external_id: `business:${businessId}` }, 201);
+      answer("POST", "/v1/checkouts/", { id: "checkout-4", url: "https://polar.test/checkout/4" }, 201);
+      await expect(handleJob(job("billing.createPackCheckout", { checkoutId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
+      expect(recorded).toMatchSnapshot();
+    });
+
+    it("for a customer Polar has, from onboarding", async () => {
+      vi.mocked(loadPackCheckoutRequest).mockResolvedValue(packCheckout({ billingEmail: "billing@example.com", onboardingStage: "plan" }));
+      answer("GET", `/v1/customers/external/business%3A${businessId}`, { id: "cus-known", external_id: `business:${businessId}` });
+      answer("POST", "/v1/checkouts/", { id: "checkout-5", url: "https://polar.test/checkout/5" }, 201);
+      await expect(handleJob(job("billing.createPackCheckout", { checkoutId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
+      expect(recorded).toMatchSnapshot();
+    });
+  });
+
   describe("a plan change", () => {
     function change(input: { from: string; plan: "starter" | "pro"; target: "starter" | "pro"; billingInterval: "monthly" | "annual"; proration: { upgrade: "invoice" | "prorate"; downgrade: "next_period" } }) {
       vi.mocked(loadPlanChangeProration).mockResolvedValue(input.proration);
@@ -163,6 +194,25 @@ describe("the requests Polar receives", () => {
     answer("GET", "/v1/subscriptions/sub-1", subscriptionBody({ status: "canceled", ended_at: "2099-11-08T00:00:00Z" }));
     await expect(handleJob(job("billing.revokeSubscription", { subscriptionId: "sub-1" }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
     expect(recorded).toMatchSnapshot();
+  });
+
+  it("ending a plan a prepaid pack replaced, after its pending usage", async () => {
+    // The moved period end is five minutes from now, so the clock is fixed.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2099-11-08T12:00:00.000Z"));
+      vi.mocked(loadPlanEndForPackWork).mockResolvedValue({ current: true, overageSubscriptionId: null, billingInterval: "monthly", subscriptionState: "active", periodEnd: new Date("2099-12-01T00:00:00.000Z"), switchedAt: new Date("2099-11-08T11:00:00.000Z"), pendingUsage: ["usage-1"], unsettled: 0 });
+      vi.mocked(loadBillingUsageEvent).mockResolvedValue({ id: "usage-1", sourceKey: "voice:call-1", isFinal: true, plan: "starter", businessId, usageKind: "voice_seconds", quantity: 95, billableQuantity: null, billingIntervalAtRecordTime: "monthly", createdAt: new Date("2099-11-08T10:30:00.000Z"), syncStatus: "pending", billingKey: "business-key", customerId: "polar-customer-id", periodStart: null, periodEnd: null });
+      vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "voice:call-1", quantity: 95, seq: 0, rateCents: null, sentAt: new Date(), expired: false });
+      vi.mocked(confirmBillingUsageSync).mockResolvedValue(true);
+      answer("GET", "/v1/subscriptions/sub-1", subscriptionBody());
+      answer("PATCH", "/v1/subscriptions/sub-1", subscriptionBody({ cancel_at_period_end: true }));
+      // Polar still shows it live until the moved end passes, so the job looks again then.
+      await expect(handleJob(job("billing.endPlanForPack", { subscriptionId: "sub-1", packId: "pack-1", since: "2099-11-08T11:00:00.000Z" }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "deferred" });
+      expect(recorded).toMatchSnapshot();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   describe("usage", () => {

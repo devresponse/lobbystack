@@ -1,10 +1,11 @@
 import { z } from "zod";
 
-import { billingPlanSlugs, billingProviderEnvs, billingProviders, billingSubscriptionActions, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
-import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
+import { billingPackStatuses, billingPlanSlugs, billingProviderEnvs, billingProviders, billingSubscriptionActions, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
+import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema, MAX_BILLING_PACKS } from "../billingProfile";
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
+import { ENTRY_LINK_LABEL_MAX_LENGTH, entryLinkStatuses, knowledgeAudiences, MAX_ARTICLES_PER_AUDIENCE_CHANGE, MAX_RECEPTIONISTS_PER_REQUEST, WEBSITE_RULE_PATH_MAX_LENGTH, RECEPTIONIST_DESCRIPTION_MAX_LENGTH, RECEPTIONIST_HANDLE_MAX_LENGTH, RECEPTIONIST_HANDLE_PATTERN, RECEPTIONIST_NAME_MAX_LENGTH, receptionistKnowledgeScopes, receptionistStatuses } from "../receptionists";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
@@ -129,6 +130,7 @@ const receptionistText = z.string().trim().min(1).max(RECEPTIONIST_TEXT_MAX_LENG
 const receptionistInstructions = z.string().trim().min(1).max(RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH).nullable();
 
 export const apiReceptionistSchema = z.object({
+  receptionist_id: id.describe("The receptionist these settings are. summary, recording_notice and appointment_change_policy are the business's, the same for every receptionist."),
   greeting: z.string().describe("What the receptionist says when it answers."),
   tone: z.string().describe("How it speaks, such as professional or warm."),
   summary: z.string().describe("What it tells callers the business does. Calls leave it out while summary_source is placeholder."),
@@ -161,6 +163,84 @@ export const apiReceptionistUpdateSchema = z.strictObject({
   recording_notice: z.boolean().optional().describe("false stops calls from saying that the caller is speaking with an AI and the call is recorded and transcribed. Tell callers another way where the law asks for it."),
 }).refine((value) => value.summary === undefined || value.regenerate_summary === undefined, { message: "Send summary or regenerate_summary, not both.", path: ["regenerate_summary"] });
 
+const receptionistName = z.string().trim().min(1).max(RECEPTIONIST_NAME_MAX_LENGTH);
+const receptionistDescription = z.string().trim().max(RECEPTIONIST_DESCRIPTION_MAX_LENGTH).describe("What it helps with, which visitors read when they pick a receptionist.");
+const receptionistHandle = z.string().trim().toLowerCase().max(RECEPTIONIST_HANDLE_MAX_LENGTH).regex(RECEPTIONIST_HANDLE_PATTERN, "Use lower-case letters and digits, joined by single dashes.");
+
+export const apiReceptionistProfileSchema = z.object({
+  id,
+  name: z.string(),
+  description: z.string().describe("What it helps with, which visitors read when they pick a receptionist."),
+  handle: z.string().nullable().describe("Its page's address, /profile/<business slug>/<handle>. The default receptionist answers the business page itself."),
+  is_default: z.boolean().describe("The default receptionist answers the business page, the numbers, widget keys and links that name no receptionist, and those of a paused or archived one."),
+  status: z.enum(receptionistStatuses).describe("active answers. paused hands its calls and chats to the default receptionist."),
+  listed: z.boolean().describe("Whether visitors can pick it on the business page. The default receptionist is always listed."),
+  position: z.number().int().describe("Its place in the business's order, lowest first."),
+  locale: locale.nullable().describe("The language its calls open in. null uses the business's language, which the default receptionist always does."),
+  knowledge_scope: z.enum(receptionistKnowledgeScopes).describe("all: it answers from every knowledge entry. audience: from those for everyone and those given to it."),
+  phone_numbers: z.number().int().describe("Numbers that ring it."),
+  widget_keys: z.number().int().describe("Active widget keys that open it."),
+  entry_links: z.number().int().describe("QR links that open it, paused ones too."),
+  archived_at: nullableTimestamp,
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("One of the business's receptionists: who it is, its page and its state. GET /receptionist is the default receptionist's greeting and instructions.");
+
+export const apiReceptionistCreateSchema = z.strictObject({
+  name: receptionistName,
+  description: receptionistDescription.optional(),
+  handle: receptionistHandle.optional().describe("Its page's address. Made from the name when left out."),
+  locale: locale.nullable().optional().describe("The language its calls open in. Left out or null, the business's language."),
+  knowledge_scope: z.enum(receptionistKnowledgeScopes).optional().describe("Defaults to audience."),
+  listed: z.boolean().optional().describe("Defaults to true."),
+  copy_from_id: id.optional().describe("The receptionist whose greeting, instructions and booking it starts with. Defaults to the default receptionist."),
+});
+
+export const apiReceptionistProfileUpdateSchema = z.strictObject({
+  name: receptionistName.optional(),
+  description: receptionistDescription.optional(),
+  handle: receptionistHandle.optional(),
+  locale: locale.nullable().optional().describe("null uses the business's language. The default receptionist has no language of its own."),
+  knowledge_scope: z.enum(receptionistKnowledgeScopes).optional(),
+  listed: z.boolean().optional().describe("The default receptionist stays listed."),
+});
+
+export const apiReceptionistReorderSchema = z.strictObject({
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).describe("Every receptionist that isn't archived, once, in the new order."),
+});
+
+export const apiQrLinkSchema = z.object({
+  id,
+  code: z.string().describe("The code its address ends with."),
+  url: z.string().describe("Its address, which the QR code carries: the dashboard's /q/<code>."),
+  label: z.string().describe("Where its sign hangs, such as Front door. Empty when none was given."),
+  status: z.enum(entryLinkStatuses).describe("active opens its receptionist's page. paused opens the business page. Links are paused, never deleted, so a printed sign always reaches someone."),
+  receptionist_id: id.describe("The receptionist it names."),
+  opens_receptionist_id: id.describe("The receptionist it opens now: the one it names, or the default receptionist while the link or that receptionist is paused or archived."),
+  scans_last_30_days: z.number().int().describe("Scans in the last 30 UTC days, today included."),
+  scans_kept: z.number().int().describe("Scans in the 13 months kept."),
+  last_scanned_on: z.string().nullable().describe("The last UTC day it was scanned, as YYYY-MM-DD."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A QR short link to one receptionist's page, for a printed sign. Scans are counted per link and UTC day, with nothing about the visitor.");
+
+export const apiQrLinkDetailSchema = apiQrLinkSchema.extend({
+  scans: z.array(z.object({ day: z.string().describe("A UTC day, YYYY-MM-DD."), scans: z.number().int() })).describe("Its scans per UTC day over the days asked, today included, oldest first. Days without scans are left out."),
+}).describe("A QR link with its scans per day.");
+
+const qrLinkLabel = z.string().max(ENTRY_LINK_LABEL_MAX_LENGTH).transform((value) => value.replace(/\s+/g, " ").trim()).describe("Where its sign hangs, such as Front door. Whitespace runs become one space.");
+
+export const apiQrLinkCreateSchema = z.strictObject({
+  receptionist_id: id.describe("The receptionist it opens: any that isn't archived."),
+  label: qrLinkLabel.optional(),
+});
+
+export const apiQrLinkUpdateSchema = z.strictObject({
+  receptionist_id: id.optional().describe("Any receptionist that isn't archived. The code stays, so printed signs keep working."),
+  label: qrLinkLabel.optional(),
+  status: z.enum(entryLinkStatuses).optional().describe("paused opens the business page instead."),
+});
+
 export const apiRuleSchema = z.object({
   id,
   title: z.string(),
@@ -189,8 +269,25 @@ export const apiRuleReorderSchema = z.strictObject({
 const checkoutPlans = ["starter", "pro"] as const;
 const billingIntervals = ["monthly", "annual"] as const;
 
+export const apiBillingPackSchema = z.object({
+  id,
+  pack: z.string().describe("The pack's code, such as pack_500_180."),
+  names: z.record(z.string(), z.string()).nullable().describe("Display names by language: en, fr, es and sr."),
+  status: z.enum(billingPackStatuses).describe("active; frozen while a dispute holds its payment, when calls can't use it until the dispute is won; expired at its end date; replaced when a subscription started; refunded when its whole payment was refunded or a dispute was lost."),
+  seconds_total: z.number().int().describe("Voice seconds it holds after refunds: a partial refund takes its share off."),
+  seconds_used: z.number().int().describe("Voice seconds calls drew from it."),
+  seconds_left: z.number().int().describe("What it still holds, which a frozen pack gives only once its dispute is won. 0 once it ended or its end date passed."),
+  days: z.number().int().nullable().describe("How long it lasts from the payment, in 24-hour days. Null when it never ends."),
+  paid_at: timestamp,
+  ends_at: nullableTimestamp.describe("paid_at plus days, fixed at the payment. Null when it never ends."),
+  ended_at: nullableTimestamp.describe("When it ended. Null while active or frozen."),
+  currency: z.string(),
+  amount_cents: z.number().int().describe("What was paid, before refunds."),
+  refunded_cents: z.number().int(),
+}).describe("A prepaid pack the business bought.");
+
 export const apiBillingSchema = z.object({
-  plan: z.enum(billingPlanSlugs).describe("The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."),
+  plan: z.enum(billingPlanSlugs).describe("The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud, and a business that would be on free_cloud reads as prepaid while one of its packs has time left."),
   promo_plan: z.string().nullable().describe("The code of the promo plan in force, which behaves as plan with its own allowances, limits and overage rates. Null on a standard plan."),
   plan_ends: nullableTimestamp.describe("When a promo plan that lasts a set number of months ends: it ends at the subscription's first renewal from then on. Null otherwise."),
   plan_ends_with: z.enum(["tier", "cancel"]).nullable().describe("What that renewal does: tier moves the subscription to the plan's tier at its standard price, cancel ends it. Null when plan_ends is."),
@@ -210,6 +307,7 @@ export const apiBillingSchema = z.object({
   spending_cap_reached: z.boolean().describe("true once this month's overage reached the cap, which stops further billable usage."),
   provider: z.enum(billingProviders).describe("The deployment's billing provider, which sells its plans: polar or stripe."),
   provider_name: z.string().describe("How to name the provider to the business, such as Polar."),
+  packs: z.array(apiBillingPackSchema).describe("The prepaid packs bought: active and frozen ones first, the one that ends first first, then the latest 20 that ended, newest first. Calls draw on them only while plan is prepaid; a pack bought beside a yearly, past-due or managed plan waits, and its end date still comes. Empty when none was bought."),
 }).describe("The business's plan and what it spends.");
 
 export const apiBillingUpdateSchema = z.strictObject({
@@ -239,6 +337,26 @@ export const apiCheckoutSchema = z.object({
   updated_at: timestamp,
 }).describe("A checkout for a plan, through the billing provider.");
 
+const packCheckoutStatuses = ["pending", "processing", "ready", "paid", "failed", "expired"] as const;
+
+export const apiPackCheckoutCreateSchema = z.strictObject({
+  pack: z.string().trim().min(1).max(48).describe("The pack's code in the deployment's billing catalog, such as pack_250_90."),
+  billing_email: z.email().max(320).optional().describe("The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here."),
+});
+
+export const apiPackCheckoutSchema = z.object({
+  id,
+  pack: z.string().describe("The pack's code."),
+  status: z.enum(packCheckoutStatuses).describe("pending or processing: the billing provider is making the page. ready: checkout_url is set until expires_at. paid: the payment arrived, and pack_status says what became of the pack. failed: the provider made no page, the business moved to a managed plan, or a plan it bought started first; error says why, and another checkout can be started. expired: the checkout waited too long to run, its page expired unpaid, or a plan the business bought started while the page was open; another can be started."),
+  pack_status: z.enum(billingPackStatuses).nullable().describe("What became of the pack the payment added. active, or frozen while a dispute holds its payment: the business has it. expired: its days ran out. replaced: a plan the business subscribed to ended it; when the plan started before the payment arrived, the pack ended at once and the operator refunds the payment. refunded: its payment was refunded or charged back. Null until the payment arrives, and for a checkout paid before the link was kept."),
+  checkout_url: z.string().nullable().describe("The billing provider's page where the customer pays once for the pack. Send it to them. Null unless status is ready."),
+  error: z.string().nullable(),
+  paid: z.boolean().describe("true once the payment arrived; pack_status says whether the business still has the pack."),
+  expires_at: timestamp.describe("When the checkout stops being open: 15 minutes after it was asked for while the provider makes the page, then when the page expires."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A checkout for a prepaid pack, paid once through the billing provider.");
+
 export const apiSubscriptionChangeSchema = z.object({
   id,
   action: z.enum(billingSubscriptionActions).describe("cancel: the plan ends at its renewal. resume: a plan set to end renews again. keep: a plan change waiting for the renewal, such as a downgrade, is dropped."),
@@ -254,7 +372,8 @@ export const apiManagedPlanCreateSchema = z.strictObject({
 });
 
 // The billing catalog: every plan of a brand's billing.json, standard or not,
-// as migration 0108's tables hold it. The fields carry the columns' own names.
+// as migration 0108's tables hold it, and every prepaid pack, as migration
+// 0148's do. The fields carry the columns' own names.
 
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/).describe("SHA-256 as 64 lowercase hex characters.");
 const nullableCount = z.number().int().nullable();
@@ -299,6 +418,12 @@ export const apiBillingCatalogLinkSchema = z.strictObject({
       polar_id: polarObjectId.optional().describe("Polar's name for provider_ref: the Polar product. Only with provider polar."),
     })).min(1).max(2).describe("Every live price of the plan."),
   })).max(60).describe("Every sold plan that isn't retired, each with every live price."),
+  packs: z.array(z.strictObject({
+    code: z.string().min(1).max(64).describe("A pack that isn't retired."),
+    terms_hash: sha256Hex.describe("The pack's terms_hash its provider object was made from. It must be the row's."),
+    currency: z.string().regex(/^[a-z]{3}$/).describe("The currency of the pack's live price."),
+    provider_ref: providerObjectId.describe("The provider's object that sells the pack's live price: a Polar product or a Stripe price."),
+  })).max(MAX_BILLING_PACKS).optional().describe("Every pack that isn't retired, each with the object that sells its live price. Required once the catalog has packs; left out, the link names none."),
   objects: z.record(z.string(), z.unknown()).optional().describe("The provider's objects beyond plans and prices, which a Stripe link records: its meters, overage prices, billing portal configuration and webhook endpoint, with the endpoint secret's SHA-256. Not with provider polar."),
   replace_ids: z.boolean().optional().describe("true lets a live price or a plan that already has a provider object take another one: the old price row is retired with its object, and a new live row takes the new one. Defaults to false."),
   dry_run: z.boolean().optional().describe("true shows what the link would change and anything that would stop it, and changes nothing. Defaults to false."),
@@ -333,6 +458,8 @@ export type BillingCatalogLinkRequest = {
   provider_env: BillingProviderEnv;
   provider_account: string;
   plans: Array<{ code: string; terms_hash: string; provider_disc: string | null; prices: Array<{ period: "monthly" | "annual"; currency: string; provider_ref: string }> }>;
+  /** Empty when the request named no packs. */
+  packs: Array<{ code: string; terms_hash: string; currency: string; provider_ref: string }>;
   objects: Record<string, unknown> | null;
   replace_ids: boolean;
   dry_run: boolean;
@@ -355,6 +482,7 @@ export function billingCatalogLinkRequest(body: ApiBillingCatalogLink): BillingC
       provider_disc: plan.provider_disc !== undefined ? plan.provider_disc : plan.polar_disc ?? null,
       prices: plan.prices.map((price) => ({ period: price.period, currency: price.currency, provider_ref: price.provider_ref ?? price.polar_id ?? "" })),
     })),
+    packs: (body.packs ?? []).map((pack) => ({ code: pack.code, terms_hash: pack.terms_hash, currency: pack.currency, provider_ref: pack.provider_ref })),
     objects: body.objects ?? null,
     replace_ids: body.replace_ids === true,
     dry_run: body.dry_run === true,
@@ -377,11 +505,11 @@ export const apiBillingCheckSchema = z.object({
 }).describe("Something a verify found that isn't as the file says.");
 
 export const apiBillingCatalogChangeSchema = z.object({
-  table: z.enum(["billing_plans", "billing_prices"]),
-  key: z.string().describe("A plan's code, or code/period/currency for a price."),
+  table: z.enum(["billing_plans", "billing_prices", "billing_pack_plans", "billing_pack_prices"]),
+  key: z.string().describe("A plan's code, or code/period/currency for a price; a pack's code, or code/currency for a pack's price."),
   action: z.enum(["insert", "update", "retire", "restore"]),
   fields: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })).describe("For update and restore, each changed column with its old and new value. Empty otherwise."),
-  lowers_allowance: z.boolean().describe("An included amount, the storage limit, the number count or the receptionist count goes down."),
+  lowers_allowance: z.boolean().describe("An included amount, the storage limit, the number count or the receptionist count goes down, or a pack's minutes or length do."),
   raises_price: z.boolean().describe("A price or an overage rate goes up."),
 }).describe("One row an apply writes.");
 
@@ -497,6 +625,37 @@ export const apiBillingCatalogPlanSchema = z.object({
   prices: z.array(apiBillingCatalogPriceSchema).describe("Every price of the plan, live ones first."),
 });
 
+export const apiBillingCatalogPackPriceSchema = z.object({
+  id,
+  currency: z.string(),
+  cents: z.number().int().describe("What the pack costs, paid once."),
+  provider_ref: z.string().nullable().describe("The provider's object that sells it, once linked: a Polar product or a Stripe price."),
+  retired_at: nullableTimestamp.describe("When it stopped being sold. Null for the live price. A retired price keeps its object, so packs bought through it are still recognized."),
+  created_at: timestamp,
+  updated_at: timestamp,
+});
+
+export const apiBillingCatalogPackSchema = z.object({
+  code: z.string().describe("The pack's permanent code, its key in billing.json's packs."),
+  status: z.enum(["draft", "active", "retired"]).describe("draft until the billing provider can sell it as defined, active, or retired."),
+  names: z.record(z.string(), z.string()).describe("Display names by language."),
+  voice_sec: z.number().int().describe("Voice seconds the pack holds."),
+  days: nullableCount.describe("How many days a bought pack lasts from its payment. Null means it never ends."),
+  sms_seg: z.number().int().describe("Alert SMS segments included a month."),
+  calls_out: z.number().int().describe("Outbound call attempts included a month."),
+  chat_units: z.number().int().describe("Website chat AI units included a month."),
+  kb_bytes: z.number().int().describe("Knowledge storage limit in bytes."),
+  numbers: z.number().int().describe("Business phone numbers included."),
+  receptionists: z.number().int().describe("Receptionists active at once, the default included."),
+  terms_hash: sha256Hex,
+  frozen_at: nullableTimestamp.describe("When it was first bought. From then its minutes and length can't change."),
+  sort: z.number().int(),
+  retired_at: nullableTimestamp,
+  created_at: timestamp,
+  updated_at: timestamp,
+  prices: z.array(apiBillingCatalogPackPriceSchema).describe("Every price of the pack, the live one first."),
+}).describe("A prepaid pack: voice minutes paid for once, to use within its days of the payment.");
+
 export const apiBillingCatalogPolarSchema = z.object({
   env: z.enum(billingPolarEnvs).describe("The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."),
   org: z.string().nullable().describe("POLAR_ORGANIZATION_ID. Null when unset."),
@@ -524,6 +683,7 @@ export const apiBillingCatalogSchema = z.object({
   profile: z.record(z.string(), z.unknown()).nullable().describe("The latest applied file, normalized, in its own camel case."),
   currency: z.string().nullable().describe("The live prices' currency."),
   plans: z.array(apiBillingCatalogPlanSchema).describe("Every plan, whatever its access or status, by sort then code."),
+  packs: z.array(apiBillingCatalogPackSchema).describe("Every prepaid pack, whatever its status, by sort then code. Empty when no applied file had packs."),
   polar: apiBillingCatalogPolarSchema.nullable().describe("Polar's settings, as before provider: on a Polar deployment, the same as provider; null on any other."),
   provider: apiBillingCatalogProviderSchema,
 }).describe("The plans and prices this deployment holds. Checkout, plan changes, the provider's webhook, the plan screens and usage limits read them.");
@@ -570,11 +730,16 @@ const phoneNumberKinds = ["local", "toll_free"] as const;
 export const apiPhoneNumberSchema = z.object({
   id,
   phone_number: e164,
+  receptionist_id: id.nullable().describe("The receptionist that answers its calls and texts; null, the default receptionist. A paused or archived one's go to the default receptionist."),
   status: z.enum(["active", "releasing", "released"]).describe("active: calls and texts to the number reach the receptionist, even while a release is scheduled. releasing: the number is being given back to the carrier. released: the business no longer has it."),
   release_scheduled_at: nullableTimestamp.describe("When an active number is released: when DELETE asked for it, or 30 days after a replacement went live. Null when no release is planned."),
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A phone number the business has or had.");
+
+export const apiPhoneNumberUpdateSchema = z.strictObject({
+  receptionist_id: id.describe("The receptionist that answers it from the next call or text on: any that isn't archived. A paused one's calls go to the default receptionist until it resumes."),
+});
 
 export const apiPhoneNumberSearchSchema = z.strictObject({
   country: z.enum(phoneNumberCountries).optional().describe("Defaults to the country of the business's time zone, or US."),
@@ -640,6 +805,7 @@ export const apiWidgetKeySchema = z.object({
   status: z.enum(widgetKeyStatuses).describe("active: the widget works. disabled: it stops until it's turned back on. revoked: it stops for good."),
   allowed_origins: z.array(z.string()).describe("The websites the widget runs on, such as https://example.com."),
   config: apiWidgetConfigSchema,
+  receptionist_id: id.nullable().describe("The receptionist that answers its chats; null, the default receptionist. A paused or archived one's go to the default receptionist."),
   key: z.string().nullable().describe("The key itself, which the widget's script tag carries. null for a revoked key, and for a key created before keys were stored, which only its creator saw."),
   embed_snippet: z.string().nullable().describe("The script tag to paste into the website's HTML. null when key is null."),
   last_used_at: nullableTimestamp,
@@ -655,6 +821,7 @@ export const apiWidgetKeyCreateSchema = z.strictObject({
   label: z.string().trim().min(1).max(120).optional(),
   allowed_origins: widgetOrigins.describe("The websites the widget may run on, as full http or https URLs. Only each one's origin is kept."),
   config: apiWidgetConfigSchema.optional(),
+  receptionist_id: id.optional().describe("The receptionist that answers its chats: any that isn't archived. Defaults to the default receptionist."),
 });
 
 export const apiWidgetKeyUpdateSchema = z.strictObject({
@@ -662,6 +829,7 @@ export const apiWidgetKeyUpdateSchema = z.strictObject({
   allowed_origins: widgetOrigins.optional().describe("Replaces the list."),
   config: apiWidgetConfigSchema.optional().describe("Replaces the whole configuration."),
   status: z.enum(widgetKeyStatuses).optional().describe("A revoked key can't be turned back on."),
+  receptionist_id: id.optional().describe("The receptionist that answers its chats from the next one on: any that isn't archived."),
 });
 
 // The public profile page checks its text as the dashboard does: whitespace
@@ -944,6 +1112,7 @@ export const apiStaffSchema = z.object({
 
 export const apiCallSchema = z.object({
   id,
+  receptionist_id: id.describe("The receptionist that answered."),
   channel: z.enum(["phone", "web"]).describe("phone: a phone call. web: a browser call from the website or dashboard."),
   status: z.enum(["in_progress", "completed"]),
   outcome: z.enum(["appointment_booked", "booking_incomplete", "message_taken", "conversation", "none"]),
@@ -1108,6 +1277,7 @@ const messageRequests = ["appointment_cancellation"] as const;
 
 export const apiMessageSchema = z.object({
   id,
+  receptionist_id: id.describe("The receptionist whose call or chat took the message."),
   status: z.enum(["open", "done"]),
   title: z.string(),
   body: z.string().describe("The full message as the team sees it."),
@@ -1123,6 +1293,15 @@ export const apiMessageSchema = z.object({
   updated_at: timestamp,
 });
 
+const knowledgeAudience = z.enum(knowledgeAudiences).describe("Who may use it. everyone: every receptionist, the default. chosen: the receptionists in receptionist_ids, and any whose knowledge_scope is all, as the default receptionist's is. One chosen only for archived receptionists is left to the default receptionist.");
+const knowledgeReceptionistIds = z.array(id).describe("The receptionists chosen for it, archived ones included. Empty when audience is everyone.");
+
+/** Who a new or changed entry or source is for. The operation checks that receptionist_ids goes with chosen. */
+const knowledgeAudienceInput = {
+  audience: z.enum(knowledgeAudiences).optional().describe("Who may use it: everyone, or the receptionists in receptionist_ids. Leave it out to keep who it's for, or everyone for a new one."),
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).optional().describe("With audience chosen: the receptionists that may use it, from GET /receptionists, none archived. They replace those chosen before."),
+};
+
 export const apiKnowledgeEntrySchema = z.object({
   id,
   type: z.enum(["text", "faq"]),
@@ -1131,6 +1310,8 @@ export const apiKnowledgeEntrySchema = z.object({
   tags: z.array(z.string()).describe("Your own labels for the entry."),
   priority: z.number().int().describe("Entries with higher numbers come first when the receptionist picks the entries it keeps ready on every call. Defaults to 0."),
   active: z.boolean().describe("Whether the receptionist answers from it."),
+  audience: knowledgeAudience,
+  receptionist_ids: knowledgeReceptionistIds,
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A text entry or FAQ the receptionist answers from.");
@@ -1141,12 +1322,13 @@ export const apiKnowledgeEntryUpdateSchema = z.strictObject({
   tags: z.array(z.string().trim().min(1).max(255)).max(100).optional().describe("Replaces the entry's labels. faq is reserved, because it marks an FAQ, so it is ignored here: an entry keeps its type."),
   priority: z.number().int().min(-100).max(100).optional(),
   active: z.boolean().optional().describe("false stops the receptionist answering from the entry without deleting it."),
+  ...knowledgeAudienceInput,
 });
 
 // Zod 4 reports an unknown type as "Invalid discriminator value. ..."; keep the v1 detail message "Invalid input".
 export const apiKnowledgeEntryCreateSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("text"), title: z.string().trim().min(1).max(300), content: z.string().trim().min(1).max(20_000) }),
-  z.strictObject({ type: z.literal("faq"), question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000) }),
+  z.strictObject({ type: z.literal("text"), title: z.string().trim().min(1).max(300), content: z.string().trim().min(1).max(20_000), ...knowledgeAudienceInput }),
+  z.strictObject({ type: z.literal("faq"), question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000), ...knowledgeAudienceInput }),
 ], { error: (issue) => (issue.code === "invalid_union" ? "Invalid input" : undefined) });
 
 export const apiKnowledgeSourceSchema = z.object({
@@ -1157,6 +1339,8 @@ export const apiKnowledgeSourceSchema = z.object({
   status: z.enum(["pending", "processing", "indexed", "error", "cancelled"]).describe("pending: a file waits its turn. processing: it is being read. indexed: the receptionist can use it. error or cancelled: reading stopped."),
   error: z.string().nullable().describe("Why reading failed, when status is error."),
   active: z.boolean().describe("Whether the receptionist answers from it. An inactive source stays indexed but unused."),
+  audience: knowledgeAudience.describe("Who may use it, as for an entry. A website's is its own; each page its crawl read has its own, which website rules can give to a receptionist."),
+  receptionist_ids: knowledgeReceptionistIds,
   page_limit: z.number().int().nullable().describe("How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."),
   content_type: z.string().nullable().describe("A file's type, such as application/pdf. Null for a website or a page, and for a file whose type wasn't recorded."),
   tags: z.array(z.string()).describe("The tags given when a file's upload was completed. Empty for a website or a page."),
@@ -1165,7 +1349,8 @@ export const apiKnowledgeSourceSchema = z.object({
 }).describe("A website, page or file the receptionist learns from.");
 
 export const apiKnowledgeSourceUpdateSchema = z.strictObject({
-  active: z.boolean().describe("false stops the receptionist answering from the source without deleting it."),
+  active: z.boolean().optional().describe("false stops the receptionist answering from the source without deleting it."),
+  ...knowledgeAudienceInput,
 });
 
 export const apiKnowledgeSourceCreateSchema = z.strictObject({
@@ -1201,6 +1386,65 @@ export const apiKnowledgeUploadSchema = z.object({
 export const apiKnowledgeUploadCompleteSchema = z.strictObject({
   title: z.string().trim().min(1).max(1_000).optional().describe("Defaults to the file name."),
   tags: z.array(z.string().trim().min(1).max(255)).max(100).optional(),
+  ...knowledgeAudienceInput,
+});
+
+export const apiKnowledgeAudienceChangeSchema = z.strictObject({
+  entry_ids: z.array(id).max(MAX_ARTICLES_PER_AUDIENCE_CHANGE).optional().describe("Text entries and FAQs to change."),
+  source_ids: z.array(id).max(MAX_ARTICLES_PER_AUDIENCE_CHANGE).optional().describe("Websites, pages and files to change."),
+  audience: z.enum(knowledgeAudiences).describe("everyone opens them to every receptionist. chosen changes the receptionists chosen for them, as mode says."),
+  mode: z.enum(["add", "remove", "replace"]).optional().describe("With audience chosen. replace, the default, makes them for exactly receptionist_ids. add gives receptionist_ids the ones already chosen for some receptionists; those for everyone stay for everyone. remove takes receptionist_ids off them; one for everyone becomes chosen for every other receptionist that isn't archived."),
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).optional().describe("With audience chosen: the receptionists, none archived unless mode is remove."),
+}).describe(`Up to ${MAX_ARTICLES_PER_AUDIENCE_CHANGE} entries and sources together, and who they're for.`);
+
+export const apiKnowledgeAudienceChangeResultSchema = z.object({
+  entries: z.number().int().describe("The entries it covered: those named that the business has."),
+  sources: z.number().int().describe("The sources it covered: those named that the business has."),
+}).describe("How many entries and sources the change covered.");
+
+export const apiUnansweredQuestionSchema = z.object({
+  id,
+  question: z.string().describe("What a caller or visitor asked that the receptionist found nothing to answer from, as first asked, up to 300 characters."),
+  times_asked: z.number().int().describe("How many times it was asked: case, punctuation and spacing don't make it another question."),
+  first_asked_at: timestamp,
+  last_asked_at: timestamp,
+  last_channel: z.enum(["voice", "web_voice", "web_chat"]).describe("Where it was last asked. voice: a phone call. web_voice: a call from the website. web_chat: the website chat."),
+  last_call_id: id.nullable().describe("The call it was last asked on, for GET /calls/{call_id}, while the business keeps it."),
+  last_conversation_id: id.nullable().describe("The chat it was last asked in, while the business keeps it."),
+  asked_of: z.array(z.object({
+    receptionist_id: id,
+    name: z.string().describe("The receptionist's name."),
+    archived: z.boolean().describe("Archived since it heard the question."),
+    times_asked: z.number().int(),
+    last_asked_at: timestamp,
+  })).describe("The receptionists that heard it, most often first. A chain hears one question at many stores; it stays one question."),
+}).describe("A question the receptionist couldn't answer from what it knows, still open. Answering it adds a text entry; dismissing it takes it off the list.");
+
+export const apiUnansweredQuestionAnswerSchema = z.strictObject({
+  answer: z.string().trim().min(1).max(5_000).describe("The answer, saved as a text entry titled with the question."),
+  audience: z.enum(["everyone", "asked", "chosen"]).optional().describe("Who uses the answer. everyone, the default: every receptionist. asked: only the receptionists that heard the question and aren't archived, so a chain's other stores don't give one store's answer. chosen: the receptionists in receptionist_ids."),
+  receptionist_ids: z.array(id).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).optional().describe("With audience chosen: the receptionists, none archived."),
+});
+
+export const apiUnansweredQuestionDismissedSchema = z.object({
+  id,
+  dismissed: z.literal(true),
+}).describe("A question taken off the list. Asked again, it stays off.");
+
+export const apiWebsiteRuleSchema = z.object({
+  id,
+  source_id: id.describe("The website it applies to, from GET /knowledge/sources."),
+  site_url: z.string().describe("The website's address."),
+  path_prefix: z.string().describe("The path its pages are under, such as /stores/kitsilano/, encoded, with a slash at each end."),
+  receptionist_id: id.describe("The receptionist its pages go to."),
+  pages: z.number().int().describe("The pages it has given to its receptionist."),
+  created_at: timestamp,
+}).describe("A rule giving a website's pages under a path to one receptionist, on every crawl. Each page under it becomes chosen for that receptionist, keeping any chosen for it before.");
+
+export const apiWebsiteRuleCreateSchema = z.strictObject({
+  source_id: id.describe("A website the business added, with a crawl of its own: type website in GET /knowledge/sources."),
+  path_prefix: z.string().trim().min(1).max(2_000).describe(`A path on the site, such as /stores/kitsilano/, or a full address on it. It's saved encoded, with a slash at each end, in up to ${WEBSITE_RULE_PATH_MAX_LENGTH} characters.`),
+  receptionist_id: id.describe("A receptionist that isn't archived."),
 });
 
 // POST /knowledge/search: the receptionist's knowledge search, stage by stage, for
@@ -1208,6 +1452,7 @@ export const apiKnowledgeUploadCompleteSchema = z.strictObject({
 // characters, and the unit the search ranks.
 export const apiKnowledgeSearchSchema = z.strictObject({
   query: z.string().trim().min(1).max(2_000).describe("What to search for, as the receptionist's model would write it: it searches with a self-contained query of its own, such as parking fees, which a call's or chat's AI trace shows in its searchKnowledge tool call."),
+  receptionist_id: id.optional().describe("Search as this receptionist, with the knowledge it may use, as its calls and chats do. One that's paused, archived or unknown searches as the default receptionist, as its calls would. Defaults to the default receptionist.")
 });
 
 const knowledgeSearchStageError = z.enum(["embedding_unavailable", "embedding_timeout", "invalid_embedding", "embedding_failed", "statement_timeout", "failed"]).nullable()
@@ -1278,6 +1523,7 @@ export const apiKnowledgeSearchTraceSchema = z.object({
 });
 
 export const apiKnowledgeSearchResultSchema = z.object({
+  receptionist_id: id.nullable().describe("The receptionist the search ran as: receptionist_id when it answers, else the default receptionist. null before the business's snapshot names its receptionists."),
   query: z.string().describe("The query as searched: trimmed, and cut to 2,000 characters."),
   outcome: z.enum(["found", "empty", "unavailable"]).describe("found: evidence has passages. empty: the search worked and found nothing. unavailable: both searches failed, or the revision check did."),
   mode: z.enum(["hybrid", "keyword"]).describe("hybrid: the semantic search worked and its results were fused with the keyword search's. keyword: the keyword search's alone."),
@@ -1372,12 +1618,21 @@ export type ApiUserCreate = z.infer<typeof apiUserCreateSchema>;
 export type ApiUser = z.infer<typeof apiUserSchema>;
 export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
 export type ApiReceptionist = z.infer<typeof apiReceptionistSchema>;
+export type ApiReceptionistProfile = z.infer<typeof apiReceptionistProfileSchema>;
+export type ApiQrLink = z.infer<typeof apiQrLinkSchema>;
+export type ApiQrLinkDetail = z.infer<typeof apiQrLinkDetailSchema>;
+export type ApiQrLinkCreate = z.infer<typeof apiQrLinkCreateSchema>;
+export type ApiQrLinkUpdate = z.infer<typeof apiQrLinkUpdateSchema>;
+export type ApiReceptionistCreate = z.infer<typeof apiReceptionistCreateSchema>;
+export type ApiReceptionistProfileUpdate = z.infer<typeof apiReceptionistProfileUpdateSchema>;
+export type ApiReceptionistReorder = z.infer<typeof apiReceptionistReorderSchema>;
 export type ApiReceptionistUpdate = z.infer<typeof apiReceptionistUpdateSchema>;
 export type ApiRule = z.infer<typeof apiRuleSchema>;
 export type ApiRuleCreate = z.infer<typeof apiRuleCreateSchema>;
 export type ApiRuleUpdate = z.infer<typeof apiRuleUpdateSchema>;
 export type ApiRuleReorder = z.infer<typeof apiRuleReorderSchema>;
 export type ApiBilling = z.infer<typeof apiBillingSchema>;
+export type ApiBillingPack = z.infer<typeof apiBillingPackSchema>;
 export type ApiBillingCatalog = z.infer<typeof apiBillingCatalogSchema>;
 export type ApiBillingCatalogApply = z.infer<typeof apiBillingCatalogApplySchema>;
 export type ApiBillingCatalogLink = z.infer<typeof apiBillingCatalogLinkSchema>;
@@ -1385,6 +1640,8 @@ export type ApiBillingCatalogPolar = z.infer<typeof apiBillingCatalogPolarSchema
 export type ApiBillingCatalogProvider = z.infer<typeof apiBillingCatalogProviderSchema>;
 export type ApiBillingCheck = z.infer<typeof apiBillingCheckSchema>;
 export type ApiBillingCatalogChange = z.infer<typeof apiBillingCatalogChangeSchema>;
+export type ApiBillingCatalogPack = z.infer<typeof apiBillingCatalogPackSchema>;
+export type ApiBillingCatalogPackPrice = z.infer<typeof apiBillingCatalogPackPriceSchema>;
 export type ApiBillingCatalogPlan = z.infer<typeof apiBillingCatalogPlanSchema>;
 export type ApiBillingCatalogPrice = z.infer<typeof apiBillingCatalogPriceSchema>;
 export type ApiBillingCatalogRefusal = z.infer<typeof apiBillingCatalogRefusalSchema>;
@@ -1396,6 +1653,8 @@ export type ApiBillingCodeCreate = z.infer<typeof apiBillingCodeCreateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiSubscriptionChange = z.infer<typeof apiSubscriptionChangeSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
+export type ApiPackCheckout = z.infer<typeof apiPackCheckoutSchema>;
+export type ApiPackCheckoutCreate = z.infer<typeof apiPackCheckoutCreateSchema>;
 export type ApiWidgetConfig = z.infer<typeof apiWidgetConfigSchema>;
 export type ApiWidgetKey = z.infer<typeof apiWidgetKeySchema>;
 export type ApiWidgetKeyCreated = z.infer<typeof apiWidgetKeyCreatedSchema>;
@@ -1421,6 +1680,7 @@ export type ApiOnboardingItem = ApiOnboarding["missing"][number];
 export type ApiOnboardingUpdate = z.infer<typeof apiOnboardingUpdateSchema>;
 export type ApiOnboardingComplete = z.infer<typeof apiOnboardingCompleteSchema>;
 export type ApiPhoneNumber = z.infer<typeof apiPhoneNumberSchema>;
+export type ApiPhoneNumberUpdate = z.infer<typeof apiPhoneNumberUpdateSchema>;
 export type ApiPhoneNumberSearch = z.infer<typeof apiPhoneNumberSearchSchema>;
 export type ApiPhoneNumberOffer = z.infer<typeof apiPhoneNumberOfferSchema>;
 export type ApiPhoneNumberClaimCreate = z.infer<typeof apiPhoneNumberClaimCreateSchema>;
@@ -1453,6 +1713,13 @@ export type ApiKnowledgeSourceUpdate = z.infer<typeof apiKnowledgeSourceUpdateSc
 export type ApiKnowledgeUpload = z.infer<typeof apiKnowledgeUploadSchema>;
 export type ApiKnowledgeUploadCreate = z.infer<typeof apiKnowledgeUploadCreateSchema>;
 export type ApiKnowledgeUploadComplete = z.infer<typeof apiKnowledgeUploadCompleteSchema>;
+export type ApiKnowledgeAudienceChange = z.infer<typeof apiKnowledgeAudienceChangeSchema>;
+export type ApiKnowledgeAudienceChangeResult = z.infer<typeof apiKnowledgeAudienceChangeResultSchema>;
+export type ApiWebsiteRule = z.infer<typeof apiWebsiteRuleSchema>;
+export type ApiUnansweredQuestion = z.infer<typeof apiUnansweredQuestionSchema>;
+export type ApiUnansweredQuestionAnswer = z.infer<typeof apiUnansweredQuestionAnswerSchema>;
+export type ApiUnansweredQuestionDismissed = z.infer<typeof apiUnansweredQuestionDismissedSchema>;
+export type ApiWebsiteRuleCreate = z.infer<typeof apiWebsiteRuleCreateSchema>;
 export type ApiKnowledgeSearch = z.infer<typeof apiKnowledgeSearchSchema>;
 export type ApiKnowledgeSearchResult = z.infer<typeof apiKnowledgeSearchResultSchema>;
 export type ApiWebhookEndpoint = z.infer<typeof apiWebhookEndpointSchema>;

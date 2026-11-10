@@ -74,7 +74,7 @@ curl https://app.lobbystack.com/api/v1/appointments \
   -d '{"service_id":"df8a2c34-d306-4292-a055-1b739ef74991","starts_at":"2026-09-29T09:30:00-04:00","contact_phone":"+14165550134"}'
 ```
 
-LobbyStack remembers each key for 24 hours, per API key and operation. The [MCP server](/ai/mcp) shares these keys: `book_appointment`, `create_contact` and `add_knowledge` count as `POST /appointments`, `POST /contacts` and `POST /knowledge`.
+LobbyStack remembers each key for 24 hours, per API key and operation. The [MCP server](/ai/mcp) shares these keys: `book_appointment`, `create_contact`, `add_knowledge` and `answer_question` count as `POST /appointments`, `POST /contacts`, `POST /knowledge` and `POST /knowledge/questions/{question_id}/answer`.
 
 - A retry with the same body gets the first response again, with the header `Idempotent-Replayed: true`. The API doesn't create a second appointment. LobbyStack compares the JSON values, so key order and spacing don't matter.
 - The same key with a different body returns `422` with the code `idempotency_key_reused`.

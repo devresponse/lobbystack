@@ -56,6 +56,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Unanswered questions](features/unanswered-questions.md) | The questions the receptionist couldn't answer, and answering them as text entries |
 | [Logs, errors and alerts](features/observability.md) | Logs, PostHog, following one call, and what to alert on |
 | [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar and Stripe, promo codes, and why it is built this way |
+| [Prepaid minute packs](features/prepaid-packs.md) | Minutes paid once that last a set number of days, beside the plans: the packs on sale, buying one, how calls draw on it, switching to and from a subscription, refunds, disputes and the end of a pack |
 | [Sign-in email addresses](auth-email-normalization.md) | How addresses are compared |
 
 ## Understand the architecture
@@ -63,7 +64,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 - [Platform architecture](architecture/overview.md), [the voice runtime](voice/runtime.md) and [knowledge](knowledge/architecture.md).
 - [Telemetry](telemetry/architecture.md): its [events](telemetry/event-taxonomy.md), [KPIs](telemetry/kpi-spec.md) and [data quality checks](telemetry/data-quality-checklist.md).
 - [Test a voice change](voice/testing.md) with `pnpm voice:eval` and `pnpm voice:call`.
-- The architecture decisions, [ADR 0001](adr/0001-monorepo.md) to [ADR 0010](adr/0010-billing-provider-per-deployment.md), listed in [decisions](project/decisions.md#read-the-architecture-decisions).
+- The architecture decisions, [ADR 0001](adr/0001-monorepo.md) to [ADR 0011](adr/0011-prepaid-packs-ledger.md), listed in [decisions](project/decisions.md#read-the-architecture-decisions).
 
 ## Look things up
 

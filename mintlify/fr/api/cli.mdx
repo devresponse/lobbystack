@@ -69,6 +69,12 @@ receptionist:
   transfer_mode: on_urgent
   transfer_number: "+14165550100"
   booking_mode: request
+receptionists:
+  - name: Emergency line
+    description: Burst pipes, floods and no heat, day and night.
+    settings:
+      greeting: Acme Plumbing emergency line, what's happening?
+      booking_mode: instant
 services:
   - name: Drain cleaning
     duration_minutes: 60
@@ -99,6 +105,7 @@ owner:
 | --- | --- |
 | `business` | `name` et `timezone` sont obligatoires. `locale` (`en` ou `fr`), `website_url`, `business_type` et `slug` sont facultatifs. `hours` liste les plages d'ouverture de la semaine par `day`, `open` et `close`, et remplace les heures que l'entreprise avait. `id` configure une entreprise qui existe déjà au lieu d'en créer une. |
 | `receptionist` | Les champs de `PATCH /receptionist`, comme `greeting`, `tone`, `transfer_mode`, `transfer_number` et `booking_mode`. |
+| `receptionists` | Les réceptionnistes en plus de celle par défaut, pour un forfait qui en comprend plusieurs : les champs de `POST /receptionists` (`name`, `description`, `handle`, `locale`, `knowledge_scope` et `listed`), et `settings` avec les champs de `PATCH /receptionist` propres à cette réceptionniste, comme `greeting`, `transfer_mode` et `booking_mode`. Une réceptionniste du même nom est mise à jour au lieu d'être ajoutée de nouveau, et une réceptionniste archivée reste telle quelle. Une entrée qui porte le nom de la réceptionniste par défaut est refusée. Le résumé, l'avis d'enregistrement et les règles de modification des rendez-vous sont ceux de l'entreprise : ils vont dans `receptionist`. |
 | `services` | Les champs de `POST /services`. Un service du même nom est mis à jour au lieu d'être ajouté de nouveau. |
 | `rules` | Les champs de `POST /rules`. Une règle du même titre est mise à jour. |
 | `knowledge.websites` | Les sites que la réceptionniste lit. La première lecture prend un échantillon de chaque site. |
@@ -168,7 +175,7 @@ Certaines étapes demandent une personne. La commande fait tout le reste, affich
 - **Un paiement.** La commande affiche le lien de paiement : envoyez-le à la personne qui paie. Tant que le forfait n'est pas payé, l'entreprise garde son forfait actuel. Le numéro de téléphone, les documents pour lesquels le forfait gratuit n'a pas de place et la lecture complète d'un site attendent le forfait payant. Une page de paiement de plus d'une heure a peut-être expiré : une exécution dans un terminal, sans `--yes`, propose d'en créer une nouvelle.
 - **La réclamation du propriétaire.** Avec la clé d'un exploitant, c'est le propriétaire de l'entreprise qui paie son forfait, donc le lien de réclamation part avant le paiement. La page de paiement est créée à la première exécution après que le propriétaire a accepté le lien.
 
-Relancez la même commande une fois que la personne a terminé. Un paiement peut acheter un forfait pour une entreprise gratuite, ou passer de Starter à Pro. Starter paie déjà : son passage à Pro ne demande aucune page, le fournisseur de facturation modifie l'abonnement et débite la différence sur le moyen de paiement enregistré, après un oui. Les autres changements de forfait, comme passer de Pro à Starter ou changer d'intervalle de facturation, se font dans le portail de facturation : la commande les signale et continue.
+Relancez la même commande une fois que la personne a terminé. Un paiement peut acheter un forfait pour une entreprise gratuite ou sur un pack de minutes prépayé, dont les packs en cours prennent fin quand le forfait commence, ou passer de Starter à Pro. Starter paie déjà : son passage à Pro ne demande aucune page, le fournisseur de facturation modifie l'abonnement et débite la différence sur le moyen de paiement enregistré, après un oui. Les autres changements de forfait, comme passer de Pro à Starter ou changer d'intervalle de facturation, se font dans le portail de facturation : la commande les signale et continue.
 
 ## La relancer
 
@@ -202,3 +209,5 @@ Sans fichier d'état, une clé de plateforme ne crée pas d'entreprise si vous e
 Pour voir ce que la réceptionniste IA trouve dans vos connaissances pour une question, lancez `lobbystack knowledge search "<question>"`. La commande fait la même recherche qu'un appel ou une discussion, et ne change rien. Elle affiche les passages trouvés, ceux laissés de côté et pourquoi, et ce que la réceptionniste reçoit. `--json` ajoute les scores de chaque passage. La clé doit avoir `knowledge:read`.
 
 Ajoutez `--log-dir <dossier>` pour enregistrer aussi chaque réponse dans ce dossier, en fichier JSON nommé d'après l'heure de la question et ses mots, comme `2026-11-03T18-45-12-345Z-parking-fees.json`. Posez les mêmes questions avant et après avoir modifié un document, chaque fois dans un dossier différent, puis comparez les deux. `LOBBYSTACK_KNOWLEDGE_LOG_DIR` enregistre chaque recherche de la même façon. Les fichiers ne contiennent jamais la clé API.
+
+Pour acheter un pack de minutes prépayé, lancez `lobbystack billing buy-pack <pack>` avec le code du pack, comme `pack_500_180` pour 500 minutes valables 180 jours. Avec `--wait`, la commande attend la page de paiement du fournisseur de facturation et affiche son lien : envoyez-le à la personne qui paie. Sans cette option, `lobbystack billing pack-status <checkout_id>` affiche le lien une fois la page prête, puis si le pack a été payé. Une fois le pack payé, `pack_status` dit ce qu'il est devenu : `active` tant que l'entreprise l'a, `frozen` tant qu'un litige bloque son paiement (l'entreprise garde le pack), `expired` une fois ses jours écoulés, `replaced` quand un forfait acheté par l'entreprise y a mis fin, et `refunded` quand son paiement a été remboursé. Un forfait qui a commencé avant l'arrivée du paiement met fin au pack aussitôt, et le paiement est remboursé. Un forfait qui commence pendant que l'achat est encore ouvert le ferme, et `--wait` l'indique au lieu de proposer un autre achat, puisque ce pack mettrait fin à un forfait mensuel. Sur un forfait Starter ou Pro mensuel, le forfait prend fin une fois le pack payé ; un forfait annuel doit d'abord prendre fin. `lobbystack billing status` liste les packs de l'entreprise après son forfait, avec les minutes restantes sur chacun et sa date de fin. La clé doit avoir `billing:manage`.

@@ -1,15 +1,16 @@
 ---
 title: "Elija un plan y gestione la facturación"
-description: "Conozca las opciones de plan de LobbyStack: Free, Starter, Pro, Enterprise y autoalojado."
+description: "Conozca las opciones de plan de LobbyStack: Free, Starter, Pro, Enterprise, autoalojado y paquetes de minutos prepago."
 sidebarTitle: "Planes y facturación"
 contentType: "Reference"
 ---
 
-LobbyStack admite cinco tipos de plan en la aplicación:
+LobbyStack admite seis tipos de plan en la aplicación:
 
 - **Free** para espacios de trabajo alojados con uso incluido limitado.
 - **Starter** para espacios de trabajo alojados con suscripción mensual o anual, uso incluido y excedentes facturables.
 - **Pro** para espacios de trabajo alojados con más uso incluido, facturación mensual o anual y excedentes facturables.
+- **Prepago** para espacios de trabajo alojados que pagan una sola vez un paquete de minutos de voz en lugar de una suscripción.
 - **Enterprise** para acuerdos alojados personalizados.
 - **Autoalojado** para implementaciones que usan sus propios proveedores e infraestructura.
 
@@ -36,6 +37,33 @@ Tarifas de excedentes de los planes de pago:
 
 El uso incluido se reinicia cada mes, tanto en las suscripciones mensuales como en las anuales. Los minutos no usados no se acumulan.
 
+## Paquetes de minutos prepago
+
+Un paquete de minutos prepago es un solo pago por minutos de voz que duran un número fijo de días desde el día en que paga, en lugar de una suscripción mensual. Un paquete no se renueva y nunca factura excedentes. Las llamadas se detienen al llegar a cero minutos, como en Free. Las llamadas telefónicas dan entonces tono de ocupado hasta que compre otro paquete.
+
+Cada paquete termina en su propia fecha, y los minutos que le queden entonces se pierden, aunque tenga otro paquete. Las llamadas usan primero el paquete que termina antes. Mientras dure un paquete, **Configuración** > **Plan** muestra su plan como **Prepago**, con los minutos restantes y la fecha en que termina su último paquete. Los SMS de alerta y los intentos de transferencia se descuentan de las asignaciones mensuales que se indican ahí, y se pausan cuando se agotan.
+
+Mientras un paquete es su plan, los propietarios del espacio de trabajo reciben un correo cuando queda alrededor de una quinta parte de los minutos, cuando no queda ninguno, y 30 días y 7 días antes de que termine un paquete. Cuando termina su último paquete, su número del negocio deja de atender llamadas y se libera 30 días después. Comprar otro paquete o un plan antes de esa fecha conserva el número, que vuelve a atender llamadas.
+
+### Compre un paquete
+
+Los propietarios y los administradores pueden comprar paquetes, salvo con Enterprise:
+
+1. En el panel, abra **Configuración** > **Plan**.
+2. En **Minutos prepagados**, elija los **Minutos** y la **Duración** del paquete.
+3. Haga clic en **Comprar paquete de minutos**, o en **Comprar más** si ya tiene un paquete, y pague en la página de pago. El paquete aparece en **Configuración** > **Plan** en cuanto llega su pago.
+
+Durante la configuración inicial, también puede comprar un paquete en **¿Prefiere minutos prepagados?** dentro del paso del plan.
+
+### Cambie entre un paquete y un plan
+
+Puede cambiar en ambos sentidos, pero los minutos y las asignaciones que queden al cambiar se pierden. Las asignaciones del nuevo plan o paquete empiezan de inmediato.
+
+- Comprar un paquete con un plan Starter o Pro mensual termina el plan en cuanto el paquete está pagado. Antes debe confirmar con **Terminar y comprar**. El resto del mes del plan no se reembolsa, y el uso hasta ese momento se sigue cobrando.
+- Suscribirse a Starter o Pro pone fin a sus paquetes, también con el plan de un código promocional en **¿Tiene un código promocional?**, que se lo advierte antes. La compra de un paquete que haya empezado se detiene; con Stripe, su página de pago también se cierra.
+- Si paga un paquete después de suscribirse, en una página de pago abierta antes, el plan va primero: el paquete no se añade y el pago se reembolsará.
+- Un plan anual no puede cambiar a un paquete. Prográmelo para que termine en la renovación y compre un paquete cuando termine. Tampoco puede comprar un paquete mientras haya un pago vencido de su plan. Páguelo primero en **Gestionar suscripción**.
+
 ## Autoalojamiento
 
 Los espacios de trabajo autoalojados funcionan con sus propios proveedores e infraestructura, fuera de las cuotas de los planes alojados de LobbyStack.
@@ -50,6 +78,7 @@ En el panel, abra **Configuración** > **Plan** para:
 
 - Ver el plan actual.
 - Pasar a Starter o Pro.
+- Comprar un [paquete de minutos prepago](#paquetes-de-minutos-prepago).
 - Introducir un código promocional en **¿Tiene un código promocional?** para ver el plan que desbloquea, lo que incluye cada mes y su descuento, y suscribirse a él. Un plan promocional puede incluir más minutos, SMS o almacenamiento que el plan en el que se basa, y **Configuración** > **Plan** y **Configuración** > **Uso** muestran entonces sus propias asignaciones. Un enlace promocional rellena el código por usted. Cada espacio de trabajo puede usar un código una sola vez, así que cuando un plan promocional termina, su código ya no lo vende. Un plan promocional de duración fija muestra cuándo termina y lo que viene después, el plan en el que se basa a su precio habitual o el fin de la suscripción, y los propietarios reciben un correo una semana antes. Termina en la primera renovación después de sus meses, y cambiar de plan antes pone fin al plan promocional y a su descuento.
 - Gestionar su suscripción.
 - Revisar las transacciones de facturación recientes.

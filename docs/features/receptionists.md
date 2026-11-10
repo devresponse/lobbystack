@@ -60,7 +60,7 @@ A phone number, a widget key and a QR link each name the receptionist that answe
 - **Settings > Website widget:** **Receptionist** on each key: "Chats and calls from this widget go to the receptionist you pick." A new key names the default receptionist unless the form picks another.
 - **Settings > QR code:** **Answered by** on each QR link ([use QR links](#use-qr-links)).
 
-A paused receptionist can be chosen; an archived one can't. Each change writes an audit entry (`phone_number.receptionist_changed`, `widget_key.receptionist_changed`, `entry_link.updated`). The v1 API's number and widget key fields are unchanged; receptionists aren't in the API yet ([API gaps](../reference/api-gaps.md)).
+A paused receptionist can be chosen; an archived one can't. Each change writes an audit entry (`phone_number.receptionist_changed`, `widget_key.receptionist_changed`, `entry_link.updated`). The v1 API does the same: `receptionist_id` on `PATCH /phone-numbers/{phone_number_id}`, on widget keys and on `/qr-links`, and `/receptionists` manages the receptionists themselves, as `lobbystack receptionists` does ([API, CLI and integrations](api-cli-integrations.md)).
 
 ## Give each receptionist its knowledge
 
@@ -73,7 +73,7 @@ The business keeps one knowledge library. Each article (a file, a website page o
 - **The business summary is written from articles for everyone,** so a receptionist's private articles never reach the other receptionists' prompts.
 - **Available to chooses what's relevant, not what's secret.** It keeps a store's notes out of the other stores' answers, but it isn't access control: the default receptionist answers from every article unless the owner limits it, a paused or archived receptionist's calls and chats go to the default, and anyone can open an unlisted receptionist at its page address and ask it. Keep text visitors must never hear out of the knowledge library.
 
-Calls and chats search only the articles the answering receptionist may use (`searchKnowledgeEvidence` filters by the receptionist; `receptionistMayUse` in `packages/shared/src/receptionists.ts` is the same rule in code). The v1 API's `POST /knowledge/search` (fork PR #130) searches as the default receptionist, with its text entries, and counts only what it may use. The business's snapshot keeps up to 50 text entries and a digest of 40 documents for each receptionist, chosen from what it may use.
+Calls and chats search only the articles the answering receptionist may use (`searchKnowledgeEvidence` filters by the receptionist; `receptionistMayUse` in `packages/shared/src/receptionists.ts` is the same rule in code). The v1 API's `POST /knowledge/search` (fork PR #130) searches as the receptionist its `receptionist_id` names, or the default, with its text entries, and counts only what it may use. Knowledge entries and sources in the API say who they're for, and `POST /knowledge/audience`, `/knowledge/website-rules` and `/knowledge/questions` do what this page and the Questions page do. The business's snapshot keeps up to 50 text entries and a digest of 40 documents for each receptionist, chosen from what it may use.
 
 ## Know what visitors see
 

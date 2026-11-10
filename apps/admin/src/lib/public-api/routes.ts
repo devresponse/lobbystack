@@ -18,11 +18,23 @@ import {
   createBillingCodeForApi,
   changeBillingSubscriptionForApi,
   createCheckoutForApi,
+  createPackCheckoutForApi,
+  packCheckoutConfigured,
   createClaimLinkForApi,
   createContactForApi,
   createKnowledgeEntryForApi,
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
+  changeReceptionistForApi,
+  answerUnansweredQuestionForApi,
+  changeKnowledgeAudienceForApi,
+  dismissUnansweredQuestionForApi,
+  listUnansweredQuestionsForApi,
+  createQrLinkForApi,
+  createWebsiteRuleForApi,
+  deleteWebsiteRuleForApi,
+  listWebsiteRulesForApi,
+  createReceptionistForApi,
   createRuleForApi,
   createServiceForApi,
   createTeamInvitationForApi,
@@ -52,12 +64,15 @@ import {
   getOnboardingForApi,
   getPlatformMeForApi,
   getPublicProfileForApi,
+  getQrLinkForApi,
   getReceptionistForApi,
+  getReceptionistProfileForApi,
   getTeamForApi,
   getCallForApi,
   getAiTraceForApi,
   listAiTracesForApi,
   getCheckoutForApi,
+  getPackCheckoutForApi,
   getSubscriptionChangeForApi,
   getPhoneNumberClaimForApi,
   getContactForApi,
@@ -76,14 +91,18 @@ import {
   listKnowledgeSourcesForApi,
   listMessagesForApi,
   listPhoneNumbersForApi,
+  updatePhoneNumberForApi,
   listRulesForApi,
   listServicesForApi,
   listStaffForApi,
+  listQrLinksForApi,
+  listReceptionistsForApi,
   listWidgetKeysForApi,
   listWebhookEndpoints,
   PublicApiError,
   releasePhoneNumberForApi,
   removeTeamMemberForApi,
+  reorderReceptionistsForApi,
   reorderRulesForApi,
   rescheduleAppointmentForApi,
   resolveActingUserId,
@@ -103,7 +122,9 @@ import {
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
   updateNotificationPreferencesForApi,
+  updateQrLinkForApi,
   updateReceptionistForApi,
+  updateReceptionistProfileForApi,
   updateRuleForApi,
   updateServiceForApi,
   updateTeamMemberForApi,
@@ -128,6 +149,7 @@ import {
   apiUserCreateSchema,
   apiCalendarConnectionUpdateSchema,
   apiCheckoutCreateSchema,
+  apiPackCheckoutCreateSchema,
   apiClaimLinkCreateSchema,
   apiManagedPlanCreateSchema,
   apiNotificationPreferencesUpdateSchema,
@@ -135,6 +157,7 @@ import {
   apiOnboardingUpdateSchema,
   apiPhoneNumberClaimCreateSchema,
   apiPhoneNumberSearchSchema,
+  apiPhoneNumberUpdateSchema,
   apiPublicProfileUpdateSchema,
   apiBusinessUpdateSchema,
   apiContactCreateSchema,
@@ -148,6 +171,14 @@ import {
   apiKnowledgeSourceUpdateSchema,
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
+  apiKnowledgeAudienceChangeSchema,
+  apiUnansweredQuestionAnswerSchema,
+  apiQrLinkCreateSchema,
+  apiWebsiteRuleCreateSchema,
+  apiQrLinkUpdateSchema,
+  apiReceptionistCreateSchema,
+  apiReceptionistProfileUpdateSchema,
+  apiReceptionistReorderSchema,
   apiReceptionistUpdateSchema,
   apiRuleCreateSchema,
   apiRuleReorderSchema,
@@ -321,11 +352,24 @@ function textParam(request: Request, name: string, maxLength: number): string | 
   return value;
 }
 
+/** ?receptionist_id=, a receptionist the request is about; absent means the default one. */
+function receptionistQuery(request: Request): string | undefined {
+  const value = queryParam(request, "receptionist_id");
+  return value === undefined ? undefined : uuidParam(value, "receptionist_id");
+}
+
 function booleanParam(request: Request, name: string): boolean | undefined {
   const value = queryParam(request, name);
   if (value === undefined) return undefined;
   if (value !== "true" && value !== "false") throw new PublicApiError(400, "invalid_request", `${name} must be true or false.`);
   return value === "true";
+}
+
+function integerParam(request: Request, name: string, min: number, max: number): number | undefined {
+  const value = queryParam(request, name);
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value) || Number(value) < min || Number(value) > max) throw new PublicApiError(400, "invalid_request", `${name} must be a whole number from ${min} to ${max}.`);
+  return Number(value);
 }
 
 function enumParam<T extends string>(request: Request, name: string, values: readonly T[]): T | undefined {
@@ -372,6 +416,9 @@ export const v1 = {
   }),
   listBillingPlans: (request: Request) => handleApiRequest(request, "listBillingPlans", async ({ context }) => ({ body: data(await listBillingPlansForApi(context)) })),
   getCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getCheckout", async ({ context, caller }) => ({ body: data(await getCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
+  // A prepaid pack's checkout is a call to the billing provider too, counted with plan checkouts.
+  createPackCheckout: (request: Request) => handleApiRequest(request, "createPackCheckout", async ({ context, caller }) => ({ body: data(await createPackCheckoutForApi(context, caller, await readApiBody(request, apiPackCheckoutCreateSchema), { available: packCheckoutConfigured(process.env), checkLimit: requireCheckoutAllowed })) })),
+  getPackCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getPackCheckout", async ({ context, caller }) => ({ body: data(await getPackCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
   // Each new change is a call to the billing provider, so it counts toward the checkout limits.
   cancelBillingPlan: (request: Request) => handleApiRequest(request, "cancelBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "cancel", { checkLimit: requireCheckoutAllowed })) })),
   resumeBillingPlan: (request: Request) => handleApiRequest(request, "resumeBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "resume", { checkLimit: requireCheckoutAllowed })) })),
@@ -438,6 +485,10 @@ export const v1 = {
     return { body: data(await claimPhoneNumberForApi(context, caller, { offerToken: body.offer_token }, { userId, claimTokenSecret: getNumberClaimTokenSecret() })) };
   }),
   getPhoneNumberClaim: (request: Request, { params }: Params<"claim_id">) => handleApiRequest(request, "getPhoneNumberClaim", async ({ context, caller }) => ({ body: data(await getPhoneNumberClaimForApi(context, caller, uuidParam((await params).claim_id, "claim_id"))) })),
+  updatePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "updatePhoneNumber", async ({ context, caller }) => {
+    const phoneNumberId = uuidParam((await params).phone_number_id, "phone_number_id");
+    return { body: data(await updatePhoneNumberForApi(context, caller, phoneNumberId, await readApiBody(request, apiPhoneNumberUpdateSchema))) };
+  }),
   releasePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "releasePhoneNumber", async ({ context, caller }) => ({ body: data(await releasePhoneNumberForApi(context, caller, uuidParam((await params).phone_number_id, "phone_number_id"))) })),
   replacePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "replacePhoneNumber", async ({ context, caller }) => {
     const phoneNumberId = uuidParam((await params).phone_number_id, "phone_number_id");
@@ -503,8 +554,49 @@ export const v1 = {
     return { body: data({ id: ruleId, deleted: true }) };
   }),
   reorderRules: (request: Request) => handleApiRequest(request, "reorderRules", async ({ context, caller }) => ({ body: { data: await reorderRulesForApi(context, caller, await readApiBody(request, apiRuleReorderSchema)), next_cursor: null, has_more: false } })),
-  getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller)) })),
-  updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => ({ body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema))) })),
+  getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller, { receptionistId: receptionistQuery(request) })) })),
+  updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => {
+    const receptionistId = receptionistQuery(request);
+    return { body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema), { receptionistId })) };
+  }),
+  changeKnowledgeAudience: (request: Request) => handleApiRequest(request, "changeKnowledgeAudience", async ({ context, caller }) => ({ body: data(await changeKnowledgeAudienceForApi(context, caller, await readApiBody(request, apiKnowledgeAudienceChangeSchema))) })),
+  listUnansweredQuestions: (request: Request) => handleApiRequest(request, "listUnansweredQuestions", async ({ context, caller }) => ({ body: await listUnansweredQuestionsForApi(context, caller, { ...pageQuery(request), receptionistId: receptionistQuery(request) }) })),
+  answerUnansweredQuestion: (request: Request, { params }: Params<"question_id">) => handleApiRequest(request, "answerUnansweredQuestion", async ({ context, caller }) => {
+    const questionId = uuidParam((await params).question_id, "question_id");
+    return { body: data(await answerUnansweredQuestionForApi(context, caller, questionId, await readApiBody(request, apiUnansweredQuestionAnswerSchema))) };
+  }),
+  dismissUnansweredQuestion: (request: Request, { params }: Params<"question_id">) => handleApiRequest(request, "dismissUnansweredQuestion", async ({ context, caller }) => {
+    const questionId = uuidParam((await params).question_id, "question_id");
+    await dismissUnansweredQuestionForApi(context, caller, questionId);
+    return { body: data({ id: questionId, dismissed: true as const }) };
+  }),
+  listWebsiteRules: (request: Request) => handleApiRequest(request, "listWebsiteRules", async ({ context, caller }) => ({ body: { data: await listWebsiteRulesForApi(context, caller), next_cursor: null, has_more: false } })),
+  createWebsiteRule: (request: Request) => handleApiRequest(request, "createWebsiteRule", async ({ context, caller }) => ({ body: data(await createWebsiteRuleForApi(context, caller, await readApiBody(request, apiWebsiteRuleCreateSchema))) })),
+  deleteWebsiteRule: (request: Request, { params }: Params<"rule_id">) => handleApiRequest(request, "deleteWebsiteRule", async ({ context, caller }) => {
+    const ruleId = uuidParam((await params).rule_id, "rule_id");
+    await deleteWebsiteRuleForApi(context, caller, ruleId);
+    return { body: data({ id: ruleId, deleted: true }) };
+  }),
+  listQrLinks: (request: Request) => handleApiRequest(request, "listQrLinks", async ({ context, caller }) => ({ body: { data: await listQrLinksForApi(context, caller, { receptionistId: receptionistQuery(request), status: enumParam(request, "status", ["active", "paused"] as const) }, { appOrigin: appOrigin(request) }), next_cursor: null, has_more: false } })),
+  createQrLink: (request: Request) => handleApiRequest(request, "createQrLink", async ({ context, caller }) => ({ body: data(await createQrLinkForApi(context, caller, await readApiBody(request, apiQrLinkCreateSchema), { appOrigin: appOrigin(request) })) })),
+  getQrLink: (request: Request, { params }: Params<"qr_link_id">) => handleApiRequest(request, "getQrLink", async ({ context, caller }) => ({ body: data(await getQrLinkForApi(context, caller, uuidParam((await params).qr_link_id, "qr_link_id"), { appOrigin: appOrigin(request), days: integerParam(request, "days", 1, 400) })) })),
+  updateQrLink: (request: Request, { params }: Params<"qr_link_id">) => handleApiRequest(request, "updateQrLink", async ({ context, caller }) => {
+    const qrLinkId = uuidParam((await params).qr_link_id, "qr_link_id");
+    return { body: data(await updateQrLinkForApi(context, caller, qrLinkId, await readApiBody(request, apiQrLinkUpdateSchema), { appOrigin: appOrigin(request) })) };
+  }),
+  listReceptionists: (request: Request) => handleApiRequest(request, "listReceptionists", async ({ context, caller }) => ({ body: { data: await listReceptionistsForApi(context, caller, { archived: booleanParam(request, "archived") }), next_cursor: null, has_more: false } })),
+  createReceptionist: (request: Request) => handleApiRequest(request, "createReceptionist", async ({ context, caller }) => ({ body: data(await createReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistCreateSchema))) })),
+  reorderReceptionists: (request: Request) => handleApiRequest(request, "reorderReceptionists", async ({ context, caller }) => ({ body: { data: await reorderReceptionistsForApi(context, caller, await readApiBody(request, apiReceptionistReorderSchema)), next_cursor: null, has_more: false } })),
+  getReceptionistProfile: (request: Request, { params }: Params<"receptionist_id">) => handleApiRequest(request, "getReceptionistProfile", async ({ context, caller }) => ({ body: data(await getReceptionistProfileForApi(context, caller, uuidParam((await params).receptionist_id, "receptionist_id"))) })),
+  updateReceptionistProfile: (request: Request, { params }: Params<"receptionist_id">) => handleApiRequest(request, "updateReceptionistProfile", async ({ context, caller }) => {
+    const receptionistId = uuidParam((await params).receptionist_id, "receptionist_id");
+    return { body: data(await updateReceptionistProfileForApi(context, caller, receptionistId, await readApiBody(request, apiReceptionistProfileUpdateSchema))) };
+  }),
+  pauseReceptionist: (request: Request, { params }: Params<"receptionist_id">) => handleApiRequest(request, "pauseReceptionist", async ({ context, caller }) => ({ body: data(await changeReceptionistForApi(context, caller, uuidParam((await params).receptionist_id, "receptionist_id"), "pause")) })),
+  resumeReceptionist: (request: Request, { params }: Params<"receptionist_id">) => handleApiRequest(request, "resumeReceptionist", async ({ context, caller }) => ({ body: data(await changeReceptionistForApi(context, caller, uuidParam((await params).receptionist_id, "receptionist_id"), "resume")) })),
+  archiveReceptionist: (request: Request, { params }: Params<"receptionist_id">) => handleApiRequest(request, "archiveReceptionist", async ({ context, caller }) => ({ body: data(await changeReceptionistForApi(context, caller, uuidParam((await params).receptionist_id, "receptionist_id"), "archive")) })),
+  restoreReceptionist: (request: Request, { params }: Params<"receptionist_id">) => handleApiRequest(request, "restoreReceptionist", async ({ context, caller }) => ({ body: data(await changeReceptionistForApi(context, caller, uuidParam((await params).receptionist_id, "receptionist_id"), "restore")) })),
+  makeDefaultReceptionist: (request: Request, { params }: Params<"receptionist_id">) => handleApiRequest(request, "makeDefaultReceptionist", async ({ context, caller }) => ({ body: data(await changeReceptionistForApi(context, caller, uuidParam((await params).receptionist_id, "receptionist_id"), "make_default")) })),
   createCalendarConnectLink: (request: Request) => handleApiRequest(request, "createCalendarConnectLink", async ({ context, caller }) => {
     requireGoogleCalendar();
     if (!calendarSigningConfigured()) throw googleCalendarUnavailable();
@@ -550,7 +642,7 @@ export const v1 = {
 
   listAiTraces: (request: Request) => handleApiRequest(request, "listAiTraces", async ({ context, caller }) => ({ body: await listAiTracesForApi(context, caller, { ...pageQuery(request), callId: optionalUuidParam(request, "call_id"), conversationId: optionalUuidParam(request, "conversation_id") }) })),
   getAiTrace: (request: Request, { params }: Params<"trace_id">) => handleApiRequest(request, "getAiTrace", async ({ context, caller }) => ({ body: data(await getAiTraceForApi(context, caller, uuidParam((await params).trace_id, "trace_id"))) })),
-  listCalls: (request: Request) => handleApiRequest(request, "listCalls", async ({ context, caller }) => ({ body: await listCallsForApi(context, caller, { ...pageQuery(request), startedAfter: dateParam(request, "started_after"), startedBefore: dateParam(request, "started_before") }) })),
+  listCalls: (request: Request) => handleApiRequest(request, "listCalls", async ({ context, caller }) => ({ body: await listCallsForApi(context, caller, { ...pageQuery(request), startedAfter: dateParam(request, "started_after"), startedBefore: dateParam(request, "started_before"), receptionistId: receptionistQuery(request) }) })),
   getCall: (request: Request, { params }: Params<"call_id">) => handleApiRequest(request, "getCall", async ({ context, caller }) => ({ body: data(await getCallForApi(context, caller, uuidParam((await params).call_id, "call_id"))) })),
 
   listContacts: (request: Request) => handleApiRequest(request, "listContacts", async ({ context, caller }) => ({ body: await listContactsForApi(context, caller, { ...pageQuery(request), phone: queryParam(request, "phone"), email: queryParam(request, "email"), name: textParam(request, "name", 200) }) })),
@@ -580,7 +672,7 @@ export const v1 = {
     return { body: data(await rescheduleAppointmentForApi(context, caller, appointmentId, await readApiBody(request, apiAppointmentRescheduleSchema))) };
   }),
 
-  listMessages: (request: Request) => handleApiRequest(request, "listMessages", async ({ context, caller }) => ({ body: await listMessagesForApi(context, caller, { ...pageQuery(request), status: enumParam(request, "status", ["open", "done"] as const) }) })),
+  listMessages: (request: Request) => handleApiRequest(request, "listMessages", async ({ context, caller }) => ({ body: await listMessagesForApi(context, caller, { ...pageQuery(request), status: enumParam(request, "status", ["open", "done"] as const), receptionistId: receptionistQuery(request) }) })),
   listKnowledgeEntries: (request: Request) => handleApiRequest(request, "listKnowledgeEntries", async ({ context, caller }) => ({ body: await listKnowledgeEntriesForApi(context, caller, { ...pageQuery(request), type: enumParam(request, "type", ["text", "faq"] as const) }) })),
   createKnowledgeEntry: (request: Request) => handleApiRequest(request, "createKnowledgeEntry", async ({ context, caller }) => ({ body: data(await createKnowledgeEntryForApi(context, caller, await readApiBody(request, apiKnowledgeEntryCreateSchema))) })),
   getKnowledgeEntry: (request: Request, { params }: Params<"entry_id">) => handleApiRequest(request, "getKnowledgeEntry", async ({ context, caller }) => ({ body: data(await getKnowledgeEntryForApi(context, caller, uuidParam((await params).entry_id, "entry_id"))) })),

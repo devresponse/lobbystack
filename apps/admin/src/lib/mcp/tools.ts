@@ -2,6 +2,7 @@ import type { StandardSchemaWithJSON, ToolAnnotations } from "@modelcontextproto
 import { z } from "zod";
 
 import {
+  answerUnansweredQuestionForApi,
   cancelAppointmentForApi,
   createAppointmentForApi,
   createContactForApi,
@@ -15,8 +16,10 @@ import {
   listCallsForApi,
   listContactsForApi,
   listMessagesForApi,
+  listReceptionistsForApi,
   listServicesForApi,
   listStaffForApi,
+  listUnansweredQuestionsForApi,
   PublicApiError,
   rescheduleAppointmentForApi,
   updateBusinessForApi,
@@ -43,8 +46,12 @@ import {
   apiKnowledgeEntrySchema,
   apiMessageSchema,
   apiPageSchema,
+  apiReceptionistProfileSchema,
   apiServiceSchema,
   apiStaffSchema,
+  apiUnansweredQuestionAnswerSchema,
+  apiUnansweredQuestionSchema,
+  MAX_RECEPTIONISTS_PER_REQUEST,
   parseApiInput,
   apiOperations,
   weekdays,
@@ -81,6 +88,9 @@ export const mcpOperations = {
   rescheduleAppointmentForApi,
   listMessagesForApi,
   createKnowledgeEntryForApi,
+  listReceptionistsForApi,
+  listUnansweredQuestionsForApi,
+  answerUnansweredQuestionForApi,
 };
 
 export type McpOperations = typeof mcpOperations;
@@ -114,6 +124,17 @@ function tool<Input extends ToolInput>(definition: ToolDefinition<Input>): McpTo
   const idempotent = operation.idempotent === true;
   if (idempotent && !definition.restBody) throw new Error(`MCP tool ${definition.name} needs restBody for idempotency.`);
   return { ...definition, scope: operation.scope, idempotent } as unknown as McpTool;
+}
+
+/**
+ * The path the REST request for an operation would use, as REST hashes it
+ * with the body when the path names something: a key used for one question's
+ * answer is a new request for another question's.
+ */
+export function restPathFor(operation: ApiOperationId, input: Record<string, unknown>): string | undefined {
+  const { path } = apiOperations[operation];
+  if (!path.includes("{")) return undefined;
+  return `/api/v1${path.replace(/\{(\w+)\}/g, (_, name: string) => encodeURIComponent(String(input[name])))}`.toLowerCase();
 }
 
 /** Validates a request body against a v1 contract schema, exactly as the REST API does. */
@@ -154,7 +175,11 @@ type Args = Record<string, unknown>;
 const pick = (input: Args, keys: string[]) => defined(Object.fromEntries(keys.map((key) => [key, input[key]])));
 const contactBody = (input: Args) => pick(input, ["name", "phone", "email", "locale", "timezone"]);
 const bookingBody = (input: Args) => pick(input, ["service_id", "starts_at", "contact_id", "contact_phone", "contact_name", "staff_id", "sms_consent"]);
-const knowledgeBody = (input: Args) => (input.type === "faq" ? pick(input, ["type", "question", "answer"]) : pick(input, ["type", "title", "content"]));
+// Receptionists chosen for an entry make it theirs alone; none leaves it for every receptionist.
+const audienceBody = (input: Args) => (Array.isArray(input.receptionist_ids) && input.receptionist_ids.length ? { audience: "chosen", receptionist_ids: input.receptionist_ids } : {});
+const knowledgeBody = (input: Args) => ({ ...(input.type === "faq" ? pick(input, ["type", "question", "answer"]) : pick(input, ["type", "title", "content"])), ...audienceBody(input) });
+const answerBody = (input: Args) => pick(input, ["answer", "audience", "receptionist_ids"]);
+const receptionistFilter = (what: string) => z.uuid().optional().describe(`Only the ${what} this receptionist answered, from list_receptionists. Leave it out for every receptionist's.`);
 
 export const mcpTools: McpTool[] = [
   tool({
@@ -166,6 +191,16 @@ export const mcpTools: McpTool[] = [
     inputSchema: z.object({}),
     outputSchema: contractSchema(apiBusinessSchema),
     run: async ({ context, caller, operations }) => await operations.getBusinessForApi(context, caller),
+  }),
+  tool({
+    name: "list_receptionists",
+    title: "List receptionists",
+    description: "Lists the business's AI receptionists that aren't archived, the default first: each one's id, name, description, status (active or paused), language and how many phone numbers, website widgets and QR links open it. A business with one receptionist lists just the default. Pass an id as receptionist_id to list_calls, list_messages or list_questions, or in receptionist_ids to add_knowledge or answer_question.",
+    operation: "listReceptionists",
+    annotations: readOnly,
+    inputSchema: z.object({}),
+    outputSchema: contractSchema(apiPageSchema(apiReceptionistProfileSchema)),
+    run: async ({ context, caller, operations }) => ({ data: await operations.listReceptionistsForApi(context, caller), next_cursor: null, has_more: false }),
   }),
   tool({
     name: "list_services",
@@ -208,6 +243,7 @@ export const mcpTools: McpTool[] = [
     inputSchema: z.object({
       started_after: timestampInput("Only calls that started at or after this time."),
       started_before: timestampInput("Only calls that started before this time."),
+      receptionist_id: receptionistFilter("calls"),
       ...pageInput,
     }),
     outputSchema: contractSchema(apiPageSchema(apiCallSchema)),
@@ -216,6 +252,7 @@ export const mcpTools: McpTool[] = [
       cursor: input.cursor,
       startedAfter: input.started_after ? new Date(input.started_after) : undefined,
       startedBefore: input.started_before ? new Date(input.started_before) : undefined,
+      receptionistId: input.receptionist_id,
     })),
   }),
   tool({
@@ -391,15 +428,16 @@ export const mcpTools: McpTool[] = [
     annotations: readOnly,
     inputSchema: z.object({
       status: z.enum(["open", "done"]).optional().describe("Only messages with this status."),
+      receptionist_id: receptionistFilter("calls and chats behind the messages"),
       ...pageInput,
     }),
     outputSchema: contractSchema(apiPageSchema(apiMessageSchema)),
-    run: async ({ context, caller, operations }, input) => await operations.listMessagesForApi(context, caller, defined({ limit: input.limit, cursor: input.cursor, status: input.status })),
+    run: async ({ context, caller, operations }, input) => await operations.listMessagesForApi(context, caller, defined({ limit: input.limit, cursor: input.cursor, status: input.status, receptionistId: input.receptionist_id })),
   }),
   tool({
     name: "add_knowledge",
     title: "Add knowledge",
-    description: "Teaches the receptionist something it can use to answer callers. For type faq, send question and answer. For type text, send title and content, for example a policy or a price list. Write it as a fact about the business, not as an instruction to the receptionist.",
+    description: "Teaches the receptionist something it can use to answer callers. For type faq, send question and answer. For type text, send title and content, for example a policy or a price list. Write it as a fact about the business, not as an instruction to the receptionist. Every receptionist uses it unless receptionist_ids names some, such as one store's receptionist for that store's hours.",
     operation: "createKnowledgeEntry",
     annotations: creates,
     inputSchema: z.object({
@@ -408,11 +446,43 @@ export const mcpTools: McpTool[] = [
       answer: z.string().optional().describe("For faq: the answer."),
       title: z.string().optional().describe("For text: a short title."),
       content: z.string().optional().describe("For text: the information itself."),
+      receptionist_ids: z.array(z.uuid()).min(1).max(MAX_RECEPTIONISTS_PER_REQUEST).optional().describe("Only these receptionists use it, from list_receptionists. Leave it out so every receptionist does."),
       idempotency_key: idempotencyKeyInput,
     }),
     outputSchema: contractSchema(apiKnowledgeEntrySchema),
     restBody: knowledgeBody,
     run: async ({ context, caller, operations }, input) => await operations.createKnowledgeEntryForApi(context, caller, contractBody(apiKnowledgeEntryCreateSchema, knowledgeBody(input))),
+  }),
+  tool({
+    name: "list_questions",
+    title: "List unanswered questions",
+    description: "Lists the questions callers and website visitors asked that the receptionist couldn't answer from what it knows, still open, most asked first, with how often and which receptionists heard each. Answer one with answer_question so the receptionist knows next time.",
+    operation: "listUnansweredQuestions",
+    annotations: readOnly,
+    inputSchema: z.object({
+      receptionist_id: z.uuid().optional().describe("Only the questions this receptionist heard, from list_receptionists."),
+      limit: z.number().int().min(1).max(50).optional().describe("How many questions to return, 1 to 50. Defaults to 25."),
+      cursor: pageInput.cursor,
+    }),
+    outputSchema: contractSchema(apiPageSchema(apiUnansweredQuestionSchema)),
+    run: async ({ context, caller, operations }, input) => await operations.listUnansweredQuestionsForApi(context, caller, defined({ limit: input.limit, cursor: input.cursor, receptionistId: input.receptionist_id })),
+  }),
+  tool({
+    name: "answer_question",
+    title: "Answer a question",
+    description: "Answers a question from list_questions: the answer becomes a text entry titled with the question, which the receptionist uses from then on, and the question leaves the list. audience asked keeps the answer to the receptionists that heard the question, so one store's answer doesn't reach the others; chosen with receptionist_ids picks them; everyone is the default. Write the answer as a fact about the business, use only what the owner told you, and confirm it with them before calling. Returns the new entry.",
+    operation: "answerUnansweredQuestion",
+    annotations: creates,
+    inputSchema: z.object({
+      question_id: uuid("question").describe("The question to answer, from list_questions."),
+      answer: z.string().describe("The answer, as a fact about the business. Up to 5,000 characters."),
+      audience: z.enum(["everyone", "asked", "chosen"]).optional().describe("Who uses the answer: everyone (the default), asked (only the receptionists that heard the question) or chosen (the receptionists in receptionist_ids)."),
+      receptionist_ids: z.array(z.uuid()).optional().describe("With audience chosen: the receptionists, from list_receptionists."),
+      idempotency_key: idempotencyKeyInput,
+    }),
+    outputSchema: contractSchema(apiKnowledgeEntrySchema),
+    restBody: answerBody,
+    run: async ({ context, caller, operations }, input) => await operations.answerUnansweredQuestionForApi(context, caller, input.question_id, contractBody(apiUnansweredQuestionAnswerSchema, answerBody(input))),
   }),
 ];
 

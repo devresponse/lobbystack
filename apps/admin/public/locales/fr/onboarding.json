@@ -309,12 +309,13 @@
         "alertSms": "Segments SMS d'alerte",
         "knowledgeStorage": "Stockage des connaissances",
         "phoneNumbers": "Numéros de téléphone",
+        "chatAiUnits": "Clavardage du site",
         "callAnswering": "Réponse aux appels 24/7",
         "callerDetails": "Détails des appelants et prise de messages",
         "knowledgeAnswers": "Réponses de la base de connaissances",
         "workflows": "Flux en langage naturel",
         "spamFiltering": "Filtrage du spam",
-        "shortCalls": "Appels de moins de 10 s exclus de la facturation",
+        "shortCalls": "Appels de moins de {{seconds}} s exclus de la facturation",
         "concurrentCalls": "Gestion des appels simultanés",
         "multilingual": "Répond dans la langue de l'appelant",
         "appointmentBooking": "Réservation de rendez-vous",
@@ -377,6 +378,11 @@
             "dedicated_one": "{{count}} dédié",
             "dedicated_many": "{{count}} dédiés",
             "dedicated_other": "{{count}} dédiés"
+          },
+          "chatAiUnits": {
+            "included_one": "{{count}} inclus",
+            "included_many": "{{count}} inclus",
+            "included_other": "{{count}} inclus"
           }
         },
         "data": {
@@ -406,7 +412,19 @@
     "retry": "Réessayer",
     "current": {
       "title": "Cette entreprise a déjà le forfait {{plan}}.",
-      "description": "Son forfait est déjà en place, vous pouvez donc passer à son numéro de téléphone."
+      "description": "Son forfait est déjà en place, vous pouvez donc passer à son numéro de téléphone.",
+      "prepaidTitle": "Cette entreprise a déjà des minutes prépayées.",
+      "prepaidDescription": "Ses minutes sont prêtes, vous pouvez donc passer à son numéro de téléphone."
+    },
+    "packs": {
+      "title": "Vous préférez des minutes prépayées ?",
+      "description": "Achetez des minutes une seule fois, sans facture mensuelle. Elles durent jusqu'à épuisement ou jusqu'à la fin du pack.",
+      "cta": "Acheter un pack de minutes",
+      "waiting": "Ajout de vos minutes...",
+      "processing": "Votre paiement est encore en cours de traitement. Vérifiez de nouveau dans quelques minutes.",
+      "checkAgain": "Vérifier de nouveau",
+      "failed": "Votre paiement n'a pas abouti. Choisissez de nouveau un forfait ou un pack de minutes.",
+      "refunded": "Votre paiement a été remboursé ou a fait l'objet d'une rétrofacturation, donc aucun pack de minutes n'a été ajouté. Choisissez de nouveau un forfait ou un pack de minutes."
     }
   }
 }

@@ -12,6 +12,7 @@ const newCall = createHookTrigger({
   resource: 'call',
   listPath: '/calls',
   filter: (call) => call.status === 'completed',
+  receptionist: 'calls',
 });
 
 const newAppointment = createHookTrigger({
@@ -55,6 +56,7 @@ const newMessage = createHookTrigger({
   event: 'message.taken',
   resource: 'message',
   listPath: '/messages',
+  receptionist: 'messages, from calls and chats',
 });
 
 const newContact = createHookTrigger({
@@ -76,6 +78,7 @@ module.exports = [
   newContact,
   dropdowns.serviceList,
   dropdowns.staffList,
+  dropdowns.receptionistList,
   dropdowns.contactList,
   dropdowns.appointmentList,
 ];

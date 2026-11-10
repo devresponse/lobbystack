@@ -737,7 +737,11 @@ let byHandSkipped = false;
 function openByHand(run, command) {
   const open = Object.entries(run.state.byHand ?? {}).filter(([id]) => !run.state.done[id]);
   if (!open.length) return "";
-  return `\n\nStill to do by hand (--yes didn't wait for these, so they aren't recorded as done):\n${open.map(([id, title]) => `  - ${id}: ${title}`).join("\n")}\nDo them, then run ${command} again without --yes and press Enter at each.`;
+  // Each step is finished by the command that runs it, which isn't always the one that just ended: up's steps,
+  // such as openai.limits, are still open when connect ends, and running connect again wouldn't close them.
+  const owner = (id) => (command === "template" ? "template" : id.startsWith("connect.") ? "connect" : "up");
+  const commands = ["up", "connect", "template"].filter((name) => open.some(([id]) => owner(id) === name));
+  return `\n\nStill to do by hand (--yes didn't wait for these, so they aren't recorded as done):\n${open.map(([id, title]) => `  - ${id}: ${title}`).join("\n")}\nDo them, then run ${commands.join(", then ")} again without --yes and press Enter at each.`;
 }
 
 let currentStep = null;
@@ -1052,7 +1056,8 @@ async function stripeKeysStep(run) {
   await step(run, "stripe.keys", "Stripe's two restricted keys, both of one account and of the deployment's mode (Stripe makes them only in its Dashboard)", async () => {
     if (!given("STRIPE_ADMIN_KEY") || !given("STRIPE_WORKER_KEY")) await byHand([
       `In the deployment's Stripe ${s.STRIPE === "live" ? "account, in live mode" : "sandbox"}, Developers > API keys > Create restricted key, make two keys (guide 3.7, "Selling plans (Stripe)", step 3):`,
-      `"${baseName(s)} admin", which opens the billing portal and reads customers, and "${baseName(s)} worker", which makes customers,`,
+      `"${baseName(s)} admin", which opens the billing portal and reads customers and PaymentIntents (to find the business of a disputed`,
+      `prepaid pack payment), and "${baseName(s)} worker", which makes customers,`,
       "Checkout Sessions, subscriptions, subscription schedules, invoices and meter events, and reads the catalog for its daily check.",
       "docs/providers/stripe.md lists each key's permissions.",
     ]);

@@ -1,8 +1,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 
-import { billingCheckoutRequests, billingUsageEvents, enqueueOutbox, providerEvents, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { billingCheckoutRequests, billingPackCheckouts, billingUsageEvents, enqueueOutbox, providerEvents, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, BILLING_CHECKOUT_EXPIRES_MS, expireBillingCheckoutRequest } from "./billing";
+import { expirePackCheckout } from "./billingPackCheckout";
 import { isBillingSubscriptionAction } from "./billingSubscription";
 import type { DomainContext } from "./context";
 import type { BillingProviderId } from "@lobbystack/providers/billing/types";
@@ -16,7 +17,8 @@ import type { BillingProviderId } from "@lobbystack/providers/billing/types";
 // worker reports work that has waited an hour. Every job it queues is safe to
 // run beside another for the same row: a Polar event applies once, a usage job
 // claims the row's next Polar event, which Polar keeps once by its ID, and a
-// checkout job claims its request.
+// checkout job claims its request. A prepaid pack's checkout waits and is
+// claimed the same way as a plan's checkout request.
 
 /** A Polar event applies within seconds of its webhook. */
 const EVENT_WAIT_MS = 5 * 60_000;
@@ -27,15 +29,15 @@ export const BILLING_WORK_OVERDUE_MS = 60 * 60_000;
 /** Rows of each kind one sweep takes, oldest first; the rest wait for the next run. */
 const SWEEP_LIMIT = 200;
 
-export type BillingSweepKind = "provider_event" | "usage_event" | "checkout_request";
+export type BillingSweepKind = "provider_event" | "usage_event" | "checkout_request" | "pack_checkout";
 
 export type BillingSweepOutcome = {
   /** Work queued again, by kind. */
   queued: Record<BillingSweepKind, number>;
   /**
    * Work that waited longer than it should, by kind: Polar events and usage
-   * queued again after BILLING_WORK_OVERDUE_MS, and checkout requests failed
-   * after BILLING_CHECKOUT_EXPIRES_MS.
+   * queued again after BILLING_WORK_OVERDUE_MS, and checkout requests and
+   * pack checkouts failed after BILLING_CHECKOUT_EXPIRES_MS.
    */
   overdue: Record<BillingSweepKind, number>;
   /** Rows the sweep couldn't queue, such as on a database error; the next run tries them again. */
@@ -82,8 +84,8 @@ export async function storeBillingWebhookEvent(
 
 /**
  * Queues billing work no job finished: Polar events never applied, final
- * usage never sent to Polar, and checkout requests a job claimed and never
- * finished or never claimed. A checkout request older than
+ * usage never sent to Polar, and checkout requests and pack checkouts a job
+ * claimed and never finished or never claimed. A checkout older than
  * BILLING_CHECKOUT_EXPIRES_MS fails instead, as its job would fail it.
  */
 export async function sweepBillingWork(context: DomainContext, now = new Date()): Promise<BillingSweepOutcome> {
@@ -92,16 +94,17 @@ export async function sweepBillingWork(context: DomainContext, now = new Date())
     select kind, business_id, entity_id, created_at, updated_at
     from app.list_billing_sweep_work(${before(EVENT_WAIT_MS)}::timestamptz, ${before(USAGE_WAIT_MS)}::timestamptz, ${before(BILLING_CHECKOUT_CLAIM_STALE_MS)}::timestamptz, ${before(BILLING_CHECKOUT_EXPIRES_MS)}::timestamptz, ${sweepHour(now)}::bigint, ${SWEEP_LIMIT})
   `)).rows, { accessMode: "read only" });
-  const outcome: BillingSweepOutcome = { queued: { provider_event: 0, usage_event: 0, checkout_request: 0 }, overdue: { provider_event: 0, usage_event: 0, checkout_request: 0 }, failed: 0 };
+  const outcome: BillingSweepOutcome = { queued: { provider_event: 0, usage_event: 0, checkout_request: 0, pack_checkout: 0 }, overdue: { provider_event: 0, usage_event: 0, checkout_request: 0, pack_checkout: 0 }, failed: 0 };
   for (const row of rows) {
     try {
       const result = await withBusinessTransaction(context.db, { businessId: row.business_id, actorType: "worker" }, async (tx) => await requeue(tx, row, now));
-      if (result === "expired") outcome.overdue.checkout_request += 1;
+      // Only checkouts expire: a plan's request or a pack's checkout.
+      if (result === "expired") outcome.overdue[row.kind] += 1;
       if (result !== "queued") continue;
       outcome.queued[row.kind] += 1;
       // An event waits from its webhook, usage from its last change.
       const waitingSince = new Date(row.kind === "provider_event" ? row.created_at : row.updated_at);
-      if (row.kind !== "checkout_request" && now.getTime() - waitingSince.getTime() > BILLING_WORK_OVERDUE_MS) outcome.overdue[row.kind] += 1;
+      if (row.kind !== "checkout_request" && row.kind !== "pack_checkout" && now.getTime() - waitingSince.getTime() > BILLING_WORK_OVERDUE_MS) outcome.overdue[row.kind] += 1;
     } catch (error) {
       outcome.failed += 1;
       outcome.error ??= error;
@@ -135,6 +138,14 @@ async function requeue(tx: DatabaseTransaction, row: SweepRow, now: Date): Promi
       if (!request) return "done";
       // Cancel, resume and keep are requests too, which their own job makes.
       await enqueueOutbox(tx, { topic: isBillingSubscriptionAction(request.target) ? "billing.changeSubscription" : "billing.createCheckout", businessId, aggregateType: "billing_checkout_request", aggregateId: id, dedupeKey, payload: { requestId: id } });
+      return "queued";
+    }
+    case "pack_checkout": {
+      if (await expirePackCheckout(tx, { businessId, checkoutId: id, now })) return "expired";
+      // The job claims the checkout, or waits for a run that holds it.
+      const [checkout] = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts).where(and(eq(billingPackCheckouts.id, id), eq(billingPackCheckouts.businessId, businessId), inArray(billingPackCheckouts.status, ["pending", "processing"]))).limit(1);
+      if (!checkout) return "done";
+      await enqueueOutbox(tx, { topic: "billing.createPackCheckout", businessId, aggregateType: "billing_pack_checkout", aggregateId: id, dedupeKey, payload: { checkoutId: id } });
       return "queued";
     }
   }

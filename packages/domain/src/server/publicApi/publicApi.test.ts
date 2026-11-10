@@ -56,7 +56,7 @@ describe("API keys", () => {
 
 describe("knowledge sources", () => {
   const at = new Date("2026-10-11T12:00:00.000Z");
-  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, mimeType: "application/pdf", tags: ["prices"], status: "pending" as const, error: null, active: true, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
+  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, mimeType: "application/pdf", tags: ["prices"], status: "pending" as const, error: null, active: true, audience: "everyone" as const, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
 
   it("serializes files, websites and the pages their crawls read to the published schema", () => {
     const file = serializeKnowledgeSource(row);
@@ -75,11 +75,23 @@ describe("knowledge sources", () => {
   });
 
   it("shows an FAQ's type instead of the tag that marks it", () => {
-    const snippet = { id: row.id, title: "Do you park?", content: "Behind the building.", tags: ["faq", "parking"], priority: 2, active: false, createdAt: at, updatedAt: at };
+    const snippet = { id: row.id, title: "Do you park?", content: "Behind the building.", tags: ["faq", "parking"], priority: 2, active: false, audience: "everyone" as const, createdAt: at, updatedAt: at };
     const faq = serializeKnowledgeEntry(snippet);
-    expect(faq).toEqual({ id: row.id, type: "faq", title: "Do you park?", content: "Behind the building.", tags: ["parking"], priority: 2, active: false, created_at: at.toISOString(), updated_at: at.toISOString() });
+    expect(faq).toEqual({ id: row.id, type: "faq", title: "Do you park?", content: "Behind the building.", tags: ["parking"], priority: 2, active: false, audience: "everyone", receptionist_ids: [], created_at: at.toISOString(), updated_at: at.toISOString() });
     expect(apiKnowledgeEntrySchema.safeParse(faq).success).toBe(true);
     expect(serializeKnowledgeEntry({ ...snippet, tags: [] }).type).toBe("text");
+  });
+
+  it("lists the receptionists chosen for an entry or source, and none for one that's for everyone", () => {
+    const receptionist = "9b1f3c5e-7d2a-4e6b-8c0d-1a2b3c4d5e6f";
+    const snippet = { id: row.id, title: "Valet", content: "Ask at the door.", tags: [], priority: 0, active: true, createdAt: at, updatedAt: at };
+    expect(serializeKnowledgeEntry({ ...snippet, audience: "chosen" }, [receptionist])).toMatchObject({ audience: "chosen", receptionist_ids: [receptionist] });
+    // Chosen for nobody: left to the default receptionist.
+    expect(serializeKnowledgeEntry({ ...snippet, audience: "chosen" })).toMatchObject({ audience: "chosen", receptionist_ids: [] });
+    expect(serializeKnowledgeEntry({ ...snippet, audience: "everyone" }, [receptionist])).toMatchObject({ audience: "everyone", receptionist_ids: [] });
+    const page = serializeKnowledgeSource({ ...row, audience: "chosen", sourceType: "website", sourceUrl: "https://maple.example/stores/" }, [receptionist]);
+    expect(page).toMatchObject({ type: "page", audience: "chosen", receptionist_ids: [receptionist] });
+    expect(apiKnowledgeSourceSchema.safeParse(page).success).toBe(true);
   });
 
   it("shows an error only for a failed source", () => {
@@ -125,9 +137,9 @@ describe("cursor pagination", () => {
 describe("v1 resource serializers match the published schemas", () => {
   const now = new Date("2026-09-27T15:00:00.000Z");
   it("serializes calls", () => {
-    const call = serializeCall({ id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", transport: "web_voice", disposition: "caller_hangup", startedAt: now, endedAt: new Date(now.getTime() + 95_000), createdAt: now, providerDurationSeconds: null, contactId: null, contactName: null, contactPhone: null, conversationSummary: null, currentIntent: null, persistedOutcome: { kind: "booked", serviceName: "Cut", startsAt: now.toISOString() }, recordingObjectId: null, recordingStatus: null, recordingRetentionUntil: null });
+    const call = serializeCall({ id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", receptionistId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", transport: "web_voice", disposition: "caller_hangup", startedAt: now, endedAt: new Date(now.getTime() + 95_000), createdAt: now, providerDurationSeconds: null, contactId: null, contactName: null, contactPhone: null, conversationSummary: null, currentIntent: null, persistedOutcome: { kind: "booked", serviceName: "Cut", startsAt: now.toISOString() }, recordingObjectId: null, recordingStatus: null, recordingRetentionUntil: null });
     expect(apiCallSchema.parse(call)).toEqual(call);
-    expect(call).toMatchObject({ channel: "web", status: "completed", outcome: "appointment_booked", duration_seconds: 95, recording_available: false });
+    expect(call).toMatchObject({ receptionist_id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", channel: "web", status: "completed", outcome: "appointment_booked", duration_seconds: 95, recording_available: false });
   });
 
   it("serializes appointments with the public status names", () => {
@@ -159,10 +171,10 @@ describe("v1 resource serializers match the published schemas", () => {
   });
 
   it("withholds expired message content", () => {
-    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", status: "open", title: "Voice message from Ada", body: "Call me", metadata: { callerName: "Ada", callbackPhone: "+14165550134", urgency: "urgent", channel: "voice" }, relatedCallId: null, createdAt: now, updatedAt: now };
+    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", receptionistId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", status: "open", title: "Voice message from Ada", body: "Call me", metadata: { callerName: "Ada", callbackPhone: "+14165550134", urgency: "urgent", channel: "voice" }, relatedCallId: null, createdAt: now, updatedAt: now };
     const message = serializeMessage({ ...base, expired: false });
     expect(apiMessageSchema.parse(message)).toEqual(message);
-    expect(message).toMatchObject({ caller_name: "Ada", urgency: "urgent", channel: "voice" });
+    expect(message).toMatchObject({ receptionist_id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", caller_name: "Ada", urgency: "urgent", channel: "voice" });
     const expired = serializeMessage({ ...base, expired: true });
     expect(expired).toMatchObject({ caller_name: null, callback_phone: null, body: "[Expired by the retention policy]" });
     expect(message).toMatchObject({ request: null, appointment_id: null });
@@ -170,7 +182,7 @@ describe("v1 resource serializers match the published schemas", () => {
 
   it("shows a cancellation request with the appointment it matched", () => {
     const appointmentId = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5c";
-    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", status: "open", title: "Voice message from Ada", body: "Cancellation request: Cut", relatedCallId: null, expired: false, createdAt: now, updatedAt: now };
+    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", receptionistId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5a", status: "open", title: "Voice message from Ada", body: "Cancellation request: Cut", relatedCallId: null, expired: false, createdAt: now, updatedAt: now };
     const request = serializeMessage({ ...base, metadata: { callerName: "Ada", channel: "voice", request: "appointment_cancellation", appointmentId } });
     expect(apiMessageSchema.parse(request)).toEqual(request);
     expect(request).toMatchObject({ request: "appointment_cancellation", appointment_id: appointmentId });
@@ -208,7 +220,7 @@ describe("phone numbers", () => {
   });
 
   it("names the worker's reclaim steps for what they do", () => {
-    const row = { id: businessId, e164: "+14165550123", reclaimScheduledAt: null, createdAt: now, updatedAt: now };
+    const row = { id: businessId, e164: "+14165550123", receptionistId: null, reclaimScheduledAt: null, createdAt: now, updatedAt: now };
     const active = serializePhoneNumber({ ...row, status: "active" });
     expect(apiPhoneNumberSchema.parse(active)).toEqual(active);
     expect(serializePhoneNumber({ ...row, status: "reclaiming", reclaimScheduledAt: now })).toMatchObject({ status: "releasing", release_scheduled_at: now.toISOString() });
@@ -268,7 +280,7 @@ describe("calendar connections", () => {
 describe("widget keys", () => {
   const now = new Date("2026-10-11T12:00:00.000Z");
   const origin = "https://app.example.com";
-  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", label: null, status: "active", allowedOrigins: ["https://example.com/", "shop.example.com "], keyValue: null, lastUsedAt: null, createdAt: now };
+  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", label: null, status: "active", allowedOrigins: ["https://example.com/", "shop.example.com "], keyValue: null, receptionistId: null, lastUsedAt: null, createdAt: now };
 
   it("shows the dashboard's configuration in snake_case, with the defaults the widget falls back to", () => {
     const plain = serializeWidgetKey({ ...row, config: {} }, origin);

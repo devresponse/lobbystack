@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { billingCatalogPlans, billingCatalogWriteOrder, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, type StoredBillingPlan, type StoredBillingPrice } from "../packages/domain/src/server/billingCatalog";
+import { billingCatalogPacks, billingCatalogPlans, billingCatalogWriteOrder, desiredBillingPacks, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, diffBillingPackCatalog, diffBillingPackLinks, type StoredBillingPack, type StoredBillingPackPrice, type StoredBillingPlan, type StoredBillingPrice } from "../packages/domain/src/server/billingCatalog";
 import { createFakeStripe, type FakeStripe } from "../packages/providers/src/stripe/fake";
 import { apiBillingCatalogLinkSchema, billingCatalogLinkRequest, billingProfileForProvider, billingProfileSchema, canonicalBillingProfileJson, perMonthCents, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "../packages/shared/src/index";
 import { runBilling } from "./billing";
@@ -24,6 +24,8 @@ type LinkRun = ApiBillingCatalogRun & { objects: Record<string, unknown> | null 
 type Instance = {
   plans: StoredBillingPlan[];
   prices: StoredBillingPrice[];
+  packs: StoredBillingPack[];
+  packPrices: StoredBillingPackPrice[];
   catalogRuns: ApiBillingCatalogRun[];
   linkRuns: LinkRun[];
   codeHash: string;
@@ -42,7 +44,13 @@ function run(kind: ApiBillingCatalogRun["kind"], fields: Partial<ApiBillingCatal
 function write(instance: Instance, writes: ReturnType<typeof diffBillingCatalog>["writes"]) {
   const now = new Date().toISOString();
   for (const entry of billingCatalogWriteOrder(writes)) {
-    if (entry.change.table === "billing_plans") {
+    if (entry.change.table === "billing_pack_plans") {
+      if (entry.change.action === "insert") instance.packs.push({ frozen_at: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPack);
+      else Object.assign(instance.packs.find((pack) => pack.code === entry.change.key)!, entry.set, { updated_at: now });
+    } else if (entry.change.table === "billing_pack_prices") {
+      if (entry.change.action === "insert") instance.packPrices.push({ id: crypto.randomUUID(), provider_ref: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPackPrice);
+      else Object.assign(instance.packPrices.find((price) => price.id === entry.id)!, entry.set, { updated_at: now });
+    } else if (entry.change.table === "billing_plans") {
       if (entry.change.action === "insert") instance.plans.push({ provider_disc: null, frozen_at: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPlan);
       else Object.assign(instance.plans.find((plan) => plan.code === entry.change.key)!, entry.set, { updated_at: now });
     } else if (entry.change.action === "insert") {
@@ -54,10 +62,20 @@ function write(instance: Instance, writes: ReturnType<typeof diffBillingCatalog>
   }
 }
 
+/** What an apply writes for a file as the deployment's provider sells it, its plans' rows and then its packs', as the API diffs them. */
+function applyDiff(instance: Instance, profile: BillingProfile, now: string) {
+  const sells = billingProfileForProvider(profile, instance.provider);
+  const diff = diffBillingCatalog({ plans: desiredBillingPlans(sells), currency: profile.currency, current: instance, now });
+  const packDiff = diffBillingPackCatalog({ packs: desiredBillingPacks(sells), currency: profile.currency, current: instance, now });
+  return { writes: [...diff.writes, ...packDiff.writes], refusals: [...diff.refusals, ...packDiff.refusals] };
+}
+
 function catalogOf(instance: Instance): ApiBillingCatalog {
   const latest = instance.catalogRuns.at(-1) ?? null;
   const lastLink = instance.linkRuns.at(-1) ?? null;
   const { objects = null, ...shownLink } = lastLink ?? {};
+  // By sort then code, as the API reads them.
+  const packs = [...instance.packs].sort((a, b) => a.sort - b.sort || (a.code < b.code ? -1 : 1));
   return {
     brand: "realinfobot",
     code_hash: instance.codeHash,
@@ -67,6 +85,7 @@ function catalogOf(instance: Instance): ApiBillingCatalog {
     profile: null,
     currency: instance.prices.find((price) => price.retired_at === null)?.currency ?? null,
     plans: billingCatalogPlans(instance, instance.provider),
+    packs: billingCatalogPacks({ packs, packPrices: instance.packPrices }),
     polar: instance.provider === "polar" ? { env: "sandbox", org: "org_test", secret_sha256: null, product_vars: {}, last_link: null } : null,
     provider: { id: instance.provider, env: instance.stripe.env, account: instance.stripe.account, secret_sha256: instance.stripe.secret ? sha256(instance.stripe.secret) : null, objects, product_vars: null, last_link: lastLink ? (shownLink as ApiBillingCatalogRun) : null },
   };
@@ -86,7 +105,7 @@ async function instanceFetch(instance: Instance, url: URL, init: RequestInit): P
     const profile = billingProfileSchema.parse(body!.billing_file);
     const hash = hashOf(profile);
     // As the admin applies it: the file as the deployment's provider sells it.
-    const diff = diffBillingCatalog({ plans: desiredBillingPlans(billingProfileForProvider(profile, instance.provider)), currency: profile.currency, current: instance, now });
+    const diff = applyDiff(instance, profile, now);
     const refusals = [...diff.refusals];
     if (body!.replaces_hash !== undefined && body!.replaces_hash !== latestHash) refusals.push({ code: "catalog_changed", path: "replaces_hash", message: "Someone applied in between." });
     if (!profile.stripe && instance.provider === "stripe") refusals.push({ code: "provider_block_missing", path: "billing_file.stripe", message: "No stripe block." });
@@ -101,15 +120,17 @@ async function instanceFetch(instance: Instance, url: URL, init: RequestInit): P
   if (url.pathname === "/api/v1/billing/catalog/links") {
     const link = billingCatalogLinkRequest(apiBillingCatalogLinkSchema.parse(body));
     const diff = diffBillingLinks({ body: link, current: instance, now });
-    const refusals = [...diff.refusals];
+    const packDiff = diffBillingPackLinks({ body: link, current: instance, now });
+    const refusals = [...diff.refusals, ...packDiff.refusals];
     const first = instance.linkRuns[0];
     if (link.hash !== latestHash) refusals.push({ code: "catalog_changed", path: "hash", message: "Another file." });
     if (link.provider !== instance.provider) refusals.push({ code: "provider_mismatch", path: "provider", message: "Another provider." });
     else if (link.provider_env !== instance.stripe.env || link.provider_account !== instance.stripe.account) refusals.push({ code: "billing_account_mismatch", path: "provider_account", message: "Another account." });
     if (first && first.provider_account !== link.provider_account) refusals.push({ code: "billing_account_changed", path: "provider_account", message: "Linked to another account first." });
     if (refusals.length) return conflict(refusals);
-    write(instance, diff.writes);
-    const changes = diff.writes.map((entry) => entry.change);
+    const writes = [...diff.writes, ...packDiff.writes];
+    write(instance, writes);
+    const changes = writes.map((entry) => entry.change);
     const stored: LinkRun = { ...run("link", { status: changes.length ? "applied" : "unchanged", hash: link.hash, prev_hash: instance.linkRuns.at(-1)?.hash ?? null, changes, provider: "stripe", provider_env: link.provider_env, provider_account: link.provider_account }), objects: link.objects };
     instance.linkRuns.push(stored);
     const { objects: _objects, ...shown } = stored;
@@ -134,9 +155,9 @@ async function setUp(options: { change?: (file: Record<string, any>) => void; pr
   await mkdir(join(root, "brands", "realinfobot"), { recursive: true });
   await writeFile(join(root, "brands", "realinfobot", "billing.json"), JSON.stringify(file, null, 2));
   const stripe = createFakeStripe({ accountId: "acct_dev1" });
-  const instance: Instance = { plans: [], prices: [], catalogRuns: [], linkRuns: [], codeHash: hashOf(deployed), provider: options.provider ?? "stripe", stripe: { env: "sandbox", account: options.account ?? "acct_dev1", secret: null }, requests: [] };
+  const instance: Instance = { plans: [], prices: [], packs: [], packPrices: [], catalogRuns: [], linkRuns: [], codeHash: hashOf(deployed), provider: options.provider ?? "stripe", stripe: { env: "sandbox", account: options.account ?? "acct_dev1", secret: null }, requests: [] };
   // The deployed file was applied when the instance was set up.
-  const seeded = diffBillingCatalog({ plans: desiredBillingPlans(billingProfileForProvider(deployed, instance.provider)), currency: deployed.currency, current: instance, now: new Date().toISOString() });
+  const seeded = applyDiff(instance, deployed, new Date().toISOString());
   write(instance, seeded.writes);
   instance.catalogRuns.push(run("catalog", { hash: instance.codeHash, code_hash: instance.codeHash, changes: seeded.writes.map((entry) => entry.change) }));
   return { stripe, instance };
@@ -189,7 +210,9 @@ describe("pnpm billing --stripe", () => {
     expect(plan.err).toBe("");
     expect(plan.code).toBe(0);
     expect(plan.out).toContain("to https://dev1.realinfobot.com and Stripe sandbox account acct_dev1\n");
-    expect(plan.out).toContain("Stripe: 18 calls");
+    // 18 for the plans and the deployment, then a product and a one-time price for each of the 9 packs.
+    expect(plan.out).toContain("Stripe: 36 calls");
+    expect(plan.out).toContain("create Price lsp_realinfobot_pack_250_90_cad_");
     expect(plan.out).toContain('create Meter "Voice overage in dollars"');
     expect(plan.out).toContain("create Price ls_realinfobot_pro_monthly_cad_");
     expect(plan.out).toContain("Set in Stripe's Dashboard, which its API can't:");
@@ -200,7 +223,8 @@ describe("pnpm billing --stripe", () => {
     const applied = await billing(["apply", ...sandbox, "--yes", "--railway-file", railwayFile], context);
     expect(applied.err).toBe("");
     const catalog = context.stripe.state.catalog;
-    expect([catalog.meters.length, catalog.products.length, catalog.prices.length, catalog.portalConfigurations.length, catalog.webhooks.length, catalog.eventDestinations.length]).toEqual([3, 5, 7, 1, 1, 1]);
+    // 5 products and 7 prices for the plans and overage, and one each for the 9 packs.
+    expect([catalog.meters.length, catalog.products.length, catalog.prices.length, catalog.portalConfigurations.length, catalog.webhooks.length, catalog.eventDestinations.length]).toEqual([3, 14, 16, 1, 1, 1]);
     // The secrets Stripe showed once, saved for Railway and never printed.
     const railway = await readFile(railwayFile, "utf8");
     expect(railway).toContain("[lobbystack-admin, worker]\nSTRIPE_ACCOUNT_ID=acct_dev1\n");
@@ -210,6 +234,10 @@ describe("pnpm billing --stripe", () => {
     const linked = context.instance.requests.find((request) => request.path === "POST /api/v1/billing/catalog/links")!.body;
     expect(linked).toMatchObject({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_dev1", objects: { portal_configuration: catalog.portalConfigurations[0]!.id, webhook_endpoint: catalog.webhooks[0]!.id, meter_error_destination: catalog.eventDestinations[0]!.id, webhook_secret_sha256: sha256(catalog.webhooks[0]!.secret) } });
     expect(context.instance.prices.map((price) => price.provider_ref).sort()).toEqual(catalog.prices.filter((price) => price.lookup_key?.startsWith("ls_realinfobot_")).map((price) => price.id).sort());
+    // Each pack is linked to its one-time price.
+    const packPrices = catalog.prices.filter((price) => price.lookup_key?.startsWith("lsp_realinfobot_"));
+    expect(packPrices.every((price) => price.recurring === null)).toBe(true);
+    expect(context.instance.packPrices.map((price) => price.provider_ref).sort()).toEqual(packPrices.map((price) => price.id).sort());
     expect(applied.out).toContain("Links: recorded");
     // The instance doesn't have the new endpoint's secret yet.
     expect(applied.out).toContain("DRIFT  webhook_secret: STRIPE_WEBHOOK_SECRET isn't set on the instance");
@@ -250,11 +278,12 @@ describe("pnpm billing --stripe", () => {
     expect(context.instance.linkRuns).toEqual([]);
     context.stripe.cutAfterWrites(null);
     const plan = await billing(["plan", ...sandbox], context);
-    expect(plan.out).toContain("Stripe: 12 calls");
+    // The 12 calls left for the plans and the deployment, then the 18 for the packs.
+    expect(plan.out).toContain("Stripe: 30 calls");
     const finished = await billing(["apply", ...sandbox, "--yes"], context);
     expect(finished.out).toContain("Links: recorded");
     const catalog = context.stripe.state.catalog;
-    expect([catalog.meters.length, catalog.products.length, catalog.prices.length]).toEqual([3, 5, 7]);
+    expect([catalog.meters.length, catalog.products.length, catalog.prices.length]).toEqual([3, 14, 16]);
   });
 
   it("refuses an instance that bills through Polar, or uses another Stripe account", async () => {

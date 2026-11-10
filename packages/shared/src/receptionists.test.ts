@@ -158,6 +158,12 @@ describe("receptionist limits", () => {
       }
     });
 
+    it("upgrades a business on a prepaid pack to a plan that includes more, as Free", () => {
+      expect(receptionistUpgrade("prepaid", 1, 50, tiers)).toBe("plan");
+      expect(receptionistUpgrade("prepaid", 5, 50, tiers)).toBe("sales");
+      expect(receptionistUpgrade("prepaid", 1, 1, tiers)).toBeNull();
+    });
+
     it("sends Pro, and a plan that has as many as Pro, to sales for Enterprise", () => {
       expect(receptionistUpgrade("pro", 5, 50, tiers)).toBe("sales");
       expect(receptionistUpgrade("starter", 5, 50, tiers)).toBe("sales");

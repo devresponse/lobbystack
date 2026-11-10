@@ -4,9 +4,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
 {
   "catalog": {
     "brand": "alloplace",
-    "code_hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
+    "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
     "currency": "cad",
-    "hash": "d7bd191a4d341faf114d42b10989221b1a5358d074d4f8f3bfda7235f8a316ea",
+    "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
     "last_run": {
       "blocked_by": [],
       "brand": "alloplace",
@@ -92,9 +92,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
           "table": "billing_prices",
         },
       ],
-      "code_hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
+      "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
       "ended_at": "<time>",
-      "hash": "d7bd191a4d341faf114d42b10989221b1a5358d074d4f8f3bfda7235f8a316ea",
+      "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
       "id": "<uuid>",
       "key_id": "<uuid>",
       "kind": "catalog",
@@ -458,9 +458,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
             "table": "billing_prices",
           },
         ],
-        "code_hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
+        "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
         "ended_at": "<time>",
-        "hash": "d7bd191a4d341faf114d42b10989221b1a5358d074d4f8f3bfda7235f8a316ea",
+        "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
         "id": "<uuid>",
         "key_id": "<uuid>",
         "kind": "polar",
@@ -484,6 +484,134 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
     },
     "profile": {
       "currency": "cad",
+      "packs": {
+        "pack_1000_180": {
+          "days": 180,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 1000,
+          "names": {
+            "en": "1,000 minutes, 180 days",
+            "es": "1.000 minutos, 180 días",
+            "fr": "1 000 minutes, 180 jours",
+            "sr": "1.000 minuta, 180 dana",
+          },
+          "priceCents": 18900,
+        },
+        "pack_1000_365": {
+          "days": 365,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 1000,
+          "names": {
+            "en": "1,000 minutes, 365 days",
+            "es": "1.000 minutos, 365 días",
+            "fr": "1 000 minutes, 365 jours",
+            "sr": "1.000 minuta, 365 dana",
+          },
+          "priceCents": 19900,
+        },
+        "pack_1000_90": {
+          "days": 90,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 1000,
+          "names": {
+            "en": "1,000 minutes, 90 days",
+            "es": "1.000 minutos, 90 días",
+            "fr": "1 000 minutes, 90 jours",
+            "sr": "1.000 minuta, 90 dana",
+          },
+          "priceCents": 17900,
+        },
+        "pack_250_180": {
+          "days": 180,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 250,
+          "names": {
+            "en": "250 minutes, 180 days",
+            "es": "250 minutos, 180 días",
+            "fr": "250 minutes, 180 jours",
+            "sr": "250 minuta, 180 dana",
+          },
+          "priceCents": 5900,
+        },
+        "pack_250_365": {
+          "days": 365,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 250,
+          "names": {
+            "en": "250 minutes, 365 days",
+            "es": "250 minutos, 365 días",
+            "fr": "250 minutes, 365 jours",
+            "sr": "250 minuta, 365 dana",
+          },
+          "priceCents": 6500,
+        },
+        "pack_250_90": {
+          "days": 90,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 250,
+          "names": {
+            "en": "250 minutes, 90 days",
+            "es": "250 minutos, 90 días",
+            "fr": "250 minutes, 90 jours",
+            "sr": "250 minuta, 90 dana",
+          },
+          "priceCents": 5500,
+        },
+        "pack_500_180": {
+          "days": 180,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 500,
+          "names": {
+            "en": "500 minutes, 180 days",
+            "es": "500 minutos, 180 días",
+            "fr": "500 minutes, 180 jours",
+            "sr": "500 minuta, 180 dana",
+          },
+          "priceCents": 9900,
+        },
+        "pack_500_365": {
+          "days": 365,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 500,
+          "names": {
+            "en": "500 minutes, 365 days",
+            "es": "500 minutos, 365 días",
+            "fr": "500 minutes, 365 jours",
+            "sr": "500 minuta, 365 dana",
+          },
+          "priceCents": 10900,
+        },
+        "pack_500_90": {
+          "days": 90,
+          "limits": {
+            "knowledgeStorageMb": 20,
+          },
+          "minutes": 500,
+          "names": {
+            "en": "500 minutes, 90 days",
+            "es": "500 minutos, 90 días",
+            "fr": "500 minutes, 90 jours",
+            "sr": "500 minuta, 90 dana",
+          },
+          "priceCents": 9500,
+        },
+      },
       "plans": {
         "enterprise": {
           "custom": true,
@@ -705,9 +833,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
         "table": "billing_prices",
       },
     ],
-    "code_hash": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
+    "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
     "ended_at": "<time>",
-    "hash": "d7bd191a4d341faf114d42b10989221b1a5358d074d4f8f3bfda7235f8a316ea",
+    "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
     "id": "<uuid>",
     "key_id": "<uuid>",
     "kind": "polar",

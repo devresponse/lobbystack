@@ -47,6 +47,9 @@ const domain = vi.hoisted(() => ({
   updateBillingForApi: vi.fn(),
   createCheckoutForApi: vi.fn(),
   getCheckoutForApi: vi.fn(),
+  createPackCheckoutForApi: vi.fn(),
+  getPackCheckoutForApi: vi.fn(),
+  packCheckoutConfigured: vi.fn((_env: Record<string, string | undefined>) => true),
   setManagedPlanForApi: vi.fn(),
   endManagedPlanForApi: vi.fn(),
   endPromoPlanForApi: vi.fn(),
@@ -429,8 +432,8 @@ describe("knowledge sources", () => {
     const updated = await v1.updateKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "PATCH", body: JSON.stringify({ active: false }) }), { params: Promise.resolve({ source_id: sourceId }) });
     expect(updated.status).toBe(200);
     expect(domain.updateKnowledgeSourceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), sourceId, { active: false });
-    // Only active can change on a source.
-    for (const bad of [{ title: "Prices" }, {}]) {
+    // Only whether it's on and who it's for can change on a source; an empty change reaches the domain, which refuses it.
+    for (const bad of [{ title: "Prices" }, { audience: "some" }, { receptionist_ids: [] }]) {
       expect((await v1.updateKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "PATCH", body: JSON.stringify(bad) }), { params: Promise.resolve({ source_id: sourceId }) })).status).toBe(400);
     }
     const deleted = await v1.deleteKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "DELETE" }), { params: Promise.resolve({ source_id: sourceId }) });
@@ -624,6 +627,36 @@ describe("billing", () => {
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
       expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: false, checkLimit: expect.any(Function) });
       expect(domain.readPolarProductLinks).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("starts a prepaid pack's checkout only where the deployment's provider is set up, counted with plan checkouts", async () => {
+    const pack = { id: checkoutId, pack: "pack_250_90", status: "pending", checkout_url: null, error: null, paid: false, expires_at: "2026-11-09T12:15:00.000Z", created_at: "2026-11-09T12:00:00.000Z", updated_at: "2026-11-09T12:00:00.000Z" };
+    const buy = async (body: Record<string, unknown>) => await v1.createPackCheckout(call("/billing/packs/checkout", { method: "POST", body: JSON.stringify(body) }));
+    domain.createPackCheckoutForApi.mockResolvedValue(pack);
+    try {
+      const response = await buy({ pack: "pack_250_90", billing_email: "billing@example.com" });
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ data: pack });
+      expect(domain.createPackCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { pack: "pack_250_90", billing_email: "billing@example.com" }, { available: true, checkLimit: expect.any(Function) });
+      expect(domain.packCheckoutConfigured).toHaveBeenLastCalledWith(process.env);
+      // Without the provider's settings no pack sells.
+      domain.packCheckoutConfigured.mockReturnValueOnce(false);
+      await buy({ pack: "pack_250_90" });
+      expect(domain.createPackCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { pack: "pack_250_90" }, { available: false, checkLimit: expect.any(Function) });
+      for (const bad of [{}, { pack: " " }, { pack: "pack_250_90", plan: "pro" }, { pack: "pack_250_90", billing_email: "billing" }]) {
+        expect((await buy(bad)).status, JSON.stringify(bad)).toBe(400);
+      }
+      expect(domain.createPackCheckoutForApi).toHaveBeenCalledTimes(2);
+
+      domain.getPackCheckoutForApi.mockResolvedValue({ ...pack, status: "ready", checkout_url: "https://checkout.stripe.com/c/pay/cs_1" });
+      const read = await v1.getPackCheckout(call(`/billing/packs/checkout/${checkoutId}`), { params: Promise.resolve({ checkout_id: checkoutId }) });
+      expect(read.status).toBe(200);
+      expect(await read.json()).toMatchObject({ data: { status: "ready", checkout_url: "https://checkout.stripe.com/c/pay/cs_1" } });
+      expect(domain.getPackCheckoutForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), checkoutId);
+      expect((await v1.getPackCheckout(call("/billing/packs/checkout/x"), { params: Promise.resolve({ checkout_id: "x" }) })).status).toBe(400);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -1382,11 +1415,22 @@ describe("receptionist settings", () => {
     expect(await response.json()).toEqual({ data: receptionist });
   });
 
+  it("reads and changes another receptionist's settings with receptionist_id, which must be an id", async () => {
+    const id = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+    domain.getReceptionistForApi.mockResolvedValue(receptionist);
+    domain.updateReceptionistForApi.mockResolvedValue(receptionist);
+    expect((await v1.getReceptionist(call(`/receptionist?receptionist_id=${id}`))).status).toBe(200);
+    expect(domain.getReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { receptionistId: id });
+    expect((await v1.updateReceptionist(call(`/receptionist?receptionist_id=${id}`, { method: "PATCH", body: JSON.stringify({ greeting: "Hello." }) }))).status).toBe(200);
+    expect(domain.updateReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { greeting: "Hello." }, { receptionistId: id });
+    expect((await v1.getReceptionist(call("/receptionist?receptionist_id=front-desk"))).status).toBe(400);
+  });
+
   it("passes the checked fields through and refuses anything the dashboard would refuse", async () => {
     domain.updateReceptionistForApi.mockResolvedValue({ ...receptionist, greeting: "Hello." });
     const response = await v1.updateReceptionist(call("/receptionist", { method: "PATCH", body: JSON.stringify({ greeting: " Hello. ", booking_mode: "request", transfer_number: "+14165550134" }) }));
     expect(response.status).toBe(200);
-    expect(domain.updateReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { greeting: "Hello.", booking_mode: "request", transfer_number: "+14165550134" });
+    expect(domain.updateReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { greeting: "Hello.", booking_mode: "request", transfer_number: "+14165550134" }, { receptionistId: undefined });
     for (const bad of [{ transfer_mode: "sometimes" }, { summary: "Mine.", regenerate_summary: true }, { greeting: "" }, { appointment_change_policy: { enabled: false } }, { locale: "fr" }]) {
       expect((await v1.updateReceptionist(call("/receptionist", { method: "PATCH", body: JSON.stringify(bad) }))).status).toBe(400);
     }

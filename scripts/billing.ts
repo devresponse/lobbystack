@@ -30,7 +30,7 @@ import { parseArgs } from "node:util";
 import { createClient, type Client } from "../packages/cli/src/client";
 import { configPath, readConfig, resolveConnection } from "../packages/cli/src/config";
 import { ApiError, CliError } from "../packages/cli/src/errors";
-import { desiredBillingPlans } from "../packages/domain/src/server/billingCatalog";
+import { desiredBillingPacks, desiredBillingPlans } from "../packages/domain/src/server/billingCatalog";
 import { POLAR_WEBHOOK_PATH, type PolarPlanOptions } from "../packages/domain/src/server/billingPolar";
 import { plannerFor } from "../packages/domain/src/server/billingProvider";
 import { STRIPE_WEBHOOK_PATH, type DesiredStripeCatalog, type StripeLinkObjects, type StripeVerifyInput } from "../packages/domain/src/server/billingStripe";
@@ -38,7 +38,7 @@ import { billingVerifyReport, type BillingVerifyResult } from "../packages/domai
 import { PolarCatalogClient, type PolarSnapshot } from "../packages/providers/src/polar/polarCatalog";
 import { StripeCatalogClient, createStripeCatalogClient, type StripeCatalogApi, type StripeSnapshot } from "../packages/providers/src/stripe/catalog";
 import { BRANDS } from "../packages/shared/src/brands/generated";
-import { billingProfileForProvider, billingProfileSchema, billingProviderNames, canonicalBillingProfileJson, polarBaseUrls, stripeKeyMode, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../packages/shared/src/index";
+import { billingProfileForProvider, billingProfileSchema, billingProfileWithoutDisplay, billingProviderNames, canonicalBillingProfileJson, polarBaseUrls, stripeKeyMode, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../packages/shared/src/index";
 
 export type BillingIo = {
   env: NodeJS.ProcessEnv;
@@ -168,7 +168,8 @@ function parse(argv: string[]): Options {
   };
 }
 
-type BillingFile = { json: unknown; profile: BillingProfile; hash: string; plans: ReturnType<typeof desiredBillingPlans> };
+/** packs: empty for a file without them, which then makes, links and checks nothing for packs. */
+type BillingFile = { json: unknown; profile: BillingProfile; hash: string; plans: ReturnType<typeof desiredBillingPlans>; packs: ReturnType<typeof desiredBillingPacks> };
 
 async function readBillingFile(root: string, brand: string, provider: BillingProvider): Promise<BillingFile> {
   const path = join(root, "brands", brand, "billing.json");
@@ -187,7 +188,8 @@ async function readBillingFile(root: string, brand: string, provider: BillingPro
   const parsed = billingProfileSchema.safeParse(json);
   if (!parsed.success) throw new Usage(`brands/${brand}/billing.json doesn't pass the schema: ${parsed.error.issues.map((issue) => `${issue.path.join(".") || "file"}: ${issue.message}`).join("; ")}`);
   // The plans as the provider sells them: on Stripe with overage on the checkout, no yearly prices.
-  return { json, profile: parsed.data, hash: sha256(canonicalBillingProfileJson(parsed.data)), plans: desiredBillingPlans(billingProfileForProvider(parsed.data, provider)) };
+  const sells = billingProfileForProvider(parsed.data, provider);
+  return { json, profile: parsed.data, hash: sha256(canonicalBillingProfileJson(parsed.data)), plans: desiredBillingPlans(sells), packs: desiredBillingPacks(sells) };
 }
 
 async function polarToken(options: Options, io: BillingIo): Promise<string> {
@@ -269,7 +271,7 @@ async function verifyCommand(options: Options, io: BillingIo, input: { file: Bil
   } catch (error) {
     polar = { env: options.polar, error: (error as Error).message };
   }
-  const result = planner.verify({ file: { brand: options.brand, hash: input.file.hash, profile: input.file.profile, plans: input.file.plans }, catalog, polar, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
+  const result = planner.verify({ file: { brand: options.brand, hash: input.file.hash, profile: input.file.profile, plans: input.file.plans, packs: input.file.packs }, catalog, polar, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
   if (options.json) io.out(JSON.stringify({ status: result.status, checks: result.checks }, null, 2));
   else io.out(billingVerifyReport(result, `${options.brand} billing.json v${input.file.profile.version} (${short(input.file.hash)}) against Polar ${polarWord(options.polar)} and ${input.url}`));
   return verifyExit(result);
@@ -286,16 +288,18 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   let catalogChanged = catalog.hash !== file.hash;
   if (catalog.brand === options.brand) {
     // An applied file too: new code can resolve the same file to other rows. The undeployed check is the preflight's, so the dry run leaves it out.
-    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: file.profile, replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
+    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
     catalogChanges = preview.changes;
     catalogChanged ||= catalogChanges.length > 0;
     reasons.push(...preview.blocked_by.map(apiRefusalLine));
   }
-  const desired = planner.desired({ brand: options.brand, profile: file.profile, plans: file.plans, webhookUrl: input.webhookUrl });
+  const desired = planner.desired({ brand: options.brand, profile: file.profile, plans: file.plans, packs: file.packs, webhookUrl: input.webhookUrl });
   const polarPlan = planner.plan({ desired, snapshot, options: options.plan });
   reasons.push(...polarPlan.refusals.map(refusalLine));
   const sold = file.plans.filter((plan) => plan.sold && plan.prices.length);
   const linkCount = sold.reduce((total, plan) => total + plan.prices.length, 0);
+  // Packs are counted only when the file has some, so a file without them prints as before.
+  const packLinks = file.packs.length ? ` and ${file.packs.length} ${file.packs.length === 1 ? "pack" : "packs"}` : "";
 
   // Step 5: the plan.
   if (options.json) {
@@ -306,7 +310,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
       polar: { env: polarWord(options.polar), organization: org.id },
       catalog: catalogChanges,
       steps: polarPlan.steps.map(({ object, action, subject, changes, leftover }) => ({ object, action, subject, changes, ...(leftover ? { leftover } : {}) })),
-      links: { plans: sold.length, prices: linkCount },
+      links: { plans: sold.length, prices: linkCount, ...(file.packs.length ? { packs: file.packs.length } : {}) },
       refusals: reasons,
     }, null, 2));
   } else {
@@ -316,7 +320,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
     for (const change of catalogChanges) io.out(changeLine(change));
     io.out(polarPlan.steps.length ? `Polar: ${polarPlan.steps.length} ${polarPlan.steps.length === 1 ? "call" : "calls"}` : "Polar: sells what the file says");
     for (const step of polarPlan.steps) io.out(stepLine(step));
-    io.out(`Links: ${linkCount} live prices of ${sold.length} sold plans, written once Polar sells what the file says`);
+    io.out(`Links: ${linkCount} live prices of ${sold.length} sold plans${packLinks}, written once Polar sells what the file says`);
   }
   if (reasons.length) throw new Refused(reasons);
   if (options.command === "plan") {
@@ -336,7 +340,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
 
   // Step 7: the catalog.
   if (catalogChanged) {
-    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: file.profile, replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
+    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
     io.out(`\nPostgres: ${run.status === "unchanged" ? "the tables already matched" : `applied ${run.changes.length} ${run.changes.length === 1 ? "change" : "changes"}`} in run ${String(run.id)}.`);
   }
 
@@ -364,11 +368,11 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   // Step 10: the links.
   const links = planner.linkBody({ desired, snapshot: after, plans: file.plans });
   if (links.missing.length) throw new Refused(links.missing, "Polar has no single object for these, so nothing was linked:");
-  const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, provider: "polar", provider_env: options.polar === "production" ? "live" : "sandbox", provider_account: after.organization.id, plans: links.plans, ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
+  const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, provider: "polar", provider_env: options.polar === "production" ? "live" : "sandbox", provider_account: after.organization.id, plans: links.plans, ...(links.packs?.length ? { packs: links.packs } : {}), ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
   io.out(`\nLinks: ${link.status === "unchanged" ? "already recorded" : `recorded ${link.changes.length} ${link.changes.length === 1 ? "change" : "changes"}`} in run ${String(link.id)}.`);
 
   // Step 11: all three pairs.
-  const result = planner.verify({ file: { brand: options.brand, hash: file.hash, profile: file.profile, plans: file.plans }, catalog: (await api.call("getBillingCatalog")).data, polar: { env: options.polar, snapshot: after }, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
+  const result = planner.verify({ file: { brand: options.brand, hash: file.hash, profile: file.profile, plans: file.plans, packs: file.packs }, catalog: (await api.call("getBillingCatalog")).data, polar: { env: options.polar, snapshot: after }, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
   io.out("");
   io.out(billingVerifyReport(result, `${options.brand} billing.json v${file.profile.version} (${short(file.hash)}) against Polar ${polarWord(options.polar)} and ${input.url}`));
   return verifyExit(result);
@@ -473,12 +477,12 @@ async function verifyStripeCommand(options: Options, io: BillingIo, input: Strip
     stripe = { env: options.stripe, error: (error as Error).message };
   }
   const links = brandLinks(options.brand);
-  const result = stripePlanner.verify({ file: { brand: options.brand, hash: input.file.hash, profile: input.file.profile, plans: input.file.plans }, catalog, stripe, webhookUrl: input.webhookUrl, links, checkWebhookSecret: true });
+  const result = stripePlanner.verify({ file: { brand: options.brand, hash: input.file.hash, profile: input.file.profile, plans: input.file.plans, packs: input.file.packs }, catalog, stripe, webhookUrl: input.webhookUrl, links, checkWebhookSecret: true });
   if (options.json) io.out(JSON.stringify({ status: result.status, checks: result.checks }, null, 2));
   else {
     io.out(billingVerifyReport(result, `${options.brand} billing.json v${input.file.profile.version} (${short(input.file.hash)}) against Stripe ${stripeWord(options.stripe)} and ${input.url}`, "Stripe"));
     io.out("");
-    io.out(stripeDashboardLines(stripePlanner.desired({ brand: options.brand, profile: input.file.profile, plans: input.file.plans, webhookUrl: input.webhookUrl, links })).join("\n"));
+    io.out(stripeDashboardLines(stripePlanner.desired({ brand: options.brand, profile: input.file.profile, plans: input.file.plans, packs: input.file.packs, webhookUrl: input.webhookUrl, links })).join("\n"));
   }
   return verifyExit(result);
 }
@@ -494,17 +498,18 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
   let catalogChanges: ApiBillingCatalogChange[] = [];
   let catalogChanged = catalog.hash !== file.hash;
   if (catalog.brand === options.brand) {
-    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: file.profile, replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
+    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
     catalogChanges = preview.changes;
     catalogChanged ||= catalogChanges.length > 0;
     reasons.push(...preview.blocked_by.map(apiRefusalLine));
   }
   const links = brandLinks(options.brand);
-  const desired = stripePlanner.desired({ brand: options.brand, profile: file.profile, plans: file.plans, webhookUrl: input.webhookUrl, links });
+  const desired = stripePlanner.desired({ brand: options.brand, profile: file.profile, plans: file.plans, packs: file.packs, webhookUrl: input.webhookUrl, links });
   const stripePlan = stripePlanner.plan({ desired, snapshot, options: options.plan });
   reasons.push(...stripePlan.refusals.map(refusalLine));
   const sold = file.plans.filter((plan) => plan.sold && plan.prices.length);
   const linkCount = sold.reduce((total, plan) => total + plan.prices.length, 0);
+  const packLinks = file.packs.length ? `, ${file.packs.length} ${file.packs.length === 1 ? "pack" : "packs"}` : "";
   const dashboard = stripeDashboardLines(desired);
 
   // Step 5: the plan.
@@ -516,7 +521,7 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
       stripe: { env: stripeWord(options.stripe), account: account.id },
       catalog: catalogChanges,
       steps: stripePlan.steps.map(({ object, action, subject, changes, leftover }) => ({ object, action, subject, changes, ...(leftover ? { leftover } : {}) })),
-      links: { plans: sold.length, prices: linkCount },
+      links: { plans: sold.length, prices: linkCount, ...(file.packs.length ? { packs: file.packs.length } : {}) },
       dashboard: dashboard.slice(1).map((line) => line.trim()),
       refusals: reasons,
     }, null, 2));
@@ -527,7 +532,7 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
     for (const change of catalogChanges) io.out(changeLine(change));
     io.out(stripePlan.steps.length ? `Stripe: ${stripePlan.steps.length} ${stripePlan.steps.length === 1 ? "call" : "calls"}` : "Stripe: sells what the file says");
     for (const step of stripePlan.steps) io.out(stepLine(step));
-    io.out(`Links: ${linkCount} live prices of ${sold.length} sold plans, and the deployment-wide objects, written once Stripe sells what the file says`);
+    io.out(`Links: ${linkCount} live prices of ${sold.length} sold plans${packLinks}, and the deployment-wide objects, written once Stripe sells what the file says`);
     io.out("");
     io.out(dashboard.join("\n"));
   }
@@ -549,7 +554,7 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
 
   // Step 7: the catalog.
   if (catalogChanged) {
-    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: file.profile, replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
+    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
     io.out(`\nPostgres: ${run.status === "unchanged" ? "the tables already matched" : `applied ${run.changes.length} ${run.changes.length === 1 ? "change" : "changes"}`} in run ${String(run.id)}.`);
   }
 
@@ -580,11 +585,11 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
   const objects = body.objects as StripeLinkObjects;
   const previous = (catalog.provider.objects ?? {}) as Partial<StripeLinkObjects> & { webhook_secret_sha256?: string | null };
   const secretSha256 = made.webhookSecret ? sha256(made.webhookSecret) : previous.webhook_endpoint === objects.webhook_endpoint ? previous.webhook_secret_sha256 ?? null : null;
-  const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, provider: "stripe", provider_env: options.stripe, provider_account: after.account.id, plans: body.plans, objects: { ...objects, webhook_secret_sha256: secretSha256 }, ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
+  const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, provider: "stripe", provider_env: options.stripe, provider_account: after.account.id, plans: body.plans, ...(body.packs?.length ? { packs: body.packs } : {}), objects: { ...objects, webhook_secret_sha256: secretSha256 }, ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
   io.out(`\nLinks: ${link.status === "unchanged" ? "already recorded" : `recorded ${link.changes.length} ${link.changes.length === 1 ? "change" : "changes"}`} in run ${String(link.id)}.`);
 
   // Step 11: all three pairs.
-  const result = stripePlanner.verify({ file: { brand: options.brand, hash: file.hash, profile: file.profile, plans: file.plans }, catalog: (await api.call("getBillingCatalog")).data, stripe: { env: options.stripe, snapshot: after }, webhookUrl: input.webhookUrl, links, checkWebhookSecret: true });
+  const result = stripePlanner.verify({ file: { brand: options.brand, hash: file.hash, profile: file.profile, plans: file.plans, packs: file.packs }, catalog: (await api.call("getBillingCatalog")).data, stripe: { env: options.stripe, snapshot: after }, webhookUrl: input.webhookUrl, links, checkWebhookSecret: true });
   io.out("");
   io.out(billingVerifyReport(result, `${options.brand} billing.json v${file.profile.version} (${short(file.hash)}) against Stripe ${stripeWord(options.stripe)} and ${input.url}`, "Stripe"));
   return verifyExit(result);

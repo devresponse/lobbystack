@@ -73,6 +73,7 @@ From [7.1](part-7-operations.md#71-release-a-new-version):
 - [ ] On Railway: migrate's log ends with `RLS enabled and forced on <n> tables.`, and the admin's and the worker's newest deployments show **Active** (step 7).
 - [ ] On a server: the backup ran first, the migrator ended with `Database migrations applied.`, and the checks in [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), steps 20 to 22, pass (step 8).
 - [ ] `https://app.example.com/api/health/live` shows the new commit, `/api/health/ready` shows `"ok":true`, you can sign in, and a browser call works (step 9).
+- [ ] Only if the instance sells plans and the release changes a brand's `billing.json`, as the one that adds prepaid packs (migration `0148`) does: once the admin and the worker run it, `pnpm billing apply` ran for the brand, and `pnpm billing verify` ends `Result: in sync (exit 0).` (step 4).
 - [ ] The date, the commit ID and a line on what changed are added to your release list (step 10).
 
 **When something breaks**

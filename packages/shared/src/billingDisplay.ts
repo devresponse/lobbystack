@@ -102,11 +102,14 @@ export const billingDisplaySchema = z.strictObject({
 /** A billing.json's display section, as checked. */
 export type BillingDisplay = z.output<typeof billingDisplaySchema>;
 
-const PLACEHOLDER = /\{\{\s*([^{}]*?)\s*\}\}/g;
+// {{ name }}: the name is everything between the braces, trimmed. The spaces
+// are trimmed in code, not matched by the pattern: a pattern with \s* on both
+// sides of a lazy name takes cubic time on a long run of spaces after {{.
+const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 
 /** The names a text prints, such as voiceMinutes for {{voiceMinutes}}. */
 export function planDisplayPlaceholders(value: string): string[] {
-  return [...value.matchAll(PLACEHOLDER)].map((match) => match[1]!);
+  return [...value.matchAll(PLACEHOLDER)].map((match) => match[1]!.trim());
 }
 
 const planValueNames = new Set<string>([...planDisplayValueNames, "appName"]);
@@ -196,7 +199,10 @@ export function planDisplayIntervalText(value: PlanDisplayIntervalText, interval
 
 /** Text with its {{name}} values filled in; a name without a value stays as written. */
 export function fillPlanDisplayText(value: string, values: Readonly<Record<string, string>>): string {
-  return value.replace(PLACEHOLDER, (whole, name: string) => (Object.hasOwn(values, name) ? values[name]! : whole));
+  return value.replace(PLACEHOLDER, (whole, inside: string) => {
+    const name = inside.trim();
+    return Object.hasOwn(values, name) ? values[name]! : whole;
+  });
 }
 
 /** Whether a bullet, a cell or a field holds words rather than a name or a flag. */

@@ -309,12 +309,13 @@
         "alertSms": "Segments SMS d'alerte",
         "knowledgeStorage": "Stockage des connaissances",
         "phoneNumbers": "Numéros de téléphone",
+        "chatAiUnits": "Clavardage du site",
         "callAnswering": "Réponse aux appels 24/7",
         "callerDetails": "Détails des appelants et prise de messages",
         "knowledgeAnswers": "Réponses de la base de connaissances",
         "workflows": "Flux en langage naturel",
         "spamFiltering": "Filtrage du spam",
-        "shortCalls": "Appels de moins de 10 s exclus de la facturation",
+        "shortCalls": "Appels de moins de {{seconds}} s exclus de la facturation",
         "concurrentCalls": "Gestion des appels simultanés",
         "multilingual": "Répond dans la langue de l'appelant",
         "appointmentBooking": "Réservation de rendez-vous",
@@ -377,6 +378,11 @@
             "dedicated_one": "{{count}} dédié",
             "dedicated_many": "{{count}} dédiés",
             "dedicated_other": "{{count}} dédiés"
+          },
+          "chatAiUnits": {
+            "included_one": "{{count}} inclus",
+            "included_many": "{{count}} inclus",
+            "included_other": "{{count}} inclus"
           }
         },
         "data": {

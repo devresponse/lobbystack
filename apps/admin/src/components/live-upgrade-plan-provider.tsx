@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { billingPlanName, isPaidSubscription, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
+import { billingPlanName, isPaidSubscription, type BillingDisplay, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
@@ -25,6 +25,8 @@ type Billing = {
   availableCheckoutPlans: HostedUpgradePlan[];
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
   plans: BillingPlanList;
+  /** billing.json's words for the plan screens. */
+  planDisplay?: BillingDisplay | null;
   promoPlan?: BillingPromoPlanView | null;
 };
 type CheckoutInput = { businessId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail?: string };
@@ -37,7 +39,8 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const { i18n, t } = useTranslation("settings");
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [interval, setInterval] = useState<BillingInterval>("annual");
+  // The tab the person picked; until then the dialog opens on billing.json's choice, else Annual.
+  const [interval, setInterval] = useState<BillingInterval | null>(null);
   const [checkout, setCheckout] = useState<Checkout | null>(null);
   const [emailPrompt, setEmailPrompt] = useState<EmailPrompt | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -143,6 +146,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       billingInterval={interval}
       changesPlan={changesPlan}
       currentPlan={plan}
+      display={billing.data.planDisplay ?? null}
       leavesPromoPlan={promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? promoPlan.plan : null}
       leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null}
       loading={pending ? "checkout" : null}

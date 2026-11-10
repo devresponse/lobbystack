@@ -309,12 +309,13 @@
         "alertSms": "SMS segmenti za obaveštenja",
         "knowledgeStorage": "Baza znanja",
         "phoneNumbers": "Brojevi telefona",
+        "chatAiUnits": "Čet na sajtu",
         "callAnswering": "Javljanje na pozive 24/7",
         "callerDetails": "Podaci o pozivaocu i primanje poruka",
         "knowledgeAnswers": "Odgovori iz baze znanja",
         "workflows": "Tokovi rada opisani običnim jezikom",
         "spamFiltering": "Filtriranje neželjenih poziva",
-        "shortCalls": "Pozivi kraći od 10 s se ne naplaćuju",
+        "shortCalls": "Pozivi kraći od {{seconds}} s se ne naplaćuju",
         "concurrentCalls": "Više poziva istovremeno",
         "multilingual": "Odgovara na jeziku pozivaoca",
         "appointmentBooking": "Zakazivanje termina",
@@ -377,6 +378,11 @@
             "dedicated_one": "{{count}} namenski",
             "dedicated_few": "{{count}} namenska",
             "dedicated_other": "{{count}} namenskih"
+          },
+          "chatAiUnits": {
+            "included_one": "{{count}} uključen",
+            "included_few": "{{count}} uključena",
+            "included_other": "{{count}} uključeno"
           }
         },
         "data": {

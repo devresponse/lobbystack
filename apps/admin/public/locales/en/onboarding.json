@@ -298,12 +298,13 @@
         "alertSms": "Alert SMS segments",
         "knowledgeStorage": "Knowledge base",
         "phoneNumbers": "Phone numbers",
+        "chatAiUnits": "Website chats",
         "callAnswering": "24/7 call answering",
         "callerDetails": "Caller details and message capture",
         "knowledgeAnswers": "Knowledge base answers",
         "workflows": "Plain-language workflows",
         "spamFiltering": "Spam filtering",
-        "shortCalls": "Calls under 10s excluded from billing",
+        "shortCalls": "Calls under {{seconds}}s excluded from billing",
         "concurrentCalls": "Concurrent call handling",
         "multilingual": "Answers in the caller's language",
         "appointmentBooking": "Appointment booking",
@@ -361,6 +362,10 @@
           "phoneNumbers": {
             "dedicated_one": "{{count}} dedicated",
             "dedicated_other": "{{count}} dedicated"
+          },
+          "chatAiUnits": {
+            "included_one": "{{count}} included",
+            "included_other": "{{count}} included"
           }
         },
         "data": {

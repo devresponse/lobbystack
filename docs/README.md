@@ -71,6 +71,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 - [Route catalog](reference/routes.md): every page and HTTP route, its file and who can reach it.
 - [API gaps](reference/api-gaps.md): what the dashboard can do that the v1 API can't yet.
 - [Environment variables](deployment/guide/appendix-a-variables.md) and [commands](deployment/guide/appendix-b-commands.md).
+- [Bootstrap script variables](deployment/bootstrap-variables.md): every setting, secret and Railway variable `devops/bootstrap.mjs` reads, keeps or writes, where each comes from, and how it is checked.
 - [The admin API's conventions](validation/api-contracts.md).
 
 ## Read the reviews and research

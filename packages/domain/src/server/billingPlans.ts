@@ -4,6 +4,7 @@ import { withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/d
 import {
   billingIntervals,
   brandBillingPlans,
+  brandPlanDisplay,
   builtInBillingPlanLimits,
   builtInBillingPlanList,
   cloudBillingPlanSlugs,
@@ -11,6 +12,7 @@ import {
   hostedCheckoutPlanSlugs,
   perMonthCents,
   type ApiBillingPlans,
+  type BillingDisplay,
   type BillingInterval,
   type BillingPlanLimits,
   type BillingPlanLimitTable,
@@ -232,6 +234,16 @@ export function brandBillingCatalog(brandId: string): BillingCatalogSnapshot | n
 /** The catalog this deployment's brand file would apply: the plans it shows and enforces until its first apply. */
 export function deploymentBrandCatalog(): BillingCatalogSnapshot | null {
   return brandBillingCatalog(currentBrand().id);
+}
+
+/**
+ * The plan screens' words and layout from this deployment's brand file, as
+ * the build carries them: its display section, which never reaches the
+ * catalog, so it holds before and after an apply alike. Null for a brand
+ * whose file has none, whose screens keep their built-in words.
+ */
+export function deploymentPlanDisplay(): BillingDisplay | null {
+  return brandPlanDisplay(currentBrand().id);
 }
 
 /**

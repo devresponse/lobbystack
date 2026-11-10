@@ -24,7 +24,7 @@ export type ScenarioName = (typeof SCENARIOS)[number]["name"];
 export type ScenarioOptions = {
   list: boolean;
   help: boolean;
-  /** The brand whose billing.json sets the sandbox up; RealInfoBot's when not given. */
+  /** The brand whose billing.json sets the sandbox up; AlloPlace's when not given, since RealInfoBot's sells packs and no plan. */
   brand: string;
   /** null runs every scenario. */
   only: ScenarioName[] | null;
@@ -89,7 +89,7 @@ export function checkoutRequest(input: { scenario: string; url: string; card: "g
 
 /** The command line, or a ScenarioUsage error that says what's wrong. */
 export function parseScenarioArgs(argv: readonly string[]): ScenarioOptions {
-  const options: ScenarioOptions = { list: false, help: false, brand: "realinfobot", only: null, keep: false, parallel: 4, merchantOfRecord: false };
+  const options: ScenarioOptions = { list: false, help: false, brand: "alloplace", only: null, keep: false, parallel: 4, merchantOfRecord: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]!;
     const [flag, inline] = arg.startsWith("--") && arg.includes("=") ? [arg.slice(0, arg.indexOf("=")), arg.slice(arg.indexOf("=") + 1)] : [arg, undefined];
@@ -104,7 +104,7 @@ export function parseScenarioArgs(argv: readonly string[]): ScenarioOptions {
     else if (flag === "--merchant-of-record") options.merchantOfRecord = true;
     else if (flag === "--brand") {
       options.brand = value();
-      if (!/^[a-z0-9][a-z0-9-]*$/.test(options.brand)) throw new ScenarioUsage("--brand names a folder under brands/, such as realinfobot.");
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(options.brand)) throw new ScenarioUsage("--brand names a folder under brands/, such as alloplace.");
     } else if (flag === "--parallel") {
       const count = Number(value());
       if (!Number.isInteger(count) || count < 1 || count > 8) throw new ScenarioUsage("--parallel is a whole number from 1 to 8.");

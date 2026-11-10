@@ -12,7 +12,7 @@ export * from "./receptionists";
 export * from "./branding";
 export * from "./brandLinks";
 export * from "./brands/resolve";
-export type { BrandBillingPlan, BrandDefinition, BrandEnvironment, BrandImage, BrandIndex } from "./brands/types";
+export type { BrandBillingPlan, BrandDefinition, BrandEnvironment, BrandImage, BrandIndex, BrandPlanDisplay } from "./brands/types";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox, assertCertificationStripeKey } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";
@@ -452,6 +452,7 @@ export { trimEndWhere, trimTrailingSlashes } from "./text";
 
 export * from "./billing";
 export * from "./billingProfile";
+export * from "./billingDisplay";
 export * from "./billingCodes";
 export * from "./product-capabilities";
 export { normalizeAuthEmail } from "./auth";

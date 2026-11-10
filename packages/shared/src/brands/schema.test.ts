@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { compileBrands, type BrandSources } from "./schema";
+import { brandsModuleSource, compileBrands, type BrandSources } from "./schema";
 
 const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>');
 
@@ -137,6 +137,25 @@ describe("compileBrands", () => {
       prices: [{ period: "annual", currency: billing.currency, cents: 37_000 }, { period: "monthly", currency: billing.currency, cents: 3700 }],
     });
     expect(plans[3]).toMatchObject({ code: "enterprise", sold: false, custom: true, voice_sec: null, receptionists: null, prices: [] });
+  });
+
+  it("carries a billing.json's display section to the plan screens, apart from the hash", () => {
+    // The example file of plans and packs, whose section has a card for each of the four plans.
+    const billing = JSON.parse(readFileSync(new URL("./testing/plans-and-packs.billing.json", import.meta.url), "utf8"));
+    const { display, ...sold } = billing;
+    const withBilling = sources();
+    withBilling.brands.alloplace!.billing = billing;
+    const compiled = compileBrands(withBilling);
+    expect(compiled.planDisplays).toEqual({ alloplace: display });
+    withBilling.brands.alloplace!.billing = sold;
+    const without = compileBrands(withBilling);
+    expect(without.planDisplays).toEqual({});
+    expect(without.billingHashes).toEqual(compiled.billingHashes);
+    expect(without.billingPlans).toEqual(compiled.billingPlans);
+    expect(brandsModuleSource(compiled)).toContain(`export const BRAND_PLAN_DISPLAYS: Record<string, BrandPlanDisplay> = ${JSON.stringify({ alloplace: display }, null, 2)};`);
+    // A section the screens can't show stops the build, naming the file.
+    withBilling.brands.alloplace!.billing = { ...billing, display: { ...display, plans: display.plans.map((card: Record<string, unknown>) => ({ ...card, popular: true })) } };
+    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json display.plans: only one plan can be popular");
   });
 
   it("keeps a name with its environment suffix within the length limit", () => {

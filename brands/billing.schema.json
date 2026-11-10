@@ -1000,6 +1000,371 @@
         ],
         "additionalProperties": false
       }
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "defaultInterval": {
+          "type": "string",
+          "enum": [
+            "monthly",
+            "annual"
+          ]
+        },
+        "plans": {
+          "minItems": 1,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "plan": {
+                "type": "string",
+                "enum": [
+                  "free_cloud",
+                  "starter",
+                  "pro",
+                  "enterprise"
+                ]
+              },
+              "popular": {
+                "type": "boolean"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PlanDisplayText"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "monthly": {
+                        "$ref": "#/$defs/PlanDisplayText"
+                      },
+                      "annual": {
+                        "$ref": "#/$defs/PlanDisplayText"
+                      }
+                    },
+                    "required": [
+                      "monthly",
+                      "annual"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "button": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PlanDisplayText"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "monthly": {
+                        "$ref": "#/$defs/PlanDisplayText"
+                      },
+                      "annual": {
+                        "$ref": "#/$defs/PlanDisplayText"
+                      }
+                    },
+                    "required": [
+                      "monthly",
+                      "annual"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "bullets": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "voiceMinutes",
+                        "receptionists",
+                        "businessNumbers",
+                        "alertSmsSegments",
+                        "outboundCallAttempts",
+                        "chatAiUnits",
+                        "knowledgeStorage"
+                      ]
+                    },
+                    {
+                      "$ref": "#/$defs/PlanDisplayText"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "plan"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "comparisonTitle": {
+          "$ref": "#/$defs/PlanDisplayText"
+        },
+        "comparisonIntro": {
+          "$ref": "#/$defs/PlanDisplayText"
+        },
+        "comparison": {
+          "maxItems": 12,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "group": {
+                "$ref": "#/$defs/PlanDisplayText"
+              },
+              "rows": {
+                "minItems": 1,
+                "maxItems": 40,
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "voiceMinutes",
+                        "receptionists",
+                        "businessNumbers",
+                        "alertSmsSegments",
+                        "outboundCallAttempts",
+                        "chatAiUnits",
+                        "knowledgeStorage",
+                        "contentRetention",
+                        "shortCalls"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row": {
+                          "type": "string",
+                          "enum": [
+                            "voiceMinutes",
+                            "receptionists",
+                            "businessNumbers",
+                            "alertSmsSegments",
+                            "outboundCallAttempts",
+                            "chatAiUnits",
+                            "knowledgeStorage",
+                            "contentRetention",
+                            "shortCalls"
+                          ]
+                        },
+                        "label": {
+                          "$ref": "#/$defs/PlanDisplayText"
+                        },
+                        "values": {
+                          "type": "object",
+                          "properties": {
+                            "free_cloud": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            },
+                            "starter": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            },
+                            "pro": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            },
+                            "enterprise": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "row"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "$ref": "#/$defs/PlanDisplayText"
+                        },
+                        "values": {
+                          "type": "object",
+                          "properties": {
+                            "free_cloud": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            },
+                            "starter": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            },
+                            "pro": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            },
+                            "enterprise": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "unlimited",
+                                    "custom",
+                                    "multiple"
+                                  ]
+                                },
+                                {
+                                  "$ref": "#/$defs/PlanDisplayText"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "values"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "group",
+              "rows"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "packs": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/PlanDisplayText"
+            },
+            "description": {
+              "$ref": "#/$defs/PlanDisplayText"
+            },
+            "button": {
+              "$ref": "#/$defs/PlanDisplayText"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [
@@ -1007,5 +1372,40 @@
     "currency",
     "plans"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "PlanDisplayText": {
+      "type": "object",
+      "properties": {
+        "en": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "fr": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "es": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "sr": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "en",
+        "fr",
+        "es",
+        "sr"
+      ],
+      "additionalProperties": false,
+      "description": "Words in every interface language: en, fr, es and sr."
+    }
+  }
 }

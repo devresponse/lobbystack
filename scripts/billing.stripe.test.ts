@@ -145,10 +145,14 @@ afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-/** A checkout with RealInfoBot's file and a stripe block, an instance on Stripe whose code was built with it, and an empty Stripe sandbox. */
+/**
+ * A checkout with the example file of plans and packs in RealInfoBot's folder and a stripe block, an
+ * instance on Stripe whose code was built with it, and an empty Stripe sandbox. The example file is
+ * RealInfoBot's file before it moved to listing packs, so these runs still sell Starter and Pro.
+ */
 async function setUp(options: { change?: (file: Record<string, any>) => void; provider?: "stripe" | "polar"; account?: string; block?: Partial<typeof stripeBlock> } = {}) {
   root = await mkdtemp(join(tmpdir(), "billing-stripe-"));
-  const file = JSON.parse(await readFile(new URL("../brands/realinfobot/billing.json", import.meta.url), "utf8")) as Record<string, any>;
+  const file = JSON.parse(await readFile(new URL("../packages/shared/src/brands/testing/plans-and-packs.billing.json", import.meta.url), "utf8")) as Record<string, any>;
   file.stripe = { ...structuredClone(stripeBlock), ...options.block };
   const deployed = billingProfileSchema.parse(structuredClone(file));
   options.change?.(file);

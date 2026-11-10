@@ -137,7 +137,9 @@ export function createFakePolar(options: { currency?: string; organization?: Par
         if (!prices.some((price) => price.price_currency === currency)) return refuse("A product needs a price in the default currency.", "prices");
         const cycle = meterCycle(body);
         if (cycle instanceof Response) return cycle;
-        const product: StoredProduct = { id: id("product"), name: String(body.name), recurring_interval: String(body.recurring_interval), recurring_interval_count: Number(body.recurring_interval_count ?? 1), ...cycle, visibility: String(body.visibility ?? "public"), is_archived: false, metadata: (body.metadata ?? {}) as PolarMetadata, prices, benefitIds: [], created_at: new Date().toISOString(), modified_at: null };
+        // A one-time product, as a pack's, has no billing cycle.
+        const oneTime = body.recurring_interval === undefined || body.recurring_interval === null;
+        const product: StoredProduct = { id: id("product"), name: String(body.name), recurring_interval: oneTime ? null : String(body.recurring_interval), recurring_interval_count: oneTime ? null : Number(body.recurring_interval_count ?? 1), ...cycle, visibility: String(body.visibility ?? "public"), is_archived: false, metadata: (body.metadata ?? {}) as PolarMetadata, prices, benefitIds: [], created_at: new Date().toISOString(), modified_at: null };
         state.products.push(product);
         return json(201, productView(product));
       }

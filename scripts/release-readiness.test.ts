@@ -46,8 +46,23 @@ describe("release readiness", () => {
     expect(result.status).toBe("planned");
     expect(result.scope.releaseCertified).toBe(false);
     expect(result.scope.resendWebhooks).toBe("unverified");
+    expect(result.scope.billingProvider).toBe("polar");
     expect(result.gates).toHaveLength(6);
     expect(execute).not.toHaveBeenCalled();
+    const stripe = await runReleaseReadiness({ mode: "staging", plan: true, environment: { BILLING_PROVIDER: "stripe" }, runId: "run-2", gitSha: "sha-1", execute });
+    expect(stripe.scope.billingProvider).toBe("stripe");
+    expect((await runReleaseReadiness({ mode: "local", plan: true, environment: {}, runId: "run-3", gitSha: "sha-1", execute })).scope.billingProvider).toBe("not-applicable");
+  });
+
+  it("asks a Stripe target for Stripe's webhook secret and a test key instead of Polar's secret", () => {
+    const { POLAR_WEBHOOK_SECRET: _polar, ...withoutPolar } = stagingEnvironment;
+    const stripe = { ...withoutPolar, BILLING_PROVIDER: "stripe" };
+    expect(stagingConfigurationProblems(stripe)).toEqual(["STRIPE_WEBHOOK_SECRET", "STRIPE_API_KEY"]);
+    expect(stagingConfigurationProblems({ ...stripe, STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_API_KEY: "rk_test_certification" })).toEqual([]);
+    expect(stagingConfigurationProblems({ ...stripe, STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_API_KEY: "rk_live_certification" })).toEqual(["STRIPE_API_KEY (must be a Stripe test key, sk_test_ or rk_test_)"]);
+    // Polar stays the default, and its secret stays required there.
+    expect(stagingConfigurationProblems(withoutPolar)).toEqual(["POLAR_WEBHOOK_SECRET"]);
+    expect(stagingConfigurationProblems({ ...stagingEnvironment, BILLING_PROVIDER: "paddle" })).toEqual(["BILLING_PROVIDER (must be polar or stripe)"]);
   });
 
   it("fails staging closed and records every unrun gate", async () => {

@@ -4,7 +4,7 @@ import { billingProfileSchema, type BillingProfile } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
-import { desiredBillingPlans } from "./billingCatalog";
+import { desiredBillingPacks, desiredBillingPlans } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps, type PolarPlanOptions } from "./billingPolar";
 import { createFakePolar, seedPolarSetup, withSetupPrices, type FakePolar } from "./billingPolar.testing";
 
@@ -55,6 +55,24 @@ async function apply(fake: FakePolar, file: BillingProfile, options: Partial<Pol
 }
 
 const summary = (steps: ReadonlyArray<{ object: string; action: string }>) => steps.map((step) => `${step.action} ${step.object}`);
+
+/** AlloPlace's catalog with the file's packs, as apply and verify build it. catalogFor leaves them out. */
+function catalogWithPacks(file: BillingProfile) {
+  return desiredPolarCatalog({ brand: "alloplace", profile: file, plans: desiredBillingPlans(file), packs: desiredBillingPacks(file), webhookUrl });
+}
+
+async function planWithPacks(fake: FakePolar, file: BillingProfile, options: Partial<PolarPlanOptions> = {}) {
+  return planPolarChanges({ catalog: catalogWithPacks(file), snapshot: await client(fake).readSnapshot(), options: { ...strict, ...options }, now });
+}
+
+/** apply, with the file's packs. */
+async function applyWithPacks(fake: FakePolar, file: BillingProfile, options: Partial<PolarPlanOptions> = {}) {
+  const first = await planWithPacks(fake, file, options);
+  expect(first.refusals).toEqual([]);
+  const result = await runPolarSteps(client(fake), first.steps);
+  expect(await planWithPacks(fake, file)).toEqual({ steps: [], refusals: [] });
+  return { first, result };
+}
 
 describe("desiredPolarCatalog", () => {
   it("maps AlloPlace's file to 3 meters, 4 products with 4 fixed and 12 metered prices, no discount and the webhook", () => {
@@ -179,8 +197,8 @@ describe("planPolarChanges", () => {
     expect(live.map((product) => [product.name, product.meter_interval])).toEqual([["Starter monthly", null], ["Pro monthly", null], ["Starter annual", "month"], ["Pro annual", "month"]]);
     const links = polarLinkPlans({ catalog: catalogFor(profile(withSetupPrices)), plans: desiredBillingPlans(profile(withSetupPrices)), snapshot: await client(fake).readSnapshot(), now });
     expect(links.missing).toEqual([]);
-    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id)).sort()).toEqual(live.map((product) => product.id).sort());
-    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id))).toEqual(expect.arrayContaining(monthlyIds));
+    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.provider_ref)).sort()).toEqual(live.map((product) => product.id).sort());
+    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.provider_ref))).toEqual(expect.arrayContaining(monthlyIds));
   });
 
   it("refuses each untagged lookalike without --adopt, so a forgotten flag makes no duplicate", async () => {
@@ -330,7 +348,7 @@ describe("planPolarChanges", () => {
     expect(first.steps[0]!.body).toMatchObject({ recurring_interval: "year", recurring_interval_count: 1, meter_interval: "month", meter_interval_count: 1 });
     expect(yearly.is_archived).toBe(true);
     const links = polarLinkPlans({ catalog: catalogFor(profile()), plans: desiredBillingPlans(profile()), snapshot: await client(fake).readSnapshot(), now });
-    const linked = links.plans.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "annual")!.polar_id;
+    const linked = links.plans.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "annual")!.provider_ref;
     expect(fake.state.products.find((product) => product.id === linked)).toMatchObject({ name: "Pro annual", is_archived: false, meter_interval: "month", meter_interval_count: 1 });
   });
 
@@ -413,5 +431,104 @@ describe("planPolarChanges", () => {
     expect(result.webhookSecret).toBe(fake.state.webhooks[0]!.secret);
     const again = await runPolarSteps(client(fake), (await plan(fake, profile())).steps);
     expect(again.webhookSecret).toBeNull();
+  });
+});
+
+describe("Polar packs", () => {
+  it("gives each pack a one-time product with its price, and leaves the rest as a file without packs has it", () => {
+    const file = profile();
+    const catalog = catalogWithPacks(file);
+    expect(catalog.packs.map((pack) => [pack.pack, pack.name, pack.cents, pack.currency, pack.terms])).toEqual(desiredBillingPacks(file).map((pack) => [pack.code, pack.names.en, pack.price.cents, "cad", pack.terms_hash]));
+    expect(catalog.packs.at(-1)).toMatchObject({ pack: "pack_1000_365", name: "1,000 minutes, 365 days", cents: 19900 });
+    expect({ ...catalog, packs: [] }).toEqual(catalogFor(file));
+  });
+
+  it("makes a private one-time product for each pack after every call a file without packs gets, links each, and makes no call on a second run", async () => {
+    const file = profile();
+    const plain = await plan(createFakePolar(), file);
+    const fake = createFakePolar();
+    const { first } = await applyWithPacks(fake, file);
+    expect(first.steps.slice(0, plain.steps.length)).toEqual(plain.steps);
+    const packSteps = first.steps.slice(plain.steps.length);
+    expect(summary(packSteps)).toEqual(Array(9).fill("create product"));
+    const smallest = catalogWithPacks(file).packs[0]!;
+    expect(packSteps[0]).toEqual({
+      object: "product",
+      action: "create",
+      subject: 'Product "250 minutes, 90 days"',
+      changes: ["55.00 CAD once", "private: only an API checkout sells it"],
+      method: "POST",
+      path: "/v1/products/",
+      body: { name: "250 minutes, 90 days", recurring_interval: null, visibility: "private", prices: [{ amount_type: "fixed", price_amount: 5500, price_currency: "cad" }], metadata: { lobbystack_brand: "alloplace", lobbystack_pack: "pack_250_90", lobbystack_terms: smallest.terms } },
+      produces: "pack:pack_250_90",
+    });
+    const packProducts = fake.state.products.filter((product) => product.metadata.lobbystack_pack !== undefined);
+    expect(packProducts.map((product) => [product.recurring_interval, product.visibility, product.benefitIds.length, product.prices.length])).toEqual(Array(9).fill([null, "private", 0, 1]));
+    const links = polarLinkPlans({ catalog: catalogWithPacks(file), plans: desiredBillingPlans(file), snapshot: await client(fake).readSnapshot(), now });
+    expect(links.missing).toEqual([]);
+    expect(links.packs).toEqual(catalogWithPacks(file).packs.map((pack) => ({ code: pack.pack, terms_hash: pack.terms, currency: "cad", provider_ref: packProducts.find((product) => product.metadata.lobbystack_pack === pack.pack)!.id })));
+    // The plans link as they would without packs.
+    expect(polarLinkPlans({ catalog: catalogFor(file), plans: desiredBillingPlans(file), snapshot: await client(fake).readSnapshot(), now })).toEqual({ ...links, packs: [] });
+    expect(polarLinkPlans({ catalog: catalogWithPacks(file), plans: desiredBillingPlans(file), snapshot: await client(createFakePolar()).readSnapshot(), now }).missing).toContain("pack pack_250_90: 0 live products tagged for it");
+  });
+
+  it("changes a pack's price on its own product, and puts back its name, its visibility and the Credits taken off it", async () => {
+    const fake = createFakePolar();
+    await applyWithPacks(fake, profile());
+    const product = fake.state.products.find((entry) => entry.metadata.lobbystack_pack === "pack_250_90")!;
+    const raised = () => profile((file) => {
+      file.packs.pack_250_90.priceCents = 6000;
+    });
+    const { first } = await applyWithPacks(fake, raised());
+    expect(first.steps.map((step) => [step.action, step.subject, step.changes])).toEqual([["update", 'Product "250 minutes, 90 days"', ["add 60.00 CAD once", "drop 55.00 CAD fixed", expect.stringMatching(/^made from older terms/)]]]);
+    expect(product.prices.filter((price) => !price.is_archived).map((price) => price.price_amount)).toEqual([6000]);
+
+    product.name = "250 minutes";
+    product.visibility = "public";
+    fake.state.benefits.push({ id: "benefit_credits", type: "meter_credit", description: "250 voice minutes", properties: { units: 250, rollover: false, meter_id: fake.state.meters[0]!.id }, metadata: {} });
+    product.benefitIds = ["benefit_credits"];
+    const { first: back } = await applyWithPacks(fake, raised());
+    expect(back.steps.map((step) => [step.action, step.changes])).toEqual([
+      ["update", ['named "250 minutes", the file says "250 minutes, 90 days"', "public, a pack is private"]],
+      ["detach", ['detach "250 voice minutes": the worker reports only each month\'s overage']],
+    ]);
+    expect([product.name, product.visibility, product.benefitIds]).toEqual(["250 minutes, 90 days", "private", []]);
+  });
+
+  it("refuses a pack product that bills on a cycle, and replaces it with a one-time product only with --allow-replace", async () => {
+    const fake = createFakePolar();
+    await applyWithPacks(fake, profile());
+    const product = fake.state.products.find((entry) => entry.metadata.lobbystack_pack === "pack_250_90")!;
+    product.recurring_interval = "month";
+    product.recurring_interval_count = 1;
+    expect(await planWithPacks(fake, profile())).toEqual({ steps: [], refusals: [{ object: "product", subject: 'Product "250 minutes, 90 days"', message: "\"250 minutes, 90 days\" bills every 1 month, a pack is paid once, and Polar never changes a product's billing cycle. Run with --allow-replace to make a one-time product and archive this one." }] });
+    const { first } = await applyWithPacks(fake, profile(), { allowReplace: true });
+    expect(first.steps.map((step) => [step.action, step.changes])).toEqual([
+      ["create", ['replaces "250 minutes, 90 days", which bills every 1 month: 55.00 CAD once', "private: only an API checkout sells it"]],
+      ["archive", ["replaced by a one-time product"]],
+    ]);
+    expect(product.is_archived).toBe(true);
+    expect(fake.state.products.filter((entry) => entry.metadata.lobbystack_pack === "pack_250_90" && !entry.is_archived).map((entry) => entry.recurring_interval)).toEqual([null]);
+  });
+
+  it("archives a pack product the file no longer has only with --allow-archive, leaves the plans' products alone, and brings it back with the pack", async () => {
+    const fake = createFakePolar();
+    await applyWithPacks(fake, profile());
+    const product = fake.state.products.find((entry) => entry.metadata.lobbystack_pack === "pack_250_90")!;
+    const fewer = profile((file) => {
+      delete file.packs.pack_250_90;
+    });
+    expect(await planWithPacks(fake, fewer)).toEqual({ steps: [], refusals: [{ object: "product", subject: 'Product "250 minutes, 90 days"', message: "It sells pack pack_250_90, which the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes." }] });
+    const { first } = await applyWithPacks(fake, fewer, { allowArchive: true });
+    expect(first.steps).toEqual([expect.objectContaining({ action: "archive", leftover: true, path: `/v1/products/${product.id}`, changes: ["the file no longer sells it; packs bought through it keep their minutes"] })]);
+    expect(fake.state.products.filter((entry) => entry.is_archived).map((entry) => entry.id)).toEqual([product.id]);
+    // A file without packs at all would archive every pack product, and no plan's.
+    const none = await plan(fake, profile((file) => {
+      delete file.packs;
+    }));
+    expect(none.steps).toEqual([]);
+    expect(none.refusals.map((refusal) => refusal.message.match(/^It sells pack (pack_\d+_\d+)/)?.[1])).toEqual(catalogWithPacks(fewer).packs.map((pack) => pack.pack));
+    const { first: back } = await applyWithPacks(fake, profile());
+    expect(back.steps).toEqual([expect.objectContaining({ action: "update", path: `/v1/products/${product.id}`, changes: ["bring it back: the file sells this pack again"], body: { is_archived: false } })]);
   });
 });

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import type { LiveTransportIncomingWebhookEvent } from "openai/resources/webhooks";
 
 import { buildPhoneSessionConfig } from "@lobbystack/agent-core/live/session";
-import { finishLiveCall, getCachedBusinessSnapshot, recordAiTrace, startLivePhoneCall } from "@lobbystack/domain";
+import { finishLiveCall, getCachedBusinessSnapshot, recordAiTrace, snapshotForReceptionist, startLivePhoneCall } from "@lobbystack/domain";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
 import { runAfterResponse } from "@/lib/after-response";
 import { getAppDatabase } from "@/lib/api-helpers";
@@ -74,13 +74,16 @@ async function routeIncomingCall(client: LiveClient, event: LiveTransportIncomin
   // incoming call to both. Only the deployment that owns the number may accept
   // or reject it; until ownership is known, this deployment leaves the call alone.
   let businessId: string | null | undefined;
+  // The receptionist that answers the number: its own, or the default one when that is paused or archived.
+  let receptionistId: string | null | undefined;
   let routed: (typeof candidates)[number] | undefined;
   let closed = false;
   try {
     const phones = sql.join(candidates.map(({ phone }) => sql`${phone}`), sql`, `);
-    const resolved = await getAppDatabase().db.execute<{ business_id: string | null; closed: boolean | null; position: number }>(sql`select app.resolve_business_by_phone(phone) as business_id, app.is_closed_business_phone(phone) as closed, position::int from unnest(array[${phones}]::text[]) with ordinality as candidate(phone, position) order by position`);
+    const resolved = await getAppDatabase().db.execute<{ business_id: string | null; receptionist_id: string | null; closed: boolean | null; position: number }>(sql`select app.resolve_business_by_phone(phone) as business_id, app.resolve_receptionist_by_phone(phone) as receptionist_id, app.is_closed_business_phone(phone) as closed, position::int from unnest(array[${phones}]::text[]) with ordinality as candidate(phone, position) order by position`);
     const match = resolved.rows.find((row) => row.business_id);
     businessId = match?.business_id;
+    receptionistId = match?.receptionist_id;
     routed = match && candidates[match.position - 1];
     closed = resolved.rows.some((row) => row.closed);
     timing.mark("lookup");
@@ -105,7 +108,7 @@ async function routeIncomingCall(client: LiveClient, event: LiveTransportIncomin
   addToCallContext({ businessId });
 
   try {
-    return await answerCall(client, { sessionId, businessId, from, to: routed.phone, timing, ...(twilioCallSid ? { twilioCallSid } : {}) });
+    return await answerCall(client, { sessionId, businessId, from, to: routed.phone, timing, ...(twilioCallSid ? { twilioCallSid } : {}), ...(receptionistId ? { receptionistId } : {}) });
   } catch (error) {
     // Reported in the background: the caller is still waiting.
     void reportServerError(error, { operation: "live.incoming" });
@@ -127,7 +130,7 @@ function createTiming() {
     eventAgeMs: undefined as number | undefined,
     // The header whose number picked the business.
     routedBy: undefined as string | undefined,
-    // With LIVE_RECORDED_GREETING=true, whether the call opened with a recording.
+    // Unless LIVE_RECORDED_GREETING=false, whether the call opened with a recording.
     greetingRecording: undefined as boolean | undefined,
     // Another delivery's decision on the call came before this one's accept.
     decisionAlreadyMade: undefined as true | undefined,
@@ -163,12 +166,20 @@ type LiveClient = ReturnType<typeof getLiveClient>;
 // Twilio media path does, so billing and limits behave identically. The
 // snapshot loads at the same time, and then the check for the opening's
 // recording, since the caller is still hearing it ring.
-async function answerCall(client: LiveClient, input: { sessionId: string; businessId: string; from: string | undefined; to: string; timing: Timing; twilioCallSid?: string }) {
+async function answerCall(client: LiveClient, input: { sessionId: string; businessId: string; from: string | undefined; to: string; timing: Timing; twilioCallSid?: string; receptionistId?: string }) {
   const domain = createWorkerDomainContext();
-  const loading = getCachedBusinessSnapshot(domain, { businessId: input.businessId });
+  // The number's receptionist answers with its own view of the business's snapshot.
+  const loading = getCachedBusinessSnapshot(domain, { businessId: input.businessId }).then((stored) => (stored ? snapshotForReceptionist(stored, input.receptionistId) : null));
+  // The call's record names the receptionist the caller hears: the snapshot's
+  // view, which answers as the default for one paused a moment ago, before
+  // the snapshot knew. Without a view, the number's receptionist.
+  const recording = loading.catch(() => null).then((snapshot) => {
+    const receptionistId = snapshot?.receptionist?.id ?? input.receptionistId;
+    return startLivePhoneCall(domain, { businessId: input.businessId, sessionId: input.sessionId, from: input.from, to: input.to, ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}), ...(receptionistId ? { receptionistId } : {}) });
+  });
   const [loaded, started, greeting] = await Promise.allSettled([
     loading,
-    startLivePhoneCall(domain, { businessId: input.businessId, sessionId: input.sessionId, from: input.from, to: input.to, ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}) }),
+    recording,
     loading.then(async (snapshot) => (snapshot ? await recordedGreetingFor(snapshot, { phone: true }) : undefined)),
   ]);
   input.timing.mark("record");
@@ -204,7 +215,8 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
   // A retried delivery's limit is read back from the call's reservation, which
   // top-ups may have grown. Its call may be under way, so it attaches as a resume:
   // the worker numbers turns after the saved ones and skips the greeting.
-  const attach = (options: { resume?: boolean; recordedGreeting?: RecordedGreeting } = {}) => attachWorkerToLiveSession({ sessionId: input.sessionId, businessId: input.businessId, callId: call.callId, conversationId: call.conversationId, channel: "voice", ...(input.from ? { callerPhone: input.from } : {}), ...(call.maxDurationMs !== undefined ? { maxDurationMs: call.maxDurationMs } : {}), ...options });
+  const answeredBy = snapshot.receptionist?.id ?? input.receptionistId;
+  const attach = (options: { resume?: boolean; recordedGreeting?: RecordedGreeting } = {}) => attachWorkerToLiveSession({ sessionId: input.sessionId, businessId: input.businessId, callId: call.callId, conversationId: call.conversationId, channel: "voice", ...(input.from ? { callerPhone: input.from } : {}), ...(call.maxDurationMs !== undefined ? { maxDurationMs: call.maxDurationMs } : {}), ...(answeredBy ? { receptionistId: answeredBy } : {}), ...options });
   // A retried delivery. The first one may have died before accepting or before
   // the worker attached, so finish the job without touching the call record:
   // accepting an accepted session just fails, and attaching is idempotent.

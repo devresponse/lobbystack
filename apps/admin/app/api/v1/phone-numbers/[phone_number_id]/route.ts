@@ -4,10 +4,10 @@ import { v1 } from "@/lib/public-api/routes";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+export const PATCH = v1.updatePhoneNumber;
 export const DELETE = v1.releasePhoneNumber;
 
-const notAllowed = methodNotAllowed(["DELETE"]);
+const notAllowed = methodNotAllowed(["PATCH", "DELETE"]);
 export const GET = notAllowed;
 export const POST = notAllowed;
-export const PATCH = notAllowed;
 export const PUT = notAllowed;

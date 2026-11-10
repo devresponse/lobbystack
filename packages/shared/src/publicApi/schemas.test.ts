@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "../receptionist";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
-import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiBillingCodeCreateSchema, apiCheckoutCreateSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
+import { apiAppointmentCreateSchema, apiBillingCatalogLinkSchema, billingCatalogLinkRequest, apiAppointmentRescheduleSchema, apiBillingCodeCreateSchema, apiCheckoutCreateSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -123,5 +123,46 @@ describe("parseApiInput", () => {
       expect(parseApiInput(apiAppointmentRescheduleSchema, { starts_at })).toEqual({ ok: true, data: { starts_at } });
     }
     expect(parseApiInput(apiAppointmentRescheduleSchema, { starts_at: "2026-10-09T14:00" })).toEqual({ ok: false, details: [{ path: "starts_at", message: "Invalid ISO datetime" }] });
+  });
+});
+
+describe("the billing catalog link request", () => {
+  const base = { brand: "alloplace", hash: "a".repeat(64) };
+  const polarPlans = [{ code: "pro", terms_hash: "b".repeat(64), polar_disc: null, prices: [{ period: "monthly", currency: "cad", polar_id: "prod_1" }] }];
+  const providerPlans = [{ code: "pro", terms_hash: "b".repeat(64), provider_disc: null, prices: [{ period: "monthly", currency: "cad", provider_ref: "prod_1" }] }];
+  const translated = { code: "pro", terms_hash: "b".repeat(64), provider_disc: null, prices: [{ period: "monthly", currency: "cad", provider_ref: "prod_1" }] };
+  const issues = (body: Record<string, unknown>) => {
+    const parsed = apiBillingCatalogLinkSchema.safeParse(body);
+    return parsed.success ? [] : parsed.error.issues.map((issue) => issue.path.join("."));
+  };
+
+  it("takes Polar's names, as clients before the provider's names send them, and translates them on arrival", () => {
+    const body = apiBillingCatalogLinkSchema.parse({ ...base, polar_env: "production", polar_org: "org_1", plans: polarPlans });
+    // Such a client names no pack.
+    expect(billingCatalogLinkRequest(body)).toEqual({ ...base, provider: "polar", provider_env: "live", provider_account: "org_1", plans: [translated], packs: [], objects: null, replace_ids: false, dry_run: false, names: "polar" });
+  });
+
+  it("takes each pack with the object that sells its live price, under provider_ref only", () => {
+    const packs = [{ code: "pack_250_90", terms_hash: "c".repeat(64), currency: "cad", provider_ref: "price_1" }];
+    const stripe = apiBillingCatalogLinkSchema.parse({ ...base, provider: "stripe", provider_env: "live", provider_account: "acct_1", plans: providerPlans, packs });
+    expect(billingCatalogLinkRequest(stripe).packs).toEqual(packs);
+    expect(issues({ ...base, provider: "polar", provider_env: "sandbox", provider_account: "org_1", plans: providerPlans, packs: [{ ...packs[0], polar_id: "prod_1" }] })).toEqual(["packs.0"]);
+    expect(issues({ ...base, provider: "stripe", provider_env: "live", provider_account: "acct_1", plans: providerPlans, packs: [{ ...packs[0], currency: "CAD" }] })).toEqual(["packs.0.currency"]);
+  });
+
+  it("takes the provider's names, for Polar or Stripe, with Stripe's other objects", () => {
+    const polar = apiBillingCatalogLinkSchema.parse({ ...base, provider: "polar", provider_env: "sandbox", provider_account: "org_1", plans: providerPlans, dry_run: true });
+    expect(billingCatalogLinkRequest(polar)).toMatchObject({ provider: "polar", provider_env: "sandbox", provider_account: "org_1", plans: [translated], dry_run: true, names: "provider" });
+    const stripe = apiBillingCatalogLinkSchema.parse({ ...base, provider: "stripe", provider_env: "live", provider_account: "acct_1", plans: providerPlans, objects: { meters: ["mtr_1"] }, replace_ids: true });
+    expect(billingCatalogLinkRequest(stripe)).toMatchObject({ provider: "stripe", provider_env: "live", objects: { meters: ["mtr_1"] }, replace_ids: true, names: "provider" });
+    // Both names of one value, when they agree.
+    expect(issues({ ...base, provider_env: "live", polar_env: "production", polar_org: "org_1", plans: polarPlans })).toEqual([]);
+  });
+
+  it("refuses Polar's names with another provider, a value named neither way, and two names that disagree", () => {
+    expect(issues({ ...base, provider: "stripe", provider_env: "live", provider_account: "acct_1", polar_org: "org_1", plans: polarPlans })).toEqual(["polar_org", "plans.0.polar_disc", "plans.0.prices.0.polar_id", "provider_account"]);
+    expect(issues({ ...base, polar_org: "org_1", plans: providerPlans })).toEqual(["provider_env"]);
+    expect(issues({ ...base, provider_env: "sandbox", polar_env: "production", polar_org: "org_1", plans: polarPlans })).toEqual(["provider_env"]);
+    expect(issues({ ...base, polar_env: "sandbox", polar_org: "org_1", plans: polarPlans, objects: {} })).toEqual(["objects"]);
   });
 });

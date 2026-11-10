@@ -217,6 +217,9 @@
           "voiceMinutes_one": "{{count}} minut razgovora u pregledaču",
           "voiceMinutes_few": "{{count}} minuta razgovora u pregledaču",
           "voiceMinutes_other": "{{count}} minuta razgovora u pregledaču",
+          "receptionists_one": "{{count}} recepcioner",
+          "receptionists_few": "{{count}} recepcionera",
+          "receptionists_other": "{{count}} recepcionera",
           "bookingContacts": "Bez broja telefona",
           "support": "Podrška zajednice"
         }
@@ -236,6 +239,9 @@
           "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
           "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
           "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+          "receptionists_one": "{{count}} recepcioner",
+          "receptionists_few": "{{count}} recepcionera",
+          "receptionists_other": "{{count}} recepcionera",
           "dedicatedNumber_one": "{{count}} namenski poslovni broj",
           "dedicatedNumber_few": "{{count}} namenska poslovna broja",
           "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
@@ -260,6 +266,9 @@
           "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
           "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
           "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+          "receptionists_one": "{{count}} recepcioner",
+          "receptionists_few": "{{count}} recepcionera",
+          "receptionists_other": "{{count}} recepcionera",
           "dedicatedNumber_one": "{{count}} namenski poslovni broj",
           "dedicatedNumber_few": "{{count}} namenska poslovna broja",
           "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
@@ -277,6 +286,7 @@
         "cta": "Kontaktirajte nas",
         "highlights": {
           "phoneNumbers": "Više namenskih brojeva",
+          "customReceptionists": "Broj recepcionera po dogovoru",
           "selfHosted": "Mogućnost samostalnog hostovanja",
           "support": "Namenska podrška pri uvođenju"
         }
@@ -294,6 +304,7 @@
       },
       "features": {
         "voiceMinutes": "Minuti razgovora",
+        "receptionists": "Recepcioneri",
         "outboundCalls": "Pokušaji preusmeravanja",
         "alertSms": "SMS segmenti za obaveštenja",
         "knowledgeStorage": "Baza znanja",
@@ -340,6 +351,11 @@
             "included_few": "{{count}} uključena",
             "included_other": "{{count}} uključeno",
             "then": "zatim {{rate}}/min"
+          },
+          "receptionists": {
+            "included_one": "{{count}} uključen",
+            "included_few": "{{count}} uključena",
+            "included_other": "{{count}} uključeno"
           },
           "outboundCalls": {
             "included_one": "{{count}} uključen",
@@ -390,7 +406,19 @@
     "retry": "Pokušaj ponovo",
     "current": {
       "title": "Ova firma već ima paket {{plan}}.",
-      "description": "Paket je već podešen, pa možete da pređete na broj telefona."
+      "description": "Paket je već podešen, pa možete da pređete na broj telefona.",
+      "prepaidTitle": "Ova firma već ima dopunu minuta.",
+      "prepaidDescription": "Minuti su spremni, pa možete da pređete na broj telefona."
+    },
+    "packs": {
+      "title": "Više volite dopunu minuta?",
+      "description": "Kupite minute jednom, bez mesečnog računa. Traju dok ih ne potrošite ili dok dopuna ne istekne.",
+      "cta": "Kupi dopunu minuta",
+      "waiting": "Dodavanje minuta...",
+      "processing": "Plaćanje se još obrađuje. Proverite ponovo za nekoliko minuta.",
+      "checkAgain": "Proveri ponovo",
+      "failed": "Plaćanje nije prošlo. Ponovo izaberite paket ili dopunu minuta.",
+      "refunded": "Plaćanje je vraćeno ili osporeno preko banke, pa dopuna minuta nije dodata. Ponovo izaberite paket ili dopunu minuta."
     }
   }
 }

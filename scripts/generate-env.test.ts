@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { generateEnv } from "./generate-env.mjs";
@@ -19,6 +21,21 @@ describe("generateEnv", () => {
 
     expect(output).toBe("TWILIO_AUTH_TOKEN=\nPOLAR_WEBHOOK_SECRET=");
     expect(generated).toEqual([]);
+  });
+
+  it("clears Stripe's credentials too, and leaves the provider choice as it is", () => {
+    const { output, generated } = generateEnv("BILLING_PROVIDER=\nSTRIPE_API_KEY=replace-with-stripe-key\nSTRIPE_WEBHOOK_SECRET=replace-with-stripe-webhook-secret\nSTRIPE_METER_WEBHOOK_SECRET=replace-with-stripe-meter-secret");
+
+    expect(output).toBe("BILLING_PROVIDER=\nSTRIPE_API_KEY=\nSTRIPE_WEBHOOK_SECRET=\nSTRIPE_METER_WEBHOOK_SECRET=");
+    expect(generated).toEqual([]);
+  });
+
+  it("clears every provider credential of the real .env.example", () => {
+    const { output } = generateEnv(readFileSync(new URL("../.env.example", import.meta.url), "utf8"), () => "generated");
+
+    for (const key of ["TWILIO_AUTH_TOKEN", "POLAR_WEBHOOK_SECRET", "STRIPE_API_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_METER_WEBHOOK_SECRET"]) {
+      expect(output).toMatch(new RegExp(`^${key}=$`, "m"));
+    }
   });
 
   it("generates production-length secrets by default", () => {

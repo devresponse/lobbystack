@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-import { agentRules, appointments, businessHours, businesses, calls, contactPasscodes, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, appointments, businessHours, businesses, calls, contactPasscodes, contacts, conversations, conversationSessions, inboxItems, knowledgeDocumentReceptionists, knowledgeDocuments, knowledgeSnippetReceptionists, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
@@ -18,6 +18,7 @@ import {
   widgetEmbedSnippet,
   weekdays,
   type ApiAppointment,
+  type ApiBillingPack,
   type ApiBusiness,
   type ApiCalendarConnection,
   type ApiCall,
@@ -38,6 +39,7 @@ import {
   type ApiStaff,
   type ApiWebhookEndpoint,
   type ApiWidgetKey,
+  type BillingPackHolding,
 } from "@lobbystack/shared";
 
 import { resolveCallOutcome } from "../callOutcome";
@@ -120,7 +122,7 @@ export function clockToMinutes(value: string): number {
 export async function loadBusinessResource(tx: DatabaseTransaction, businessId: string): Promise<ApiBusiness | null> {
   const [business] = await tx.select().from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) return null;
-  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
   return {
     id: business.id,
@@ -198,6 +200,7 @@ export async function listStaffResources(tx: DatabaseTransaction, businessId: st
 
 const callColumns = {
   id: calls.id,
+  receptionistId: calls.receptionistId,
   transport: calls.transport,
   disposition: calls.disposition,
   startedAt: calls.startedAt,
@@ -215,7 +218,7 @@ const callColumns = {
   recordingRetentionUntil: storageObjects.retentionUntil,
 };
 
-type CallRow = { id: string; transport: string; disposition: string | null; startedAt: Date; endedAt: Date | null; createdAt: Date; providerDurationSeconds: number | null; contactId: string | null; contactName: string | null; contactPhone: string | null; conversationSummary: string | null; currentIntent: string | null; persistedOutcome: Record<string, unknown> | null; recordingObjectId: string | null; recordingStatus: string | null; recordingRetentionUntil: Date | null };
+type CallRow = { id: string; receptionistId: string; transport: string; disposition: string | null; startedAt: Date; endedAt: Date | null; createdAt: Date; providerDurationSeconds: number | null; contactId: string | null; contactName: string | null; contactPhone: string | null; conversationSummary: string | null; currentIntent: string | null; persistedOutcome: Record<string, unknown> | null; recordingObjectId: string | null; recordingStatus: string | null; recordingRetentionUntil: Date | null };
 
 function callQuery(tx: DatabaseTransaction, where: SQL | undefined) {
   return tx.select(callColumns).from(calls)
@@ -233,6 +236,7 @@ export function serializeCall(row: CallRow): ApiCall {
   const measured = row.endedAt ? Math.max(0, Math.round((row.endedAt.getTime() - row.startedAt.getTime()) / 1000)) : null;
   return {
     id: row.id,
+    receptionist_id: row.receptionistId,
     channel: row.transport.includes("web") ? "web" : "phone",
     status: row.endedAt ? "completed" : "in_progress",
     outcome: outcome.kind === "booked" ? "appointment_booked" : outcome.kind === "booking_in_progress" ? "booking_incomplete" : outcome.kind === "message_taking" ? "message_taken" : outcome.kind === "summary" ? "conversation" : "none",
@@ -254,12 +258,14 @@ export async function loadCallResource(tx: DatabaseTransaction, businessId: stri
   return row ? serializeCall(row) : null;
 }
 
-export async function listCallResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { startedAfter?: Date | undefined; startedBefore?: Date | undefined }): Promise<Page<ApiCall>> {
+export async function listCallResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { startedAfter?: Date | undefined; startedBefore?: Date | undefined; receptionistId?: string | undefined }): Promise<Page<ApiCall>> {
   const limit = pageSize(request.limit);
   const rows = await callQuery(tx, and(
     eq(calls.businessId, businessId),
     request.startedAfter ? gte(calls.startedAt, request.startedAfter) : undefined,
     request.startedBefore ? lt(calls.startedAt, request.startedBefore) : undefined,
+    // Every call names the receptionist that answered (migration 0143), so the filter is plain equality.
+    request.receptionistId ? eq(calls.receptionistId, request.receptionistId) : undefined,
     afterCursor(calls.startedAt, calls.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(calls.startedAt, calls.id)).limit(limit + 1);
   return toPage(rows, limit, serializeCall, (row) => ({ at: row.startedAt, id: row.id }));
@@ -426,6 +432,7 @@ const messageExpired = sql<boolean>`(${inboxItems.contentRetentionStatus} = 'scr
 
 const messageColumns = {
   id: inboxItems.id,
+  receptionistId: inboxItems.receptionistId,
   status: inboxItems.status,
   title: inboxItems.title,
   body: inboxItems.body,
@@ -436,7 +443,7 @@ const messageColumns = {
   updatedAt: inboxItems.updatedAt,
 };
 
-type MessageRow = { id: string; status: string; title: string; body: string; metadata: Record<string, unknown> | null; relatedCallId: string | null; expired: boolean; createdAt: Date; updatedAt: Date };
+type MessageRow = { id: string; receptionistId: string; status: string; title: string; body: string; metadata: Record<string, unknown> | null; relatedCallId: string | null; expired: boolean; createdAt: Date; updatedAt: Date };
 
 const urgencies = new Set(["low", "normal", "urgent"]);
 const messageChannels = new Set(["voice", "web_voice", "web_chat", "sms"]);
@@ -455,6 +462,7 @@ export function serializeMessage(row: MessageRow): ApiMessage {
   const appointmentId = text(metadata.appointmentId);
   return {
     id: row.id,
+    receptionist_id: row.receptionistId,
     status: row.status === "done" ? "done" : "open",
     title: row.expired ? EXPIRED_FOLLOW_UP_TITLE : row.title,
     body: row.expired ? "[Expired by the retention policy]" : row.body,
@@ -476,12 +484,13 @@ export async function loadMessageResource(tx: DatabaseTransaction, businessId: s
   return row ? serializeMessage(row) : null;
 }
 
-export async function listMessageResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { status?: "open" | "done" | undefined }): Promise<Page<ApiMessage>> {
+export async function listMessageResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { status?: "open" | "done" | undefined; receptionistId?: string | undefined }): Promise<Page<ApiMessage>> {
   const limit = pageSize(request.limit);
   const rows = await tx.select(messageColumns).from(inboxItems).where(and(
     eq(inboxItems.businessId, businessId),
     eq(inboxItems.kind, "voice_message"),
     request.status ? eq(inboxItems.status, request.status) : undefined,
+    request.receptionistId ? eq(inboxItems.receptionistId, request.receptionistId) : undefined,
     afterCursor(inboxItems.createdAt, inboxItems.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(inboxItems.createdAt, inboxItems.id)).limit(limit + 1);
   return toPage(rows, limit, serializeMessage, (row) => ({ at: row.createdAt, id: row.id }));
@@ -492,8 +501,40 @@ export async function listMessageResources(tx: DatabaseTransaction, businessId: 
 /** An FAQ is a snippet with this tag; the API shows it as the entry's type, not as a label. */
 export const FAQ_TAG = "faq";
 
-export function serializeKnowledgeEntry(row: Pick<typeof knowledgeSnippets.$inferSelect, "id" | "title" | "content" | "tags" | "priority" | "active" | "createdAt" | "updatedAt">): ApiKnowledgeEntry {
-  return { id: row.id, type: row.tags.includes(FAQ_TAG) ? "faq" : "text", title: row.title, content: row.content, tags: row.tags.filter((tag) => tag !== FAQ_TAG), priority: row.priority, active: row.active, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+/** Who an article is for: chosen ones list their receptionists, archived ones too; those for everyone list none. */
+function audienceOf(audience: string, receptionistIds: readonly string[] | undefined): Pick<ApiKnowledgeEntry, "audience" | "receptionist_ids"> {
+  return audience === "chosen" ? { audience: "chosen", receptionist_ids: [...(receptionistIds ?? [])] } : { audience: "everyone", receptionist_ids: [] };
+}
+
+/** The ids of the rows chosen for some receptionists, the only ones with links to read. */
+function chosenIds(rows: ReadonlyArray<{ id: string; audience: string }>): string[] {
+  return rows.filter((row) => row.audience === "chosen").map((row) => row.id);
+}
+
+function groupLinks(rows: ReadonlyArray<{ articleId: string; receptionistId: string }>): Map<string, string[]> {
+  const links = new Map<string, string[]>();
+  for (const row of rows) links.set(row.articleId, [...(links.get(row.articleId) ?? []), row.receptionistId]);
+  return links;
+}
+
+/** The receptionists chosen for each text entry named, in the order they were chosen, as the Knowledge page shows them. */
+export async function knowledgeEntryReceptionists(tx: DatabaseTransaction, businessId: string, entryIds: string[]): Promise<Map<string, string[]>> {
+  if (!entryIds.length) return new Map();
+  return groupLinks(await tx.select({ articleId: knowledgeSnippetReceptionists.snippetId, receptionistId: knowledgeSnippetReceptionists.receptionistId }).from(knowledgeSnippetReceptionists)
+    .where(and(eq(knowledgeSnippetReceptionists.businessId, businessId), inArray(knowledgeSnippetReceptionists.snippetId, entryIds)))
+    .orderBy(asc(knowledgeSnippetReceptionists.createdAt), asc(knowledgeSnippetReceptionists.receptionistId)));
+}
+
+/** The receptionists chosen for each website, page or file named, including those website rules chose. */
+export async function knowledgeSourceReceptionists(tx: DatabaseTransaction, businessId: string, documentIds: string[]): Promise<Map<string, string[]>> {
+  if (!documentIds.length) return new Map();
+  return groupLinks(await tx.select({ articleId: knowledgeDocumentReceptionists.documentId, receptionistId: knowledgeDocumentReceptionists.receptionistId }).from(knowledgeDocumentReceptionists)
+    .where(and(eq(knowledgeDocumentReceptionists.businessId, businessId), inArray(knowledgeDocumentReceptionists.documentId, documentIds)))
+    .orderBy(asc(knowledgeDocumentReceptionists.createdAt), asc(knowledgeDocumentReceptionists.receptionistId)));
+}
+
+export function serializeKnowledgeEntry(row: Pick<typeof knowledgeSnippets.$inferSelect, "id" | "title" | "content" | "tags" | "priority" | "active" | "audience" | "createdAt" | "updatedAt">, receptionistIds?: readonly string[]): ApiKnowledgeEntry {
+  return { id: row.id, type: row.tags.includes(FAQ_TAG) ? "faq" : "text", title: row.title, content: row.content, tags: row.tags.filter((tag) => tag !== FAQ_TAG), priority: row.priority, active: row.active, ...audienceOf(row.audience, receptionistIds), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 function isFaq(): SQL {
@@ -507,17 +548,17 @@ export async function listKnowledgeEntryResources(tx: DatabaseTransaction, busin
     request.type === "faq" ? isFaq() : request.type === "text" ? not(isFaq()) : undefined,
     afterCursor(knowledgeSnippets.createdAt, knowledgeSnippets.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(knowledgeSnippets.createdAt, knowledgeSnippets.id)).limit(limit + 1);
-  return toPage(rows, limit, serializeKnowledgeEntry, (row) => ({ at: row.createdAt, id: row.id }));
+  const links = await knowledgeEntryReceptionists(tx, businessId, chosenIds(rows));
+  return toPage(rows, limit, (row) => serializeKnowledgeEntry(row, links.get(row.id)), (row) => ({ at: row.createdAt, id: row.id }));
 }
 
 export async function loadKnowledgeEntryResource(tx: DatabaseTransaction, businessId: string, entryId: string): Promise<ApiKnowledgeEntry | null> {
   const [row] = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.id, entryId))).limit(1);
-  return row ? serializeKnowledgeEntry(row) : null;
+  if (!row) return null;
+  return serializeKnowledgeEntry(row, (await knowledgeEntryReceptionists(tx, businessId, chosenIds([row]))).get(row.id));
 }
 
-type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "mimeType" | "tags" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
-
-const knowledgeSourceStatuses = ["pending", "processing", "indexed", "error", "cancelled"] as const;
+type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "mimeType" | "tags" | "status" | "error" | "active" | "audience" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
 
 /** A website added as a source has a crawl job; a page its crawl read has none. Anything else is a file. */
 export function knowledgeSourceType(row: Pick<KnowledgeSourceRow, "sourceType" | "jobId">): ApiKnowledgeSource["type"] {
@@ -525,24 +566,23 @@ export function knowledgeSourceType(row: Pick<KnowledgeSourceRow, "sourceType" |
   return row.jobId ? "website" : "page";
 }
 
-export function serializeKnowledgeSource(row: KnowledgeSourceRow): ApiKnowledgeSource {
+export function serializeKnowledgeSource(row: KnowledgeSourceRow, receptionistIds?: readonly string[]): ApiKnowledgeSource {
   const type = knowledgeSourceType(row);
-  // A status this API does not know yet reads as still processing.
-  const status = (knowledgeSourceStatuses as readonly string[]).includes(row.status) ? row.status as ApiKnowledgeSource["status"] : "processing";
   const tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : [];
-  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status, error: status === "error" ? row.error : null, active: row.active, page_limit: type === "website" ? row.pageLimit : null, content_type: type === "file" ? row.mimeType : null, tags, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status: row.status, error: row.status === "error" ? row.error : null, active: row.active, ...audienceOf(row.audience, receptionistIds), page_limit: type === "website" ? row.pageLimit : null, content_type: type === "file" ? row.mimeType : null, tags, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 function selectKnowledgeSourceRows(tx: DatabaseTransaction, businessId: string) {
   return tx
-    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, mimeType: knowledgeDocuments.mimeType, tags: knowledgeDocuments.tags, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
+    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, mimeType: knowledgeDocuments.mimeType, tags: knowledgeDocuments.tags, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, audience: knowledgeDocuments.audience, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
     .from(knowledgeDocuments)
     .leftJoin(websiteIngestionJobs, and(eq(websiteIngestionJobs.rootDocumentId, knowledgeDocuments.id), eq(websiteIngestionJobs.businessId, businessId)));
 }
 
 export async function loadKnowledgeSourceResource(tx: DatabaseTransaction, businessId: string, documentId: string): Promise<ApiKnowledgeSource | null> {
   const [row] = await selectKnowledgeSourceRows(tx, businessId).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.id, documentId))).limit(1);
-  return row ? serializeKnowledgeSource(row) : null;
+  if (!row) return null;
+  return serializeKnowledgeSource(row, (await knowledgeSourceReceptionists(tx, businessId, chosenIds([row]))).get(row.id));
 }
 
 function knowledgeSourceTypeCondition(type: ApiKnowledgeSource["type"] | undefined): SQL | undefined {
@@ -552,11 +592,8 @@ function knowledgeSourceTypeCondition(type: ApiKnowledgeSource["type"] | undefin
   return undefined;
 }
 
-// Matches serializeKnowledgeSource: a status the API doesn't know reads as processing.
 function knowledgeSourceStatusCondition(status: ApiKnowledgeSource["status"] | undefined): SQL | undefined {
-  if (!status) return undefined;
-  if (status === "processing") return or(eq(knowledgeDocuments.status, "processing"), notInArray(knowledgeDocuments.status, [...knowledgeSourceStatuses]));
-  return eq(knowledgeDocuments.status, status);
+  return status ? eq(knowledgeDocuments.status, status) : undefined;
 }
 
 export async function listKnowledgeSourceResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { type?: ApiKnowledgeSource["type"] | undefined; status?: ApiKnowledgeSource["status"] | undefined }): Promise<Page<ApiKnowledgeSource>> {
@@ -567,7 +604,8 @@ export async function listKnowledgeSourceResources(tx: DatabaseTransaction, busi
     knowledgeSourceStatusCondition(request.status),
     afterCursor(knowledgeDocuments.createdAt, knowledgeDocuments.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(knowledgeDocuments.createdAt, knowledgeDocuments.id)).limit(limit + 1);
-  return toPage(rows, limit, serializeKnowledgeSource, (row) => ({ at: row.createdAt, id: row.id }));
+  const links = await knowledgeSourceReceptionists(tx, businessId, chosenIds(rows));
+  return toPage(rows, limit, (row) => serializeKnowledgeSource(row, links.get(row.id)), (row) => ({ at: row.createdAt, id: row.id }));
 }
 
 // Phone numbers. The API names the worker's reclaim steps for what they do:
@@ -575,11 +613,16 @@ export async function listKnowledgeSourceResources(tx: DatabaseTransaction, busi
 // Other statuses stay out.
 
 const phoneNumberStatuses: Record<string, ApiPhoneNumber["status"]> = { active: "active", reclaiming: "releasing", reclaimed: "released", released: "released" };
-const phoneNumberColumns = { id: phoneNumbers.id, e164: phoneNumbers.e164, status: phoneNumbers.status, reclaimScheduledAt: phoneNumbers.reclaimScheduledAt, createdAt: phoneNumbers.createdAt, updatedAt: phoneNumbers.updatedAt };
-type PhoneNumberRow = { id: string; e164: string; status: string; reclaimScheduledAt: Date | null; createdAt: Date; updatedAt: Date };
+const phoneNumberColumns = { id: phoneNumbers.id, e164: phoneNumbers.e164, receptionistId: phoneNumbers.receptionistId, status: phoneNumbers.status, reclaimScheduledAt: phoneNumbers.reclaimScheduledAt, createdAt: phoneNumbers.createdAt, updatedAt: phoneNumbers.updatedAt };
+type PhoneNumberRow = { id: string; e164: string; receptionistId: string | null; status: string; reclaimScheduledAt: Date | null; createdAt: Date; updatedAt: Date };
 
 export function serializePhoneNumber(row: PhoneNumberRow): ApiPhoneNumber {
-  return { id: row.id, phone_number: row.e164, status: phoneNumberStatuses[row.status] ?? "released", release_scheduled_at: isoOrNull(row.reclaimScheduledAt), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+  return { id: row.id, phone_number: row.e164, receptionist_id: row.receptionistId, status: phoneNumberStatuses[row.status] ?? "released", release_scheduled_at: isoOrNull(row.reclaimScheduledAt), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+}
+
+/** A prepaid pack as GET /billing lists it, from listBusinessPacks. */
+export function serializeBillingPack(pack: BillingPackHolding): ApiBillingPack {
+  return { id: pack.id, pack: pack.code, names: pack.names, status: pack.status, seconds_total: pack.secondsTotal, seconds_used: pack.secondsUsed, seconds_left: pack.secondsLeft, days: pack.days, paid_at: pack.paidAt, ends_at: pack.endsAt, ended_at: pack.endedAt, currency: pack.currency, amount_cents: pack.amountCents, refunded_cents: pack.refundedCents };
 }
 
 export async function listPhoneNumberResources(tx: DatabaseTransaction, businessId: string): Promise<ApiPhoneNumber[]> {
@@ -621,7 +664,7 @@ export async function loadPhoneNumberClaimResource(tx: DatabaseTransaction, busi
 // dashboard shows it, until it's revoked. Keys created before it was stored
 // kept only their hash.
 
-export function serializeWidgetKey(row: { id: string; label: string | null; status: string; allowedOrigins: unknown; config: unknown; keyValue: string | null; lastUsedAt: Date | null; createdAt: Date }, appOrigin: string): ApiWidgetKey {
+export function serializeWidgetKey(row: { id: string; label: string | null; status: string; allowedOrigins: unknown; config: unknown; keyValue: string | null; receptionistId: string | null; lastUsedAt: Date | null; createdAt: Date }, appOrigin: string): ApiWidgetKey {
   const parsed = widgetConfigSchema.safeParse(row.config ?? {});
   const config = { ...defaultWidgetConfig, ...(parsed.success ? parsed.data : {}) };
   const status = row.status === "disabled" || row.status === "revoked" ? row.status : "active";
@@ -641,6 +684,7 @@ export function serializeWidgetKey(row: { id: string; label: string | null; stat
       ...(config.leadForm !== undefined ? { lead_form: { enabled: config.leadForm.enabled, require_phone: config.leadForm.requirePhone ?? false, require_email: config.leadForm.requireEmail ?? false, show_before_chat: config.leadForm.showBeforeChat ?? false } } : {}),
       ...(config.liveChat !== undefined ? { live_chat: { enabled: config.liveChat.enabled } } : {}),
     },
+    receptionist_id: row.receptionistId,
     key,
     embed_snippet: key ? widgetEmbedSnippet(appOrigin, key) : null,
     last_used_at: isoOrNull(row.lastUsedAt),
@@ -726,12 +770,15 @@ export function serializeCalendarConnection(row: { id: string; provider: string;
 
 const summarySources = ["placeholder", "generated", "operator"] as const;
 
-type ReceptionistRow = Pick<typeof receptionistProfiles.$inferSelect, "greeting" | "tone" | "summary" | "summarySource" | "bookingPolicy" | "voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferMode" | "transferNumber" | "appointmentChangePolicy" | "bookingMode" | "recordingNotice" | "updatedAt">;
+// The receptionist's own settings, with the ones every receptionist shares, which the business keeps.
+type ReceptionistRow = Pick<typeof receptionistProfiles.$inferSelect, "id" | "greeting" | "tone" | "bookingPolicy" | "voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferMode" | "transferNumber" | "bookingMode" | "updatedAt">
+  & Pick<typeof businesses.$inferSelect, "summary" | "summarySource" | "appointmentChangePolicy" | "recordingNotice">;
 
 /** Shows the settings as calls use them: a transfer mode, booking mode or policy calls don't know reads as what they fall back to. */
 export function serializeReceptionist(row: ReceptionistRow): ApiReceptionist {
   const policy = normalizeAppointmentChangePolicy(row.appointmentChangePolicy);
   return {
+    receptionist_id: row.id,
     greeting: row.greeting,
     tone: row.tone,
     summary: row.summary,

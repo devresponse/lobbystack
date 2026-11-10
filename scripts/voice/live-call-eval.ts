@@ -4,12 +4,13 @@
 // that runs on calls. Agent tools that need the database fail, as they would
 // with the database down. See docs/voice/testing.md.
 //
-// OPENAI_API_KEY=... pnpm voice:eval [--scenario <name>]... [--runs <n>] [--concurrency <n>] [--snapshot <file.json>] [--browser [--recorded-greeting]]
+// OPENAI_API_KEY=... pnpm voice:eval [--scenario <name>]... [--runs <n>] [--concurrency <n>] [--snapshot <file.json> [--receptionist <id>]] [--browser] [--recorded-greeting]
 
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
-import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
+import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, saysGoodbye, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
+import { snapshotForReceptionist } from "@lobbystack/domain";
 import { callOpening, demoSnapshot, type BusinessContextSnapshot } from "@lobbystack/shared";
 import OpenAI from "openai";
 import type { SidebandWS } from "openai/resources/live/sideband/ws";
@@ -26,8 +27,6 @@ const END_WINDOW_MS = 15_000;
 const REPLY_QUIET_MS = 1_500;
 // How long the caller waits for a greeting before speaking: long enough for the worker's fallback and both retries.
 const GREETING_WAIT_MS = 15_000;
-// For the report only: the product never matches words to end a call.
-const GOODBYE = /\b(bye|goodbye|take care|have a (good|great|nice|wonderful)|thanks for calling)\b/i;
 
 const { values } = parseArgs({
   options: {
@@ -35,16 +34,19 @@ const { values } = parseArgs({
     runs: { type: "string", default: "3" },
     concurrency: { type: "string", default: "4" },
     snapshot: { type: "string" },
+    // Which receptionist of a stored snapshot takes the call, the default one unless set.
+    receptionist: { type: "string" },
     // A browser call, as from the website widget: its own instructions, and full-band audio.
     browser: { type: "boolean", default: false },
-    // A browser call that opens with a recording of the greeting, as with LIVE_RECORDED_GREETING=true.
+    // A call that opens with a recording of the greeting, as calls do unless LIVE_RECORDED_GREETING=false.
     "recorded-greeting": { type: "boolean", default: false },
   },
 });
 if (!process.env.OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY.");
-if (values["recorded-greeting"] && !values.browser) throw new Error("--recorded-greeting needs --browser: only browser calls open with a recording.");
 const scenarios = findScenarios(values.scenario);
-const snapshot: BusinessContextSnapshot = values.snapshot ? JSON.parse(readFileSync(values.snapshot, "utf8")) : demoSnapshot;
+const loaded: BusinessContextSnapshot = values.snapshot ? JSON.parse(readFileSync(values.snapshot, "utf8")) : demoSnapshot;
+// A stored snapshot holds every receptionist, and a call gets one receptionist's view of it.
+const snapshot = loaded.receptionists ? snapshotForReceptionist(loaded, values.receptionist) : loaded;
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // Recorded once, as the worker does for the calls after the first.
 const greetingRecording = values["recorded-greeting"] ? (await recordGreeting(client, { greeting: callOpening(snapshot), voice: LIVE_VOICE, snapshot })).audio : undefined;
@@ -92,7 +94,7 @@ function sessionConfig() {
     const { store: _store, client: _client, ...session } = buildBrowserSessionConfig(snapshot, { greetingRecorded: greetingRecording !== undefined });
     return session;
   }
-  const { type: _type, store: _store, ...session } = buildPhoneSessionConfig(snapshot);
+  const { type: _type, store: _store, ...session } = buildPhoneSessionConfig(snapshot, { greetingRecorded: greetingRecording !== undefined });
   return session;
 }
 
@@ -114,6 +116,10 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
   let callerSpoke = false;
   let reply = "";
   let replyEndMs = -1;
+  // OpenAI mutes the caller while a recording plays and GPT-Live's timeline
+  // leaves that time out, so after one its times run behind the audio sent by
+  // the recording's length. Without this, the caller talks over the replies.
+  let timelineLagMs = 0;
   const replies: string[] = [];
   const checks: boolean[] = [];
   // Each hand-over during the scenario, by the tools the agent used.
@@ -124,14 +130,16 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
     reply = "";
   };
   ws.on("session.output_transcript.delta", (event) => {
-    lastReplyEndMs = Math.max(lastReplyEndMs, event.end_ms);
+    const startMs = event.start_ms + timelineLagMs;
+    const endMs = event.end_ms + timelineLagMs;
+    lastReplyEndMs = Math.max(lastReplyEndMs, endMs);
     replied = true;
     if (!callerSpoke && greetedAfterMs === undefined && event.delta.trim()) greetedAfterMs = sessionMs;
     if (!callerSpoke && recordingPlayed) afterRecording += event.delta;
-    if (event.start_ms < scenarioStartMs) return;
-    if (replyEndMs >= 0 && event.start_ms - replyEndMs > 700) flushReply();
+    if (startMs < scenarioStartMs) return;
+    if (replyEndMs >= 0 && startMs - replyEndMs > 700) flushReply();
     reply += event.delta;
-    replyEndMs = event.end_ms;
+    replyEndMs = endMs;
   });
 
   let controller!: LiveCallController;
@@ -156,12 +164,13 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       connect: () => ws as unknown as SidebandWS,
       // As the worker does, the time limit ends the call with a goodbye.
       ...(scenario.limitMs ? { maxDurationMs: scenario.limitMs, onTimeout: (reason) => void controller.wrapUp(reason) } : {}),
-      onDelegation: (timing) => { if (timing.offsetMs >= scenarioStartMs) handOvers.push(timing.tools.join("+") || "reply"); },
+      onDelegation: (timing) => { if (timing.offsetMs + timelineLagMs >= scenarioStartMs) handOvers.push(timing.tools.join("+") || "reply"); },
       onGreeting: (event) => {
         if (event.step === "sent" && event.trigger !== "recording") greetingCommands += 1;
         // A recording writes no transcript, so the greeting counts from when OpenAI started it.
         if (event.step === "spoken" && event.trigger === "recording" && greetingRecording) {
           recordingPlayed = true;
+          timelineLagMs = recordingMs(greetingRecording);
           greetedAfterMs ??= sessionMs;
           replied = true;
           lastReplyEndMs = Math.max(lastReplyEndMs, sessionMs + recordingMs(greetingRecording));
@@ -228,7 +237,8 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       ws.send({ type: "session.close" });
       await Promise.race([closed, sleep(5_000)]);
     }
-    const goodbyes = replies.filter((line) => GOODBYE.test(line)).length;
+    // Goodbyes as the controller recognizes them. The product never matches words to end a call.
+    const goodbyes = replies.filter((line) => saysGoodbye(line)).length;
     const endedAfterMs = ended === undefined ? undefined : Math.max(0, ended - lastLineAt);
     const forbidden = scenario.mustNotSay ? replies.find((line) => scenario.mustNotSay!.test(line)) : undefined;
     // After the recording, GPT-Live should wait for the caller instead of greeting again.

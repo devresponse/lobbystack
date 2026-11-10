@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { hostedCheckoutPlanSlugs } from "./billing";
-import { billingProfileSchema, canonicalBillingProfileJson, normalizeBillingProfile, planTermsJson, resolveBillingPlans, type BillingProfile, type ResolvedBillingPlan } from "./billingProfile";
+import { billingProfileForProvider, billingProfileSchema, canonicalBillingProfileJson, normalizeBillingProfile, packTermsJson, planTermsJson, resolveBillingPacks, resolveBillingPlans, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
@@ -166,6 +166,37 @@ describe("billingProfileSchema", () => {
   });
 });
 
+describe("the file as each provider sells it", () => {
+  const brandFile = (brand: string): unknown => JSON.parse(readFileSync(new URL(`../../../brands/${brand}/billing.json`, import.meta.url), "utf8"));
+
+  it.each(["alloplace", "realinfobot"])("still passes the schema for %s, on Polar and on Stripe", (brand) => {
+    const file = parse(brandFile(brand));
+    expect(problems(billingProfileForProvider(file, "polar"))).toEqual([]);
+    expect(problems(billingProfileForProvider(file, "stripe"))).toEqual([]);
+  });
+
+  it("still passes the schema once Stripe, with overage on the checkout, drops the yearly prices and the plans with only those", () => {
+    const file = parse(withPlans({
+      "pro-yearly": extra({ prices: { annualCents: 80000 } }),
+      "starter-yearly": extra({ tier: "starter", prices: { annualCents: 30000 } }),
+      "starter-launch": extra({ tier: "starter", prices: { monthlyCents: 3000, annualCents: 30000 }, discount: { type: "fixed", amountCents: 2000, duration: "once" } }),
+    }, (raw) => {
+      raw.plans.pro.prices = { annualCents: 87000 };
+      raw.stripe = { ...raw.stripe, overage: "checkout", managedPayments: true };
+    }));
+    const onStripe = billingProfileForProvider(file, "stripe");
+    expect(problems(onStripe)).toEqual([]);
+    // Pro has only a yearly price, so it isn't sold, and neither plan with only a yearly price is offered.
+    expect(onStripe.plans.pro).toMatchObject({ sold: false });
+    expect(Object.keys(onStripe.plans)).not.toContain("pro-yearly");
+    expect(Object.keys(onStripe.plans)).not.toContain("starter-yearly");
+    expect(onStripe.plans["starter-launch"]).toMatchObject({ prices: { monthlyCents: 3000 } });
+    expect(JSON.stringify(onStripe.plans)).not.toContain("annualCents");
+    // Polar sells the file as it is.
+    expect(billingProfileForProvider(file, "polar")).toBe(file);
+  });
+});
+
 describe("resolveBillingPlans", () => {
   it("fills an additional plan's missing values from its tier, and keeps the ones it sets", () => {
     const file = withPlans({ extra: extra({ included: { voiceMinutes: 700 }, limits: { businessNumbers: 0 }, overageCents: { voiceMinute: 15 } }) });
@@ -223,6 +254,39 @@ describe("the profile hash", () => {
   });
 });
 
+describe("receptionists per plan", () => {
+  it("reads each standard plan's number from the file, and its tier's built-in number when the file has none", () => {
+    expect(["free_cloud", "starter", "pro", "enterprise"].map((code) => plan(alloplace(), code).receptionists)).toEqual([1, 1, 5, null]);
+    const older = alloplace();
+    for (const code of ["free_cloud", "starter", "pro"]) delete older.plans[code].limits.receptionists;
+    expect(["free_cloud", "starter", "pro", "enterprise"].map((code) => plan(older, code).receptionists)).toEqual([1, 1, 5, null]);
+    const chain = withPlans({}, (file) => { file.plans.pro.limits.receptionists = 12; });
+    expect(plan(chain, "pro").receptionists).toBe(12);
+  });
+
+  it("gives an additional plan its tier's number unless it sets its own", () => {
+    const file = withPlans({ inherits: extra(), sets: extra({ limits: { receptionists: 20 } }) });
+    expect(plan(file, "inherits").receptionists).toBe(5);
+    expect(plan(file, "sets").receptionists).toBe(20);
+  });
+
+  it("allows 1 to 50 receptionists in a plan", () => {
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 0; }))).toEqual([expect.stringContaining("plans.pro.limits.receptionists")]);
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 51; }))).toEqual([expect.stringContaining("plans.pro.limits.receptionists")]);
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 2.5; }))).toEqual([expect.stringContaining("plans.pro.limits.receptionists")]);
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 50; }))).toEqual([]);
+  });
+
+  it("leaves the number out of the terms hash, so plans with subscribers can change it", () => {
+    const base = termsHash(alloplace(), "pro");
+    expect(termsHash(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 9; }), "pro")).toBe(base);
+    const older = alloplace();
+    delete older.plans.pro.limits.receptionists;
+    expect(termsHash(older, "pro")).toBe(base);
+    expect(planTermsJson(plan(alloplace(), "pro"))).not.toContain("receptionists");
+  });
+});
+
 describe("the terms hash", () => {
   it("ignores names, access, offerEndsAt and sort", () => {
     const base = termsHash(withPlans({ extra: extra() }), "extra");
@@ -262,5 +326,83 @@ describe("the terms hash", () => {
     expect(termsHash(after, "inherits")).not.toBe(termsHash(before, "inherits"));
     expect(termsHash(after, "sets")).toBe(termsHash(before, "sets"));
     expect(termsHash(after, "pro")).not.toBe(termsHash(before, "pro"));
+  });
+});
+
+describe("prepaid packs", () => {
+  const packEntry = (overrides: Record<string, unknown> = {}) => ({ names: name("500 minutes"), minutes: 500, days: 180, priceCents: 9900, ...overrides });
+  const withPacks = (packs: Record<string, unknown>, change: (file: Record<string, any>) => void = () => undefined) => withPlans({}, (file) => { file.packs = packs; change(file); });
+  const pack = (file: unknown, code: string): ResolvedBillingPack => resolveBillingPacks(parse(file)).find((row) => row.code === code)!;
+  const packHash = (file: unknown, code: string) => createHash("sha256").update(packTermsJson(pack(file, code))).digest("hex");
+
+  it("sells nine packs in each brand's file, smallest and shortest first, with Starter's allowances and 20 MB of knowledge", () => {
+    for (const brand of ["alloplace", "realinfobot"]) {
+      const file = JSON.parse(readFileSync(new URL(`../../../brands/${brand}/billing.json`, import.meta.url), "utf8"));
+      const packs = resolveBillingPacks(parse(file));
+      expect(packs.map((row) => row.code)).toEqual(["pack_250_90", "pack_250_180", "pack_250_365", "pack_500_90", "pack_500_180", "pack_500_365", "pack_1000_90", "pack_1000_180", "pack_1000_365"]);
+      expect(packs.map((row) => row.sort)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 90]);
+      expect(packs.find((row) => row.code === "pack_500_180")).toEqual({
+        code: "pack_500_180",
+        names: { en: "500 minutes, 180 days", fr: "500 minutes, 180 jours", es: "500 minutos, 180 días", sr: "500 minuta, 180 dana" },
+        voice_sec: 30_000,
+        days: 180,
+        sms_seg: 50,
+        calls_out: 20,
+        chat_units: 50,
+        kb_bytes: 20 * 1_048_576,
+        numbers: 1,
+        receptionists: 1,
+        sort: 50,
+        price: { currency: "cad", cents: 9900 },
+      });
+    }
+  });
+
+  it("takes what a pack leaves out from Starter, and keeps what it sets", () => {
+    const file = withPacks({ own: packEntry({ included: { alertSmsSegments: 7 }, limits: { knowledgeStorageMb: 3, businessNumbers: 0, receptionists: 2 } }), bare: packEntry({ days: undefined }) });
+    expect(pack(file, "own")).toMatchObject({ sms_seg: 7, calls_out: 20, chat_units: 50, kb_bytes: 3 * 1_048_576, numbers: 0, receptionists: 2 });
+    expect(pack(file, "bare")).toMatchObject({ days: null, sms_seg: 50, kb_bytes: 5 * 1_048_576, numbers: 1, receptionists: 1 });
+    // A pack that never ends sorts after every length of its size.
+    expect(resolveBillingPacks(parse(file)).map((row) => row.code)).toEqual(["own", "bare"]);
+  });
+
+  it("allows a file without packs, and checks each pack's code, length and price", () => {
+    expect(resolveBillingPacks(parse(withPlans({}, (file) => { delete file.packs; })))).toEqual([]);
+    expect(problems(withPacks({ "Big-Pack": packEntry() }))).toEqual([expect.stringMatching(/^packs\.Big-Pack: a pack code is/)]);
+    expect(problems(withPacks({ starter: packEntry() }))).toEqual([expect.stringMatching(/^packs\.starter: a plan already has this code/)]);
+    const many = Object.fromEntries(Array.from({ length: 31 }, (_, index) => [`pack-${String(index).padStart(2, "0")}`, packEntry()]));
+    expect(problems(withPacks(many))).toEqual([expect.stringMatching(/^packs\.pack-30: a file holds at most 30 packs/)]);
+    const refused = (file: unknown, path: RegExp) => expect(problems(file).some((problem) => path.test(problem)), `${path} in ${problems(file).join("; ")}`).toBe(true);
+    refused(withPacks({ pk1: packEntry({ days: 0 }) }), /^packs\.pk1\.days: /);
+    refused(withPacks({ pk1: packEntry({ days: 1_096 }) }), /^packs\.pk1\.days: /);
+    refused(withPacks({ pk1: packEntry({ minutes: 0 }) }), /^packs\.pk1\.minutes: /);
+    refused(withPacks({ pk1: packEntry({ priceCents: 0 }) }), /^packs\.pk1\.priceCents: /);
+    refused(withPacks({ pk1: packEntry({ included: { voiceMinutes: 10 } }) }), /^packs\.pk1\.included: Unrecognized key/);
+    refused(withPacks({ pk1: packEntry({ limits: { businessNumbers: 2 } }) }), /^packs\.pk1\.limits\.businessNumbers: /);
+    expect(problems(withPacks({ pk1: packEntry({ days: 1_095 }) }))).toEqual([]);
+  });
+
+  it("hashes everything a buyer gets and the price, but not the names or the order", () => {
+    const base = packHash(withPacks({ pk1: packEntry() }), "pk1");
+    expect(packHash(withPacks({ pk1: packEntry({ names: name("Another name") }), pk0: packEntry({ minutes: 100 }) }), "pk1")).toBe(base);
+    const changed = [
+      packEntry({ minutes: 501 }),
+      packEntry({ days: 181 }),
+      packEntry({ days: undefined }),
+      packEntry({ priceCents: 9901 }),
+      packEntry({ included: { alertSmsSegments: 1 } }),
+      packEntry({ included: { outboundCallAttempts: 1 } }),
+      packEntry({ included: { chatAiUnits: 1 } }),
+      packEntry({ limits: { knowledgeStorageMb: 1 } }),
+      packEntry({ limits: { businessNumbers: 0 } }),
+      packEntry({ limits: { receptionists: 3 } }),
+    ].map((entry) => packHash(withPacks({ pk1: entry }), "pk1"));
+    expect(new Set([base, ...changed]).size).toBe(changed.length + 1);
+    expect(packHash(withPacks({ pk1: packEntry() }, (file) => { file.currency = "usd"; }), "pk1")).not.toBe(base);
+  });
+
+  it("leaves every plan's terms hash as it was", () => {
+    const without = withPlans({}, (file) => { delete file.packs; });
+    for (const code of ["free_cloud", "starter", "pro", "enterprise"]) expect(termsHash(alloplace(), code)).toBe(termsHash(without, code));
   });
 });

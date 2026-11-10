@@ -6,6 +6,8 @@
   "tags": [],
   "priority": 0,
   "active": true,
+  "audience": "everyone",
+  "receptionist_ids": [],
   "created_at": "2026-09-22T17:00:00Z",
   "updated_at": "2026-09-22T17:00:00Z"
 }

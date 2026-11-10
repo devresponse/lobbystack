@@ -112,7 +112,8 @@
       "rateLimited": "Započeto je previše probnih poziva. Pokušajte ponovo malo kasnije.",
       "unavailable": "Vaš AI recepcioner trenutno nije dostupan.",
       "generic": "Došlo je do greške pri pokretanju poziva."
-    }
+    },
+    "receptionist": "Recepcioner za probne pozive"
   },
   "appointments": {
     "title": "Termini",

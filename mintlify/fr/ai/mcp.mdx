@@ -62,8 +62,9 @@ Les propriétaires et les administrateurs voient tous les assistants connectés 
 | `get_business` | `business:read` | Nom de l'entreprise, fuseau horaire, heures d'ouverture et mode de réservation |
 | `list_services` | `business:read` | Services que les clients peuvent réserver |
 | `list_staff` | `business:read` | Personnes qui prennent des rendez-vous et services qu'elles offrent |
+| `list_receptionists` | `business:read` | Les réceptionnistes IA qui ne sont pas archivés, celui par défaut en premier |
 | `update_business_hours` | `business:write` | Remplace les heures d'ouverture de la semaine |
-| `list_calls` | `calls:read` | Appels, du plus récent au plus ancien, filtrés par heure de début |
+| `list_calls` | `calls:read` | Appels, du plus récent au plus ancien, filtrés par heure de début ou par réceptionniste |
 | `get_call` | `calls:read` | Un appel avec sa transcription |
 | `search_contacts` | `contacts:read` | Contacts par téléphone, courriel ou partie du nom |
 | `get_contact` | `contacts:read` | Un contact |
@@ -76,7 +77,9 @@ Les propriétaires et les administrateurs voient tous les assistants connectés 
 | `cancel_appointment` | `appointments:write` | Annule un rendez-vous |
 | `reschedule_appointment` | `appointments:write` | Déplace un rendez-vous vers un autre créneau libre ou un autre membre du personnel |
 | `list_messages` | `messages:read` | Messages que le réceptionniste a pris pour votre équipe |
-| `add_knowledge` | `knowledge:write` | Ajoute une FAQ ou un texte que le réceptionniste peut utiliser |
+| `add_knowledge` | `knowledge:write` | Ajoute une FAQ ou un texte pour tous les réceptionnistes ou ceux que vous choisissez |
+| `list_questions` | `knowledge:read` | Les questions auxquelles le réceptionniste n'a pas su répondre, les plus posées d'abord |
+| `answer_question` | `knowledge:write` | Enregistre la réponse à l'une de ces questions dans les connaissances |
 
 Les portées sont les mêmes pour OAuth et pour les clés API. Les outils renvoient les mêmes objets que l'API REST, avec les heures en UTC. Les outils en lecture seule portent l'annotation `readOnlyHint`, et les outils qui annulent, déplacent ou remplacent des données portent `destructiveHint`, pour que votre assistant puisse vous demander votre accord avant de les exécuter.
 
@@ -107,7 +110,7 @@ Le serveur lui-même répond `401` quand la clé ou le jeton d'accès est absent
 
 Chaque appel d'outil compte dans une limite de 120 requêtes par minute. Une clé API partage sa limite avec les requêtes REST faites avec la même clé ; chaque connexion OAuth a sa propre limite. Lister les outils ne compte pas. Au-delà de la limite, l'outil renvoie `rate_limited` avec le nombre de secondes à attendre.
 
-`book_appointment`, `create_contact` et `add_knowledge` acceptent un `idempotency_key` facultatif. Si vous réessayez avec la même valeur dans les 24 heures, vous obtenez le premier résultat au lieu d'un doublon. Ces clés sont les mêmes que l'en-tête REST `Idempotency-Key` pour `POST /appointments`, `POST /contacts` et `POST /knowledge` : une nouvelle tentative par MCP d'une requête REST, ou l'inverse, renvoie le premier résultat. La même clé avec des détails différents renvoie `idempotency_key_reused`.
+`book_appointment`, `create_contact`, `add_knowledge` et `answer_question` acceptent un `idempotency_key` facultatif. Si vous réessayez avec la même valeur dans les 24 heures, vous obtenez le premier résultat au lieu d'un doublon. Ces clés sont les mêmes que l'en-tête REST `Idempotency-Key` pour `POST /appointments`, `POST /contacts`, `POST /knowledge` et `POST /knowledge/questions/{question_id}/answer` : une nouvelle tentative par MCP d'une requête REST, ou l'inverse, renvoie le premier résultat. La même clé avec des détails différents renvoie `idempotency_key_reused`.
 
 ## Journal d'audit
 

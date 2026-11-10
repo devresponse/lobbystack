@@ -102,14 +102,30 @@ describe("enqueueJob job ids", () => {
     expect(options).not.toHaveProperty("delay");
   });
 
-  it("retries usage billing, Polar events, notifications, promo plan endings and call summaries for hours instead of the queue's 15 seconds", async () => {
+  it("retries usage billing, Polar events, notifications, promo plan endings, queued pack runs and call summaries for hours instead of the queue's 15 seconds", async () => {
     const { queue, add } = createQueueStub("critical");
 
-    for (const type of ["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "conversation.finalizeSession", "sms.send", "billing.createCheckout"] as const) await enqueueJob(queue, { type, payload: {}, idempotencyKey: type });
+    for (const type of ["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "billing.expirePacks", "conversation.finalizeSession", "sms.send", "billing.createCheckout"] as const) await enqueueJob(queue, { type, payload: {}, idempotencyKey: type });
 
     const options = add.mock.calls.map((call) => (call as unknown as [string, unknown, Record<string, unknown>])[2]);
-    for (const long of options.slice(0, 5)) expect(long).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
+    for (const long of options.slice(0, 6)) expect(long).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
     // Someone waits on a checkout's page, so it gives up as fast as the queue does.
-    for (const short of options.slice(5)) expect(short).not.toHaveProperty("attempts");
+    for (const short of options.slice(6)) expect(short).not.toHaveProperty("attempts");
+  });
+
+  it("retries closing a pack's payment page a plan's start closed for longer than the page stays open, so nobody pays on it meanwhile", async () => {
+    expect(queueForJobType["billing.closePackCheckout"]).toBe("critical");
+    const { queue, add } = createQueueStub("critical");
+    await enqueueJob(queue, { type: "billing.closePackCheckout", businessId: "3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3e", payload: { checkoutId: "3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3f", providerCheckoutId: "cs_1" }, idempotencyKey: "billing-pack-checkout:3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3f:close" });
+    const [, , options] = add.mock.calls[0] as unknown as [string, unknown, Record<string, unknown>];
+    expect(options).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
+  });
+
+  it("runs the end of a subscription a prepaid pack replaced on the critical queue and retries it for hours, since the business pays for both until it ends", async () => {
+    expect(queueForJobType["billing.endPlanForPack"]).toBe("critical");
+    const { queue, add } = createQueueStub("critical");
+    await enqueueJob(queue, { type: "billing.endPlanForPack", businessId: "3f0f8c3e-1f3a-4a9a-8f3e-1f3a4a9a8f3e", payload: { subscriptionId: "sub_1" }, idempotencyKey: "end-plan-for-pack:sub_1" });
+    const [, , options] = add.mock.calls[0] as unknown as [string, unknown, Record<string, unknown>];
+    expect(options).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
   });
 });

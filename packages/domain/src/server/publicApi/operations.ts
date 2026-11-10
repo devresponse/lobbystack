@@ -3,8 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notExists, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPlans, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPlans, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocumentReceptionists, knowledgeDocuments, knowledgeSnippetReceptionists, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
+  isUuid,
   CONTACT_PASSCODE_DEFAULT_LENGTH,
   CONTACT_PASSCODE_MAX_LENGTH,
   CONTACT_PASSCODE_MIN_LENGTH,
@@ -40,7 +41,10 @@ import {
   type ApiAiTrace,
   type ApiAiTraceDetail,
   type ApiCheckout,
+  type ApiSubscriptionChange,
   type ApiCheckoutCreate,
+  type ApiPackCheckout,
+  type ApiPackCheckoutCreate,
   type ApiClaimLink,
   type ApiClaimLinkCreate,
   type ApiContact,
@@ -49,6 +53,14 @@ import {
   type ApiContactPasscodesUpdate,
   type ApiContactUpdate,
   type ApiGeneratedContactPasscodes,
+  MAX_ARTICLES_PER_AUDIENCE_CHANGE,
+  normalizeWebsiteRulePath,
+  type ApiKnowledgeAudienceChange,
+  type ApiKnowledgeAudienceChangeResult,
+  type ApiUnansweredQuestion,
+  type ApiUnansweredQuestionAnswer,
+  type ApiWebsiteRule,
+  type ApiWebsiteRuleCreate,
   type ApiKnowledgeEntry,
   type ApiKnowledgeEntryCreate,
   type ApiKnowledgeEntryUpdate,
@@ -67,12 +79,21 @@ import {
   type ApiOnboardingItem,
   type ApiOnboardingUpdate,
   type ApiPhoneNumber,
+  type ApiPhoneNumberUpdate,
   type ApiPhoneNumberClaim,
   type ApiPhoneNumberOffer,
   type ApiPhoneNumberSearch,
   type ApiPublicProfile,
   type ApiPublicProfileUpdate,
+  type ApiQrLink,
+  type ApiQrLinkCreate,
+  type ApiQrLinkDetail,
+  type ApiQrLinkUpdate,
   type ApiReceptionist,
+  type ApiReceptionistCreate,
+  type ApiReceptionistProfile,
+  type ApiReceptionistProfileUpdate,
+  type ApiReceptionistReorder,
   type ApiReceptionistUpdate,
   type ApiRule,
   type ApiRuleCreate,
@@ -92,7 +113,10 @@ import {
   type ApiWidgetKeyCreate,
   type ApiWidgetKeyCreated,
   type ApiWidgetKeyUpdate,
+  type BillingSubscriptionAction,
   type PublicProfileSettings,
+  billingProviderNames,
+  billingProviderOf,
   promoPlanEnding,
 } from "@lobbystack/shared";
 
@@ -100,10 +124,12 @@ import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } f
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
-import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
+import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
+import { listBusinessPacks } from "../billingPacks";
+import { createPackCheckoutRequestInTransaction, readPackCheckoutInTransaction } from "../billingPackCheckout";
+import { billingSubscriptionChangeShown, createBillingSubscriptionRequestInTransaction, isBillingSubscriptionAction } from "../billingSubscription";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
-import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -111,16 +137,33 @@ import { NUMBER_BEING_REPLACED_MESSAGE, schedulePhoneNumberReleaseInTransaction 
 import { hashContactPasscodes, removeContactPasscodesInTransaction, saveContactPasscodesInTransaction } from "../contactPasscodes";
 import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
+import { changeKnowledgeAudienceInTransaction, createWebsiteRuleInTransaction, deleteWebsiteRuleInTransaction, listWebsiteRulesInTransaction, setKnowledgeArticleAudienceInTransaction, type KnowledgeArticleKind, type KnowledgeAudienceChoice, type WebsiteRule } from "../knowledgeAudience";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
+import { answerUnansweredQuestionInTransaction, dismissUnansweredQuestionInTransaction, listOpenUnansweredQuestionsInTransaction, type OpenUnansweredQuestion, type UnansweredAnswerAudience } from "../unansweredQuestions";
 import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
-import { normalizeOnboardingStage, resolveOnboardingStageForPlan, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
+import { normalizeOnboardingStage, resolveOnboardingStageForNumbers, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
+import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
-import { loadBillingContext } from "../usage";
-import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
+import { loadBillingContext, loadBusinessPlanLimits } from "../usage";
+import { createEntryLinkInTransaction, getEntryLinkInTransaction, listEntryLinkScansInTransaction, listEntryLinksInTransaction, updateEntryLinkInTransaction, type EntryLink, type EntryLinkPatch } from "../entryLinks";
+import { setPhoneNumberReceptionistInTransaction, setWidgetKeyReceptionistInTransaction } from "../receptionistEntryPoints";
+import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "../receptionistInput";
+import { loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch, type ReceptionistView } from "../receptionistProfile";
+import {
+  archiveReceptionistInTransaction,
+  createReceptionistInTransaction,
+  listReceptionistsInTransaction,
+  makeDefaultReceptionistInTransaction,
+  reorderReceptionistsInTransaction,
+  restoreReceptionistInTransaction,
+  setReceptionistStatusInTransaction,
+  updateReceptionistInTransaction,
+  type ReceptionistListItem,
+} from "../receptionists";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
 import { insertWidgetKeyInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "../widgetKeys";
 import { ianaTimeZone, insertBusinessInTransaction, insertInvitationInTransaction, invitationUrl, isSingleEmailAddress, lockBusinessTeam, removeMemberInTransaction, revokeInvitationInTransaction, updateBusinessInTransaction, updateMemberRoleInTransaction } from "../tenancy";
@@ -153,8 +196,9 @@ import {
   loadPhoneNumberResource,
   pageSize,
   serializeCalendarConnection,
+  serializeBillingPack,
   serializeContact,
-  serializeKnowledgeEntry,
+  knowledgeEntryReceptionists,
   serializeNotificationPreferences,
   serializePublicProfile,
   serializeReceptionist,
@@ -264,11 +308,6 @@ function apiChange(caller: ApiCaller) {
   return { source: "api" as const, audit: callerAudit(caller) };
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  const cause = typeof error === "object" && error !== null && "cause" in error ? (error as { cause: unknown }).cause : undefined;
-  return [error, cause].some((value) => typeof value === "object" && value !== null && "code" in value && (value as { code: unknown }).code === "23505");
-}
-
 function assertTimeZone(value: string, field: string): void {
   if (!ianaTimeZone(value)) {
     throw invalidRequest(`${field} is not a valid IANA time zone.`, [{ path: field, message: "Use an IANA time zone such as America/Toronto." }]);
@@ -316,7 +355,7 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
   const callEmails = { ...(input.call_transcript_recipients !== undefined ? { callTranscriptRecipients: input.call_transcript_recipients } : {}), ...(input.call_transcript_content !== undefined ? { callTranscriptContent: input.call_transcript_content } : {}) };
   if (!Object.keys(fields).length && input.hours === undefined && input.ai_traces_enabled === undefined && !Object.keys(callEmails).length) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields });
+    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields, audit: callerAudit(caller) });
     // Read when each AI turn finishes, so no snapshot refresh is needed.
     if (input.ai_traces_enabled !== undefined) await tx.update(businesses).set({ aiTracesEnabled: input.ai_traces_enabled, updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
     // Read when each call's email is queued and again when it's sent.
@@ -341,7 +380,9 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 /** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
 async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  // A subscription a prepaid pack replaced counts as ended while the provider ends it, whatever its own state, end date or next change says.
+  const replaced = isReplacedSubscription(account);
   // A promo plan's end, and what its renewal does; a plan that keeps going has neither.
   const [promo] = planCode ? await tx.select({ ends: billingPlans.ends }).from(billingPlans).where(eq(billingPlans.code, planCode)).limit(1) : [];
   const planEndsWith = planCode && account?.planEnds ? promoPlanEnding(account.endWith, promo?.ends) : null;
@@ -357,12 +398,18 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
     plan_ends: planEndsWith && account?.planEnds ? account.planEnds.toISOString() : null,
     plan_ends_with: planEndsWith,
     managed: isManagedBillingAccount(account),
-    subscription_state: account?.subscriptionState ?? null,
+    subscription_state: replaced ? null : account?.subscriptionState ?? null,
     billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
     current_period_end: paid && account?.currentPeriodEnd ? account.currentPeriodEnd.toISOString() : null,
+    cancels_at: account?.cancelAt && isLiveSubscriptionState(account.subscriptionState) && !replaced ? account.cancelAt.toISOString() : null,
+    next_change: !replaced && account?.nextPlanCode && (account.nextInterval === "monthly" || account.nextInterval === "annual") && account.nextChangeAt ? { plan: account.nextPlanCode, interval: account.nextInterval, at: account.nextChangeAt.toISOString() } : null,
+    payment_action_url: replaced ? null : await loadPlanChangePayment(tx, { businessId, subscriptionId: account?.subscriptionId ?? null }),
     spending_cap_cents: cap,
     overage_spend_cents: spend,
     spending_cap_reached: cap !== null && spend > 0 && spend >= cap,
+    provider: billingProviderOf(process.env),
+    provider_name: billingProviderNames[billingProviderOf(process.env)],
+    packs: (await listBusinessPacks(tx, businessId)).map(serializeBillingPack),
   };
 }
 
@@ -381,6 +428,24 @@ export async function updateBillingForApi(context: DomainContext, caller: ApiCal
     }
     return await loadBilling(tx, caller.businessId);
   });
+}
+
+/** A cancel, resume or keep request as the API shows it; done once the account shows the change, as the provider's webhook brings it. */
+async function loadSubscriptionChange(tx: DatabaseTransaction, businessId: string, changeId: string): Promise<ApiSubscriptionChange> {
+  const [row] = await tx.select().from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.businessId, businessId), eq(billingCheckoutRequests.id, changeId))).limit(1);
+  if (!row || !isBillingSubscriptionAction(row.target)) throw notFound("Subscription change");
+  const [account] = await tx.select({ cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  // One the business moved to a managed plan from reads as failed, as a checkout does.
+  const status = row.status === "canceled" ? "error" : (["pending", "processing", "changed", "error"] as const).find((value) => value === row.status) ?? "pending";
+  return {
+    id: row.id,
+    action: row.target,
+    status,
+    error: status === "error" ? row.error : null,
+    done: status === "changed" && billingSubscriptionChangeShown(account, row.target),
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
 }
 
 async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiCheckout> {
@@ -410,12 +475,12 @@ async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkou
  * owner or admin. A platform key acts for an owner of the business other than
  * the key's own account, and is refused while there is none: every business the
  * key onboards would otherwise carry one email in Polar, which can tie their
- * payments together.
+ * payments together. purchase names what is bought in that refusal.
  */
-async function checkoutPayerId(context: DomainContext, caller: ApiCaller): Promise<string> {
+async function checkoutPayerId(context: DomainContext, caller: ApiCaller, purchase = "a plan"): Promise<string> {
   if (caller.platformKeyId === undefined) return await resolveActingUserId(context, caller);
   const [owner] = await inBusiness(context, caller, async (tx) => await tx.select({ userId: businessMemberships.userId }).from(businessMemberships).where(and(eq(businessMemberships.businessId, caller.businessId), eq(businessMemberships.role, "business_owner"), eq(businessMemberships.status, "active"), ne(businessMemberships.userId, caller.actingUserId))).orderBy(asc(businessMemberships.createdAt)).limit(1));
-  if (!owner) throw conflict("Only the business's own owner can pay for a plan, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan.");
+  if (!owner) throw conflict(`Only the business's own owner can pay for ${purchase}, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan.`);
   return owner.userId;
 }
 
@@ -437,10 +502,11 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
 
 /**
  * Asks Polar for a page where the customer pays. Like the dashboard, it sells
- * any plan to a free business and Pro to a Starter one, which the worker does
+ * any plan to a free business or one on a prepaid pack, whose packs the new
+ * subscription ends, and Pro to a Starter one, which the worker does
  * by changing the Starter subscription rather than with a page; other changes
  * to a paid plan happen in Polar's billing portal. A promo code's plan is sold
- * to a free, Starter or Pro business alike. Callers say whether this
+ * to a free, prepaid, Starter or Pro business alike. Callers say whether this
  * deployment sells a standard plan and interval, and limit promo code tries
  * in checkPromoCode, which runs once the key may pay for the business, before
  * the code is looked up, so a key that is refused spends none of its tries.
@@ -448,7 +514,7 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
  * one; checkLimit runs only before a new one is made.
  */
 export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean; checkPromoCode?: () => Promise<void>; checkLimit?: BillingCheckoutLimit }): Promise<ApiCheckout> {
-  if (!options.available) throw conflict(input.plan === "promo" ? "This deployment doesn't sell plans through Polar." : "This deployment doesn't sell that plan and interval.");
+  if (!options.available) throw conflict(input.plan === "promo" ? `This deployment doesn't sell plans through ${billingProviderNames[billingProviderOf(process.env)]}.` : "This deployment doesn't sell that plan and interval.");
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
@@ -468,15 +534,83 @@ export async function createCheckoutForApi(context: DomainContext, caller: ApiCa
   });
 }
 
+/**
+ * Cancels the plan at its renewal, resumes it, or keeps it, as Settings >
+ * Plan does on a provider that does these in the app. Made in the name of
+ * the person the key acts for, or the owner for a platform key.
+ */
+export async function changeBillingSubscriptionForApi(context: DomainContext, caller: ApiCaller, action: BillingSubscriptionAction, options: { checkLimit?: BillingCheckoutLimit } = {}): Promise<ApiSubscriptionChange> {
+  const userId = await checkoutPayerId(context, caller);
+  return await inBusiness(context, caller, async (tx) => {
+    let change: { id: string; created: boolean };
+    try {
+      change = await createBillingSubscriptionRequestInTransaction(tx, { userId, businessId: caller.businessId, action, checkLimit: options.checkLimit });
+    } catch (error) {
+      throw apiErrorFromDomain(error, "Subscription");
+    }
+    if (change.created) await audit(tx, caller, { eventType: `api.billing.plan_${action}_requested`, entityType: "billing_checkout_request", entityId: change.id, payload: { action, requestedByUserId: userId } });
+    return await loadSubscriptionChange(tx, caller.businessId, change.id);
+  });
+}
+
+export async function getSubscriptionChangeForApi(context: DomainContext, caller: ApiCaller, changeId: string): Promise<ApiSubscriptionChange> {
+  return await inBusiness(context, caller, async (tx) => await loadSubscriptionChange(tx, caller.businessId, changeId));
+}
+
 export async function getCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiCheckout> {
   return await inBusiness(context, caller, async (tx) => await loadCheckout(tx, caller.businessId, checkoutId));
+}
+
+/** A prepaid pack's checkout as the API shows it; paid once billing.reconcile recorded its payment, and pack_status says what became of the pack. */
+async function loadPackCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiPackCheckout> {
+  const checkout = await readPackCheckoutInTransaction(tx, { businessId, checkoutId });
+  if (!checkout) throw notFound("Pack checkout");
+  return {
+    id: checkout.id,
+    pack: checkout.pack,
+    status: checkout.status,
+    pack_status: checkout.packStatus,
+    checkout_url: checkout.checkoutUrl,
+    error: checkout.error,
+    paid: checkout.status === "paid",
+    expires_at: checkout.expiresAt.toISOString(),
+    created_at: checkout.createdAt.toISOString(),
+    updated_at: checkout.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Asks the deployment's billing provider for a page where the customer pays
+ * once for a prepaid pack, as Settings > Plan does, with the dashboard's
+ * refusals as the API's 409. Callers say whether this deployment sells packs
+ * through its provider. Made out to the person the key acts for, or the owner
+ * for a platform key. The payer's open checkout for the same pack comes back
+ * instead of a new one; checkLimit runs only before a new one is made.
+ */
+export async function createPackCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiPackCheckoutCreate, options: { available: boolean; checkLimit?: BillingCheckoutLimit }): Promise<ApiPackCheckout> {
+  if (!options.available) throw conflict(`This deployment doesn't sell packs through ${billingProviderNames[billingProviderOf(process.env)]}.`);
+  const userId = await checkoutPayerId(context, caller, "a pack");
+  return await inBusiness(context, caller, async (tx) => {
+    let checkout: { id: string; created: boolean };
+    try {
+      checkout = await createPackCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, pack: input.pack, billingEmail: input.billing_email, checkLimit: options.checkLimit });
+    } catch (error) {
+      throw apiErrorFromDomain(error, "Pack checkout");
+    }
+    if (checkout.created) await audit(tx, caller, { eventType: "api.billing.pack_checkout_started", entityType: "billing_pack_checkout", entityId: checkout.id, payload: { pack: input.pack, payerUserId: userId } });
+    return await loadPackCheckout(tx, caller.businessId, checkout.id);
+  });
+}
+
+export async function getPackCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiPackCheckout> {
+  return await inBusiness(context, caller, async (tx) => await loadPackCheckout(tx, caller.businessId, checkoutId));
 }
 
 /** Puts the business on the managed enterprise plan. Callers check that an operator's platform key asked. */
 export async function setManagedPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
   return await inBusiness(context, caller, async (tx) => {
     const outcome = await setManagedPlanInTransaction(tx, { businessId: caller.businessId });
-    if (outcome === "paid_through_polar") throw conflict("This business pays through Polar. Cancel that subscription before giving it a managed plan.");
+    if (outcome === "paid_through_provider") throw conflict(`This business pays through ${billingProviderNames[billingProviderOf(process.env)]}. Cancel that subscription before giving it a managed plan.`);
     if (outcome === "set") await audit(tx, caller, { eventType: "api.billing.managed_plan_set", entityType: "billing_account", entityId: caller.businessId, payload: { plan: "enterprise" } });
     return await loadBilling(tx, caller.businessId);
   });
@@ -555,6 +689,19 @@ async function requireReplaceableNumber(tx: DatabaseTransaction, businessId: str
 
 export async function listPhoneNumbersForApi(context: DomainContext, caller: ApiCaller): Promise<ApiPhoneNumber[]> {
   return await inBusiness(context, caller, async (tx) => await listPhoneNumberResources(tx, caller.businessId));
+}
+
+/** Points a number at a receptionist, as the dashboard's Phone Number settings do. */
+export async function updatePhoneNumberForApi(context: DomainContext, caller: ApiCaller, phoneNumberId: string, input: ApiPhoneNumberUpdate): Promise<ApiPhoneNumber> {
+  return await inBusiness(context, caller, async (tx) => {
+    const number = await loadPhoneNumberResource(tx, caller.businessId, phoneNumberId);
+    if (!number || number.status === "released") throw notFound("Phone number");
+    const receptionistId = input.receptionist_id.toLowerCase();
+    if (number.receptionist_id === receptionistId) return number;
+    await asApiErrors(() => setPhoneNumberReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, phoneNumberId: number.id, receptionistId }));
+    await audit(tx, caller, { eventType: "api.phone_number.receptionist_changed", entityType: "phone_number", entityId: number.id, payload: { receptionistId } });
+    return (await loadPhoneNumberResource(tx, caller.businessId, number.id)) ?? number;
+  });
 }
 
 /**
@@ -677,15 +824,15 @@ const onboardingHints: Record<ApiOnboardingItem, string> = {
 async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Promise<ApiOnboarding> {
   const [business] = await tx.select({ name: businesses.name, timezone: businesses.timezone, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
-  const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
-  const { plan, planCode } = await loadBillingContext(tx, businessId);
-  const limits = await readBillingPlanLimitBook(tx);
-  const paid = plan === "starter" || plan === "pro" || plan === "enterprise";
+  const { plan, limits } = await loadBusinessPlanLimits(tx, businessId);
+  // A prepaid pack is bought like a plan, and its own limits say whether it includes a number.
+  const paid = plan === "starter" || plan === "pro" || plan === "enterprise" || plan === "prepaid";
   // A hosted plan needs its number when it includes one: claims follow the plan's own count, which a promo plan can set to none.
-  const needsNumber = plan !== "self_host" && limitsFor(limits, plan, planCode).includedBusinessNumbers !== 0;
+  const needsNumber = plan !== "self_host" && limits.includedBusinessNumbers !== 0;
   const answeredCall = await hasAnsweredPhoneCall(tx, businessId);
   const item = (id: ApiOnboardingItem, done: boolean, skipped: boolean, required: boolean) => ({ id, status: done ? "done" as const : skipped ? "skipped" as const : "missing" as const, required });
   const checklist = [
@@ -700,7 +847,7 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
     item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
   ];
   // The step the dashboard shows: a business on a plan without a number goes back from the number steps to its plan.
-  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), plan, limits, planCode);
+  const stage = resolveOnboardingStageForNumbers(normalizeOnboardingStage(business.stage), limits.includedBusinessNumbers);
   const complete = stage === "complete";
   return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
 }
@@ -919,7 +1066,12 @@ export async function listWidgetKeysForApi(context: DomainContext, caller: ApiCa
 /** Creates a widget key and the script tag for it, served from the dashboard's own origin. */
 export async function createWidgetKeyForApi(context: DomainContext, caller: ApiCaller, input: ApiWidgetKeyCreate, options: { appOrigin: string }): Promise<ApiWidgetKeyCreated> {
   return await inBusiness(context, caller, async (tx) => {
-    const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
+    const inserted = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
+    const { key } = inserted;
+    // A new key names the default receptionist unless the request names another.
+    const row = input.receptionist_id
+      ? { ...inserted.row, receptionistId: (await asApiErrors(() => setWidgetKeyReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, widgetKeyId: inserted.row.id, receptionistId: input.receptionist_id!.toLowerCase() }))).receptionistId }
+      : inserted.row;
     await audit(tx, caller, { eventType: "api.widget_key.created", entityType: "widget_key", entityId: row.id });
     return { ...serializeWidgetKey(row, options.appOrigin), key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key) };
   });
@@ -945,10 +1097,17 @@ export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiC
       if (sortedJson(serializeWidgetKey({ ...current, config }, options.appOrigin).config) !== sortedJson(before.config)) patch.config = config;
     }
     if (input.status !== undefined && input.status !== before.status) patch.status = input.status;
-    if (Object.keys(patch).length === 0) return before;
-    const row = await updateWidgetKeyInTransaction(tx, { businessId: caller.businessId, widgetKeyId, patch });
-    if (!row) throw notFound("Widget key");
-    await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: Object.keys(patch) } });
+    const receptionistId = input.receptionist_id?.toLowerCase();
+    const newReceptionist = receptionistId !== undefined && receptionistId !== before.receptionist_id;
+    if (Object.keys(patch).length === 0 && !newReceptionist) return before;
+    let row = current;
+    if (Object.keys(patch).length) {
+      const updated = await updateWidgetKeyInTransaction(tx, { businessId: caller.businessId, widgetKeyId, patch });
+      if (!updated) throw notFound("Widget key");
+      row = updated;
+    }
+    if (newReceptionist) row = { ...row, receptionistId: (await asApiErrors(() => setWidgetKeyReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, widgetKeyId, receptionistId: receptionistId! }))).receptionistId };
+    await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: [...Object.keys(patch), ...(newReceptionist ? ["receptionist_id"] : [])] } });
     return serializeWidgetKey(row, options.appOrigin);
   });
 }
@@ -1269,7 +1428,27 @@ export async function reorderRulesForApi(context: DomainContext, caller: ApiCall
   });
 }
 
+/**
+ * The dashboard's refusals as the v1 API words them, with the dashboard's own
+ * message: the plan's receptionists all in use is plan_limit_reached, since a
+ * plan with more fixes it; any other 409, such as an archived receptionist, a
+ * conflict; a 404 not_found; and a 400 invalid_request.
+ */
+async function asApiErrors<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    const { status, code } = error instanceof Error ? (error as { status?: unknown; code?: unknown }) : { status: undefined, code: undefined };
+    if (status === 409 && code === "receptionist_limit") throw new PublicApiError(409, "plan_limit_reached", (error as Error).message);
+    if (status === 409) throw conflict((error as Error).message);
+    if (status === 404) throw new PublicApiError(404, "not_found", (error as Error).message);
+    if (status === 400) throw invalidRequest((error as Error).message);
+    throw error;
+  }
+}
+
 // Receptionist settings
+
 
 const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiReceptionistUpdate> = {
   greeting: "greeting",
@@ -1286,17 +1465,21 @@ const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiRec
   recordingNotice: "recording_notice",
 };
 
-/** The business's receptionist row, or the defaults it would be saved with when it has none yet. */
-async function loadReceptionistState(tx: DatabaseTransaction, businessId: string, lock: boolean) {
-  const [business] = await tx.select({ name: businesses.name, updatedAt: businesses.updatedAt }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  if (!business) throw notFound("Business");
-  const query = tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
-  const [profile] = lock ? await query.for("update") : await query;
-  return { business, profile: profile ?? null, shown: profile ?? { ...defaultReceptionistProfile(business.name), updatedAt: business.updatedAt } };
+/**
+ * The receptionist the v1 receptionist resource is, with the settings every
+ * receptionist shares: the default one, or receptionistId's when it isn't
+ * archived. Every business has a default from the moment it exists
+ * (migration 0143), so none means the business is out of sight.
+ */
+async function loadSettingsReceptionist(tx: DatabaseTransaction, businessId: string, lock: boolean, receptionistId?: string | undefined): Promise<ReceptionistView> {
+  if (receptionistId !== undefined && !isUuid(receptionistId)) throw notFound("Receptionist");
+  const receptionist = await loadReceptionistView(tx, { businessId, lock, ...(receptionistId ? { receptionistId: receptionistId.toLowerCase() } : {}) });
+  if (!receptionist) throw notFound(receptionistId ? "Receptionist" : "Business");
+  return receptionist;
 }
 
-export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller): Promise<ApiReceptionist> {
-  return await inBusiness(context, caller, async (tx) => serializeReceptionist((await loadReceptionistState(tx, caller.businessId, false)).shown));
+export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller, options: { receptionistId?: string | undefined } = {}): Promise<ApiReceptionist> {
+  return await inBusiness(context, caller, async (tx) => serializeReceptionist(await loadSettingsReceptionist(tx, caller.businessId, false, options.receptionistId)));
 }
 
 /**
@@ -1305,10 +1488,10 @@ export async function getReceptionistForApi(context: DomainContext, caller: ApiC
  * summary makes it the business's own, so AI won't replace it, even when the
  * text is the same.
  */
-export async function updateReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistUpdate): Promise<ApiReceptionist> {
+export async function updateReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistUpdate, options: { receptionistId?: string | undefined } = {}): Promise<ApiReceptionist> {
   if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    const { business, profile: current, shown } = await loadReceptionistState(tx, caller.businessId, true);
+    const current = await loadSettingsReceptionist(tx, caller.businessId, true, options.receptionistId);
     const policy = input.appointment_change_policy;
     const requested: ReceptionistProfilePatch = {
       ...(input.greeting !== undefined ? { greeting: input.greeting } : {}),
@@ -1325,19 +1508,358 @@ export async function updateReceptionistForApi(context: DomainContext, caller: A
       ...(policy ? { appointmentChangePolicy: { enabled: policy.enabled, allowCancel: policy.allow_cancel, allowReschedule: policy.allow_reschedule, verificationMode: policy.verification_mode } } : {}),
     };
     const unchanged = (field: keyof ReceptionistProfilePatch): boolean => {
-      if (!current) return false;
       if (field === "summary") return requested.summary === current.summary && current.summarySource === "operator";
       if (field === "appointmentChangePolicy") return JSON.stringify(requested.appointmentChangePolicy) === JSON.stringify(normalizeAppointmentChangePolicy(current.appointmentChangePolicy));
       return requested[field] === current[field];
     };
     const patch = Object.fromEntries(Object.entries(requested).filter(([field]) => !unchanged(field as keyof ReceptionistProfilePatch))) as ReceptionistProfilePatch;
     const regenerateSummary = input.regenerate_summary === true;
-    if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(shown);
-    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, businessName: business.name, patch, regenerateSummary });
+    if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(current);
+    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, receptionistId: current.id, patch, regenerateSummary });
     if (!profile) throw new Error("The receptionist settings could not be saved.");
     const fields = [...(Object.keys(patch) as Array<keyof ReceptionistProfilePatch>).map((field) => receptionistApiFields[field]), ...(regenerateSummary ? ["regenerate_summary"] : [])];
     await audit(tx, caller, { eventType: "api.receptionist.updated", entityType: "receptionist_profile", entityId: profile.id, payload: { fields } });
     return serializeReceptionist(profile);
+  });
+}
+
+// Receptionists
+
+const RECEPTIONIST_PAGE_SIZE = 50;
+
+/** A receptionist as the v1 API shows it, with how many numbers, widget keys and QR links open it. */
+function serializeReceptionistProfile(row: ReceptionistListItem): ApiReceptionistProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    handle: row.handle,
+    is_default: row.isDefault,
+    status: row.status,
+    listed: row.listed,
+    position: row.sortOrder,
+    locale: row.locale as ApiReceptionistProfile["locale"],
+    knowledge_scope: row.knowledgeScope,
+    phone_numbers: row.phoneNumbers,
+    widget_keys: row.widgetKeys,
+    entry_links: row.entryLinks,
+    archived_at: row.archivedAt ? row.archivedAt.toISOString() : null,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+async function loadReceptionistProfile(tx: DatabaseTransaction, businessId: string, receptionistId: string): Promise<ApiReceptionistProfile> {
+  if (!isUuid(receptionistId)) throw notFound("Receptionist");
+  const [row] = (await listReceptionistsInTransaction(tx, { businessId, receptionistId: receptionistId.toLowerCase(), pageSize: 1 })).receptionists;
+  if (!row) throw notFound("Receptionist");
+  return serializeReceptionistProfile(row);
+}
+
+async function listReceptionistProfiles(tx: DatabaseTransaction, businessId: string, archived: boolean): Promise<ApiReceptionistProfile[]> {
+  const rows: ReceptionistListItem[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await listReceptionistsInTransaction(tx, { businessId, view: archived ? "archived" : "current", page, pageSize: RECEPTIONIST_PAGE_SIZE });
+    rows.push(...result.receptionists);
+    if (!result.receptionists.length || rows.length >= result.total) break;
+  }
+  return rows.map(serializeReceptionistProfile);
+}
+
+
+/** The receptionists that aren't archived, or the archived ones, the default first, then in the business's order. */
+export async function listReceptionistsForApi(context: DomainContext, caller: ApiCaller, options: { archived?: boolean | undefined } = {}): Promise<ApiReceptionistProfile[]> {
+  return await inBusiness(context, caller, async (tx) => await listReceptionistProfiles(tx, caller.businessId, options.archived === true));
+}
+
+export async function getReceptionistProfileForApi(context: DomainContext, caller: ApiCaller, receptionistId: string): Promise<ApiReceptionistProfile> {
+  return await inBusiness(context, caller, async (tx) => await loadReceptionistProfile(tx, caller.businessId, receptionistId));
+}
+
+/** Adds a receptionist within the plan's limit, as AI agents in the dashboard does. */
+export async function createReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistCreate): Promise<ApiReceptionistProfile> {
+  return await inBusiness(context, caller, async (tx) => {
+    const receptionist: ReceptionistCreateInput = {
+      name: input.name,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.handle ? { handle: input.handle } : {}),
+      ...(input.locale !== undefined ? { locale: input.locale } : {}),
+      ...(input.knowledge_scope ? { knowledgeScope: input.knowledge_scope } : {}),
+      ...(input.listed !== undefined ? { listed: input.listed } : {}),
+      ...(input.copy_from_id ? { copyFromId: input.copy_from_id.toLowerCase() } : {}),
+    };
+    const created = await asApiErrors(() => createReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionist }));
+    await audit(tx, caller, { eventType: "api.receptionist_profile.created", entityType: "receptionist_profile", entityId: created.id });
+    return await loadReceptionistProfile(tx, caller.businessId, created.id);
+  });
+}
+
+/** Changes the fields sent. Values the receptionist already has change nothing. */
+export async function updateReceptionistProfileForApi(context: DomainContext, caller: ApiCaller, receptionistId: string, input: ApiReceptionistProfileUpdate): Promise<ApiReceptionistProfile> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const current = await loadReceptionistProfile(tx, caller.businessId, receptionistId);
+    if (current.archived_at) throw conflict("Restore the receptionist before changing it.");
+    const patch: ReceptionistIdentityPatch = {};
+    if (input.name !== undefined && input.name !== current.name) patch.name = input.name;
+    if (input.description !== undefined && input.description !== current.description) patch.description = input.description;
+    if (input.handle !== undefined && input.handle !== current.handle) patch.handle = input.handle;
+    if (input.locale !== undefined && input.locale !== current.locale) patch.locale = input.locale;
+    if (input.knowledge_scope !== undefined && input.knowledge_scope !== current.knowledge_scope) patch.knowledgeScope = input.knowledge_scope;
+    if (input.listed !== undefined && input.listed !== current.listed) patch.listed = input.listed;
+    if (!Object.keys(patch).length) return current;
+    await asApiErrors(() => updateReceptionistInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, receptionistId: current.id, patch }));
+    await audit(tx, caller, { eventType: "api.receptionist_profile.updated", entityType: "receptionist_profile", entityId: current.id, payload: { fields: Object.keys(patch).sort() } });
+    return await loadReceptionistProfile(tx, caller.businessId, current.id);
+  });
+}
+
+export type ReceptionistAction = "pause" | "resume" | "archive" | "restore" | "make_default";
+
+/**
+ * Pauses, resumes, archives, restores or makes default a receptionist, with
+ * the dashboard's rules. Asking for the state it's already in changes
+ * nothing, so a retry is safe.
+ */
+export async function changeReceptionistForApi(context: DomainContext, caller: ApiCaller, receptionistId: string, action: ReceptionistAction): Promise<ApiReceptionistProfile> {
+  return await inBusiness(context, caller, async (tx) => {
+    const current = await loadReceptionistProfile(tx, caller.businessId, receptionistId);
+    const { businessId } = caller;
+    const actorUserId = callerAudit(caller).actorUserId;
+    const already = action === "archive" ? current.archived_at !== null
+      : action === "restore" ? current.archived_at === null
+        : action === "make_default" ? current.is_default
+          : current.archived_at === null && current.status === (action === "pause" ? "paused" : "active");
+    if (already) return current;
+    if (current.archived_at && action !== "restore") throw conflict("Restore the receptionist first.");
+    await asApiErrors(async () => {
+      if (action === "pause" || action === "resume") await setReceptionistStatusInTransaction(tx, { businessId, actorUserId, receptionistId: current.id, status: action === "pause" ? "paused" : "active" });
+      else if (action === "archive") await archiveReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });
+      else if (action === "restore") await restoreReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });
+      else await makeDefaultReceptionistInTransaction(tx, { businessId, actorUserId, receptionistId: current.id });
+    });
+    await audit(tx, caller, { eventType: `api.receptionist_profile.${action}`, entityType: "receptionist_profile", entityId: current.id });
+    return await loadReceptionistProfile(tx, businessId, current.id);
+  });
+}
+
+/** Puts every receptionist that isn't archived in the order sent. The order they already have changes nothing. */
+export async function reorderReceptionistsForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistReorder): Promise<ApiReceptionistProfile[]> {
+  return await inBusiness(context, caller, async (tx) => {
+    const receptionistIds = input.receptionist_ids.map((receptionistId) => receptionistId.toLowerCase());
+    const current = await listReceptionistProfiles(tx, caller.businessId, false);
+    const missing = current.filter((receptionist) => !receptionistIds.includes(receptionist.id)).map((receptionist) => receptionist.id);
+    const unknown = receptionistIds.filter((receptionistId) => !current.some((receptionist) => receptionist.id === receptionistId));
+    const repeated = new Set(receptionistIds).size !== receptionistIds.length;
+    if (missing.length || unknown.length || repeated) {
+      throw invalidRequest("Send every receptionist that isn't archived once, in the new order.", [
+        ...(missing.length ? [{ path: "receptionist_ids", message: `Missing: ${missing.join(", ")}.` }] : []),
+        ...(unknown.length ? [{ path: "receptionist_ids", message: `Not among the business's receptionists that aren't archived: ${unknown.join(", ")}.` }] : []),
+        ...(repeated ? [{ path: "receptionist_ids", message: "An id is sent more than once." }] : []),
+      ]);
+    }
+    // Lists put the default receptionist first; the order sent is the positions, which change nothing when they already match.
+    const byPosition = [...current].sort((first, second) => first.position - second.position);
+    const distinct = byPosition.every((receptionist, index) => index === 0 || receptionist.position > byPosition[index - 1]!.position);
+    if (distinct && receptionistIds.every((receptionistId, index) => byPosition[index]?.id === receptionistId)) return current;
+    await reorderReceptionistsInTransaction(tx, { businessId: caller.businessId, receptionistIds });
+    await audit(tx, caller, { eventType: "api.receptionists.reordered", entityType: "receptionist_profile", payload: { receptionistIds } });
+    return await listReceptionistProfiles(tx, caller.businessId, false);
+  });
+}
+
+// QR links
+
+const QR_LINK_PAGE_SIZE = 50;
+
+function serializeQrLink(link: EntryLink, appOrigin: string): ApiQrLink {
+  return {
+    id: link.id,
+    code: link.code,
+    url: `${appOrigin}/q/${link.code}`,
+    label: link.label,
+    status: link.status,
+    receptionist_id: link.receptionistId,
+    opens_receptionist_id: link.opensReceptionistId,
+    scans_last_30_days: link.scansLast30Days,
+    scans_kept: link.scansKept,
+    last_scanned_on: link.lastScannedOn,
+    created_at: link.createdAt.toISOString(),
+    updated_at: link.updatedAt.toISOString(),
+  };
+}
+
+/** Every QR link, as the QR code page lists them, read a page at a time. */
+export async function listQrLinksForApi(context: DomainContext, caller: ApiCaller, filters: { receptionistId?: string | undefined; status?: "active" | "paused" | undefined }, options: { appOrigin: string }): Promise<ApiQrLink[]> {
+  return await inBusiness(context, caller, async (tx) => {
+    const links: EntryLink[] = [];
+    for (let page = 1; ; page += 1) {
+      const result = await listEntryLinksInTransaction(tx, { businessId: caller.businessId, receptionistId: filters.receptionistId?.toLowerCase(), status: filters.status, page, pageSize: QR_LINK_PAGE_SIZE });
+      links.push(...result.links);
+      if (!result.links.length || links.length >= result.total) break;
+    }
+    return links.map((link) => serializeQrLink(link, options.appOrigin));
+  });
+}
+
+/** A link with its scans per day: the last 30 days unless days says otherwise, up to the 13 months kept. */
+export async function getQrLinkForApi(context: DomainContext, caller: ApiCaller, qrLinkId: string, options: { appOrigin: string; days?: number | undefined }): Promise<ApiQrLinkDetail> {
+  return await inBusiness(context, caller, async (tx) => {
+    const link = await getEntryLinkInTransaction(tx, { businessId: caller.businessId, linkId: qrLinkId.toLowerCase() });
+    if (!link) throw notFound("QR link");
+    const scans = await listEntryLinkScansInTransaction(tx, { businessId: caller.businessId, linkId: link.id, ...(options.days !== undefined ? { days: options.days } : {}) });
+    return { ...serializeQrLink(link, options.appOrigin), scans: scans.map((scan) => ({ day: scan.day, scans: scan.scans })) };
+  });
+}
+
+/** Makes a link with the dashboard's rules: an unknown or archived receptionist is a 404, the business's 1,000th link a 409. */
+export async function createQrLinkForApi(context: DomainContext, caller: ApiCaller, input: ApiQrLinkCreate, options: { appOrigin: string }): Promise<ApiQrLink> {
+  return await inBusiness(context, caller, async (tx) => {
+    const link = await asApiErrors(() => createEntryLinkInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, link: { receptionistId: input.receptionist_id.toLowerCase(), label: input.label ?? "" } }));
+    await audit(tx, caller, { eventType: "api.qr_link.created", entityType: "entry_link", entityId: link.id });
+    return serializeQrLink(link, options.appOrigin);
+  });
+}
+
+/** Changes the fields sent; values the link already has change nothing. */
+export async function updateQrLinkForApi(context: DomainContext, caller: ApiCaller, qrLinkId: string, input: ApiQrLinkUpdate, options: { appOrigin: string }): Promise<ApiQrLink> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const current = await getEntryLinkInTransaction(tx, { businessId: caller.businessId, linkId: qrLinkId.toLowerCase() });
+    if (!current) throw notFound("QR link");
+    const patch: EntryLinkPatch = {
+      ...(input.receptionist_id !== undefined && input.receptionist_id.toLowerCase() !== current.receptionistId ? { receptionistId: input.receptionist_id.toLowerCase() } : {}),
+      ...(input.label !== undefined && input.label !== current.label ? { label: input.label } : {}),
+      ...(input.status !== undefined && input.status !== current.status ? { status: input.status } : {}),
+    };
+    if (!Object.keys(patch).length) return serializeQrLink(current, options.appOrigin);
+    const link = await asApiErrors(() => updateEntryLinkInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, linkId: current.id, patch }));
+    await audit(tx, caller, { eventType: "api.qr_link.updated", entityType: "entry_link", entityId: link.id, payload: { fields: Object.keys(patch).sort() } });
+    return serializeQrLink(link, options.appOrigin);
+  });
+}
+
+// Who knowledge is for, and website rules
+
+/**
+ * Changes who the entries and sources named are for, as the Knowledge page's
+ * selection does. Those the business doesn't have are skipped; the answer
+ * counts the rest. One audit entry covers the change.
+ */
+export async function changeKnowledgeAudienceForApi(context: DomainContext, caller: ApiCaller, input: ApiKnowledgeAudienceChange): Promise<ApiKnowledgeAudienceChangeResult> {
+  const snippetIds = [...new Set((input.entry_ids ?? []).map((entryId) => entryId.toLowerCase()))];
+  const documentIds = [...new Set((input.source_ids ?? []).map((sourceId) => sourceId.toLowerCase()))];
+  if (!snippetIds.length && !documentIds.length) throw invalidRequest("Name at least one entry or source.", [{ path: "entry_ids", message: "Send entry_ids, source_ids or both." }]);
+  if (snippetIds.length + documentIds.length > MAX_ARTICLES_PER_AUDIENCE_CHANGE) throw invalidRequest(`Change up to ${MAX_ARTICLES_PER_AUDIENCE_CHANGE} entries and sources at once.`);
+  if (input.audience === "everyone" && input.mode !== undefined) throw invalidRequest("mode goes with audience chosen.", [{ path: "mode", message: "Leave it out when audience is everyone." }]);
+  const choice = audienceChoice(input);
+  const change = choice?.audience === "chosen"
+    ? { documentIds, snippetIds, audience: "chosen" as const, mode: input.mode ?? "replace", receptionistIds: choice.receptionistIds }
+    : { documentIds, snippetIds, audience: "everyone" as const };
+  return await inBusiness(context, caller, async (tx) => {
+    const covered = await asApiErrors(() => changeKnowledgeAudienceInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, change }));
+    await audit(tx, caller, { eventType: "api.knowledge.audience_changed", entityType: "knowledge", payload: { audience: change.audience, ...(change.audience === "chosen" ? { mode: change.mode } : {}), entries: covered.snippets, sources: covered.documents } });
+    return { entries: covered.snippets, sources: covered.documents };
+  });
+}
+
+// Unanswered questions
+
+const QUESTIONS_PAGE_MAX = 50;
+
+// The Questions page orders questions by how often they're asked, which
+// changes as they're asked, so a page's cursor is where the next one starts.
+function encodeQuestionsCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset })).toString("base64url");
+}
+
+function decodeQuestionsCursor(cursor: string | undefined): number {
+  if (!cursor) return 0;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { o?: unknown };
+    if (typeof parsed.o === "number" && Number.isSafeInteger(parsed.o) && parsed.o >= 0) return parsed.o;
+  } catch {
+    // Falls through to the error.
+  }
+  throw invalidRequest("cursor is invalid. Pass the next_cursor value from the previous page.");
+}
+
+function serializeUnansweredQuestion(question: OpenUnansweredQuestion): ApiUnansweredQuestion {
+  return {
+    id: question.id,
+    question: question.question,
+    times_asked: question.timesAsked,
+    first_asked_at: question.firstAskedAt.toISOString(),
+    last_asked_at: question.lastAskedAt.toISOString(),
+    last_channel: question.lastChannel as ApiUnansweredQuestion["last_channel"],
+    last_call_id: question.lastCallId,
+    last_conversation_id: question.lastConversationId,
+    asked_of: question.askedOf.map((asker) => ({ receptionist_id: asker.receptionistId, name: asker.name, archived: asker.archived, times_asked: asker.timesAsked, last_asked_at: asker.lastAskedAt.toISOString() })),
+  };
+}
+
+/** The open questions, most asked first, a page at a time, with the Questions page's own query. */
+export async function listUnansweredQuestionsForApi(context: DomainContext, caller: ApiCaller, request: PageRequest & { receptionistId?: string | undefined }): Promise<Page<ApiUnansweredQuestion>> {
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1 || request.limit > QUESTIONS_PAGE_MAX)) throw invalidRequest(`limit must be an integer from 1 to ${QUESTIONS_PAGE_MAX}.`);
+  const limit = pageSize(request.limit);
+  const offset = decodeQuestionsCursor(request.cursor);
+  return await inBusiness(context, caller, async (tx) => {
+    const page = await asApiErrors(() => listOpenUnansweredQuestionsInTransaction(tx, { businessId: caller.businessId, receptionistId: request.receptionistId?.toLowerCase() ?? null, limit, offset, counts: false }));
+    const next = offset + page.questions.length;
+    const hasMore = page.questions.length > 0 && next < page.openCount;
+    return { data: page.questions.map(serializeUnansweredQuestion), next_cursor: hasMore ? encodeQuestionsCursor(next) : null, has_more: hasMore };
+  });
+}
+
+/** Who an answer is for: everyone unless audience says asked, or chosen with receptionist_ids. */
+function answerAudience(input: ApiUnansweredQuestionAnswer): UnansweredAnswerAudience {
+  if (input.audience === "asked") {
+    if (input.receptionist_ids !== undefined) throw invalidRequest("receptionist_ids goes with audience chosen.", [{ path: "receptionist_ids", message: "Leave it out when audience is asked." }]);
+    return { audience: "asked" };
+  }
+  return audienceChoice({ audience: input.audience, receptionist_ids: input.receptionist_ids }) ?? { audience: "everyone" };
+}
+
+/** Answers a question as the Questions page does, and returns the text entry the answer became. */
+export async function answerUnansweredQuestionForApi(context: DomainContext, caller: ApiCaller, questionId: string, input: ApiUnansweredQuestionAnswer): Promise<ApiKnowledgeEntry> {
+  const audience = answerAudience(input);
+  return await inBusiness(context, caller, async (tx) => {
+    const answered = await asApiErrors(() => answerUnansweredQuestionInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, questionId: questionId.toLowerCase(), answer: input.answer, audience }));
+    await audit(tx, caller, { eventType: "api.unanswered_question.answered", entityType: "unanswered_question", entityId: questionId.toLowerCase(), payload: { knowledgeSnippetId: answered.snippetId, audience: answered.audience } });
+    return await requireKnowledgeEntry(tx, caller.businessId, answered.snippetId);
+  });
+}
+
+export async function dismissUnansweredQuestionForApi(context: DomainContext, caller: ApiCaller, questionId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    await asApiErrors(() => dismissUnansweredQuestionInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, questionId: questionId.toLowerCase() }));
+    await audit(tx, caller, { eventType: "api.unanswered_question.dismissed", entityType: "unanswered_question", entityId: questionId.toLowerCase() });
+  });
+}
+
+function serializeWebsiteRule(rule: WebsiteRule): ApiWebsiteRule {
+  return { id: rule.id, source_id: rule.rootDocumentId, site_url: rule.siteUrl, path_prefix: rule.pathPrefix, receptionist_id: rule.receptionistId, pages: rule.pages, created_at: rule.createdAt.toISOString() };
+}
+
+export async function listWebsiteRulesForApi(context: DomainContext, caller: ApiCaller): Promise<ApiWebsiteRule[]> {
+  return await inBusiness(context, caller, async (tx) => (await listWebsiteRulesInTransaction(tx, { businessId: caller.businessId })).map(serializeWebsiteRule));
+}
+
+/** Adds a rule with the Knowledge page's checks, and gives it the pages already read. */
+export async function createWebsiteRuleForApi(context: DomainContext, caller: ApiCaller, input: ApiWebsiteRuleCreate): Promise<ApiWebsiteRule> {
+  const pathPrefix = normalizeWebsiteRulePath(input.path_prefix);
+  if (!pathPrefix) throw invalidRequest("Enter a path on the site, such as /stores/kitsilano/.", [{ path: "path_prefix", message: "Use a path or an address on the site, without ? or #." }]);
+  return await inBusiness(context, caller, async (tx) => {
+    const rule = await asApiErrors(() => createWebsiteRuleInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, rule: { rootDocumentId: input.source_id.toLowerCase(), pathPrefix, receptionistId: input.receptionist_id.toLowerCase() } }));
+    await audit(tx, caller, { eventType: "api.website_rule.created", entityType: "knowledge_website_rule", entityId: rule.id });
+    return serializeWebsiteRule(rule);
+  });
+}
+
+export async function deleteWebsiteRuleForApi(context: DomainContext, caller: ApiCaller, ruleId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    if (!await deleteWebsiteRuleInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, ruleId: ruleId.toLowerCase() })) throw notFound("Website rule");
+    await audit(tx, caller, { eventType: "api.website_rule.deleted", entityType: "knowledge_website_rule", entityId: ruleId.toLowerCase() });
   });
 }
 
@@ -1742,7 +2264,8 @@ export async function getAppointmentForApi(context: DomainContext, caller: ApiCa
 async function bookingContext(tx: DatabaseTransaction, businessId: string) {
   const [business] = await tx.select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
-  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  // The API books as the default receptionist does.
+  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   return { timezone: business.timezone, bookingMode: normalizeBookingMode(profile?.bookingMode) };
 }
 
@@ -1871,17 +2394,64 @@ export async function rescheduleAppointmentForApi(context: DomainContext, caller
 
 // Messages and knowledge
 
-export async function listMessagesForApi(context: DomainContext, caller: ApiCaller, request: PageRequest & { status?: "open" | "done" | undefined }): Promise<Page<ApiMessage>> {
+export async function listMessagesForApi(context: DomainContext, caller: ApiCaller, request: Parameters<typeof listMessageResources>[2]): Promise<Page<ApiMessage>> {
   return await inBusiness(context, caller, async (tx) => await listMessageResources(tx, caller.businessId, request));
 }
 
+/**
+ * Who an entry or source is for, from audience and receptionist_ids, as the
+ * Knowledge page sets it; undefined when neither is sent. receptionist_ids
+ * goes with chosen, and chosen needs at least one.
+ */
+function audienceChoice(input: { audience?: "everyone" | "chosen" | undefined; receptionist_ids?: string[] | undefined }): KnowledgeAudienceChoice | undefined {
+  if (input.audience === undefined) {
+    if (input.receptionist_ids !== undefined) throw invalidRequest("Send audience chosen with receptionist_ids.", [{ path: "audience", message: "chosen makes it for the receptionists in receptionist_ids." }]);
+    return undefined;
+  }
+  if (input.audience === "everyone") {
+    if (input.receptionist_ids !== undefined) throw invalidRequest("receptionist_ids goes with audience chosen.", [{ path: "receptionist_ids", message: "Leave it out when audience is everyone." }]);
+    return { audience: "everyone" };
+  }
+  if (!input.receptionist_ids?.length) throw invalidRequest("Choose at least one receptionist.", [{ path: "receptionist_ids", message: "Name the receptionists, from GET /receptionists." }]);
+  return { audience: "chosen", receptionistIds: [...new Set(input.receptionist_ids.map((receptionistId) => receptionistId.toLowerCase()))] };
+}
+
+/**
+ * Whether an article is already for exactly who choice names: the same
+ * receptionists, whether someone chose them or a website rule did, since GET
+ * shows them alike, so sending back what GET returned changes nothing.
+ * POST /knowledge/audience with replace makes a rule's choice someone's own.
+ */
+async function hasAudience(tx: DatabaseTransaction, businessId: string, article: { kind: KnowledgeArticleKind; id: string; audience: string }, choice: KnowledgeAudienceChoice): Promise<boolean> {
+  if (choice.audience === "everyone") return article.audience !== "chosen";
+  if (article.audience !== "chosen") return false;
+  const links = article.kind === "snippet"
+    ? await tx.select({ receptionistId: knowledgeSnippetReceptionists.receptionistId }).from(knowledgeSnippetReceptionists).where(and(eq(knowledgeSnippetReceptionists.businessId, businessId), eq(knowledgeSnippetReceptionists.snippetId, article.id)))
+    : await tx.select({ receptionistId: knowledgeDocumentReceptionists.receptionistId }).from(knowledgeDocumentReceptionists).where(and(eq(knowledgeDocumentReceptionists.businessId, businessId), eq(knowledgeDocumentReceptionists.documentId, article.id)));
+  const wanted = new Set(choice.receptionistIds);
+  return links.length === wanted.size && links.every((link) => wanted.has(link.receptionistId));
+}
+
+/** Sets who an article is for with the Knowledge page's rules: an unknown receptionist is a 404, an archived one a 409. */
+async function setAudience(tx: DatabaseTransaction, caller: ApiCaller, kind: KnowledgeArticleKind, articleId: string, choice: KnowledgeAudienceChoice): Promise<void> {
+  await asApiErrors(() => setKnowledgeArticleAudienceInTransaction(tx, { businessId: caller.businessId, actorUserId: callerAudit(caller).actorUserId, kind, articleId, choice }));
+}
+
+async function requireKnowledgeEntry(tx: DatabaseTransaction, businessId: string, entryId: string): Promise<ApiKnowledgeEntry> {
+  const entry = await loadKnowledgeEntryResource(tx, businessId, entryId);
+  if (!entry) throw notFound("Knowledge entry");
+  return entry;
+}
+
 export async function createKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, input: ApiKnowledgeEntryCreate): Promise<ApiKnowledgeEntry> {
+  const choice = audienceChoice(input);
   return await inBusiness(context, caller, async (tx) => {
     const snippet = await createKnowledgeSnippetInTransaction(tx, input.type === "faq"
       ? { businessId: caller.businessId, title: input.question, content: input.answer, tags: [FAQ_TAG] }
       : { businessId: caller.businessId, title: input.title, content: input.content });
-    await audit(tx, caller, { eventType: "api.knowledge.created", entityType: "knowledge_snippet", entityId: snippet.id, payload: { type: input.type } });
-    return serializeKnowledgeEntry(snippet);
+    if (choice?.audience === "chosen") await setAudience(tx, caller, "snippet", snippet.id, choice);
+    await audit(tx, caller, { eventType: "api.knowledge.created", entityType: "knowledge_snippet", entityId: snippet.id, payload: { type: input.type, ...(choice?.audience === "chosen" ? { audience: "chosen" } : {}) } });
+    return await requireKnowledgeEntry(tx, caller.businessId, snippet.id);
   });
 }
 
@@ -1904,6 +2474,7 @@ export async function getKnowledgeEntryForApi(context: DomainContext, caller: Ap
  */
 export async function updateKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, entryId: string, input: ApiKnowledgeEntryUpdate): Promise<ApiKnowledgeEntry> {
   if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  const choice = audienceChoice(input);
   return await inBusiness(context, caller, async (tx) => {
     const [current] = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, caller.businessId), eq(knowledgeSnippets.id, entryId))).limit(1).for("update");
     if (!current) throw notFound("Knowledge entry");
@@ -1915,11 +2486,12 @@ export async function updateKnowledgeEntryForApi(context: DomainContext, caller:
       ...(input.priority !== undefined && input.priority !== current.priority ? { priority: input.priority } : {}),
       ...(input.active !== undefined && input.active !== current.active ? { active: input.active } : {}),
     };
-    if (!Object.keys(changes).length) return serializeKnowledgeEntry(current);
-    const snippet = await updateKnowledgeSnippetInTransaction(tx, { businessId: caller.businessId, snippetId: entryId, ...changes });
-    if (!snippet) throw notFound("Knowledge entry");
-    await audit(tx, caller, { eventType: "api.knowledge.updated", entityType: "knowledge_snippet", entityId: entryId, payload: { fields: Object.keys(changes) } });
-    return serializeKnowledgeEntry(snippet);
+    const audienceChanged = choice !== undefined && !await hasAudience(tx, caller.businessId, { kind: "snippet", id: current.id, audience: current.audience }, choice);
+    if (!Object.keys(changes).length && !audienceChanged) return await requireKnowledgeEntry(tx, caller.businessId, current.id);
+    if (Object.keys(changes).length && !await updateKnowledgeSnippetInTransaction(tx, { businessId: caller.businessId, snippetId: current.id, ...changes })) throw notFound("Knowledge entry");
+    if (audienceChanged) await setAudience(tx, caller, "snippet", current.id, choice);
+    await audit(tx, caller, { eventType: "api.knowledge.updated", entityType: "knowledge_snippet", entityId: current.id, payload: { fields: [...Object.keys(changes), ...(audienceChanged ? ["audience"] : [])] } });
+    return await requireKnowledgeEntry(tx, caller.businessId, current.id);
   });
 }
 
@@ -2047,14 +2619,19 @@ export async function getKnowledgeSourceForApi(context: DomainContext, caller: A
   });
 }
 
-/** Turns a website, page or file off or back on. Sending its current state changes nothing. */
+/** Turns a website, page or file off or back on, or changes who it's for. Values it already has change nothing. */
 export async function updateKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string, input: ApiKnowledgeSourceUpdate): Promise<ApiKnowledgeSource> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  const choice = audienceChoice(input);
   return await inBusiness(context, caller, async (tx) => {
-    const [current] = await tx.select({ active: knowledgeDocuments.active }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.id, documentId))).limit(1).for("update");
+    const [current] = await tx.select({ id: knowledgeDocuments.id, active: knowledgeDocuments.active, audience: knowledgeDocuments.audience }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.id, documentId))).limit(1).for("update");
     if (!current) throw notFound("Knowledge source");
-    if (current.active !== input.active) {
-      await setKnowledgeDocumentActiveInTransaction(tx, { businessId: caller.businessId, documentId, active: input.active });
-      await audit(tx, caller, { eventType: "api.knowledge_source.updated", entityType: "knowledge_document", entityId: documentId, payload: { active: input.active } });
+    const activeChanged = input.active !== undefined && current.active !== input.active;
+    if (activeChanged) await setKnowledgeDocumentActiveInTransaction(tx, { businessId: caller.businessId, documentId: current.id, active: input.active! });
+    const audienceChanged = choice !== undefined && !await hasAudience(tx, caller.businessId, { kind: "document", id: current.id, audience: current.audience }, choice);
+    if (audienceChanged) await setAudience(tx, caller, "document", current.id, choice);
+    if (activeChanged || audienceChanged) {
+      await audit(tx, caller, { eventType: "api.knowledge_source.updated", entityType: "knowledge_document", entityId: current.id, payload: { fields: [...(activeChanged ? ["active"] : []), ...(audienceChanged ? ["audience"] : [])], ...(activeChanged ? { active: input.active } : {}) } });
     }
     const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
     if (!source) throw notFound("Knowledge source");
@@ -2099,6 +2676,7 @@ async function completedUpload(context: DomainContext, caller: ApiCaller, upload
  * source queued to be read. Completing again returns the same source.
  */
 export async function completeKnowledgeUploadForApi(context: DomainContext, caller: ApiCaller, uploadId: string, input: ApiKnowledgeUploadComplete, storage: StorageProvider): Promise<ApiKnowledgeSource> {
+  const choice = audienceChoice(input);
   const object = await inBusiness(context, caller, async (tx) => (await tx.select().from(storageObjects).where(and(eq(storageObjects.id, uploadId), eq(storageObjects.businessId, caller.businessId), eq(storageObjects.purpose, "knowledge"))).limit(1))[0]);
   if (!object) throw notFound("Upload");
   if (object.status === "ready") return await completedUpload(context, caller, uploadId);
@@ -2112,6 +2690,7 @@ export async function completeKnowledgeUploadForApi(context: DomainContext, call
     return await inBusiness(context, caller, async (tx) => {
       const documentId = await completeUploadInTransaction(tx, { businessId: caller.businessId, objectId: uploadId, purpose: "knowledge", fileName: object.fileName, metadata, title: input.title, tags: input.tags });
       if (!documentId) throw new Error("The knowledge upload made no document.");
+      if (choice?.audience === "chosen") await setAudience(tx, caller, "document", documentId, choice);
       await audit(tx, caller, { eventType: "api.knowledge_upload.completed", entityType: "knowledge_document", entityId: documentId, payload: { uploadId } });
       const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
       if (!source) throw new Error("The file source could not be read back.");

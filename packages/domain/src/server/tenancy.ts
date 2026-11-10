@@ -4,7 +4,7 @@ import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiKeys, auditLogs, businessInvitations, businessMemberships, businesses, calendarConnections, receptionistProfiles, staff, users, webhookEndpoints } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
+import { defaultAppointmentChangePolicy, defaultReceptionistName, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { disconnectCalendarInTransaction } from "./calendar";
@@ -90,7 +90,8 @@ export async function createBusiness(
 
 /**
  * Inserts a business with what every new business needs: its owner, the staff
- * member that stands for it, a receptionist profile, and its first snapshot.
+ * member that stands for it, its default receptionist's settings, and its
+ * first snapshot.
  * The transaction must be scoped to businessId, and timezone must already be
  * an IANA name. A generated slug gets a random suffix when taken; a taken slug
  * the caller chose fails with a unique violation.
@@ -119,6 +120,11 @@ export async function insertBusinessInTransaction(
       // every mode but cloud skips billing and the paid-plan check on numbers.
       deploymentMode: input.deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud"),
       onboardingStage: "website",
+      // Settings every receptionist shares. The summary starts as the business
+      // name; summarySource marks it as the placeholder.
+      summary: name,
+      summarySource: "placeholder",
+      appointmentChangePolicy: defaultAppointmentChangePolicy,
       ...(defaultLocale !== undefined ? { defaultLocale } : {}),
       ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}),
     });
@@ -142,18 +148,19 @@ export async function insertBusinessInTransaction(
   // Booking assigns every appointment to a staff member. Businesses that don't
   // manage a team get one hidden member that stands for the business itself.
   await tx.insert(staff).values({ businessId, name, timezone });
-  await tx.insert(receptionistProfiles).values({
-    businessId,
+  // The database made the business's default receptionist with it, "Front
+  // desk" in its language (migration 0143); sign-up gives it these settings.
+  const [receptionist] = await tx.update(receptionistProfiles).set({
     greeting: `Thanks for calling ${name}.`,
     tone: "warm and direct",
-    // The business name, like defaultReceptionistProfile; summarySource marks it as the placeholder.
-    summary: name,
     bookingPolicy: "Only confirm a booking after availability is checked.",
     voiceInstructions: "Sound calm, confident, and concise. Escalate urgent requests to a human when policy requires it.",
     smsInstructions: "Keep replies concise and friendly. Ask one follow-up question at a time.",
     transferMode: "on_request",
-    appointmentChangePolicy: defaultAppointmentChangePolicy,
-  });
+  }).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).returning({ id: receptionistProfiles.id });
+  if (!receptionist) {
+    throw new Error("The business's default receptionist could not be set up.");
+  }
   await enqueueOutbox(tx, {
     topic: "snapshot.refresh",
     businessId,
@@ -187,24 +194,55 @@ export async function updateBusiness(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    await updateBusinessInTransaction(tx, input);
+    await updateBusinessInTransaction(tx, { ...input, audit: { actorUserId: input.userId } });
   });
 }
+
+/** Who changed the business, for the audit log: the account, and the API key or grant that acted for it. */
+export type BusinessChangeAudit = { actorUserId: string | null; payload?: Record<string, unknown> };
 
 /** Updates basic business fields and refreshes the receptionist's snapshot. Callers authorize first. */
 export async function updateBusinessInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; name?: string; timezone?: string; businessType?: string; defaultLocale?: string; websiteUrl?: string | null },
+  input: { businessId: string; name?: string; timezone?: string; businessType?: string; defaultLocale?: string; websiteUrl?: string | null; audit?: BusinessChangeAudit },
 ): Promise<void> {
   const timezone = input.timezone === undefined ? undefined : requireIanaTimeZone(input.timezone);
   const defaultLocale = input.defaultLocale === undefined ? undefined : requireRuntimeLocale(input.defaultLocale);
   const values = { ...(input.name !== undefined ? { name: input.name.trim() } : {}), ...(timezone !== undefined ? { timezone } : {}), ...(input.businessType !== undefined ? { businessType: input.businessType.trim() } : {}), ...(defaultLocale !== undefined ? { defaultLocale } : {}), ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}), updatedAt: new Date() };
   if (Object.keys(values).length === 1) throw new Error("At least one business field is required.");
+  // The language before this change, read under the row's lock, so a change made at the same time reads this one's.
+  const before = defaultLocale === undefined ? undefined : (await tx.select({ defaultLocale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0];
   const [business] = await tx.update(businesses).set(values).where(eq(businesses.id, input.businessId)).returning({ id: businesses.id });
   if (!business) throw new Error("Business not found.");
   // shortcut: every staff row today is the default member that stands for the business; once staff set their own zones, update only that member.
   if (timezone !== undefined) await tx.update(staff).set({ timezone, updatedAt: new Date() }).where(eq(staff.businessId, input.businessId));
+  if (before && defaultLocale !== undefined) await renameDefaultReceptionistForLanguage(tx, { businessId: input.businessId, from: before.defaultLocale, to: defaultLocale, audit: input.audit });
   await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "business", aggregateId: input.businessId, dedupeKey: `business:${input.businessId}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "business_updated" } });
+}
+
+/**
+ * The default receptionist takes the new language's "Front desk" while it has
+ * the old language's, the name the code gave it, and keeps any other name:
+ * one someone wrote, or another language's "Front desk", which someone chose.
+ * The rename is in the audit log, as a rename on the Receptionists page is.
+ */
+async function renameDefaultReceptionistForLanguage(tx: DatabaseTransaction, input: { businessId: string; from: string; to: string; audit?: BusinessChangeAudit | undefined }): Promise<void> {
+  const from = defaultReceptionistName(input.from);
+  const to = defaultReceptionistName(input.to);
+  if (from === to) return;
+  const renamed = await tx.update(receptionistProfiles).set({ name: to, updatedAt: new Date() })
+    .where(and(eq(receptionistProfiles.businessId, input.businessId), eq(receptionistProfiles.isDefault, true), eq(receptionistProfiles.name, from)))
+    .returning({ id: receptionistProfiles.id });
+  if (!renamed.length) return;
+  const actorUserId = input.audit?.actorUserId;
+  await tx.insert(auditLogs).values(renamed.map((row) => ({
+    businessId: input.businessId,
+    ...(actorUserId ? { actorUserId } : {}),
+    eventType: "receptionist.updated",
+    entityType: "receptionist",
+    entityId: row.id,
+    payload: { ...input.audit?.payload, fields: ["name"], from, to, reason: "business_language" },
+  })));
 }
 
 export async function switchWorkspace(

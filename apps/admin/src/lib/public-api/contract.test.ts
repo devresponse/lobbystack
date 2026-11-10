@@ -18,6 +18,19 @@ describe("v1 contract", () => {
     }
   });
 
+  it("serves and documents each alias path as its operation", () => {
+    const document = buildOpenApiDocument({ serverUrl: "https://app.lobbystack.com/api/v1" }) as { paths: Record<string, Record<string, { operationId: string; summary: string }>> };
+    for (const [operationId, operation] of Object.entries(apiOperations) as Array<[string, ApiOperation]>) {
+      for (const alias of operation.aliases ?? []) {
+        const file = `${adminRoot}app/api/v1${alias.replace(/\{([a-z_]+)\}/g, "[$1]")}/route.ts`;
+        expect(readFileSync(file, "utf8"), alias).toContain(`export const ${operation.method} = v1.${operationId};`);
+        expect(document.paths[alias]?.[operation.method.toLowerCase()], alias).toMatchObject({ operationId: `${operationId}Alias`, summary: `${operation.summary} (alias)` });
+      }
+    }
+    // Clients written before the Stripe plan's step 6 post links here.
+    expect(apiOperations.linkBillingCatalog).toMatchObject({ path: "/billing/catalog/links", aliases: ["/billing/catalog/polar-links"] });
+  });
+
   it("requires a declared scope on every operation except the key check", () => {
     for (const [operationId, operation] of Object.entries(apiOperations)) {
       if (operationId === "getMe") expect(operation.scope).toBeNull();
@@ -78,8 +91,8 @@ describe("v1 contract", () => {
       expect(businessApiKeyScopes).not.toContain(scope);
       expect(oauthGrantableScopes).not.toContain(scope);
     }
-    // MCP has no tools for the onboarding scopes, so OAuth clients are offered the same scopes as before.
-    expect([...oauthGrantableScopes]).toEqual(["business:read", "business:write", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:write"]);
+    // MCP has no tools for the onboarding scopes; list_questions brought knowledge:read.
+    expect([...oauthGrantableScopes]).toEqual(["business:read", "business:write", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:read", "knowledge:write"]);
   });
 
   it("offers in Settings only per-business scopes an endpoint uses, each with a label", () => {

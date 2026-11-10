@@ -23,6 +23,12 @@ Each feature has a status:
 | --- | --- | --- | --- | --- |
 | [Read the business's website during onboarding, as an option](onboarding-website-option.md) | The website read during onboarding again, where and when the deployment chooses, now that fork PR #127 makes the website step only save the address | Not estimated; most of the code is kept | Waiting on 3 decisions | None; the maintainer's request of 2026-11-02 |
 
+**Receptionists**
+
+| Feature | What it gives | Effort | Status | Study |
+| --- | --- | --- | --- | --- |
+| [Take several receptionists further](receptionists-next.md) | A chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and team members limited to some receptionists | 2 to 5 days each; 5 or more for limited members | Ready when needed; more numbers waits on a decision about plans | The design of 2026-11-02, built in fork PR #129 ([receptionists](../features/receptionists.md)) |
+
 **Calls and conversations**
 
 | Feature | What it gives | Effort | Status | Study |
@@ -47,6 +53,11 @@ Each feature has a status:
 | --- | --- | --- | --- | --- |
 | [Publish the n8n and Zapier integrations](n8n-and-zapier.md) | A dedicated n8n node, and the brands' private Zapier integration (fork PR #94) listed in Zapier's directory. The Make app (fork PR #95) is shared by invite link | 3 to 5 days for the node; 1.5 to 2.5 days for the listing | Ready when needed | 2026-10-13, in [integrations](../features/api-cli-integrations.md#connect-n8n) |
 | [Offer a QR place guide](qr-place-guide.md) | A no-login guide at a place, paid for by the place's owner | A pilot with no code; a minimum product in 16 to 23 days at the time | Waiting on a decision | [2026-10-10](../research/qr-place-guide-market.md) |
+
+**Billing**
+
+| Feature | What it gives | Effort | Status | Study |
+| --- | --- | --- | --- | --- |
 
 ## Know the smaller items
 

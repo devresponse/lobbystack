@@ -13,6 +13,9 @@ export interface LegalSection {
   blocks: LegalBlock[]
 }
 
+/** The payment processor the pages name: the deployment's billing provider, from the landing build's BILLING_PROVIDER. */
+export type LegalProcessor = "polar" | "stripe"
+
 export interface LegalDocument {
   updated: string
   h1: string

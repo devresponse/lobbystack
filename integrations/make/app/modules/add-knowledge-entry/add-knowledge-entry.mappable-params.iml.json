@@ -48,5 +48,33 @@
         ]
       }
     ]
+  },
+  {
+    "name": "audience",
+    "type": "select",
+    "label": "Who uses it",
+    "default": "everyone",
+    "mappable": false,
+    "options": [
+      {
+        "label": "Every receptionist",
+        "value": "everyone"
+      },
+      {
+        "label": "Chosen receptionists",
+        "value": "chosen",
+        "nested": [
+          {
+            "name": "receptionist_ids",
+            "type": "select",
+            "label": "Receptionists",
+            "multiple": true,
+            "options": "rpc://listReceptionists",
+            "required": true,
+            "help": "Only these receptionists use the entry, such as one store's receptionist for that store's hours."
+          }
+        ]
+      }
+    ]
   }
 ]

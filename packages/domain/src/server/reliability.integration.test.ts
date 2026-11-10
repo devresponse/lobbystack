@@ -3,11 +3,14 @@ import { readFileSync } from "node:fs";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
-import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
-import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
+import { createBillingSubscriptionRequestInTransaction } from "./billingSubscription";
+import { loadUsageTotalsWork, recordUsageTotalsCheck } from "./billingUsageTotals";
+import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, loadOverageWork, loadPlanChangePayment, reconcileBillingProviderEvent, recordOverageSubscription, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
-import { DASHBOARD_TEST_CALL_WIDGET_ID } from "@lobbystack/shared";
+import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
+import { DASHBOARD_TEST_CALL_WIDGET_ID, planChangeRefusalSentence } from "@lobbystack/shared";
 import { currentWebsiteIngestion } from "./activation";
 import { createBusiness } from "./tenancy";
 import { bookAppointment, cancelAppointment } from "./booking";
@@ -317,7 +320,8 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
     await rollbackTest(async (tx) => {
       const businessId = randomUUID();
       await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Maple Family Clinic", timezone: "UTC", businessType: "test", deploymentMode: "cloud" });
-      await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Maple Family Clinic uses LobbyStack to answer calls.", bookingPolicy: "Confirm first.", transferMode: "never" });
+      await tx.update(businesses).set({ summary: "Maple Family Clinic uses LobbyStack to answer calls." }).where(eq(businesses.id, businessId));
+      await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Confirm first.", transferMode: "never" }).where(eq(receptionistProfiles.businessId, businessId));
       const [indexed, pending] = [randomUUID(), randomUUID()];
       await tx.insert(knowledgeDocuments).values([
         { id: indexed, businessId, sourceType: "website", title: "Home", status: "indexed" },
@@ -341,12 +345,12 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       expect(reloaded).toMatchObject({ summarySource: "generated", currentFingerprint: input!.fingerprint });
 
       await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
-        await workerTx.update(receptionistProfiles).set({ summary: "Written by the owner.", summarySource: "operator" }).where(eq(receptionistProfiles.businessId, businessId));
+        await workerTx.update(businesses).set({ summary: "Written by the owner.", summarySource: "operator" }).where(eq(businesses.id, businessId));
       });
       expect(await saveGeneratedBusinessSummary({ db }, { businessId, summary: "An AI rewrite.", fingerprint: "other" })).toBe(false);
       await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
-        const [profile] = await workerTx.select({ summary: receptionistProfiles.summary }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
-        expect(profile?.summary).toBe("Written by the owner.");
+        const [business] = await workerTx.select({ summary: businesses.summary }).from(businesses).where(eq(businesses.id, businessId));
+        expect(business?.summary).toBe("Written by the owner.");
       });
     });
   });
@@ -599,15 +603,16 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       const business = async (input: { summarySource?: "placeholder" | "generated" } = {}) => {
         const businessId = randomUUID();
         await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Backfill listing", timezone: "UTC", businessType: "test" });
-        await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Backfill listing", summarySource: input.summarySource ?? "placeholder", bookingPolicy: "Confirm first.", transferMode: "never" });
+        await tx.update(businesses).set({ summary: "Backfill listing", summarySource: input.summarySource ?? "placeholder" }).where(eq(businesses.id, businessId));
+        await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Confirm first.", transferMode: "never" }).where(eq(receptionistProfiles.businessId, businessId));
         return businessId;
       };
-      const document = async (businessId: string, input: { status: string; active?: boolean }) => {
+      const document = async (businessId: string, input: { status: "indexed" | "processing"; active?: boolean }) => {
         const [row] = await tx.insert(knowledgeDocuments).values({ businessId, sourceType: "upload", title: "Menu", status: input.status, active: input.active ?? true }).returning({ id: knowledgeDocuments.id });
         return row!.id;
       };
       const vector = Array.from({ length: 1536 }, () => 0.01);
-      const chunk = async (businessId: string, input: { fingerprint: string | null; embedded: boolean; status: string }) => {
+      const chunk = async (businessId: string, input: { fingerprint: string | null; embedded: boolean; status: "pending" | "completed" | "failed" }) => {
         await tx.insert(knowledgeChunks).values({ businessId, documentId: await document(businessId, { status: "indexed" }), sequence: 0, content: "Open 9 to 5.", contentHash: randomUUID(), embedding: input.embedded ? vector : null, embeddingFingerprint: input.fingerprint, embeddingStatus: input.status });
       };
 
@@ -796,6 +801,236 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       // Its own older snapshot doesn't.
       await reconcile("subscription.updated", { plan: "pro", subscriptionId: "sub_new", subscriptionState: "active", subscriptionModifiedAt: "2026-09-01T06:00:00.000Z" });
       expect(await account()).toEqual({ plan: "starter", state: "active", subscriptionId: "sub_new" });
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+it("applies a Stripe subscription as its read-back says, in any order of its events, and orders read-backs by their time", async () => {
+    // The plan prices as the catalog's links name them, here through the product variables.
+    const env = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "price_starter_month", POLAR_PRO_MONTHLY_PRODUCT_ID: "price_pro_month" };
+    const read = (seconds: number, priceRef: string, state: ProviderSubscription["state"] = "active"): ProviderSubscription => ({ id: "sub_1", customerId: "cus_1", state, priceRef, interval: "monthly", discountRef: null, periodStart: new Date("2026-11-01T00:00:00Z"), periodEnd: new Date("2026-12-01T00:00:00Z"), cancelAt: null, endedAt: null, next: null, pendingPayment: null, metadata: {}, readAt: new Date(Date.UTC(2026, 10, 8, 12, 0, seconds)) });
+    for (const order of [[0, 1, 2], [2, 0, 1], [1, 2, 0]]) {
+      const businessId = randomUUID();
+      await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe read-back test", timezone: "UTC", businessType: "test" });
+      // What each event said when it was sent: created, paid, then moved to Pro.
+      const sent = [
+        { subscriptionState: "incomplete", priceRef: "price_starter_month", subscriptionModifiedAt: "2026-11-08T11:00:00.000Z" },
+        { subscriptionState: "active", priceRef: "price_starter_month", subscriptionModifiedAt: "2026-11-08T11:01:00.000Z" },
+        { subscriptionState: "active", priceRef: "price_pro_month", subscriptionModifiedAt: "2026-11-08T11:02:00.000Z" },
+      ];
+      const events = await client!.db.insert(providerEvents).values(sent.map((payload) => ({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType: "customer.subscription.updated", businessId, payload: { kind: "subscription", subscriptionId: "sub_1", customerId: "cus_1", ...payload } }))).returning({ id: providerEvents.id });
+      try {
+        // Each reconcile reads the subscription back first, and Stripe says it's on Pro now.
+        let seconds = 0;
+        for (const index of order) await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: events[index]!.id, fresh: read(seconds++, "price_pro_month") }, env);
+        const [account] = await client!.db.select({ plan: billingAccounts.plan, state: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId, customerId: billingAccounts.customerId, source: billingAccounts.source }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId));
+        expect(account).toEqual({ plan: "pro", state: "active", subscriptionId: "sub_1", customerId: "cus_1", source: "stripe" });
+        // A read-back older than one already applied, as from a slow worker, changes nothing.
+        const [late] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType: "customer.subscription.updated", businessId, payload: { kind: "subscription", subscriptionId: "sub_1", customerId: "cus_1", subscriptionState: "active", priceRef: "price_starter_month" } }).returning({ id: providerEvents.id });
+        await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: late!.id, fresh: { ...read(0, "price_starter_month"), readAt: new Date(Date.UTC(2026, 10, 8, 11, 59, 0)) } }, env);
+        expect((await client!.db.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0]?.plan).toBe("pro");
+        const [stored] = await client!.db.select({ payload: providerEvents.payload, status: providerEvents.status }).from(providerEvents).where(eq(providerEvents.id, events[order[0]!]!.id));
+        expect(stored).toMatchObject({ status: "processed", payload: { subscriptionModifiedAt: "2026-11-08T12:00:00.000Z" } });
+      } finally {
+        await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+      }
+    }
+  });
+
+  it("queues a Stripe plan's overage job when there's one to do, drops an overage subscription Stripe ended, and reports one ended unpaid", async () => {
+    const env = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "price_starter_month" };
+    const context = { db: client!.db as unknown as Database };
+    let seconds = 0;
+    const read = (state: ProviderSubscription["state"]): ProviderSubscription => ({ id: "sub_1", customerId: "cus_1", state, priceRef: "price_starter_month", interval: "monthly", discountRef: null, periodStart: new Date("2026-11-01T00:00:00Z"), periodEnd: new Date("2026-12-01T00:00:00Z"), cancelAt: null, endedAt: state === "canceled" ? new Date("2026-11-20T00:00:00Z") : null, next: null, pendingPayment: null, metadata: {}, readAt: new Date(Date.UTC(2026, 10, 8, 12, 0, seconds++)) });
+    const businessId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe overage test", timezone: "UTC", businessType: "test" });
+    const reconcile = async (eventType: string, payload: Record<string, unknown>, fresh?: ProviderSubscription) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType, businessId, payload: { customerId: "cus_1", ...payload } }).returning({ id: providerEvents.id });
+      await reconcileBillingProviderEvent(context, { businessId, providerEventId: event!.id, ...(fresh ? { fresh } : {}) }, env);
+      return event!.id;
+    };
+    const planEvent = (state: ProviderSubscription["state"]) => reconcile("customer.subscription.updated", { kind: "subscription", subscriptionId: "sub_1" }, read(state));
+    // What the webhook stores for the overage subscription's events: its own object, beside the ID.
+    const overageEnded = (status: string, reason: string | null) => reconcile(status === "canceled" ? "customer.subscription.deleted" : "customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage", status, cancellation_details: { reason } });
+    const jobs = async () => (await client!.db.select({ dedupeKey: outboxMessages.dedupeKey }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.ensureOverage")))).map((row) => row.dedupeKey);
+    const reports = async () => (await client!.db.select({ properties: productEvents.properties }).from(productEvents).where(and(eq(productEvents.businessId, businessId), eq(productEvents.name, "ops.billing.overage_unpaid")))).map((row) => row.properties);
+    const overage = async () => (await client!.db.select({ id: billingAccounts.overageSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0]?.id;
+    try {
+      // The plan goes live without an overage subscription: its event queues the job, and usage stops at the allowance meanwhile.
+      const live = await reconcile("customer.subscription.created", { kind: "subscription", subscriptionId: "sub_1" }, read("active"));
+      expect(await jobs()).toEqual([`ensure-overage:${live}`]);
+      expect(await getBillingUsageStatus(context, { businessId })).toMatchObject({ overagesBillable: false });
+      // The job stores the one it made while the account pays with the plan it was made for.
+      expect(await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_other", overageSubscriptionId: "sub_overage" })).toBe(false);
+      expect(await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage" })).toBe(true);
+      expect(await loadOverageWork(context, { businessId })).toMatchObject({ source: "stripe", customerId: "cus_1", subscriptionId: "sub_1", subscriptionState: "active", cancelAt: null, overageSubscriptionId: "sub_overage" });
+      expect(await getBillingUsageStatus(context, { businessId })).toMatchObject({ overagesBillable: true });
+      // A live plan with its overage subscription has nothing for the job.
+      await planEvent("active");
+      expect(await jobs()).toHaveLength(1);
+
+      // Canceled by hand: the account has none, nothing's reported, and the plan's next event queues a new one.
+      await overageEnded("canceled", "cancellation_requested");
+      expect([await overage(), await reports()]).toEqual([null, []]);
+      const again = await planEvent("active");
+      expect(await jobs()).toContain(`ensure-overage:${again}`);
+      await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage" });
+
+      // Stripe ends it after failed payments while the plan pays on: dropped and reported, once.
+      await overageEnded("canceled", "payment_failed");
+      await overageEnded("canceled", "payment_failed");
+      expect(await overage()).toBeNull();
+      expect(await reports()).toEqual([expect.objectContaining({ provider: "stripe", overageSubscriptionId: "sub_overage", businessId })]);
+      expect(await getBillingUsageStatus(context, { businessId })).toMatchObject({ overagesBillable: false });
+
+      // Its invoice paid later, or voided or forgiven: that invoice's event queues the job, which makes a new one.
+      const settled = await reconcile("invoice.paid", { kind: "payment", orderId: "in_overage", status: "paid", amountCents: 1_250, currency: "cad", overageSubscriptionId: "sub_overage" });
+      expect(await jobs()).toContain(`ensure-overage:${settled}`);
+      // With an overage subscription recorded, its events queue nothing.
+      await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage_2" });
+      await reconcile("customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage_2", status: "active" });
+      expect(await jobs()).toHaveLength(3);
+      // Left unpaid, then paid: dropped and reported, and live again its event queues the job, which records it again.
+      await reconcile("customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage_2", status: "unpaid", cancellation_details: { reason: null } });
+      expect([await overage(), (await reports()).length]).toEqual([null, 2]);
+      const liveAgain = await reconcile("customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage_2", status: "active" });
+      expect(await jobs()).toContain(`ensure-overage:${liveAgain}`);
+
+      // The plan ends with an overage subscription: its event queues the job, which ends it with its month.
+      await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage" });
+      const ended = await planEvent("canceled");
+      expect(await jobs()).toContain(`ensure-overage:${ended}`);
+      // Its end once the plan has ended isn't an unpaid one, whatever the reason.
+      await overageEnded("unpaid", null);
+      expect([await overage(), (await reports()).length]).toEqual([null, 2]);
+      // An overage invoice once the plan has ended queues nothing, nor does the plan's next event.
+      await reconcile("invoice.paid", { kind: "payment", orderId: "in_overage_2", status: "paid", amountCents: 900, currency: "cad", overageSubscriptionId: "sub_overage" });
+      await planEvent("canceled");
+      expect(await jobs()).toHaveLength(5);
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("settles a plan change that waited for the customer's payment once Stripe applies it, or once it expires unpaid", async () => {
+    const env = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "price_starter_month", POLAR_PRO_MONTHLY_PRODUCT_ID: "price_pro_month" };
+    const context = { db: client!.db as unknown as Database };
+    let seconds = 0;
+    const read = (priceRef: string): ProviderSubscription => ({ id: "sub_1", customerId: "cus_1", state: "active", priceRef, interval: "monthly", discountRef: null, periodStart: new Date("2026-11-01T00:00:00Z"), periodEnd: new Date("2026-12-01T00:00:00Z"), cancelAt: null, endedAt: null, next: null, pendingPayment: null, metadata: {}, readAt: new Date(Date.UTC(2026, 10, 8, 12, 0, seconds++)) });
+    const businessId = randomUUID();
+    const userId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe pending update test", timezone: "UTC", businessType: "test" });
+    await client!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
+    const reconcile = async (eventType: string, fresh: ProviderSubscription) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType, businessId, payload: { kind: "subscription", subscriptionId: "sub_1", customerId: "cus_1" } }).returning({ id: providerEvents.id });
+      await reconcileBillingProviderEvent(context, { businessId, providerEventId: event!.id, fresh }, env);
+    };
+    // The worker's needs_action: the request ready on the invoice's page, naming the subscription.
+    const waiting = async () => (await client!.db.insert(billingCheckoutRequests).values({ businessId, requestedByUserId: userId, target: "pro", billingInterval: "monthly", status: "ready", checkoutId: "sub_1", checkoutUrl: "https://invoice.stripe.com/i/in_1" }).returning({ id: billingCheckoutRequests.id }))[0]!.id;
+    const request = async (id: string) => (await client!.db.select({ status: billingCheckoutRequests.status, error: billingCheckoutRequests.error }).from(billingCheckoutRequests).where(eq(billingCheckoutRequests.id, id)))[0];
+    const payment = async () => await withBusinessTransaction(client!.db, { businessId, actorType: "worker" }, async (tx) => await loadPlanChangePayment(tx, { businessId, subscriptionId: "sub_1" }));
+    const published = async (id: string) => (await client!.db.select({ dedupeKey: outboxMessages.dedupeKey }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.aggregateId, id)))).map((row) => row.dedupeKey);
+    try {
+      await reconcile("customer.subscription.created", read("price_starter_month"));
+      expect(await payment()).toBeNull();
+
+      // The customer confirms with the bank: Stripe applies the upgrade, and the request is done.
+      const applied = await waiting();
+      expect(await payment()).toBe("https://invoice.stripe.com/i/in_1");
+      await reconcile("customer.subscription.pending_update_applied", read("price_pro_month"));
+      expect(await request(applied)).toEqual({ status: "changed", error: null });
+      expect(await published(applied)).toEqual([`billing-checkout:${applied}:changed`]);
+      expect((await client!.db.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0]?.plan).toBe("pro");
+      expect(await payment()).toBeNull();
+
+      // Another one never paid: Stripe drops it within a day, and the business hears the card wasn't charged.
+      const expired = await waiting();
+      const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      await reconcile("customer.subscription.pending_update_expired", read("price_pro_month"));
+      const lines = warnings.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith("{")).map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(lines).toContainEqual(expect.objectContaining({ level: "warn", message: "ops.billing.plan_change_expired", businessId, requestId: expired, subscriptionId: "sub_1" }));
+      warnings.mockRestore();
+      expect(await request(expired)).toEqual({ status: "error", error: planChangeRefusalSentence("stripe", "payment_failed") });
+      expect(await published(expired)).toEqual([`billing-checkout:${expired}:error`]);
+      expect(await payment()).toBeNull();
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await client!.db.delete(users).where(eq(users.id, userId));
+    }
+  });
+
+  it("queues cancel, resume and keep on Stripe one change at a time, and refuses what there's nothing to change", async () => {
+    const stripe = { BILLING_PROVIDER: "stripe" };
+    const businessId = randomUUID();
+    const userId = randomUUID();
+    const otherId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe plan actions test", timezone: "UTC", businessType: "test" });
+    await client!.db.insert(users).values([userId, otherId].map((id) => ({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid` })));
+    await client!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", plan: "pro", subscriptionId: "sub_1", subscriptionState: "active", billingInterval: "annual" });
+    const ask = async (action: "cancel" | "resume" | "keep", env: Record<string, string> = stripe, user = userId) => await withBusinessTransaction(client!.db, { businessId, userId: user, actorType: "operator" }, async (tx) => await createBillingSubscriptionRequestInTransaction(tx, { userId: user, businessId, action }, env));
+    const refusal = async (asked: Promise<unknown>) => {
+      try {
+        await asked;
+      } catch (error) {
+        const { status, code, message } = error as { status?: number; code?: string; message: string };
+        return { status, code, message };
+      }
+      throw new Error("The change was queued.");
+    };
+    const setAccount = async (fields: Partial<typeof billingAccounts.$inferInsert>) => await client!.db.update(billingAccounts).set(fields).where(eq(billingAccounts.businessId, businessId));
+    try {
+      // Polar's billing portal does these on a Polar deployment.
+      expect(await refusal(ask("cancel", {}))).toMatchObject({ status: 409, message: expect.stringContaining("Polar's billing portal") });
+      expect(await refusal(ask("resume"))).toMatchObject({ status: 409, message: "The plan isn't set to end, so there's nothing to resume." });
+      expect(await refusal(ask("keep"))).toMatchObject({ status: 409, message: "No plan change waits for the renewal." });
+
+      const cancel = await ask("cancel");
+      expect(cancel.created).toBe(true);
+      // The same person's click again gets the same request; anyone else's change waits for it.
+      expect(await ask("cancel")).toEqual({ id: cancel.id, created: false });
+      expect(await refusal(ask("cancel", stripe, otherId))).toMatchObject({ status: 409, code: "plan_change_pending" });
+      expect((await client!.db.select({ target: billingCheckoutRequests.target, status: billingCheckoutRequests.status, interval: billingCheckoutRequests.billingInterval }).from(billingCheckoutRequests).where(eq(billingCheckoutRequests.id, cancel.id)))[0]).toEqual({ target: "cancel", status: "pending", interval: "annual" });
+      expect(await client!.db.select({ topic: outboxMessages.topic, dedupeKey: outboxMessages.dedupeKey, payload: outboxMessages.payload }).from(outboxMessages).where(eq(outboxMessages.aggregateId, cancel.id))).toEqual([{ topic: "billing.changeSubscription", dedupeKey: `billing-subscription:${cancel.id}`, payload: { requestId: cancel.id } }]);
+
+      // The job made the change, and the webhook brought the end: cancelling again has nothing to do, resuming has.
+      await client!.db.update(billingCheckoutRequests).set({ status: "changed" }).where(eq(billingCheckoutRequests.id, cancel.id));
+      await setAccount({ cancelAt: new Date("2027-11-01T00:00:00Z") });
+      expect(await refusal(ask("cancel"))).toMatchObject({ status: 409, message: "The plan already ends at its renewal." });
+      expect((await ask("resume", stripe, otherId)).created).toBe(true);
+
+      // Without a live subscription there's nothing to change at all.
+      await client!.db.update(billingCheckoutRequests).set({ status: "changed" }).where(eq(billingCheckoutRequests.businessId, businessId));
+      await setAccount({ subscriptionState: "canceled" });
+      expect(await refusal(ask("resume"))).toMatchObject({ status: 404 });
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await client!.db.delete(users).where(inArray(users.id, [userId, otherId]));
+    }
+  });
+
+  it("stores Stripe invoices as orders, an uncollectible one paid later as paid, and a refund before its payment as refunded", async () => {
+    const businessId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe invoice test", timezone: "UTC", businessType: "test" });
+    const reconcile = async (eventType: string, payload: Record<string, unknown>, refundInvoice?: string) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType, businessId, payload: { customerId: "cus_1", currency: "cad", occurredAt: "2026-11-08T00:00:00.000Z", ...payload } }).returning({ id: providerEvents.id });
+      await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: event!.id, ...(refundInvoice ? { refundInvoice } : {}) });
+    };
+    const order = async (id: string) => (await client!.db.select({ status: billingTransactions.status, amount: billingTransactions.amountCents, refunded: billingTransactions.refundedAmountCents }).from(billingTransactions).where(and(eq(billingTransactions.businessId, businessId), eq(billingTransactions.sourceId, id))))[0];
+    const invoice = (id: string, status: string) => ({ kind: "payment", id, orderId: id, status, amountCents: 8_700 });
+    try {
+      await reconcile("invoice.finalized", invoice("in_1", "pending"));
+      await reconcile("invoice.payment_failed", invoice("in_1", "uncollectible"));
+      await reconcile("invoice.paid", invoice("in_1", "paid"));
+      expect(await order("in_1")).toEqual({ status: "paid", amount: 8_700, refunded: 0 });
+      // A declined upgrade's invoice, voided once its payment failed, no longer waits.
+      await reconcile("invoice.finalized", invoice("in_3", "pending"));
+      await reconcile("invoice.voided", invoice("in_3", "void"));
+      expect(await order("in_3")).toMatchObject({ status: "void" });
+      // The refund's read-back named its invoice before Stripe's paid event was applied.
+      await reconcile("charge.refunded", { kind: "refund", amount: 8_700, refundedAmount: 8_700, paymentRef: "pi_2", status: "refunded" }, "in_2");
+      await reconcile("invoice.paid", invoice("in_2", "paid"));
+      expect(await order("in_2")).toEqual({ status: "refunded", amount: 8_700, refunded: 8_700 });
     } finally {
       await client!.db.delete(businesses).where(eq(businesses.id, businessId));
     }
@@ -1021,7 +1256,7 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       const correct = (segments: number) => correctAlertSmsUsage({ db }, { businessId, sourceKey, segments });
 
       // The first event carries the billable quantity, under the row's source key.
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: sourceKey, quantity: 1, seq: 0 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: sourceKey, quantity: 1, seq: 0 });
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 0 })).toBe(true);
       expect(await row()).toEqual({ status: "synced", billable: 1, synced: 1, seq: 1, sending: null });
 
@@ -1030,8 +1265,8 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       await correct(3);
       await enqueueBillingUsageSync({ db }, usage);
       expect(await syncs()).toContain(`billing-usage:${usageEventId}:sync:3:1`);
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 1 })).toBe(true);
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 1 })).toBe(false);
       expect(await row()).toEqual({ status: "synced", billable: 3, synced: 3, seq: 2, sending: null });
@@ -1042,12 +1277,12 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
 
       // A correction while an event is on its way: confirming it queues the rest.
       await correct(2);
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:2`, quantity: -1, seq: 2 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:2`, quantity: -1, seq: 2 });
       await correct(4);
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 2 })).toBe(true);
       expect(await row()).toEqual({ status: "pending", billable: 4, synced: 2, seq: 3, sending: null });
       expect(await syncs()).toContain(`billing-usage:${usageEventId}:sync:4:3`);
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:3`, quantity: 2, seq: 3 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:3`, quantity: 2, seq: 3 });
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 3 })).toBe(true);
       expect(await row()).toMatchObject({ status: "synced", synced: 4, seq: 4 });
 
@@ -1056,6 +1291,67 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       await correct(4);
       expect(await claimBillingUsageSync({ db }, usage)).toBeNull();
       expect(await row()).toMatchObject({ status: "synced", synced: 4, seq: 4, sending: null });
+    });
+  });
+
+  it("prices a usage row once, at its first claim, and lets a Stripe event go out again only within 20 hours of its send", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Usage price test", timezone: "UTC", businessType: "test" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", customerId: "cus_1", plan: "pro", subscriptionState: "active" });
+      const [usage] = await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `voice:${randomUUID()}`, usageKind: "voice_seconds", quantity: 90, billableQuantity: 90, planAtRecordTime: "pro", isFinal: true, syncStatus: "pending" }).returning({ id: billingUsageEvents.id });
+      const db = tx as unknown as Database;
+      const input = { businessId, usageEventId: usage!.id };
+      const row = async () => (await tx.select({ rate: billingUsageEvents.rateCents, sentAt: billingUsageEvents.syncSentAt }).from(billingUsageEvents).where(eq(billingUsageEvents.id, usage!.id)))[0];
+      const sentAt = new Date("2026-11-08T08:00:00.000Z");
+      // The first claim fixes the rate from the plan the row counted under, and when the event went out.
+      const first = await claimBillingUsageSync({ db }, { ...input, resendWithinMs: 20 * 60 * 60_000, now: sentAt });
+      expect(first).toMatchObject({ quantity: 90, seq: 0, sentAt, expired: false });
+      expect(first!.rateCents).toEqual(expect.any(Number));
+      expect(await row()).toEqual({ rate: first!.rateCents, sentAt });
+      // Unconfirmed, it goes out again as it was until 20 hours on, then counts as sent instead.
+      expect(await claimBillingUsageSync({ db }, { ...input, resendWithinMs: 20 * 60 * 60_000, now: new Date(sentAt.getTime() + 19 * 60 * 60_000) })).toMatchObject({ seq: 0, sentAt, expired: false });
+      expect(await claimBillingUsageSync({ db }, { ...input, resendWithinMs: 20 * 60 * 60_000, now: new Date(sentAt.getTime() + 21 * 60 * 60_000) })).toMatchObject({ seq: 0, sentAt, expired: true });
+      // Polar keeps an identifier for good, so without the window it always goes out again.
+      expect(await claimBillingUsageSync({ db }, { ...input, now: new Date(sentAt.getTime() + 21 * 60 * 60_000) })).toMatchObject({ expired: false });
+      // A correction keeps the row's first rate, whatever the plan's rate is by then.
+      await confirmBillingUsageSync({ db }, { ...input, seq: 0 });
+      await tx.update(billingUsageEvents).set({ rateCents: 7, billableQuantity: 120, syncStatus: "pending" }).where(eq(billingUsageEvents.id, usage!.id));
+      expect(await claimBillingUsageSync({ db }, { ...input, now: new Date(sentAt.getTime() + 25 * 60 * 60_000) })).toMatchObject({ quantity: 30, seq: 1, rateCents: 7, expired: false });
+      expect(await row()).toEqual({ rate: 7, sentAt: new Date(sentAt.getTime() + 25 * 60 * 60_000) });
+    });
+  });
+
+  it("totals what a Stripe business confirmed sending, waiting while an event is in flight or was just sent or checked", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      const db = tx as unknown as Database;
+      const now = new Date("2026-11-08T12:00:00.000Z");
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Usage totals test", timezone: "UTC", businessType: "test" });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ wait: "nothing" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", customerId: "cus_1", plan: "pro", subscriptionState: "active" });
+      const usage = (fields: Partial<typeof billingUsageEvents.$inferInsert>) => tx.insert(billingUsageEvents).values({ businessId, periodKey: "2026-11", sourceKey: `row:${randomUUID()}`, usageKind: "voice_seconds", quantity: 0, isFinal: true, syncStatus: "synced", createdAt: new Date("2026-11-02T00:00:00.000Z"), syncSentAt: new Date("2026-11-02T00:00:00.000Z"), ...fields }).returning({ id: billingUsageEvents.id });
+      await usage({ quantity: 90, syncedQuantity: 90, rateCents: 20, createdAt: new Date("2026-10-30T00:00:00.000Z") });
+      await usage({ usageKind: "alert_sms_segments", quantity: 3, syncedQuantity: 3, rateCents: 2 });
+      await usage({ usageKind: "outbound_call_attempts", quantity: 1, syncedQuantity: 1, rateCents: 25 });
+      // Unpriced rows, as on Polar, aren't Stripe's to hold.
+      await usage({ quantity: 60, syncedQuantity: 60 });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ customerId: "cus_1", since: new Date("2026-10-30T00:00:00.000Z"), confirmed: { voice: 30, alert_sms: 6, transfer: 25 }, periodKey: "2026-11", fixSeq: 0, openSince: new Date("2026-11-01T00:00:00.000Z"), currency: expect.toBeOneOf([expect.any(String), null]) });
+      // Overage on the plan subscription is invoiced at its renewal: the open period starts there.
+      await tx.update(billingAccounts).set({ currentPeriodStart: new Date("2026-11-05T09:00:00.000Z") }).where(eq(billingAccounts.businessId, businessId));
+      expect(await loadUsageTotalsWork({ db }, { businessId, now, overageOnPlan: true })).toMatchObject({ openSince: new Date("2026-11-05T09:00:00.000Z") });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toMatchObject({ openSince: new Date("2026-11-01T00:00:00.000Z") });
+
+      // The check keeps what it saw on the open month, and waits an hour before the next.
+      await recordUsageTotalsCheck({ db }, { businessId, periodKey: "2026-11", providerOverageCents: 61.25, fixSeq: 2, checkedAt: new Date("2026-11-08T11:30:00.000Z") });
+      expect((await tx.select({ cents: billingUsageMonths.providerOverageCents, checkedAt: billingUsageMonths.providerCheckedAt, fixSeq: billingUsageMonths.fixSeq }).from(billingUsageMonths).where(and(eq(billingUsageMonths.businessId, businessId), eq(billingUsageMonths.periodKey, "2026-11"))))[0]).toEqual({ cents: "61.2500", checkedAt: new Date("2026-11-08T11:30:00.000Z"), fixSeq: 2 });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ wait: "recent" });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now: new Date("2026-11-08T13:00:00.000Z") })).toMatchObject({ fixSeq: 2 });
+      // An event sent within the hour, or one claimed and not confirmed, makes it wait.
+      await usage({ quantity: 30, syncedQuantity: 30, rateCents: 20, syncSentAt: new Date("2026-11-08T12:40:00.000Z") });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now: new Date("2026-11-08T13:00:00.000Z") })).toEqual({ wait: "recent" });
+      await usage({ quantity: 30, sendingQuantity: 30, rateCents: 20, syncStatus: "pending" });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now: new Date("2026-11-08T15:00:00.000Z") })).toEqual({ wait: "in_flight" });
     });
   });
 

@@ -106,6 +106,25 @@ describe.skipIf(!testUrl)("unanswered questions against PostgreSQL under RLS", (
     });
   });
 
+  it("lists a page of open questions at a time, counting them all", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, userId, businessId } = await seedBusiness(tx);
+      await as(tx, "lobbystack_worker");
+      for (let index = 1; index <= 12; index += 1) await recordUnansweredQuestion(context, { businessId, question: `Question number ${index}?`, channel: "web_chat" });
+
+      await as(tx, "lobbystack_app");
+      const first = await listOpenUnansweredQuestions(context, { userId, businessId, limit: 10 });
+      const second = await listOpenUnansweredQuestions(context, { userId, businessId, limit: 10, offset: 10 });
+      expect([first.questions.length, first.openCount, second.questions.length, second.openCount]).toEqual([10, 12, 2, 12]);
+      const ids = [...first.questions, ...second.questions].map((question) => question.id);
+      expect(new Set(ids).size).toBe(12);
+      // Without a limit, or past 50, a list holds 50 at most; a limit under 1 holds 1.
+      expect((await listOpenUnansweredQuestions(context, { userId, businessId })).questions).toHaveLength(12);
+      expect((await listOpenUnansweredQuestions(context, { userId, businessId, limit: 0 })).questions).toHaveLength(1);
+      expect((await listOpenUnansweredQuestions(context, { userId, businessId, limit: 10, offset: 20 })).questions).toEqual([]);
+    });
+  });
+
   it("keeps a dismissed question off the list when it's asked again, and reopens an answered one", async () => {
     await rollbackTest(async (tx) => {
       const { context, userId, businessId } = await seedBusiness(tx);
@@ -117,7 +136,7 @@ describe.skipIf(!testUrl)("unanswered questions against PostgreSQL under RLS", (
       await dismissUnansweredQuestion(context, { userId, businessId, questionId: dog!.id });
       await expect(dismissUnansweredQuestion(context, { userId, businessId, questionId: dog!.id })).rejects.toMatchObject({ status: 409 });
       await answerUnansweredQuestion(context, { userId, businessId, questionId: parking!.id, answer: "Two hours free." });
-      expect(await listOpenUnansweredQuestions(context, { userId, businessId })).toEqual({ questions: [], openCount: 0 });
+      expect(await listOpenUnansweredQuestions(context, { userId, businessId })).toEqual({ questions: [], openCount: 0, openByReceptionist: {} });
 
       await as(tx, "lobbystack_worker");
       expect(await recordUnansweredQuestion(context, { businessId, question: "can i bring my dog", channel: "voice" })).toEqual({ id: dog!.id, timesAsked: 2, status: "dismissed" });

@@ -8,10 +8,12 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfi
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { getBillingUsageStatus, getWebVoiceBillingAllowance } from "./billing";
-import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
-import { billingPlanList, brandBillingCatalog, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
+import { applyBillingCatalogForApi, billingDeploymentPolar, billingDeploymentStripe, desiredBillingPacks, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, loadStripeSelling, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
+import { billingPlanList, brandBillingCatalog, hasLinkedPackPrice, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
+import { desiredStripeCatalog, planStripeChanges, stripeLinkBody } from "./billingStripe";
+import { emptyStripeSnapshot, runStripeSteps } from "./billingStripe.testing";
 import { runDailyBillingVerify } from "./billingVerify";
 import { NumberSelectionError, numberMarketInTransaction } from "./phoneNumbers";
 import { PublicApiError } from "./publicApi/errors";
@@ -40,6 +42,11 @@ async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
       // The lock every catalog apply and link takes: the catalog test that commits its
       // applies can't add or delete rows while this one reads the tables.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('lobbystack.billing_catalog'))`);
+      // A pack's purchases point at its rows, and every row at the run that wrote it.
+      await tx.execute(sql`delete from public.billing_packs`);
+      await tx.execute(sql`delete from public.billing_pack_checkouts`);
+      await tx.execute(sql`delete from public.billing_pack_prices`);
+      await tx.execute(sql`delete from public.billing_pack_plans`);
       await tx.execute(sql`delete from public.billing_prices`);
       await tx.execute(sql`delete from public.billing_plans`);
       await tx.execute(sql`delete from public.billing_runs`);
@@ -124,10 +131,16 @@ async function refusal(promise: Promise<unknown>): Promise<PublicApiError> {
   throw new Error("The apply went through.");
 }
 
-const count = async (tx: DatabaseTransaction, table: "billing_runs" | "billing_plans" | "billing_prices") => Number((await rows(tx, sql.raw(`select count(*) as n from public.${table}`)))[0]!.n);
+const count = async (tx: DatabaseTransaction, table: "billing_runs" | "billing_plans" | "billing_prices" | "billing_pack_plans" | "billing_pack_prices") => Number((await rows(tx, sql.raw(`select count(*) as n from public.${table}`)))[0]!.n);
 const plan = async (tx: DatabaseTransaction, code: string) => (await rows(tx, sql`select * from public.billing_plans where code = ${code}`))[0]!;
 const prices = async (tx: DatabaseTransaction, code: string) => await rows(tx, sql`select * from public.billing_prices where plan = ${code} order by period, retired_at nulls first`);
 const actions = (run: ApiBillingCatalogRun) => run.changes.map((change) => `${change.action} ${change.key}`);
+const pack = async (tx: DatabaseTransaction, code: string) => (await rows(tx, sql`select * from public.billing_pack_plans where code = ${code}`))[0]!;
+const packPrices = async (tx: DatabaseTransaction, code: string) => await rows(tx, sql`select * from public.billing_pack_prices where pack = ${code} order by retired_at nulls first, created_at desc`);
+// The brand file's nine packs, in the order a run lists their changes.
+const packCodes = Object.keys(JSON.parse(fileText).packs as Record<string, unknown>).sort();
+/** What a run does to each of the brand file's packs and then to each pack's price. */
+const packActions = (pack: (code: string) => string, price: (code: string) => string | string[]) => [...packCodes.map(pack), ...packCodes.flatMap(price)];
 const hashOf = (value: Record<string, any>) => createHash("sha256").update(canonicalBillingProfileJson(apiBillingCatalogApplySchema.parse({ brand: "alloplace", billing_file: value }).billing_file)).digest("hex");
 
 describe.skipIf(!testUrl)("billing catalog apply", () => {
@@ -137,7 +150,8 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect(await loadPlanChangeProration(context(tx))).toEqual({ upgrade: "invoice", downgrade: "next_period" });
       const first = await apply(tx, file());
       expect(first).toMatchObject({ status: 201, replayed: false, run: { kind: "catalog", status: "applied", brand: "alloplace", ver: 1, prev_hash: null, code_hash: deployedHash, hash: deployedHash, key_id: caller.platformKeyId, partner: "lobbystack" } });
-      expect(actions(first.run)).toEqual(["insert enterprise", "insert free_cloud", "insert pro", "insert starter", "insert pro/annual/cad", "insert pro/monthly/cad", "insert starter/annual/cad", "insert starter/monthly/cad"]);
+      // The plans' changes as before packs, then the brand file's packs and their prices.
+      expect(actions(first.run)).toEqual(["insert enterprise", "insert free_cloud", "insert pro", "insert starter", "insert pro/annual/cad", "insert pro/monthly/cad", "insert starter/annual/cad", "insert starter/monthly/cad", ...packActions((code) => `insert ${code}`, (code) => `insert ${code}/cad`)]);
       expect(first.run.ended_at).not.toBeNull();
       expect(Object.fromEntries((await rows(tx, sql`select code, status, src, access from public.billing_plans`)).map((row) => [row.code, `${String(row.status)} ${String(row.src)} ${String(row.access)}`]))).toEqual({ free_cloud: "active file public", starter: "draft file public", pro: "draft file public", enterprise: "active file hidden" });
       expect((await rows(tx, sql`select distinct run_id from public.billing_plans union select distinct run_id from public.billing_prices`)).map((row) => row.run_id)).toEqual([first.run.id]);
@@ -159,6 +173,14 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       // After one, as the latest file says.
       await apply(tx, file((value) => { value.polar.upgradeProration = "prorate"; }));
       expect(await loadPlanChangeProration(context(tx))).toEqual({ upgrade: "prorate", downgrade: "next_period" });
+      // A Stripe deployment goes by the stripe block's words (the Stripe plan's step 14), and before it has one, by the defaults.
+      expect(await loadPlanChangeProration(context(tx), "stripe")).toEqual({ upgrade: "invoice", downgrade: "next_period" });
+      await apply(tx, file((value) => { value.stripe = { upgrade: "reset", downgrade: "prorate", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "separate", managedPayments: false }; }));
+      expect(await loadPlanChangeProration(context(tx), "stripe")).toEqual({ upgrade: "reset", downgrade: "prorate" });
+      // How the file sells on Stripe: directly, until its block puts overage on the checkout with Stripe as the merchant of record.
+      expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: false, overage: "separate", currency: "cad", usageGraceHours: 1 });
+      await apply(tx, file((value) => { value.stripe = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 6, overage: "checkout", managedPayments: true }; }));
+      expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 6 });
     });
   });
 
@@ -179,12 +201,12 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
       const [before] = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
-      await byHand(tx, sql`update public.billing_prices set polar_id = 'prod_pro_m' where id = ${before!.id}`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = 'prod_pro_m' where id = ${before!.id}`);
       const changed = await apply(tx, file((value) => { value.plans.pro.prices.monthlyCents = 11000; }));
       expect(actions(changed.run)).toEqual(["update pro", "update pro/monthly/cad"]);
       expect(changed.run.changes[1]).toMatchObject({ raises_price: true, fields: { cents: { from: 8700, to: 11000 } } });
       const after = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
-      expect(after).toEqual([expect.objectContaining({ id: before!.id, cents: 11000, polar_id: "prod_pro_m", run_id: changed.run.id, retired_at: null })]);
+      expect(after).toEqual([expect.objectContaining({ id: before!.id, cents: 11000, provider_ref: "prod_pro_m", run_id: changed.run.id, retired_at: null })]);
     });
   });
 
@@ -192,14 +214,14 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
       const [annual] = await prices(tx, "starter");
-      await byHand(tx, sql`update public.billing_prices set polar_id = 'prod_starter_a' where id = ${annual!.id}`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = 'prod_starter_a' where id = ${annual!.id}`);
       const removed = await apply(tx, file((value) => { delete value.plans.starter.prices.annualCents; }));
       expect(actions(removed.run)).toEqual(["update starter", "retire starter/annual/cad"]);
       expect((await prices(tx, "starter")).find((row) => row.id === annual!.id)!.retired_at).not.toBeNull();
       const restored = await apply(tx, file((value) => { value.plans.starter.prices.annualCents = 30000; }));
       expect(actions(restored.run)).toEqual(["update starter", "restore starter/annual/cad"]);
       const rowsNow = (await prices(tx, "starter")).filter((row) => row.period === "annual");
-      expect(rowsNow).toEqual([expect.objectContaining({ id: annual!.id, cents: 30000, polar_id: "prod_starter_a", retired_at: null })]);
+      expect(rowsNow).toEqual([expect.objectContaining({ id: annual!.id, cents: 30000, provider_ref: "prod_starter_a", retired_at: null })]);
     });
   });
 
@@ -251,17 +273,99 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     });
   });
 
+  it("keeps a frozen plan's receptionists from going down, directly or through its tier, and lets Pro's go down and the plan's go up", async () => {
+    await rollbackTest(async (tx) => {
+      const launch = (receptionists?: number) => (value: Record<string, any>) => {
+        withExamples("pro-launch")(value);
+        if (receptionists !== undefined) value.plans["pro-launch"].limits = { receptionists };
+      };
+      await apply(tx, file(launch()));
+      await byHand(tx, sql`update public.billing_plans set frozen_at = now(), status = 'active' where code = 'pro-launch'`);
+      const runs = await count(tx, "billing_runs");
+      const inherited = await refusal(apply(tx, file((value) => { launch()(value); value.plans.pro.limits.receptionists = 3; })));
+      expect(inherited).toMatchObject({ status: 409, code: "conflict", details: [{ code: "plan_frozen", path: "billing_file.plans.pro-launch" }] });
+      expect(inherited.details![0]!.message).toContain("can't go down, directly or through its tier, from 5 to 3");
+      const direct = await refusal(apply(tx, file(launch(4))));
+      expect(direct.details!.map((detail) => detail.code)).toEqual(["plan_frozen"]);
+      expect(await count(tx, "billing_runs")).toBe(runs);
+      expect((await plan(tx, "pro")).receptionists).toBe(5);
+      expect((await plan(tx, "pro-launch")).receptionists).toBe(5);
+
+      // Pro never freezes: with pro-launch's number in its entry, Pro's goes down alone.
+      const kept = await apply(tx, file((value) => { launch(5)(value); value.plans.pro.limits.receptionists = 3; }));
+      expect(kept.run.changes).toEqual([expect.objectContaining({ key: "pro", action: "update", lowers_allowance: true, fields: { receptionists: { from: 5, to: 3 } } })]);
+      expect((await plan(tx, "pro")).receptionists).toBe(3);
+      const more = await apply(tx, file((value) => { launch(8)(value); value.plans.pro.limits.receptionists = 3; }));
+      expect(actions(more.run)).toEqual(["update pro-launch"]);
+      expect(more.run.changes[0]).toMatchObject({ lowers_allowance: false, fields: { receptionists: { from: 5, to: 8 } } });
+      expect(await plan(tx, "pro-launch")).toMatchObject({ receptionists: 8, status: "active" });
+    });
+  });
+
+  it("refuses to change a bought pack's minutes or length, lets its price and names change, and retires a pack that leaves the file until it comes back", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "draft", voice_sec: 15_000, days: 90, sort: 10, frozen_at: null, retired_at: null });
+      expect((await packPrices(tx, "pack_250_90")).map((row) => [row.currency, row.cents, row.provider_ref, row.retired_at])).toEqual([["cad", 5500, null, null]]);
+      await byHand(tx, sql`update public.billing_pack_plans set frozen_at = now(), status = 'active' where code = 'pack_250_90'`);
+      const runs = await count(tx, "billing_runs");
+      const fewer = await refusal(apply(tx, file((value) => { value.packs.pack_250_90.minutes = 200; })));
+      expect(fewer).toMatchObject({ status: 409, code: "conflict", details: [{ code: "plan_frozen", path: "billing_file.packs.pack_250_90" }] });
+      const shorter = await refusal(apply(tx, file((value) => { value.packs.pack_250_90.days = 60; })));
+      expect(shorter.details!.map((detail) => detail.code)).toEqual(["plan_frozen"]);
+      expect(await count(tx, "billing_runs")).toBe(runs);
+
+      // A new price is new terms: the pack waits in draft until its provider sells the price.
+      const raised = await apply(tx, file((value) => { value.packs.pack_250_90.priceCents = 6000; value.packs.pack_250_90.names.en = "250 minutes for 90 days"; }));
+      expect(raised.run.changes.map((change) => [change.table, change.action, change.key, Object.keys(change.fields).sort(), change.raises_price])).toEqual([
+        ["billing_pack_plans", "update", "pack_250_90", ["names", "status", "terms_hash"], false],
+        ["billing_pack_prices", "update", "pack_250_90/cad", ["cents"], true],
+      ]);
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "draft", frozen_at: expect.anything() });
+
+      // The others move up a place; the pack and its price are retired, never deleted.
+      const removed = await apply(tx, file((value) => { delete value.packs.pack_250_90; }));
+      expect(removed.run.changes.filter((change) => change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${change.key}`)).toEqual(["retire pack_250_90", "retire pack_250_90/cad"]);
+      expect(removed.run.changes.filter((change) => !change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${Object.keys(change.fields).join(",")}`)).toEqual(Array(8).fill("update sort"));
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "retired", retired_at: expect.anything(), frozen_at: expect.anything() });
+      expect(await count(tx, "billing_pack_plans")).toBe(9);
+
+      const back = await apply(tx, file());
+      expect(back.run.changes.filter((change) => change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${change.key} ${Object.keys(change.fields).sort().join(",")}`)).toEqual([
+        "restore pack_250_90 names,retired_at,status,terms_hash",
+        "restore pack_250_90/cad cents,retired_at",
+      ]);
+      expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "draft", retired_at: null, sort: 10 });
+      expect((await packPrices(tx, "pack_250_90")).map((row) => [row.cents, row.retired_at])).toEqual([[5500, null]]);
+    });
+  });
+
+  it("refuses a pack with the code of a plan made through the API", async () => {
+    await rollbackTest(async (tx) => {
+      await byHand(tx, sql`insert into public.billing_plans (code, tier, status, access, sold, overage, src, names, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, terms_hash) values ('pack_250_90', 'starter', 'active', 'code', false, true, 'api', ${JSON.stringify(names("Partner pack"))}::jsonb, 1, 1, 1, 1, 1, 1, 1, 1, 1, ${"a".repeat(64)})`);
+      const taken = await refusal(apply(tx, file()));
+      expect(taken).toMatchObject({ status: 409, code: "conflict" });
+      expect(taken.details).toEqual([{ code: "code_taken", path: "billing_file.packs.pack_250_90", message: "A plan already has the code pack_250_90, so a pack can't use it. Pick another code." }]);
+      expect(await count(tx, "billing_pack_plans")).toBe(0);
+    });
+  });
+
   it("refuses a currency change while Polar sells a live price, and otherwise retires the old prices and inserts new ones", async () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
-      await byHand(tx, sql`update public.billing_prices set polar_id = 'prod_pro_m' where plan = 'pro' and period = 'monthly'`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = 'prod_pro_m' where plan = 'pro' and period = 'monthly'`);
       const usd = file((value) => { value.currency = "usd"; });
       expect((await refusal(apply(tx, usd))).details).toEqual([expect.objectContaining({ code: "currency_locked", path: "billing_file.currency" })]);
-      await byHand(tx, sql`update public.billing_prices set polar_id = null`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = null`);
       const changed = await apply(tx, usd);
-      expect(actions(changed.run).filter((action) => action.includes("/"))).toEqual(["retire pro/annual/cad", "insert pro/annual/usd", "retire pro/monthly/cad", "insert pro/monthly/usd", "retire starter/annual/cad", "insert starter/annual/usd", "retire starter/monthly/cad", "insert starter/monthly/usd"]);
+      const tableActions = (table: string) => changed.run.changes.filter((change) => change.table === table).map((change) => `${change.action} ${change.key}`);
+      expect(tableActions("billing_prices")).toEqual(["retire pro/annual/cad", "insert pro/annual/usd", "retire pro/monthly/cad", "insert pro/monthly/usd", "retire starter/annual/cad", "insert starter/annual/usd", "retire starter/monthly/cad", "insert starter/monthly/usd"]);
       expect((await rows(tx, sql`select currency from public.billing_prices where retired_at is null group by currency`)).map((row) => row.currency)).toEqual(["usd"]);
       expect(await count(tx, "billing_prices")).toBe(8);
+      // The packs' prices move to the new currency the same way, and their terms with them.
+      expect(tableActions("billing_pack_prices")).toEqual(packCodes.flatMap((code) => [`retire ${code}/cad`, `insert ${code}/usd`]));
+      expect(tableActions("billing_pack_plans")).toEqual(packCodes.map((code) => `update ${code}`));
+      expect((await rows(tx, sql`select currency from public.billing_pack_prices where retired_at is null group by currency`)).map((row) => row.currency)).toEqual(["usd"]);
     });
   });
 
@@ -303,12 +407,22 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     });
   });
 
+  it("refuses a file without the block of the deployment's provider, and takes one with another provider's block too", async () => {
+    await rollbackTest(async (tx) => {
+      const blocked = await apply(tx, file((value) => { delete value.polar; }), { dryRun: true, key: null });
+      expect(blocked.run.blocked_by.map((item) => [item.code, item.path])).toEqual([["provider_block_missing", "billing_file.polar"]]);
+      const stripe = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "separate", managedPayments: false };
+      expect((await apply(tx, file((value) => { value.stripe = stripe; }), { dryRun: true, key: null })).run.blocked_by).toEqual([]);
+    });
+  });
+
   it("shows in a dry run the changes and refusals an apply would make, writing nothing", async () => {
     await rollbackTest(async (tx) => {
       const empty = await apply(tx, file(), { dryRun: true, key: null });
       expect(empty).toMatchObject({ status: 200, replayed: false, run: { id: null, status: "preview", blocked_by: [], prev_hash: null, key_id: caller.platformKeyId } });
-      expect(empty.run.changes).toHaveLength(8);
-      expect(await count(tx, "billing_runs") + await count(tx, "billing_plans") + await count(tx, "billing_prices")).toBe(0);
+      // The brand file's 4 plans and 4 prices, then its 9 packs and their 9 prices.
+      expect(empty.run.changes).toHaveLength(26);
+      expect(await count(tx, "billing_runs") + await count(tx, "billing_plans") + await count(tx, "billing_prices") + await count(tx, "billing_pack_plans") + await count(tx, "billing_pack_prices")).toBe(0);
       await apply(tx, file());
       const changed = file((value) => { withExamples("pro-plus")(value); value.plans.pro.included.voiceMinutes = 450; });
       const preview = await apply(tx, changed, { dryRun: true });
@@ -346,11 +460,11 @@ async function seededPolar(billingFile: Record<string, any>) {
   const fake = createFakePolar();
   const profile = billingProfileSchema.parse(billingFile);
   const plans = desiredBillingPlans(profile);
-  const catalog = desiredPolarCatalog({ brand: "alloplace", profile, plans, webhookUrl: `${polarEnv.APP_BASE_URL}/api/webhooks/polar` });
+  const catalog = desiredPolarCatalog({ brand: "alloplace", profile, plans, packs: desiredBillingPacks(profile), webhookUrl: `${polarEnv.APP_BASE_URL}/api/webhooks/polar` });
   const planned = planPolarChanges({ catalog, snapshot: await polarClient(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false } });
   await runPolarSteps(polarClient(fake), planned.steps);
   const links = polarLinkPlans({ catalog, plans, snapshot: await polarClient(fake).readSnapshot() });
-  return { fake, plans: links.plans };
+  return { fake, plans: links.plans, packs: links.packs };
 }
 
 /** The deployment with Polar settings: the stand-in's organization and the product variables a link sets. */
@@ -364,49 +478,77 @@ async function link(tx: DatabaseTransaction, body: Record<string, unknown>, opti
 }
 
 describe.skipIf(!testUrl)("billing catalog Polar links", () => {
+  it("takes a link in the provider's names, refuses another provider, and replays the same link sent in Polar's names", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      const { plans, packs } = await seededPolar(file());
+      const neutral = (body: Record<string, unknown>, key: string | null = randomUUID()) => linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: key, body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: deployedHash, plans, packs, ...body }), deployment: polarDeployment() });
+      // Stripe on a Polar deployment.
+      const stripe = await refusal(neutral({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_test" }));
+      expect(stripe.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["provider_mismatch provider"]);
+      // Polar's refusal, naming the field as the request did.
+      const other = await refusal(neutral({ provider: "polar", provider_env: "sandbox", provider_account: "org_other" }));
+      expect(other.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["polar_org_mismatch provider_account"]);
+      const first = await neutral({ provider: "polar", provider_env: "sandbox", provider_account: "org_test" }, "neutral-link");
+      expect(first.run).toMatchObject({ kind: "polar", status: "applied", polar_env: "sandbox", polar_org: "org_test", provider: "polar", provider_env: "sandbox", provider_account: "org_test" });
+      // The same link in Polar's names is the same request.
+      const polarPlans = plans.map((plan) => ({ code: plan.code, terms_hash: plan.terms_hash, polar_disc: plan.provider_disc, prices: plan.prices.map((price) => ({ period: price.period, currency: price.currency, polar_id: price.provider_ref })) }));
+      expect(await link(tx, { hash: deployedHash, plans: polarPlans, packs }, { key: "neutral-link" })).toMatchObject({ replayed: true, run: { id: first.run.id } });
+      // link lists every provider's links; polar, Polar's.
+      expect((await listBillingCatalogRunsForApi(context(tx), { kind: "link" })).data.map((run) => run.id)).toEqual([first.run.id]);
+      expect((await listBillingCatalogRunsForApi(context(tx), { kind: "polar" })).data.map((run) => run.id)).toEqual([first.run.id]);
+    });
+  });
+
   it("refuses a link before an apply, for another brand, file or organization, or without POLAR_ORGANIZATION_ID, listing every reason and writing nothing", async () => {
     await rollbackTest(async (tx) => {
-      const { plans } = await seededPolar(file());
-      const early = await refusal(link(tx, { hash: deployedHash, plans }));
+      const { plans, packs } = await seededPolar(file());
+      const early = await refusal(link(tx, { hash: deployedHash, plans, packs }));
       expect(early).toMatchObject({ status: 409, code: "conflict" });
-      expect(early.details!.map((detail) => `${detail.code} ${detail.message}`)).toEqual(["catalog_changed Nothing was applied yet. Apply the file before linking Polar to it.", "unknown_price There's no plan starter.", "unknown_price There's no plan pro."]);
+      // The plans' reasons as before packs, then one for each pack the link names.
+      expect(early.details!.map((detail) => `${detail.code} ${detail.message}`)).toEqual(["catalog_changed Nothing was applied yet. Apply the file before linking Polar to it.", "unknown_price There's no plan starter.", "unknown_price There's no plan pro.", ...packs.map((entry) => `unknown_price There's no pack ${entry.code}.`)]);
 
       await apply(tx, file());
-      const wrong = await refusal(link(tx, { brand: "cadre", hash: "b".repeat(64), polar_org: "org_other", plans }));
+      const wrong = await refusal(link(tx, { brand: "cadre", hash: "b".repeat(64), polar_org: "org_other", plans, packs }));
       expect(wrong.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["brand_mismatch brand", "catalog_changed hash", "polar_org_mismatch polar_org"]);
-      const unset = await refusal(link(tx, { hash: deployedHash, plans }, { deployment: { brand: "alloplace", polar: billingDeploymentPolar({}) } }));
+      const unset = await refusal(link(tx, { hash: deployedHash, plans, packs }, { deployment: { brand: "alloplace", polar: billingDeploymentPolar({}) } }));
       expect(unset.details!.map((detail) => detail.code)).toEqual(["polar_org_mismatch"]);
       expect(unset.details![0]!.message).toContain("POLAR_ORGANIZATION_ID isn't set");
-      const production = await refusal(link(tx, { hash: deployedHash, plans, polar_env: "production" }));
+      const production = await refusal(link(tx, { hash: deployedHash, plans, packs, polar_env: "production" }));
       expect(production.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["polar_org_mismatch polar_env"]);
 
-      const preview = await link(tx, { hash: deployedHash, plans, polar_org: "org_other", dry_run: true }, { key: null });
+      const preview = await link(tx, { hash: deployedHash, plans, packs, polar_org: "org_other", dry_run: true }, { key: null });
       expect(preview).toMatchObject({ status: 200, run: { id: null, status: "preview", kind: "polar" } });
       expect(preview.run.blocked_by.map((item) => item.code)).toEqual(["polar_org_mismatch"]);
-      expect(preview.run.changes).toHaveLength(6);
+      // The 2 sold plans and their 4 prices, then the 9 packs and their 9 prices.
+      expect(preview.run.changes).toHaveLength(24);
       expect(await count(tx, "billing_runs")).toBe(1);
-      expect((await rows(tx, sql`select count(*) as n from public.billing_prices where polar_id is not null`))[0]!.n).toBe("0");
+      expect((await rows(tx, sql`select count(*) as n from public.billing_prices where provider_ref is not null`))[0]!.n).toBe("0");
+      expect((await rows(tx, sql`select count(*) as n from public.billing_pack_prices where provider_ref is not null`))[0]!.n).toBe("0");
     });
   });
 
   it("links every sold price, makes the sold plans active, and records unchanged for the same products, with key replays", async () => {
     await rollbackTest(async (tx) => {
       const applied = await apply(tx, file());
-      const { plans } = await seededPolar(file());
-      const first = await link(tx, { hash: deployedHash, plans }, { key: "link-1" });
+      const { plans, packs } = await seededPolar(file());
+      const first = await link(tx, { hash: deployedHash, plans, packs }, { key: "link-1" });
       expect(first).toMatchObject({ status: 201, replayed: false, run: { kind: "polar", status: "applied", hash: deployedHash, prev_hash: null, polar_env: "sandbox", polar_org: "org_test", key_id: caller.platformKeyId, problems: [] } });
-      expect(actions(first.run)).toEqual(["update pro", "update starter", "update pro/annual/cad", "update pro/monthly/cad", "update starter/annual/cad", "update starter/monthly/cad"]);
+      // The plans' changes as before packs, then each pack made active and its price linked.
+      expect(actions(first.run)).toEqual(["update pro", "update starter", "update pro/annual/cad", "update pro/monthly/cad", "update starter/annual/cad", "update starter/monthly/cad", ...packActions((code) => `update ${code}`, (code) => `update ${code}/cad`)]);
       expect(Object.fromEntries((await rows(tx, sql`select code, status from public.billing_plans`)).map((row) => [row.code, row.status]))).toEqual({ free_cloud: "active", starter: "active", pro: "active", enterprise: "active" });
-      const linkedIds = (await rows(tx, sql`select polar_id from public.billing_prices order by polar_id`)).map((row) => row.polar_id);
-      expect(linkedIds).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.polar_id)).sort());
+      const linkedRows = await rows(tx, sql`select provider_ref from public.billing_prices order by provider_ref`);
+      expect(linkedRows.map((row) => row.provider_ref)).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.provider_ref)).sort());
+      // The link run is stored as link, which the API shows as polar, and names its provider, environment and account.
+      expect(await rows(tx, sql`select kind, provider, provider_env, provider_account from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ kind: "link", provider: "polar", provider_env: "sandbox", provider_account: "org_test" }]);
       // The rows a link changes carry its run; the rest keep the apply's.
       expect((await rows(tx, sql`select distinct run_id from public.billing_prices`)).map((row) => row.run_id)).toEqual([first.run.id]);
       expect((await plan(tx, "free_cloud")).run_id).toBe(applied.run.id);
 
-      expect(await link(tx, { hash: deployedHash, plans }, { key: "link-1" })).toEqual({ ...first, replayed: true });
-      expect(await refusal(link(tx, { hash: deployedHash, plans, replace_ids: true }, { key: "link-1" }))).toMatchObject({ status: 422, code: "idempotency_key_reused" });
-      expect(await refusal(link(tx, { hash: deployedHash, plans }, { key: null }))).toMatchObject({ status: 400, details: [{ path: "Idempotency-Key" }] });
-      const again = await link(tx, { hash: deployedHash, plans });
+      expect(await link(tx, { hash: deployedHash, plans, packs }, { key: "link-1" })).toEqual({ ...first, replayed: true });
+      expect(await refusal(link(tx, { hash: deployedHash, plans, packs, replace_ids: true }, { key: "link-1" }))).toMatchObject({ status: 422, code: "idempotency_key_reused" });
+      expect(await refusal(link(tx, { hash: deployedHash, plans, packs }, { key: null }))).toMatchObject({ status: 400, details: [{ path: "Idempotency-Key" }] });
+      const again = await link(tx, { hash: deployedHash, plans, packs });
       expect(again.run).toMatchObject({ status: "unchanged", changes: [], prev_hash: deployedHash });
 
       const catalog = await getBillingCatalogForApi(context(tx), { deployment: polarDeployment({ POLAR_WEBHOOK_SECRET: "polar_whs_x" }) });
@@ -419,29 +561,56 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
   it("refuses a new product for a linked price unless replace_ids, which retires the row with its product and keeps the cents", async () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
-      const { plans } = await seededPolar(file());
-      await link(tx, { hash: deployedHash, plans });
+      const { plans, packs } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans, packs });
       const [before] = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
       const swapped = structuredClone(plans);
-      swapped.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "monthly")!.polar_id = "product_new";
-      expect((await refusal(link(tx, { hash: deployedHash, plans: swapped }))).details).toEqual([expect.objectContaining({ code: "id_changed" })]);
-      const replaced = await link(tx, { hash: deployedHash, plans: swapped, replace_ids: true });
+      swapped.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "monthly")!.provider_ref = "product_new";
+      expect((await refusal(link(tx, { hash: deployedHash, plans: swapped, packs }))).details).toEqual([expect.objectContaining({ code: "id_changed" })]);
+      const replaced = await link(tx, { hash: deployedHash, plans: swapped, packs, replace_ids: true });
       expect(actions(replaced.run)).toEqual(["retire pro/monthly/cad", "insert pro/monthly/cad"]);
       const after = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
-      expect(after.map((row) => [row.cents, row.polar_id, row.retired_at === null])).toEqual([[8700, "product_new", true], [8700, before!.polar_id, false]]);
+      expect(after.map((row) => [row.cents, row.provider_ref, row.retired_at === null])).toEqual([[8700, "product_new", true], [8700, before!.provider_ref, false]]);
       expect(after[1]!.id).toBe(before!.id);
       // The old product can't be linked again: it stays with its retired row.
-      expect((await refusal(link(tx, { hash: deployedHash, plans, replace_ids: true }))).details).toEqual([expect.objectContaining({ code: "id_taken", message: expect.stringContaining("a retired price") })]);
+      expect((await refusal(link(tx, { hash: deployedHash, plans, packs, replace_ids: true }))).details).toEqual([expect.objectContaining({ code: "id_taken", message: expect.stringContaining("a retired price") })]);
+    });
+  });
+
+  it("refuses a link that leaves the packs out, sells a pack through a plan's product or names a pack on older terms, and then links every pack together", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      const { plans, packs } = await seededPolar(file());
+      // A link sent as before packs names none of them.
+      const older = await refusal(link(tx, { hash: deployedHash, plans }));
+      expect(older).toMatchObject({ status: 409, code: "conflict" });
+      expect(older.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(Array(9).fill("links_incomplete packs"));
+      expect(older.details![0]!.message).toMatch(/^Pack pack_\d+_\d+ isn't retired and isn't in the link\. Name every pack that isn't retired, with the product that sells its live price\.$/);
+      // One product sells one price, a plan's or a pack's; the plan's field goes by the request's Polar names.
+      const crossed = structuredClone(packs);
+      crossed[0]!.provider_ref = plans[0]!.prices[0]!.provider_ref;
+      expect((await refusal(link(tx, { hash: deployedHash, plans, packs: crossed }))).details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["id_taken plans[0].prices[0].polar_id", "id_taken packs[0].provider_ref"]);
+      const stale = structuredClone(packs);
+      stale[1]!.terms_hash = "c".repeat(64);
+      expect((await refusal(link(tx, { hash: deployedHash, plans, packs: stale }))).details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["terms_changed packs[1].terms_hash"]);
+      expect(await count(tx, "billing_runs")).toBe(1);
+      expect((await rows(tx, sql`select count(*) as n from public.billing_pack_prices where provider_ref is not null`))[0]!.n).toBe("0");
+
+      await link(tx, { hash: deployedHash, plans, packs });
+      for (const entry of packs) {
+        expect(await pack(tx, entry.code)).toMatchObject({ status: "active", terms_hash: entry.terms_hash });
+        expect((await packPrices(tx, entry.code)).map((row) => [row.currency, row.provider_ref, row.retired_at])).toEqual([["cad", entry.provider_ref, null]]);
+      }
     });
   });
 
   it("keeps a deployment with the Polar organization it was first linked to", async () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
-      const { plans } = await seededPolar(file());
-      await link(tx, { hash: deployedHash, plans });
+      const { plans, packs } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans, packs });
       const moved = polarDeployment({ POLAR_ORGANIZATION_ID: "org_live", POLAR_API_BASE_URL: "https://api.polar.sh" });
-      const error = await refusal(link(tx, { hash: deployedHash, plans, polar_env: "production", polar_org: "org_live" }, { deployment: moved }));
+      const error = await refusal(link(tx, { hash: deployedHash, plans, packs, polar_env: "production", polar_org: "org_live" }, { deployment: moved }));
       expect(error.details!.map((detail) => detail.code)).toEqual(["polar_org_changed"]);
       expect(error.details![0]!.message).toContain("Live payments get a deployment of their own.");
     });
@@ -470,13 +639,13 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
       expect({ ...applied, source: "built_in" }).toEqual(fromFile);
       expect(applied.plans.map((plan) => plan.slug)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
       const pro = applied.plans.find((plan) => plan.slug === "pro")!;
-      expect(pro).toMatchObject({ custom: false, overage_billable: true, included: { voice_seconds: 30_000, alert_sms_segments: 200, business_numbers: 1, knowledge_storage_bytes: 20 * 1024 * 1024 }, overage_rates: { voice_minute_cents: 18 } });
+      expect(pro).toMatchObject({ custom: false, overage_billable: true, included: { voice_seconds: 30_000, alert_sms_segments: 200, business_numbers: 1, receptionists: 5, knowledge_storage_bytes: 20 * 1024 * 1024 }, overage_rates: { voice_minute_cents: 18 } });
       expect(pro.prices.map((price) => [price.interval, price.currency, price.amount_cents, price.monthly_amount_cents, price.checkout_available])).toEqual([["monthly", "cad", 8_700, 8_700, true], ["annual", "cad", 87_000, 7_300, false]]);
       expect(applied.plans.find((plan) => plan.slug === "enterprise")).toMatchObject({ custom: true, prices: [] });
 
-      const { plans } = await seededPolar(file());
-      await link(tx, { hash: deployedHash, plans });
-      const linked = new Map(plans.flatMap((plan) => plan.prices.map((price) => [`${plan.code}/${price.period}`, price.polar_id])));
+      const { plans, packs } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans, packs });
+      const linked = new Map(plans.flatMap((plan) => plan.prices.map((price) => [`${plan.code}/${price.period}`, price.provider_ref])));
       const links = await readPolarProductLinks(context(tx), sells);
       expect(links.productFor("pro", "annual")).toBe(linked.get("pro/annual"));
       expect(links.productFor("pro", "monthly")).toBe(linked.get("pro/monthly"));
@@ -490,8 +659,8 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
   it("lets the app read the public standard plans and their links, with hidden Enterprise kept to its built-in terms", async () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
-      const { plans } = await seededPolar(file());
-      await link(tx, { hash: deployedHash, plans });
+      const { plans, packs } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans, packs });
       await as(tx, "lobbystack_app");
       const { catalog, links } = await loadBillingCatalog(tx, {});
       expect(catalog.plans.map((plan) => plan.code)).toEqual(["free_cloud", "starter", "pro"]);
@@ -499,6 +668,54 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
       expect(list).toMatchObject({ currency: "cad", source: "catalog" });
       expect(list.plans.find((plan) => plan.slug === "enterprise")).toMatchObject({ custom: true, prices: [], sortOrder: 30 });
       expect(list.plans.find((plan) => plan.slug === "starter")!.prices.every((price) => price.checkoutAvailable)).toBe(true);
+    });
+  });
+});
+
+/** An answer with what changes from run to run, ids and times, replaced, so it can be recorded. */
+function stable(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value), (_key, entry: unknown) => typeof entry !== "string" ? entry : entry
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
+    .replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, "<time>"));
+}
+
+/** An answer without the fields the Stripe plan's step 6 added, to compare with what was recorded before them. */
+function withoutAdded(value: unknown): unknown {
+  const added = new Set(["provider", "provider_env", "provider_account", "provider_ref", "provider_disc"]);
+  return JSON.parse(JSON.stringify(value), (key, entry: unknown) => (added.has(key) ? undefined : entry));
+}
+
+/** An answer without what the file's packs add, their rows' changes and the catalog's packs, to compare with what was recorded before packs. */
+function withoutPacks(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value), (key, entry: unknown) => {
+    if (key === "changes" && Array.isArray(entry)) return entry.filter((change: { table: string }) => !change.table.startsWith("billing_pack_"));
+    // The catalog's packs are a list; the profile's packs section, recorded with the file, is an object.
+    return key === "packs" && Array.isArray(entry) ? undefined : entry;
+  });
+}
+
+describe.skipIf(!testUrl)("billing catalog answers on a Polar deployment", () => {
+  // Recorded before the provider-neutral fields (the Stripe plan's step 6): a Polar
+  // deployment's answers may gain fields, and must not change otherwise. The
+  // packs' rows came later still, and leave the plans' parts as recorded.
+  it("answers GET /billing/catalog and a link as recorded", async () => {
+    await rollbackTest(async (tx) => {
+      const billingFile = file(withExamples("salons-half-off"));
+      await apply(tx, billingFile);
+      const { plans, packs } = await seededPolar(billingFile);
+      const linked = await link(tx, { hash: hashOf(billingFile), plans, packs }, { key: "record-link" });
+      const catalog = await getBillingCatalogForApi(context(tx), { deployment: polarDeployment({ POLAR_WEBHOOK_SECRET: "whsec_recorded" }) });
+      expect(stable(withoutAdded(withoutPacks({ link: linked.run, catalog })))).toMatchSnapshot();
+      // What the packs add: each pack active, its live price sold by the product the link named.
+      expect(actions({ ...linked.run, changes: linked.run.changes.filter((change) => change.table.startsWith("billing_pack_")) })).toEqual(packActions((code) => `update ${code}`, (code) => `update ${code}/cad`));
+      expect(catalog.packs.map((entry) => [entry.code, entry.status, entry.prices.map((price) => [price.currency, price.provider_ref, price.retired_at])])).toEqual(packs.map((entry) => [entry.code, "active", [["cad", entry.provider_ref, null]]]));
+      // What step 6 added repeats Polar's values in the provider's names.
+      expect(linked.run).toMatchObject({ kind: "polar", provider: "polar", provider_env: "sandbox", provider_account: "org_test" });
+      expect(catalog.provider).toEqual({ id: "polar", env: "sandbox", account: "org_test", secret_sha256: catalog.polar!.secret_sha256, objects: null, product_vars: catalog.polar!.product_vars, last_link: catalog.polar!.last_link });
+      for (const plan of catalog.plans) {
+        expect(plan.provider_disc).toBe(plan.polar_disc);
+        for (const price of plan.prices) expect(price.provider_ref).toBe(price.polar_id);
+      }
     });
   });
 });
@@ -623,6 +840,116 @@ describe.skipIf(!testUrl)("billing catalog limits", () => {
   });
 });
 
+// A Stripe deployment: its variables, and a file with a stripe block, which it needs.
+const stripeEnv = { BILLING_PROVIDER: "stripe", STRIPE_API_KEY: "rk_test_worker123", STRIPE_ACCOUNT_ID: "acct_test" };
+const stripeBlock = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: true, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "separate", managedPayments: false };
+const stripeDeployment = (extra: Record<string, string> = {}): BillingCatalogDeployment => ({ brand: "alloplace", stripe: billingDeploymentStripe({ ...stripeEnv, STRIPE_WEBHOOK_SECRET: "whsec_test", ...extra }) });
+
+/** Sets an empty Stripe account up from a file, as pnpm billing apply does, and returns it with the link it would send. */
+function seededStripe(billingFile: Record<string, any>) {
+  const profile = billingProfileSchema.parse(billingFile);
+  const plans = desiredBillingPlans(profile);
+  const catalog = desiredStripeCatalog({ brand: "alloplace", profile, plans, packs: desiredBillingPacks(profile), webhookUrl: "https://demo.alloplace.com/api/webhooks/stripe" });
+  const { snapshot } = runStripeSteps(emptyStripeSnapshot({ account: "acct_test" }), planStripeChanges({ catalog, snapshot: emptyStripeSnapshot({ account: "acct_test" }), options: { adopt: false, allowReplace: false, allowArchive: false } }).steps);
+  const body = stripeLinkBody({ catalog, plans, snapshot });
+  return { snapshot, plans: body.plans, packs: body.packs, objects: { ...body.objects, webhook_secret_sha256: createHash("sha256").update("whsec_test").digest("hex") } };
+}
+
+describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
+  it("refuses a file without a stripe block, then takes a Stripe link with its objects, refusing Polar's, another account and a new one later", async () => {
+    await rollbackTest(async (tx) => {
+      // The brand files have their stripe block since step 18: this one is taken off.
+      const blocked = await apply(tx, file((value) => { delete value.stripe; }), { dryRun: true, key: null, deployment: stripeDeployment() });
+      expect(blocked.run.blocked_by.map((item) => [item.code, item.path])).toEqual([["provider_block_missing", "billing_file.stripe"]]);
+      const withStripe = file((value) => { value.stripe = stripeBlock; });
+      await apply(tx, withStripe, { deployment: stripeDeployment() });
+      const { plans, packs, objects } = seededStripe(withStripe);
+      // A Polar link records no objects beyond its plans.
+      const send = (body: Record<string, unknown>, deployment = stripeDeployment()) => linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: hashOf(withStripe), plans, packs, ...(body.provider === "stripe" ? { objects } : {}), ...body }), deployment });
+      const polar = await refusal(send({ provider: "polar", provider_env: "sandbox", provider_account: "org_test" }));
+      expect(polar.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["provider_mismatch provider"]);
+      const other = await refusal(send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_other" }));
+      expect(other.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_mismatch provider_account"]);
+      const live = await refusal(send({ provider: "stripe", provider_env: "live", provider_account: "acct_test" }));
+      expect(live.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_mismatch provider_env"]);
+
+      const first = await send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_test" });
+      expect(first.run).toMatchObject({ kind: "link", status: "applied", provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", polar_env: null, polar_org: null });
+      const catalog = await getBillingCatalogForApi(context(tx), { deployment: stripeDeployment() });
+      expect(catalog.polar).toBeNull();
+      expect(catalog.provider).toMatchObject({ id: "stripe", env: "sandbox", account: "acct_test", objects, product_vars: null, last_link: { id: first.run.id } });
+      const linked = catalog.plans.filter((plan) => plan.sold).flatMap((plan) => plan.prices.map((price) => [price.provider_ref, price.polar_id]));
+      expect(linked.length).toBe(4);
+      expect(linked.every(([ref, polarId]) => typeof ref === "string" && ref.startsWith("price_") && polarId === null)).toBe(true);
+      // Each pack's live price is the one-time Stripe price the link named.
+      expect(catalog.packs.map((entry) => [entry.code, entry.status, entry.prices.map((price) => price.provider_ref)])).toEqual(packs.map((entry) => [entry.code, "active", [entry.provider_ref]]));
+      expect(packs.every((entry) => entry.provider_ref.startsWith("price_"))).toBe(true);
+
+      // Once linked, it keeps how it sells: a file switching overage to the plan's checkout, or Stripe to the merchant of record, is refused.
+      const switched = await apply(tx, file((value) => { value.stripe = { ...stripeBlock, overage: "checkout", managedPayments: true }; }), { dryRun: true, key: null, deployment: stripeDeployment() });
+      expect(switched.run.blocked_by.map((item) => [item.code, item.path])).toEqual([["selling_mode_changed", "billing_file.stripe.overage"], ["selling_mode_changed", "billing_file.stripe.managedPayments"]]);
+      // Other settings of the block still change.
+      const proration = await apply(tx, file((value) => { value.stripe = { ...stripeBlock, upgrade: "prorate" }; }), { dryRun: true, key: null, deployment: stripeDeployment() });
+      expect(proration.run.blocked_by.map((item) => item.code)).not.toContain("selling_mode_changed");
+
+      // A deployment pointed at another account later keeps the first one's.
+      const moved = await refusal(send({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_other" }, stripeDeployment({ STRIPE_ACCOUNT_ID: "acct_other" })));
+      expect(moved.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["billing_account_changed provider_account"]);
+    });
+  });
+
+  it("tells the webhook no pack was sold until a link records a pack's price, a retired one too, read as the worker since the dispatcher can't", async () => {
+    await rollbackTest(async (tx) => {
+      // As Stripe's webhook route reads it: the worker's role, as the worker actor.
+      const linked = async () => await withBusinessTransaction(tx as unknown as Database, { actorType: "worker" }, (scoped) => hasLinkedPackPrice(scoped));
+      expect(await linked()).toBe(false);
+      const withStripe = file((value) => { value.stripe = stripeBlock; });
+      await apply(tx, withStripe, { deployment: stripeDeployment() });
+      // The apply writes each pack's price; only a link records the Stripe price that sells it.
+      expect(await count(tx, "billing_pack_prices")).toBe(9);
+      expect(await linked()).toBe(false);
+      const { plans, packs, objects } = seededStripe(withStripe);
+      await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: hashOf(withStripe), provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", plans, packs, objects }), deployment: stripeDeployment() });
+      expect(await linked()).toBe(true);
+      // A retired price keeps its link, and a pack bought through it may still be disputed.
+      await byHand(tx, sql`update public.billing_pack_prices set retired_at = now()`);
+      expect(await linked()).toBe(true);
+      await as(tx, "lobbystack_dispatcher");
+      expect(await failure(tx, sql`select exists (select 1 from public.billing_pack_prices where provider_ref is not null)`)).toMatchObject({ code: "42501" });
+    });
+  });
+
+  it("runs the daily check against the Stripe account with the worker's key, storing a verify run that names Stripe", async () => {
+    await rollbackTest(async (tx) => {
+      const unused = async () => { throw new Error("Stripe wasn't to be read."); };
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: { BILLING_PROVIDER: "stripe" }, readStripe: unused })).toEqual({ status: "skipped", reason: "STRIPE_ACCOUNT_ID isn't set" });
+      const withStripe = file((value) => { value.stripe = stripeBlock; });
+      await apply(tx, withStripe, { deployment: stripeDeployment() });
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: unused })).toEqual({ status: "skipped", reason: "nothing was linked yet" });
+      const { snapshot, plans, packs, objects } = seededStripe(withStripe);
+      await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: hashOf(withStripe), provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", plans, packs, objects }), deployment: stripeDeployment() });
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readPolar: unused })).toEqual({ status: "skipped", reason: "the worker has no Stripe key" });
+
+      const passed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: async () => snapshot });
+      expect(passed).toMatchObject({ status: "passed", previousStatus: null, polarEnv: null, provider: "stripe", providerEnv: "sandbox" });
+      // The build's file has no stripe block, so the code's hash is another file's: a warning, not a drift.
+      const codes = (outcome: Awaited<ReturnType<typeof runDailyBillingVerify>>) => (outcome.status === "skipped" ? [] : outcome.problems.map((problem) => `${problem.pair} ${problem.code} ${problem.level}`));
+      expect(codes(passed)).toEqual(["file_postgres code_hash warn"]);
+      const [stored] = await rows(tx, sql`select kind, status, provider, provider_env, provider_account from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);
+      expect(stored).toEqual({ kind: "verify", status: "passed", provider: "stripe", provider_env: "sandbox", provider_account: "acct_test" });
+
+      const drifted = structuredClone(snapshot);
+      drifted.prices.find((price) => price.metadata.lobbystack_plan === "pro" && price.recurring?.interval === "month")!.active = false;
+      const drift = await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: async () => drifted });
+      expect(drift).toMatchObject({ status: "drift", previousStatus: "passed" });
+      expect(codes(drift)).toEqual(["file_postgres code_hash warn", "file_provider price drift", "postgres_provider linked_id drift"]);
+      const failed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env: stripeEnv, readStripe: async () => { throw new Error("Invalid API Key provided"); } });
+      expect(failed).toMatchObject({ status: "failed", previousStatus: "drift" });
+      expect(codes(failed)).toEqual(["file_postgres code_hash warn", "file_provider unreadable drift"]);
+    });
+  });
+});
+
 describe.skipIf(!testUrl)("billing catalog daily check", () => {
   it("skips until the deployment has a Polar organization and a link, then stores a verify run without a key", async () => {
     await rollbackTest(async (tx) => {
@@ -631,8 +958,8 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
       await apply(tx, file());
       expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: polarEnv, readPolar: unused })).toEqual({ status: "skipped", reason: "nothing was linked yet" });
 
-      const { fake, plans } = await seededPolar(file());
-      await link(tx, { hash: deployedHash, plans });
+      const { fake, plans, packs } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans, packs });
       // No product ID variables: a linked deployment doesn't need them.
       const env = polarEnv;
       // The worker's read: its token has no webhooks:read, so the check leaves the webhook to pnpm billing verify.
@@ -642,7 +969,7 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
       const passed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
       expect(passed).toMatchObject({ status: "passed", previousStatus: null, problems: [], polarEnv: "sandbox" });
       const [stored] = await rows(tx, sql`select * from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);
-      expect(stored).toMatchObject({ kind: "verify", status: "passed", hash: deployedHash, code_hash: deployedHash, key_id: null, idem_key: null, partner: null, polar_env: "sandbox", polar_org: "org_test", profile: {} });
+      expect(stored).toMatchObject({ kind: "verify", status: "passed", hash: deployedHash, code_hash: deployedHash, key_id: null, idem_key: null, partner: null, provider: "polar", provider_env: "sandbox", provider_account: "org_test", profile: {} });
 
       fake.state.products.find((product) => product.name === "Pro monthly")!.prices.find((price) => price.amount_type === "fixed")!.price_amount = 12000;
       const drift = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
@@ -660,13 +987,16 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
 
   it("records a verify run as the worker with no key, and returns the status before it", async () => {
     await rollbackTest(async (tx) => {
-      const first = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "drift", problems: [{ code: "catalog_hash", pair: "file_postgres", level: "drift", subject: "catalog", message: "x" }], polarEnv: "sandbox", polarOrg: "org_test" });
+      const first = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "drift", problems: [{ code: "catalog_hash", pair: "file_postgres", level: "drift", subject: "catalog", message: "x" }], provider: "polar", providerEnv: "sandbox", providerAccount: "org_test" });
       expect(first).toMatchObject({ previousStatus: null, run: { kind: "verify", status: "drift", key_id: null, prev_hash: null, problems: [{ code: "catalog_hash" }] } });
-      const second = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "passed", problems: [], polarEnv: "sandbox", polarOrg: "org_test" });
+      const second = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "passed", problems: [], provider: "polar", providerEnv: "sandbox", providerAccount: "org_test" });
       expect(second.previousStatus).toBe("drift");
+      // The run names its provider, and Polar's columns follow for the release before.
+      expect(first.run).toMatchObject({ polar_env: "sandbox", polar_org: "org_test" });
+      expect(await rows(tx, sql`select provider, provider_env, provider_account from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ provider: "polar", provider_env: "sandbox", provider_account: "org_test" }]);
       expect(second.run.started_at > first.run.started_at).toBe(true);
       await as(tx, "lobbystack_app");
-      expect((await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'alloplace', 1, ${deployedHash}, '{}', 'sandbox', 'org_test')`)).code).toBe("42501");
+      expect((await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'passed', 'alloplace', 1, ${deployedHash}, '{}', 'polar', 'sandbox', 'org_test')`)).code).toBe("42501");
     });
   });
 });
@@ -701,7 +1031,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
         await savepoint.execute(sql`insert into public.billing_prices (plan, period, currency, cents) values ('starter', 'monthly', 'usd', 2200)`);
       });
       expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, key_id, partner, idem_key, req_hash, started_at) values ('catalog', 'applied', 'alloplace', 1, ${"a".repeat(64)}, '{}', ${randomUUID()}, 'p', 'k', ${"a".repeat(64)}, '2026-10-21 08:00:00.123456+00')`)).toMatchObject({ code: "23514" });
-      expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org, key_id, partner, idem_key, req_hash) values ('polar', 'applied', 'alloplace', 1, ${"a".repeat(64)}, '{}', 'sandbox', 'org', ${caller.platformKeyId}, 'lobbystack', 'seed-1', ${"b".repeat(64)})`)).toEqual({ code: "23505", constraint: "billing_runs_idem_unique" });
+      expect(await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account, key_id, partner, idem_key, req_hash) values ('link', 'applied', 'alloplace', 1, ${"a".repeat(64)}, '{}', 'polar', 'sandbox', 'org', ${caller.platformKeyId}, 'lobbystack', 'seed-1', ${"b".repeat(64)})`)).toEqual({ code: "23505", constraint: "billing_runs_idem_unique" });
       expect(await rows(tx, sql`select started_at = date_trunc('milliseconds', started_at) as whole from public.billing_runs where id = ${seeded.run.id}`)).toEqual([{ whole: true }]);
     });
   });
@@ -757,7 +1087,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
         value.plans["winter-2025"] = { tier: "starter", access: "code", names: names("Winter"), sold: true, prices: { monthlyCents: 2000 }, offerEndsAt: "2025-12-31T23:59:59-05:00" };
       };
       await apply(tx, file((value) => { fixture(value); value.plans["summer-2026"] = { tier: "starter", access: "code", names: names("Summer"), sold: true, prices: { monthlyCents: 2500 } }; }));
-      await byHand(tx, sql`update public.billing_prices set polar_id = case when plan = 'pro-launch' then 'prod_launch_m' when plan = 'summer-2026' then 'prod_summer_m' else 'prod_' || plan || '_' || period end where plan <> 'pro-plus'`);
+      await byHand(tx, sql`update public.billing_prices set provider_ref = case when plan = 'pro-launch' then 'prod_launch_m' when plan = 'summer-2026' then 'prod_summer_m' else 'prod_' || plan || '_' || period end where plan <> 'pro-plus'`);
       await byHand(tx, sql`update public.billing_plans set status = 'active' where code <> 'pro-plus'`);
       const last = await apply(tx, file(fixture), { key: "fixture" });
       expect(actions(last.run)).toEqual(["retire summer-2026", "retire summer-2026/monthly/cad"]);
@@ -766,13 +1096,13 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
       const q1 = sql`SELECT code, tier, names, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, period, currency, cents, per_month FROM billing_offers ORDER BY sort, code, period`;
       await as(tx, "lobbystack_app");
       expect((await rows(tx, q1)).map((row) => [row.code, row.period, row.cents, row.per_month])).toEqual([["free_cloud", null, null, null], ["starter", "annual", 37000, 3100], ["starter", "monthly", 3700, 3700], ["pro", "annual", 87000, 7300], ["pro", "monthly", 8700, 8700]]);
-      const q3 = sql`SELECT polar_id, polar_disc, months, ends FROM billing_offers WHERE code = ${"pro-launch"} AND period = ${"monthly"}`;
+      const q3 = sql`SELECT provider_ref, provider_disc, months, ends FROM billing_offers WHERE code = ${"pro-launch"} AND period = ${"monthly"}`;
       expect(await rows(tx, q3)).toEqual([]);
 
       await as(tx, "lobbystack_worker");
       expect((await rows(tx, q1)).map((row) => `${String(row.code)} ${String(row.period)}`)).toEqual(["free_cloud null", "starter annual", "starter monthly", "pro annual", "pro monthly", "enterprise null", "pro-launch monthly", "salons-half-off monthly"]);
-      expect(await rows(tx, q3)).toEqual([{ polar_id: "prod_launch_m", polar_disc: null, months: 6, ends: "tier" }]);
-      const q4 = sql`SELECT r.plan, r.period, p.tier FROM billing_prices r JOIN billing_plans p ON p.code = r.plan WHERE r.polar_id = ${"prod_summer_m"}`;
+      expect(await rows(tx, q3)).toEqual([{ provider_ref: "prod_launch_m", provider_disc: null, months: 6, ends: "tier" }]);
+      const q4 = sql`SELECT r.plan, r.period, p.tier FROM billing_prices r JOIN billing_plans p ON p.code = r.plan WHERE r.provider_ref = ${"prod_summer_m"}`;
       expect(await rows(tx, q4)).toEqual([{ plan: "summer-2026", period: "monthly", tier: "starter" }]);
       const q5 = sql`SELECT tier, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, overage, voice_rate, sms_rate, call_rate FROM billing_plans WHERE code = ${"pro-launch"}`;
       expect(await rows(tx, q5)).toEqual([{ tier: "pro", voice_sec: 36000, sms_seg: 200, calls_out: 100, chat_units: 200, kb_bytes: String(20 * 1024 * 1024), numbers: 1, overage: true, voice_rate: 18, sms_rate: 2, call_rate: 2 }]);
@@ -789,7 +1119,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
       const q9 = await rows(tx, sql`SELECT * FROM billing_prices ORDER BY plan, period, retired_at NULLS FIRST`);
       expect(q9).toHaveLength(10);
       expect(q9.filter((row) => row.retired_at !== null).map((row) => row.plan)).toEqual(["summer-2026"]);
-      const q10 = sql`SELECT plan, period FROM billing_prices WHERE retired_at IS NULL AND polar_id IS NULL ORDER BY period`;
+      const q10 = sql`SELECT plan, period FROM billing_prices WHERE retired_at IS NULL AND provider_ref IS NULL ORDER BY period`;
       expect(await rows(tx, q10)).toEqual([{ plan: "pro-plus", period: "annual" }, { plan: "pro-plus", period: "monthly" }]);
     });
   });
@@ -808,21 +1138,28 @@ describe.skipIf(!testUrl)("billing catalog applies at the same time", () => {
     if (Number(before) !== 0) throw new Error("This test needs empty billing tables.");
     const runs: string[] = [];
     try {
-      const results = await Promise.all([
+      // Settled, so both applies have finished and every committed run is known before the cleanup.
+      const settled = await Promise.allSettled([
         applyBillingCatalogForApi({ db }, { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogApplySchema.parse({ brand: "alloplace", billing_file: file() }), deployment: deployed }),
         applyBillingCatalogForApi({ db }, { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogApplySchema.parse({ brand: "alloplace", billing_file: file((value) => { value.polar.portalPlanChanges = false; }), allow_undeployed: true }), deployment: deployed }),
       ]);
-      runs.push(...results.map((result) => result.run.id!));
+      runs.push(...settled.flatMap((result) => (result.status === "fulfilled" ? [result.value.run.id!] : [])));
+      const results = settled.map((result) => { if (result.status === "rejected") throw result.reason; return result.value; });
       const [first, second] = [...results].sort((a, b) => (a.run.started_at < b.run.started_at ? -1 : 1)).map((result) => result.run);
       expect(first!.prev_hash).toBeNull();
-      expect(first!.changes).toHaveLength(8);
+      // The brand file's 4 plans and 4 prices, then its 9 packs and their 9 prices.
+      expect(first!.changes).toHaveLength(26);
       expect(second).toMatchObject({ prev_hash: first!.hash, status: "applied", changes: [] });
       expect((await listBillingCatalogRunsForApi({ db }, {})).data.map((run) => run.id)).toEqual([second!.id, first!.id]);
       expect((await getBillingCatalogForApi({ db }, { deployment: deployed })).last_run!.id).toBe(second!.id);
     } finally {
+      const ids = `{${runs.join(",")}}`;
+      // The pack rows point at the runs, and a pack's prices at the pack.
+      await db.execute(sql`delete from public.billing_pack_prices where run_id = any(${ids}::uuid[])`);
+      await db.execute(sql`delete from public.billing_pack_plans where run_id = any(${ids}::uuid[])`);
       await db.execute(sql`delete from public.billing_prices`);
       await db.execute(sql`delete from public.billing_plans`);
-      if (runs.length) await db.execute(sql`delete from public.billing_runs where id = any(${`{${runs.join(",")}}`}::uuid[])`);
+      if (runs.length) await db.execute(sql`delete from public.billing_runs where id = any(${ids}::uuid[])`);
     }
   });
 });

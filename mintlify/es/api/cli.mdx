@@ -69,6 +69,12 @@ receptionist:
   transfer_mode: on_urgent
   transfer_number: "+14165550100"
   booking_mode: request
+receptionists:
+  - name: Emergency line
+    description: Burst pipes, floods and no heat, day and night.
+    settings:
+      greeting: Acme Plumbing emergency line, what's happening?
+      booking_mode: instant
 services:
   - name: Drain cleaning
     duration_minutes: 60
@@ -99,6 +105,7 @@ owner:
 | --- | --- |
 | `business` | `name` y `timezone` son obligatorios. `locale` (`en` o `fr`), `website_url`, `business_type` y `slug` son opcionales. `hours` enumera los horarios de la semana por `day`, `open` y `close`, y reemplaza los horarios que tenía el negocio. `id` configura un negocio que ya existe en lugar de crear uno. |
 | `receptionist` | Los campos de `PATCH /receptionist`, como `greeting`, `tone`, `transfer_mode`, `transfer_number` y `booking_mode`. |
+| `receptionists` | Las recepcionistas además de la predeterminada, para un plan que incluye varias: los campos de `POST /receptionists` (`name`, `description`, `handle`, `locale`, `knowledge_scope` y `listed`), y `settings` con los campos de `PATCH /receptionist` propios de esa recepcionista, como `greeting`, `transfer_mode` y `booking_mode`. Una recepcionista con el mismo nombre se actualiza en lugar de agregarse de nuevo, y una archivada se queda como está. Una entrada con el nombre de la recepcionista predeterminada se rechaza. El resumen, el aviso de grabación y las reglas para cambiar citas son del negocio, así que van en `receptionist`. |
 | `services` | Los campos de `POST /services`. Un servicio con el mismo nombre se actualiza en lugar de agregarse otra vez. |
 | `rules` | Los campos de `POST /rules`. Una regla con el mismo título se actualiza. |
 | `knowledge.websites` | Los sitios que lee la recepcionista. La primera lectura toma una muestra de cada sitio. |
@@ -107,7 +114,7 @@ owner:
 | `knowledge.faqs` | Preguntas y respuestas. Una pregunta frecuente con la misma pregunta recibe la respuesta nueva. |
 | `knowledge.texts` | Notas con un `title` y un `content`. Una nota con el mismo título recibe el contenido nuevo. |
 | `public_profile` | Los campos de `PATCH /public-profile`, que configura la [página pública](/es/settings/public-profile) del negocio en `/profile/<slug>`: `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` y `widget_key_id`. `published: true` publica la página. Las partes de la dirección que el archivo omite conservan su valor. |
-| `plan` | `checkout` con un `plan` (`starter` o `pro`) y un `interval` (`monthly` o `annual`). O `managed: true` para un plan que se factura fuera de Polar, que solo la clave de plataforma de un operador puede definir. |
+| `plan` | `checkout` con un `plan` (`starter` o `pro`) y un `interval` (`monthly` o `annual`). O `managed: true` para un plan que se factura fuera del proveedor de facturación, que solo la clave de plataforma de un operador puede definir. |
 | `phone_number` | Los campos de `POST /phone-numbers/search`: `country`, `kind`, `area_code`, `city`, `region` y `postal_code`. El comando reserva el primer número que ofrece la búsqueda. |
 | `onboarding` | La incorporación termina cuando ya no le falta nada, salvo con la clave de un socio, que la deja abierta para el propietario. `skip_number: true` la termina sin número, `complete` indica si termina, y `source` registra de dónde vino el negocio. |
 | `owner` | El `email` de la persona que será propietaria del negocio. Recibe un enlace para reclamarlo. |
@@ -168,7 +175,7 @@ Algunos pasos necesitan a una persona. El comando hace todo lo demás, muestra l
 - **Un pago.** El comando muestra el enlace de pago: envíelo a quien paga. Hasta que el plan esté pagado, el negocio conserva su plan actual. El número de teléfono, los documentos que no caben en el plan gratuito y la lectura completa de un sitio esperan el plan de pago. Una página de pago de más de una hora puede haber caducado: una ejecución en una terminal, sin `--yes`, ofrece crear una nueva.
 - **La reclamación del propietario.** Con la clave de un operador, el propietario del negocio paga su plan, así que el enlace de reclamación sale antes del pago. La página de pago se crea en la primera ejecución después de que el propietario acepte el enlace.
 
-Ejecute el mismo comando de nuevo cuando la persona termine. Un pago puede comprar un plan para un negocio gratuito, o pasar de Starter a Pro. Starter ya paga, así que su paso a Pro no necesita página: Polar cambia la suscripción y cobra la diferencia al método de pago guardado, tras un sí. Los demás cambios de plan, como pasar de Pro a Starter o cambiar el intervalo de facturación, se hacen en el portal de facturación: el comando los indica y sigue.
+Ejecute el mismo comando de nuevo cuando la persona termine. Un pago puede comprar un plan para un negocio gratuito o con un paquete de minutos prepago, cuyos paquetes en curso terminan cuando empieza el plan, o pasar de Starter a Pro. Starter ya paga, así que su paso a Pro no necesita página: el proveedor de facturación cambia la suscripción y cobra la diferencia al método de pago guardado, tras un sí. Los demás cambios de plan, como pasar de Pro a Starter o cambiar el intervalo de facturación, se hacen en el portal de facturación: el comando los indica y sigue.
 
 ## Ejecútelo de nuevo
 
@@ -202,3 +209,5 @@ Sin un archivo de estado, una clave de plataforma no crea un negocio si ya incor
 Para ver lo que la recepcionista con IA encuentra en su conocimiento para una pregunta, ejecute `lobbystack knowledge search "<pregunta>"`. Hace la misma búsqueda que una llamada o un chat, y no cambia nada. Muestra los pasajes que encontró, los que dejó fuera y por qué, y lo que recibe la recepcionista. `--json` agrega las puntuaciones de cada pasaje. La clave necesita `knowledge:read`.
 
 Agregue `--log-dir <carpeta>` para guardar también cada respuesta en esa carpeta, como un archivo JSON con la hora de la pregunta y sus palabras en el nombre, por ejemplo `2026-11-03T18-45-12-345Z-parking-fees.json`. Haga las mismas preguntas antes y después de cambiar un documento, cada vez en una carpeta distinta, y compare las dos. `LOBBYSTACK_KNOWLEDGE_LOG_DIR` guarda cada búsqueda de la misma forma. Los archivos nunca guardan la clave de API.
+
+Para comprar un paquete de minutos prepago, ejecute `lobbystack billing buy-pack <pack>` con el código del paquete, por ejemplo `pack_500_180` para 500 minutos que duran 180 días. Con `--wait`, el comando espera la página de pago del proveedor de facturación y muestra su enlace: envíelo a quien paga. Sin esa opción, `lobbystack billing pack-status <checkout_id>` muestra el enlace cuando la página está lista y, después, si el paquete se pagó. Una vez pagado, `pack_status` dice qué fue del paquete: `active` mientras el negocio lo tiene, `frozen` mientras una disputa retiene su pago (el negocio sigue teniendo el paquete), `expired` cuando se acabaron sus días, `replaced` cuando lo terminó un plan que compró el negocio y `refunded` cuando se devolvió su pago. Un plan que empezó antes de que llegara el pago termina el paquete en el acto, y el pago se reembolsa. Un plan que empieza mientras la compra sigue abierta la cierra, y `--wait` lo indica en lugar de sugerir otra compra, ya que ese paquete terminaría un plan mensual. En un plan Starter o Pro mensual, el plan termina cuando el paquete está pagado; un plan anual tiene que terminar antes. `lobbystack billing status` muestra los paquetes del negocio después de su plan, con los minutos que le quedan a cada uno y cuándo termina. La clave necesita `billing:manage`.

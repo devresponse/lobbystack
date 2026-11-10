@@ -1,0 +1,182 @@
+import { createHmac } from "node:crypto";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
+
+const mocks = vi.hoisted(() => ({ lookup: vi.fn(), store: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn(), customer: vi.fn(), packPayment: vi.fn(), packPriceLinked: vi.fn() }));
+// storeBillingWebhookEvent's and hasLinkedPackPrice's own tests run them against PostgreSQL.
+vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog, storeBillingWebhookEvent: mocks.store, hasLinkedPackPrice: mocks.packPriceLinked }));
+vi.mock("@/lib/api-helpers", () => ({ getDispatcherDatabase: () => ({ db: {} }), getWorkerDatabase: () => ({ db: {} }) }));
+vi.mock("@lobbystack/db", async importOriginal => ({
+  ...await importOriginal<typeof import("@lobbystack/db")>(),
+  withDispatcherTransaction: async (_db: unknown, callback: (tx: unknown) => unknown) => callback({ select: () => ({ from: () => ({ where: (condition: unknown) => { mocks.where(condition); return { limit: mocks.lookup }; } }) }) }),
+  withBusinessTransaction: async (_db: unknown, scope: unknown, callback: (tx: unknown) => unknown) => {
+    mocks.scope(scope);
+    return callback({});
+  },
+}));
+// The admin's Stripe key reads a charge's customer, or a disputed pack payment, back for its business.
+vi.mock("@lobbystack/providers/billing/factory", async importOriginal => {
+  const actual = await importOriginal<typeof import("@lobbystack/providers/billing/factory")>();
+  return { ...actual, createBillingProvider: () => ({ businessOfCustomer: mocks.customer, businessOfPackPayment: mocks.packPayment }) };
+});
+
+import { POST } from "./route";
+import { POST as POLAR } from "../polar/route";
+
+// Stripe's billing webhook on a Stripe deployment (the Stripe plan's step 12):
+// who may deliver, which business an event is for, and Polar's route answering 404.
+
+const businessId = "ed4f1b6f-a237-4c09-8e26-68c3b976b110";
+const secret = "whsec_route_test";
+let logged: MockInstance<typeof console.error>;
+let warned: MockInstance<typeof console.warn>;
+const warnings = () => warned.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+const errors = () => logged.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+
+function signed(body: string, options: { secrets?: string[]; at?: number } = {}) {
+  const at = options.at ?? Math.floor(Date.now() / 1000);
+  const signatures = (options.secrets ?? [secret]).map((key) => `v1=${createHmac("sha256", key).update(`${at}.${body}`).digest("hex")}`);
+  return new Request("https://app.example.test/api/webhooks/stripe", { method: "POST", body, headers: { "stripe-signature": [`t=${at}`, ...signatures].join(",") } });
+}
+
+const subscriptionEvent = (fields: Record<string, unknown> = {}) => JSON.stringify({
+  id: "evt_1",
+  object: "event",
+  type: "customer.subscription.updated",
+  created: Math.floor(Date.now() / 1000),
+  livemode: false,
+  data: { object: { id: "sub_1", object: "subscription", customer: "cus_1", status: "active", items: { data: [] }, discounts: [], schedule: null, cancel_at: null, cancel_at_period_end: false, metadata: { lobbystack_business: businessId } } },
+  ...fields,
+});
+
+const disputeEvent = (type: string) => JSON.stringify({ id: type === "charge.dispute.closed" ? "evt_dispute2" : "evt_dispute1", object: "event", type, created: Math.floor(Date.now() / 1000), livemode: false, data: { object: { id: "dp_1", object: "dispute", charge: "ch_1", payment_intent: "pi_pack", amount: 8700, currency: "cad", status: type === "charge.dispute.closed" ? "lost" : "needs_response", metadata: {} } } });
+
+const refundEvent = JSON.stringify({ id: "evt_2", object: "event", type: "charge.refunded", created: Math.floor(Date.now() / 1000), livemode: false, data: { object: { id: "ch_1", object: "charge", customer: "cus_1", payment_intent: "pi_1", amount: 8700, amount_refunded: 8700, currency: "cad", refunded: true, metadata: {} } } });
+
+const packCheckout = "f7a4a0a2-3a37-4f43-9d2a-8a56a7fb6a10";
+const packSessionEvent = (type: string) => JSON.stringify({ id: type.endsWith("failed") ? "evt_pack2" : "evt_pack1", object: "event", type, created: Math.floor(Date.now() / 1000), livemode: false, data: { object: { id: "cs_pack_1", object: "checkout.session", mode: "payment", customer: "cus_1", payment_intent: "pi_pack", invoice: null, amount_total: 8700, currency: "cad", payment_status: "paid", client_reference_id: packCheckout, metadata: { lobbystack_business: businessId, lobbystack_role: "pack", lobbystack_pack: "pack_500_90", lobbystack_pack_checkout: packCheckout, lobbystack_pack_price: "price_pack_500_90" } } } });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubEnv("BILLING_PROVIDER", "stripe");
+  vi.stubEnv("STRIPE_API_KEY", "rk_test_admin123");
+  vi.stubEnv("STRIPE_WEBHOOK_SECRET", secret);
+  mocks.lookup.mockResolvedValue([{ id: businessId }]);
+  mocks.catalog.mockResolvedValue({ plans: [], prices: [] });
+  mocks.customer.mockResolvedValue(businessId);
+  mocks.packPayment.mockResolvedValue(businessId);
+  // A deployment that sells packs: a link recorded their prices.
+  mocks.packPriceLinked.mockResolvedValue(true);
+  // The first delivery is new, and Stripe's next one a duplicate.
+  mocks.store.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
+  logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+});
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+it("stores a signed event in the business its metadata names, as the worker, and says when Stripe sent it before", async () => {
+  expect(await (await POST(signed(subscriptionEvent()))).json()).toEqual({ accepted: true, duplicate: false, eventId: "evt_1" });
+  expect(await (await POST(signed(subscriptionEvent()))).json()).toEqual({ accepted: true, duplicate: true, eventId: "evt_1" });
+  expect(mocks.scope).toHaveBeenCalledWith({ businessId, actorType: "worker" });
+  expect(mocks.store).toHaveBeenCalledWith({}, { provider: "stripe", businessId, providerEventId: "evt_1", eventType: "customer.subscription.updated", payload: expect.objectContaining({ kind: "subscription", subscriptionId: "sub_1", subscriptionState: "active" }) });
+  expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0]![0])).toMatchObject({ sql: '"businesses"."id" = $1', params: [businessId] });
+  expect(mocks.customer).not.toHaveBeenCalled();
+});
+
+it("reads a charge's customer back for its business, and drops it when the customer names none", async () => {
+  expect((await POST(signed(refundEvent))).status).toBe(200);
+  expect(mocks.customer).toHaveBeenCalledWith("cus_1");
+  expect(mocks.store).toHaveBeenCalledWith({}, expect.objectContaining({ businessId, eventType: "charge.refunded", payload: expect.objectContaining({ kind: "refund", paymentRef: "pi_1" }) }));
+  mocks.customer.mockResolvedValue(null);
+  expect(await (await POST(signed(refundEvent))).json()).toEqual({ accepted: true, ignored: true });
+  expect(errors()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "stripe", eventType: "charge.refunded", reason: "no_reference" }]);
+});
+
+it("reads a disputed payment back for its business only when it paid for a pack, and drops any other dispute as before", async () => {
+  expect((await POST(signed(disputeEvent("charge.dispute.created")))).status).toBe(200);
+  expect(mocks.packPayment).toHaveBeenCalledWith("pi_pack");
+  expect(mocks.customer).not.toHaveBeenCalled();
+  expect(mocks.store).toHaveBeenCalledWith({}, expect.objectContaining({ businessId, eventType: "charge.dispute.created", payload: expect.objectContaining({ kind: "dispute", paymentRef: "pi_pack", disputeOutcome: "opened" }) }));
+  // A plan's payment names no pack, so its dispute stays unattributed, as it was before packs.
+  mocks.packPayment.mockResolvedValue(null);
+  expect(await (await POST(signed(disputeEvent("charge.dispute.closed")))).json()).toEqual({ accepted: true, ignored: true });
+  expect(errors()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "stripe", eventType: "charge.dispute.closed", reason: "no_reference", businessReference: "ch_1" }]);
+});
+
+it("asks Stripe nothing about a dispute on a deployment that never linked a pack's price, and drops it as before packs", async () => {
+  mocks.packPriceLinked.mockResolvedValue(false);
+  const answer = await POST(signed(disputeEvent("charge.dispute.created")));
+  expect(answer.status).toBe(200);
+  expect(await answer.json()).toEqual({ accepted: true, ignored: true });
+  expect(mocks.packPriceLinked).toHaveBeenCalledTimes(1);
+  // Read as the worker, as the catalog is, since the dispatcher can't read the pack catalog.
+  expect(mocks.scope.mock.calls).toEqual([[{ actorType: "worker" }], [{ actorType: "worker" }]]);
+  expect(mocks.packPayment).not.toHaveBeenCalled();
+  expect(mocks.store).not.toHaveBeenCalled();
+  expect(errors()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "stripe", eventType: "charge.dispute.created", reason: "no_reference", businessReference: "ch_1" }]);
+  // Only a dispute without a business needs to know: a subscription's event and a charge's refund don't ask.
+  await POST(signed(subscriptionEvent()));
+  await POST(signed(refundEvent));
+  expect(mocks.packPriceLinked).toHaveBeenCalledTimes(1);
+});
+
+it("ignores the events only packs need on a deployment that never linked a pack's price, as before packs, and takes them once one is linked", async () => {
+  // Only an endpoint that takes every event sends them there.
+  mocks.packPriceLinked.mockResolvedValue(false);
+  for (const body of [disputeEvent("charge.dispute.closed"), packSessionEvent("checkout.session.async_payment_succeeded"), packSessionEvent("checkout.session.async_payment_failed")]) {
+    const answer = await POST(signed(body));
+    expect(answer.status).toBe(202);
+    expect(await answer.json()).toEqual({ accepted: true, ignored: true });
+  }
+  expect(mocks.packPriceLinked).toHaveBeenCalledTimes(3);
+  expect(mocks.packPayment).not.toHaveBeenCalled();
+  expect(mocks.store).not.toHaveBeenCalled();
+  expect(errors()).toEqual([]);
+  mocks.packPriceLinked.mockClear().mockResolvedValue(true);
+  expect((await POST(signed(packSessionEvent("checkout.session.async_payment_succeeded")))).status).toBe(200);
+  expect(mocks.store).toHaveBeenCalledWith({}, expect.objectContaining({ businessId, eventType: "checkout.session.async_payment_succeeded", payload: expect.objectContaining({ role: "pack", packOutcome: "paid", paymentRef: "pi_pack" }) }));
+  // A closed dispute reads the link once, then its payment.
+  expect((await POST(signed(disputeEvent("charge.dispute.closed")))).status).toBe(200);
+  expect(mocks.packPriceLinked).toHaveBeenCalledTimes(2);
+  expect(mocks.packPayment).toHaveBeenCalledWith("pi_pack");
+});
+
+it("refuses a bad, old or missing signature, another secret, the other mode and no secret, and takes either secret during a rotation", async () => {
+  const at = Math.floor(Date.now() / 1000);
+  expect((await POST(signed(subscriptionEvent(), { secrets: ["whsec_other"] }))).status).toBe(401);
+  expect((await POST(signed(subscriptionEvent(), { at: at - 600 }))).status).toBe(401);
+  expect((await POST(new Request("https://app.example.test/api/webhooks/stripe", { method: "POST", body: subscriptionEvent() }))).status).toBe(401);
+  expect((await POST(signed(subscriptionEvent({ livemode: true })))).status).toBe(401);
+  vi.stubEnv("STRIPE_WEBHOOK_SECRET", `whsec_next,${secret}`);
+  expect((await POST(signed(subscriptionEvent()))).status).toBe(200);
+  vi.stubEnv("STRIPE_WEBHOOK_SECRET", "");
+  expect((await POST(signed(subscriptionEvent()))).status).toBe(401);
+  expect(warnings().filter((line) => line.message === "ops.billing.webhook_refused").map((line) => [line.provider, line.reason])).toEqual([
+    ["stripe", "bad_signature"],
+    ["stripe", "too_old"],
+    ["stripe", "missing_headers"],
+    ["stripe", "wrong_mode"],
+    ["stripe", "unconfigured"],
+  ]);
+  const notAnEvent = JSON.stringify({ hello: "world" });
+  expect((await POST(signed(notAnEvent, { secrets: [] }))).status).toBe(401);
+  vi.stubEnv("STRIPE_WEBHOOK_SECRET", secret);
+  expect((await POST(signed(notAnEvent))).status).toBe(400);
+});
+
+it("answers 404 on the other provider's route, logging it at most once a minute", async () => {
+  vi.useFakeTimers({ now: new Date("2026-11-08T12:00:00Z") });
+  try {
+    expect((await POLAR(new Request("https://app.example.test/api/webhooks/polar", { method: "POST", body: "{}" }))).status).toBe(404);
+    expect((await POLAR(new Request("https://app.example.test/api/webhooks/polar", { method: "POST", body: "{}" }))).status).toBe(404);
+    expect(warnings().filter((line) => line.message === "ops.billing.webhook_wrong_provider")).toEqual([expect.objectContaining({ provider: "polar", route: "/api/webhooks/polar" })]);
+    vi.setSystemTime(new Date("2026-11-08T12:01:01Z"));
+    vi.unstubAllEnvs();
+    // Stripe's route on a Polar deployment.
+    expect((await POST(signed(subscriptionEvent()))).status).toBe(404);
+    expect(warnings().filter((line) => line.message === "ops.billing.webhook_wrong_provider").map((line) => line.route)).toEqual(["/api/webhooks/polar", "/api/webhooks/stripe"]);
+    expect(mocks.store).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});

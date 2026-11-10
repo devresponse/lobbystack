@@ -62,7 +62,9 @@
       "requirePhone": "Require phone",
       "showBeforeChat": "Ask before chat",
       "liveChat": "Let visitors chat with your team",
-      "liveChatHint": "During opening hours, a visitor who asks for a person gets someone from your team in the chat. Your team gets an alert and replies from Messages. If nobody replies within 3 minutes, the receptionist offers to take a message."
+      "liveChatHint": "During opening hours, a visitor who asks for a person gets someone from your team in the chat. Your team gets an alert and replies from Messages. If nobody replies within 3 minutes, the receptionist offers to take a message.",
+      "receptionist": "Receptionist",
+      "receptionistHint": "Chats and calls from this widget go to the receptionist you pick. While it's paused, {{name}} answers them."
     },
     "positions": {
       "bottomRight": "Bottom right",
@@ -115,6 +117,9 @@
       "title": "Your page",
       "description": "{{business}} gets a page at this address, with your hours, services, location and chat.",
       "label": "Published",
+      "labelOff": "Not published",
+      "publishAction": "Publish page",
+      "unpublishAction": "Unpublish page",
       "on": "Anyone with the link can see the page, and search engines can list it.",
       "off": "Only your team can see the page until you publish it.",
       "since": "Published {{date}}",
@@ -181,9 +186,87 @@
     "title": "QR code",
     "loading": "Loading your QR code…",
     "unavailable": "Your QR code can't be loaded right now.",
-    "card": {
-      "title": "Your QR code",
-      "description": "Put it on your door, counter or tables. Anyone who scans it lands on your public profile."
+    "links": {
+      "title": "Your QR codes",
+      "description": "Put them on your door, counter or tables. Each code opens your page with the receptionist you choose.",
+      "descriptionOne": "Put them on your door, counter or tables. Each code opens your page and counts its own scans.",
+      "new": "New link",
+      "searchLabel": "Search links",
+      "search_one": "Search {{total}} link",
+      "search_other": "Search {{total}} links",
+      "columns": {
+        "link": "Link",
+        "answeredBy": "Answered by",
+        "opens": "Opens",
+        "scans": "Scans, 30 days",
+        "actions": "Actions"
+      },
+      "businessPage": "Business page",
+      "notCounted": "Not counted",
+      "untitled": "Link {{code}}",
+      "paused": "Paused",
+      "answersNow": "{{name}} answers for now",
+      "archivedReceptionist": "Archived receptionist",
+      "loading": "Loading your QR links…",
+      "unavailable": "Your QR links can't be loaded right now.",
+      "retry": "Try again",
+      "empty": "No links yet. Make one for each sign to see which one gets scanned.",
+      "emptyViewer": "No links yet. An owner or admin can make one for each sign.",
+      "noMatches": "No links match.",
+      "range": "{{from}}–{{to}} of {{total}}",
+      "previous": "Previous page",
+      "next": "Next page",
+      "menuNote": "Each row's menu changes its receptionist, pauses it or copies its address.",
+      "menuNoteOne": "Each row's menu renames it, pauses it or copies its address.",
+      "menuNoteViewer": "Each row's menu copies its address.",
+      "routingNote": "A paused link opens your business page, and a link whose receptionist is paused or archived answers as {{name}}.",
+      "routingNoteOne": "A paused link opens your business page.",
+      "menu": {
+        "label": "More options for {{name}}",
+        "edit": "Edit",
+        "copy": "Copy address",
+        "pause": "Pause",
+        "resume": "Resume"
+      },
+      "toast": {
+        "created": "{{name}} is ready. Its sign is below.",
+        "saved": "{{name}} saved.",
+        "paused": "{{name}} is paused. Its sign opens your business page until you resume it.",
+        "resumed": "{{name}} is on again.",
+        "copied": "Address copied.",
+        "copyFailed": "The address couldn't be copied. It's {{url}}"
+      },
+      "dialog": {
+        "newTitle": "New link",
+        "editTitle": "Edit link",
+        "newDescription": "Make a QR code that opens your page with one receptionist answering.",
+        "newDescriptionOne": "Make a QR code that opens your page.",
+        "editDescription": "Its code stays the same, so signs you've printed keep working.",
+        "label": "Label",
+        "labelPlaceholder": "Front window",
+        "labelHint": "Only your team sees it, here and in the scan counts.",
+        "labelMissing": "Give the link a label, such as where its sign hangs.",
+        "answeredBy": "Answered by",
+        "answeredByHint": "Scans open the page of the receptionist you pick. While it's paused, {{name}} answers.",
+        "address": "Address",
+        "addressNewHint": "Made for you when you create the link.",
+        "addressHint": "The code never changes.",
+        "cancel": "Cancel",
+        "create": "Create link",
+        "save": "Save"
+      },
+      "errors": {
+        "limit": "Your business has {{max}} QR links, the most it can keep. Change a paused one instead.",
+        "codeUnavailable": "A new code couldn't be made just now. Try again.",
+        "invalidLabel": "Labels can be up to {{max}} characters."
+      }
+    },
+    "signCard": {
+      "pageTitle": "Business page sign",
+      "linkTitle": "{{name}} sign",
+      "description": "Print it, or download the code for your own design.",
+      "link": "Link",
+      "linkPaused": "This link is paused, so its sign opens your business page until you resume it."
     },
     "opens": "Opens",
     "open": "Open page",
@@ -238,9 +321,25 @@
     "noCode": "This address can't be made into a QR code.",
     "sign": {
       "defaultMessage": "Questions?\nAsk us any time.",
+      "defaultMessageFor": "Questions?\nAsk {{name}}.",
       "scanChat": "Scan to chat with us",
+      "scanChatWith": "Scan to chat with {{name}}",
       "scanPage": "Scan to visit our page",
       "answeredBy": "Answered by <brand>{{appName}}</brand>"
+    },
+    "chart": {
+      "title": "Scans per day",
+      "summary_one": "{{total}} scan, {{range}}.",
+      "summary_other": "{{total}} scans, {{range}}.",
+      "busiest_one": "Busiest: {{day}}, {{scans}} scan.",
+      "busiest_other": "Busiest: {{day}}, {{scans}} scans.",
+      "none": "No scans, {{range}}.",
+      "day_one": "{{day}}: {{scans}} scan",
+      "day_other": "{{day}}: {{scans}} scans",
+      "tableCaption": "Scans per day, {{range}}",
+      "dayColumn": "Day",
+      "scansColumn": "Scans",
+      "notCounted": "Scans of the business page sign aren't counted. Make a link for a sign to count its scans."
     }
   },
   "billing": {
@@ -249,7 +348,12 @@
       "checkoutFailed": "Unable to open checkout.",
       "portalFailed": "Unable to open the customer portal.",
       "rateLimited": "Too many tries. Try again later.",
-      "planChanged": "Your plan is changing. It shows here as soon as Polar confirms it.",
+      "planChanged": "Your plan is changing. It shows here as soon as {{provider}} confirms it.",
+      "planCanceled": "Your plan won't renew. It stays active until the end of the period you paid for.",
+      "planResumed": "Your plan will keep renewing.",
+      "planKept": "You're staying on your current plan.",
+      "planActionFailed": "That didn't go through. Try again in a minute.",
+      "resumeFirst": "Your subscription is set to end, so its plan can't change. Resume your plan on this page first.",
       "planChangeFailed": "Unable to change your plan.",
       "planChangeRefused": {
         "payment_failed": "Your saved payment method couldn't be charged for the new plan. Update it under Manage subscription, then try again.",
@@ -277,7 +381,8 @@
       "pro": "Pro",
       "proCard": "Pro Plan",
       "enterprise": "Enterprise",
-      "enterpriseCard": "Enterprise Plan"
+      "enterpriseCard": "Enterprise Plan",
+      "prepaidCard": "Prepaid"
     },
     "subscriptionStates": {
       "active": "Active",
@@ -303,7 +408,16 @@
       "changingPlan": "Changing plan...",
       "openingPortal": "Opening portal...",
       "viewInvoice": "View invoice",
+      "completePayment": "Complete payment",
+      "cancelPlan": "Cancel plan",
+      "resume": "Resume",
+      "keepPlan": "Keep my plan",
       "retry": "Try again"
+    },
+    "cancelDialog": {
+      "title": "Cancel your plan?",
+      "description": "Your plan stays active until {{date}}, then moves to Free. Usage over what's included until then is still billed.",
+      "back": "Go back"
     },
     "currentPlan": {
       "title": "Your plan",
@@ -319,6 +433,10 @@
       "billingContactMissing": "No billing contact on file yet.",
       "subscriptionStateTitle": "Subscription",
       "billingPeriod": "Current period resets {{resetAt}}",
+      "planEndsOn": "Your plan ends on {{date}}.",
+      "planChangesOn": "Your plan changes to {{plan}} on {{date}}.",
+      "overageNote": "Usage over your allowance is billed on its own invoice on the 1st of each month.",
+      "completePaymentHint": "Your bank asks you to confirm the payment for the new plan.",
       "selfHostNotice": "Self-hosted workspaces use your own providers. No usage limits or billing apply.",
       "enterpriseNotice": "Usage and limits are governed by your enterprise agreement.",
       "proNotice": "Included usage resets monthly. Additional usage is billed at the overage rate.",
@@ -329,21 +447,30 @@
       "includedStorageLabel": "storage",
       "includedVoice_one": "{{count}} voice minute",
       "includedVoice_other": "{{count}} voice minutes",
+      "includedReceptionists_one": "{{count}} receptionist",
+      "includedReceptionists_other": "{{count}} receptionists",
       "includedSms_one": "{{count}} SMS alert",
       "includedSms_other": "{{count}} SMS alerts",
       "includedOutbound_one": "{{count}} transfer attempt",
       "includedOutbound_other": "{{count}} transfer attempts",
       "includedStorageCustom": "Custom storage allowance",
       "includedVoiceCustom": "Custom voice allowance",
+      "includedReceptionistsCustom": "Custom receptionist allowance",
       "includedSmsCustom": "Custom SMS allowance",
       "includedOutboundCustom": "Custom transfer allowance",
-      "includedStorage": "{{amount}} {{unit}} storage"
+      "includedStorage": "{{amount}} {{unit}} storage",
+      "prepaidMinutesLeft_one": "minute left",
+      "prepaidMinutesLeft_other": "minutes left",
+      "prepaidUntil": "Until {{date}}",
+      "prepaidNeverEnds": "Never ends"
     },
     "upgradeDialog": {
       "title": "Upgrade plan",
       "description": "Choose the plan that works best for your team.",
       "changesSubscription": "You already have a subscription, so this changes it instead of opening a checkout. Any difference is charged to your saved payment method.",
       "leavesPromo": "Changing your plan ends {{plan}} and its discount.",
+      "endsPacks_one": "Starting a plan ends your packs and the {{minutes}} minute left on them.",
+      "endsPacks_other": "Starting a plan ends your packs and the {{minutes}} minutes left on them.",
       "enterpriseSubject": "Enterprise plan",
       "billingIntervalLabel": "Billing interval",
       "annualDiscount": "Save {{percent}}%",
@@ -371,6 +498,8 @@
           "highlights": {
             "voiceMinutes_one": "{{count}} browser voice minute included",
             "voiceMinutes_other": "{{count}} browser voice minutes included",
+            "receptionists_one": "{{count}} receptionist",
+            "receptionists_other": "{{count}} receptionists",
             "allFeatures": "No telephone number",
             "support": "Community support"
           }
@@ -384,6 +513,8 @@
           "highlights": {
             "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
             "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+            "receptionists_one": "{{count}} receptionist",
+            "receptionists_other": "{{count}} receptionists",
             "dedicatedNumber_one": "{{count}} dedicated business number",
             "dedicatedNumber_other": "{{count}} dedicated business numbers",
             "phoneNumber_one": "{{count}} alert SMS segment",
@@ -400,6 +531,8 @@
           "highlights": {
             "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
             "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+            "receptionists_one": "{{count}} receptionist",
+            "receptionists_other": "{{count}} receptionists",
             "dedicatedNumber_one": "{{count}} dedicated business number",
             "dedicatedNumber_other": "{{count}} dedicated business numbers",
             "alertSms_one": "{{count}} alert SMS segment",
@@ -415,6 +548,7 @@
           },
           "highlights": {
             "phoneNumbers": "Multiple dedicated numbers",
+            "customReceptionists": "Custom number of receptionists",
             "selfHosted": "Self-hosted deployment option",
             "support": "Dedicated implementation support"
           }
@@ -446,6 +580,8 @@
       "unlimited": "Unlimited",
       "blocked": "Limit reached",
       "blockedDescription": "Limit reached — usage paused until next period.",
+      "packDescription": "Your minutes come from your packs and last until each one ends.",
+      "packBlockedDescription": "No minutes left. Calls get a busy signal until you buy another pack.",
       "overageCount": "{{count}} over limit",
       "overageCost": "≈ {{amount}} in overages",
       "noOverages": "No overages — usage hard-capped at the included pool.",
@@ -481,9 +617,58 @@
       "saveFailed": "Unable to save the monthly overage cap.",
       "removeFailed": "Unable to remove the monthly overage cap."
     },
+    "packs": {
+      "title": "Prepaid minutes",
+      "description": "Buy minutes up front, with no monthly bill. Calls use them until they run out or the pack ends.",
+      "minutesLabel": "Minutes",
+      "lengthLabel": "Lasts",
+      "minutesOption_one": "{{minutes}} minute",
+      "minutesOption_other": "{{minutes}} minutes",
+      "daysOption_one": "{{count}} day",
+      "daysOption_other": "{{count}} days",
+      "neverEndsOption": "No end date",
+      "priceSuffix": "paid once",
+      "left_one": "{{left}} minute left of {{total}}",
+      "left_other": "{{left}} minutes left of {{total}}",
+      "endsOn": "Ends on {{date}}",
+      "neverEnds": "Never ends",
+      "frozen": "On hold while a payment dispute is open",
+      "buy": "Buy pack",
+      "buyMore": "Buy more",
+      "unavailable": "Packs can't be bought here right now.",
+      "refusals": {
+        "managed_plan": "Your plan is managed for you, so packs can't be bought here.",
+        "pack_not_sold_on_plan": "Packs aren't sold with your plan.",
+        "pack_yearly_plan": "You're on a yearly plan. Set it to end at renewal, then buy a pack once it ends.",
+        "pack_past_due": "A payment for your plan is past due. Settle it under Manage subscription, then buy a pack.",
+        "plan_change_payment_waiting": "Your bank still needs you to confirm a payment for your plan. Complete it first.",
+        "pack_not_on_sale": "This pack isn't on sale right now.",
+        "plan_change_pending": "Another purchase for this business is still in progress. Try again in a minute."
+      },
+      "endsPlanDialog": {
+        "title": "End your {{plan}} plan?",
+        "planEnds": "Paying for this pack ends your {{plan}} plan right away.",
+        "noRefund": "The rest of its month, until {{date}}, isn't refunded. Usage so far is still billed.",
+        "noRefundUndated": "The rest of its month isn't refunded. Usage so far is still billed.",
+        "promoLost": "Your promo code is lost for good. It can't be used again.",
+        "receptionistsPaused": "All your receptionists but one are paused.",
+        "packStarts": "The pack's minutes and allowances start right away.",
+        "confirm": "End plan and buy"
+      },
+      "toast": {
+        "added": "Your pack was added.",
+        "failed": "Your payment didn't go through, so no pack was added.",
+        "processing": "Your payment is processing. Your pack shows here once it arrives.",
+        "checkoutFailed": "Unable to open the payment page. Try again.",
+        "checkoutExpired": "The payment page expired. Try again.",
+        "gaveWay": "A plan started before this payment arrived, so no pack was added. The payment will be refunded.",
+        "refundedFirst": "This payment was refunded or charged back, so no pack was added.",
+        "closedForPlan": "A plan started for this business, so this pack's checkout closed."
+      }
+    },
     "transactions": {
       "title": "Transaction history",
-      "description": "Orders, refunds, and setup fees synced from Polar.",
+      "description": "Orders, refunds, and setup fees synced from {{provider}}.",
       "empty": "No transactions yet.",
       "columns": {
         "date": "Date",
@@ -501,7 +686,9 @@
         "partially_refunded": "Partial refund",
         "succeeded": "Completed",
         "failed": "Failed",
-        "canceled": "Canceled"
+        "canceled": "Canceled",
+        "void": "Voided",
+        "uncollectible": "Unpaid"
       },
       "kindLabels": {
         "order": "Order",
@@ -572,7 +759,10 @@
     "reclaim": {
       "title": "This number will be released on {{date}}",
       "description": "Free plans do not include a dedicated business number. Upgrade to Starter or Pro before then to keep {{number}}.",
-      "upgradeCta": "Upgrade to keep this number"
+      "upgradeCta": "Upgrade to keep this number",
+      "packDescription": "Your last pack ended. Buy a pack or choose a plan before then to keep {{number}}.",
+      "buyPackCta": "Buy a pack",
+      "choosePlanCta": "Choose a plan"
     },
     "requiresPaidPlan": {
       "title": "Dedicated numbers are on paid plans",
@@ -627,6 +817,13 @@
     "toast": {
       "changed": "Phone number changed. Your previous number will stay active for 30 days.",
       "added": "Phone number added."
+    },
+    "answeredBy": {
+      "label": "Answered by",
+      "hint": "Calls and texts to this number go to the receptionist you pick. While it's paused, {{name}} answers them.",
+      "saved": "Calls and texts to {{number}} go to {{name}} now.",
+      "otherNumbers": "Other numbers",
+      "otherNumbersDescription": "Each number's calls and texts go to the receptionist you pick."
     }
   },
   "appearance": {
@@ -1422,6 +1619,7 @@
       "appointments_read": "Read appointments and open times",
       "appointments_write": "Book, cancel and reschedule appointments",
       "messages_read": "Read messages the receptionist took",
+      "knowledge_read": "Read the questions the receptionist couldn't answer",
       "knowledge_write": "Add knowledge entries and FAQs"
     }
   }

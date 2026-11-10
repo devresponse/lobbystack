@@ -13,6 +13,10 @@ A released number keeps its row, marked released, and only numbers a business st
 
 The worker needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_SIP_TRUNK_SID`. Without them it ends the claim at once and its `job.failed` log line names the missing variable. Before fork PR #32, a claim stayed reserved for 15 minutes and refused the next pick.
 
+## Choose who answers the number
+
+Since fork PR #129 a business can have several receptionists, and each number names the one that answers its calls and texts ([receptionists](receptionists.md#choose-who-answers-each-number-widget-and-sign)). With more than one receptionist, **Settings > Phone number** shows **Answered by** under the number, and any other active number the business has under **Other numbers**, each with its own dropdown. A choice saves at once, for owners and admins, through `PATCH /api/phone-numbers/{phoneNumberId}`, and takes effect from the next call. A number names the default receptionist until someone picks another, and a paused or archived receptionist's number is answered by the default one. The incoming call webhook finds the number's receptionist with `app.resolve_receptionist_by_phone`, so the call opens with that receptionist's greeting, in its language. A business still holds one number at most; a number for each receptionist is on the [roadmap](../roadmap/receptionists-next.md).
+
 ## Know the limits
 
 | Limit | Value |
@@ -24,6 +28,15 @@ The worker needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_SIP_TRUNK
 | Dashboard searches | 10 first searches and 20 others in each 10 minutes |
 
 The reservation and purchase limits count per person across their businesses, or per business when a platform key claims for it. They live in the database functions from migration `0094`. The search limit is in `apps/admin/src/lib/phone-number-search-limit.ts`.
+
+## Know what happens when the last pack ends
+
+A business on prepaid minute packs holds its number while a pack has time left. When its last pack ends, on its end date or by a refund or a lost dispute, the `billing.expirePacks` job ([billing](../billing/README.md#know-what-runs-on-its-own)) sets the number to go back to Twilio 30 days after that pack ended:
+
+- **The number stops answering at once.** Calls are turned away (`live.incoming_closed_business` in the admin's log), and texts get no reply, as on a [canceled account](account-cancellation.md). Migration `0148` has `app.resolve_business_by_phone`, `app.resolve_receptionist_by_phone` and `app.is_closed_business_phone` read a number set to go for this reason (`reclaim_reason` `pack_ended`) as closed. A number set to go for a replacement or a cancellation answers as before.
+- **The worker's hourly `phone-number-reclaim` job releases it** once the 30 days are up.
+- **A new pack, a plan bought or a managed plan an operator gives before then keeps the number,** and it answers again from the next call.
+- **Nothing is set to go while the business still has a number another way:** a live pack, a disputed pack with time left, or a plan that includes a number, such as Starter.
 
 ## Debug "Request failed" and "We couldn't get that number"
 

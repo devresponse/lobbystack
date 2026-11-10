@@ -3,17 +3,19 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import agent from "../../../../public/locales/en/agent.json";
 import knowledge from "../../../../public/locales/en/knowledge.json";
 import { unansweredQuestionsQueryKey, type UnansweredQuestions } from "@/components/unanswered-questions-section";
+import { testNavigation } from "@/lib/navigation-testing";
 import AgentLayout from "../layout";
 import AgentQuestionsPage from "./page";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/agent/questions" }));
+vi.mock("next/navigation", async () => (await import("@/lib/navigation-testing")).nextNavigationMock);
 
 const clients: QueryClient[] = [];
+beforeEach(() => { testNavigation.reset("/agent/questions"); });
 afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); });
 
 const open: UnansweredQuestions = {
@@ -30,7 +32,8 @@ async function openPage({ role = "business_owner", businesses = [{ businessId: "
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
   client.setQueryData(["businesses"], { businesses });
-  if (cached) client.setQueryData(unansweredQuestionsQueryKey("business"), open);
+  // The page opens at its first page of 10.
+  if (cached) client.setQueryData(unansweredQuestionsQueryKey("business", null, { pageIndex: 0, pageSize: 10 }), open);
   const fetchMock = vi.fn(async (_url: string) => Response.json(open));
   vi.stubGlobal("fetch", fetchMock);
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><AgentLayout><AgentQuestionsPage /></AgentLayout></QueryClientProvider></I18nextProvider>);
@@ -67,7 +70,10 @@ describe("the Questions page at /agent/questions", () => {
   it("asks only for the active business's questions", async () => {
     const { fetchMock } = await openPage({ cached: false, businesses: [{ businessId: "other", name: "Other", slug: "other", active: false, role: "business_owner" }, { businessId: "business", name: "Clinic", slug: "clinic", active: true, role: "business_owner" }] });
     expect(await screen.findByText("Do you validate parking?")).toBeTruthy();
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/knowledge/questions?businessId=business"]);
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls.filter((url) => url.startsWith("/api/knowledge/questions"))).toEqual(["/api/knowledge/questions?businessId=business&limit=10&offset=0"]);
+    // The receptionist filter lists the active business's receptionists too.
+    expect(urls.filter((url) => !url.startsWith("/api/knowledge/questions"))).toEqual(["/api/receptionists/choices?businessId=business"]);
   });
 
   it("says there's no workspace yet instead of listing questions", async () => {

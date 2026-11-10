@@ -53,13 +53,15 @@ async function seedChat(tx: DatabaseTransaction) {
   await tx.insert(users).values({ id: userId, name: "Yuri Maksymenko", email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
   await tx.insert(businessMemberships).values({ businessId, userId, role: "business_owner" });
   await tx.insert(widgetVisitors).values({ id: visitorId, businessId });
-  const { conversationId } = await as(tx, "worker", (db) => getOrCreateWidgetConversation({ db }, { businessId, widgetVisitorId: visitorId }));
+  // The chat names the business's default receptionist, which the database made with the business.
+  const { conversationId, receptionistId: frontDeskId } = await as(tx, "worker", (db) => getOrCreateWidgetConversation({ db }, { businessId, widgetVisitorId: visitorId }));
   const write = (login: "worker" | "app", message: Omit<Parameters<typeof appendMessage>[1], "businessId" | "conversationId" | "channel">) =>
     as(tx, login, (db) => appendMessage({ db }, { ...message, businessId, conversationId, channel: "web_chat" }));
   return {
     businessId,
     userId,
     conversationId,
+    frontDeskId,
     visitorWrites: (body: string) => write("worker", { body, direction: "inbound" }),
     aiReplies: (body: string) => write("worker", { body, direction: "outbound", aiGenerated: true }),
     teamReplies: (body: string) => write("app", { body, direction: "outbound", userId }),
@@ -337,7 +339,7 @@ describe.skipIf(!testUrl)("a website chat after a day without messages, against 
       await chat.teamReplies("Hi, this is Yuri.");
       const lastMessage = Date.now();
 
-      expect(await chat.openChat(new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS - 60_000))).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff" });
+      expect(await chat.openChat(new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS - 60_000))).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff", receptionistId: chat.frontDeskId });
 
       const nextDay = new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000);
       const next = await chat.openChat(nextDay);
@@ -367,7 +369,7 @@ describe.skipIf(!testUrl)("a website chat after a day without messages, against 
 
       await chat.teamSets("human_handoff");
       expect(await chat.shownChat(chat.visitorId)).toEqual({ conversationId: chat.conversationId, idle: false });
-      expect(await chat.openChat(new Date())).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff" });
+      expect(await chat.openChat(new Date())).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff", receptionistId: chat.frontDeskId });
 
       // A day after the take-over without a word, the visitor's next message starts a new chat.
       const next = await chat.openChat(new Date(Date.now() + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000));

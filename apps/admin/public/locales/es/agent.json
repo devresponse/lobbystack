@@ -9,6 +9,10 @@
       "title": "Ajustes de IA",
       "description": "Saludo y ajustes de transferencia de su recepcionista."
     },
+    "receptionists": {
+      "title": "Agentes de IA",
+      "description": "Quién responde a sus llamadas, chats y páginas. Agregue una para cada sede, equipo o idioma."
+    },
     "knowledge": {
       "title": "Conocimiento",
       "description": "Información y pautas que su recepcionista usa para responder preguntas.",
@@ -90,6 +94,88 @@
           "label": "Etiquetas (opcional)",
           "placeholder": "Horario, ubicación",
           "hint": "Palabras clave separadas por comas para clasificar este conocimiento."
+        }
+      },
+      "receptionists": {
+        "availableTo": "Disponible para",
+        "rowAction": "Disponible para",
+        "select": "Seleccionar {{title}}",
+        "selectPage": "Seleccionar los artículos de esta página",
+        "selected_one": "{{count}} seleccionado",
+        "selected_many": "{{count}} seleccionados",
+        "selected_other": "{{count}} seleccionados",
+        "clear": "Borrar",
+        "showingAll": "Se muestran todos los artículos. Elija una recepcionista para ver exactamente lo que puede usar.",
+        "showingEverything": "{{name}} responde con todos los artículos.",
+        "showingOne": "Lo que {{name}} puede usar: los artículos para todas y los elegidos para ella.",
+        "bulk": {
+          "open": "Disponible para",
+          "mode": "Cambio",
+          "add": "Añadir",
+          "remove": "Quitar",
+          "replace": "Reemplazar",
+          "addNote": "Los artículos para todas ya incluyen a cada recepcionista, así que se quedan como están.",
+          "removeNote": "Los artículos para todas pasan a estar disponibles para cada una de las demás recepcionistas. Un artículo que se queda sin recepcionista solo lo usa la recepcionista predeterminada.",
+          "summary": {
+            "everyone_one": "Deja {{count}} artículo disponible para todas.",
+            "everyone_many": "Deja {{count}} artículos disponibles para todas.",
+            "everyone_other": "Deja {{count}} artículos disponibles para todas.",
+            "add_one": "Añade a {{names}} en {{count}} artículo.",
+            "add_many": "Añade a {{names}} en {{count}} artículos.",
+            "add_other": "Añade a {{names}} en {{count}} artículos.",
+            "remove_one": "Quita a {{names}} de {{count}} artículo.",
+            "remove_many": "Quita a {{names}} de {{count}} artículos.",
+            "remove_other": "Quita a {{names}} de {{count}} artículos.",
+            "replace_one": "Deja {{count}} artículo disponible solo para {{names}}.",
+            "replace_many": "Deja {{count}} artículos disponibles solo para {{names}}.",
+            "replace_other": "Deja {{count}} artículos disponibles solo para {{names}}."
+          },
+          "tooMany": "Seleccione como máximo {{max}} artículos para cambiarlos a la vez.",
+          "apply_one": "Aplicar a {{count}} artículo",
+          "apply_many": "Aplicar a {{count}} artículos",
+          "apply_other": "Aplicar a {{count}} artículos",
+          "done_one": "Disponibilidad cambiada en {{count}} artículo.",
+          "done_many": "Disponibilidad cambiada en {{count}} artículos.",
+          "done_other": "Disponibilidad cambiada en {{count}} artículos."
+        },
+        "dialog": {
+          "description": "Quién puede usar «{{title}}».",
+          "done": "Disponibilidad guardada."
+        },
+        "rules": {
+          "open": "Reglas del sitio web",
+          "rowAction": "Reglas de páginas",
+          "title": "Reglas del sitio web",
+          "description": "Las páginas cuya dirección empieza por la ruta de una regla van a su recepcionista, en este rastreo y en todos los siguientes.",
+          "importLabel": "Reglas de páginas",
+          "listTitle": "Reglas",
+          "empty": "Aún no hay reglas.",
+          "noSites": "Primero importe un sitio web. Una regla da una sección de sus páginas a una recepcionista.",
+          "site": "Sitio web",
+          "path": "Ruta",
+          "pathPlaceholder": "/stores/kitsilano/",
+          "pathOf": "Ruta de la regla {{number}}",
+          "goesTo": "Va a",
+          "goesToOf": "Recepcionista de la regla {{number}}",
+          "goesToName": "Va a {{name}}",
+          "removeDraft": "Quitar la regla {{number}}",
+          "invalidDraft": "Dele a la regla una ruta, como /bikes/, y una recepcionista, o quítela.",
+          "chooseReceptionist": "Elija a quién van las páginas.",
+          "add": "Añadir regla",
+          "added_one": "Regla añadida. {{count}} página va a {{name}}.",
+          "added_many": "Regla añadida. {{count}} páginas van a {{name}}.",
+          "added_other": "Regla añadida. {{count}} páginas van a {{name}}.",
+          "removed": "Regla eliminada.",
+          "pages_one": "{{count}} página",
+          "pages_many": "{{count}} páginas",
+          "pages_other": "{{count}} páginas",
+          "showAll_one": "Mostrar las {{count}} reglas",
+          "showAll_many": "Mostrar las {{count}} reglas",
+          "showAll_other": "Mostrar las {{count}} reglas",
+          "delete": "Eliminar la regla de {{path}}",
+          "deleteTitle": "¿Eliminar la regla de {{path}}?",
+          "deleteDescription": "Las páginas que daba a su recepcionista vuelven a estar disponibles para todas, salvo que otra regla o su propia elección también se las dé a alguien.",
+          "deleteConfirm": "Eliminar regla"
         }
       }
     },
@@ -406,5 +492,26 @@
     "edit": "Editar",
     "cancel": "Cancelar",
     "notSet": "Sin definir"
+  },
+  "receptionists": {
+    "shared": {
+      "title": "Comunes a todas las recepcionistas",
+      "description": "El resumen del negocio, lo que oye quien llama sobre la IA y la grabación, el idioma y la zona horaria del negocio, el horario y las reglas para las citas."
+    },
+    "own": {
+      "title": "Propios de cada recepcionista",
+      "description": "Su saludo, idioma, número de transferencia y reservas. Elija la recepcionista que quiere cambiar."
+    },
+    "picker": "Recepcionista",
+    "businessLanguage": {
+      "label": "Idioma del negocio",
+      "hint": "Lo habla la recepcionista predeterminada y cada recepcionista sin un idioma propio. Las llamadas cambian al idioma de la persona que llama si habla otro, y los resúmenes de llamadas se escriben en él."
+    },
+    "language": {
+      "label": "Idioma",
+      "hint": "Sus llamadas empiezan en este idioma y cambian al de la persona que llama si habla otro.",
+      "defaultHint": "La recepcionista predeterminada habla el idioma del negocio, que se define en los ajustes comunes de arriba.",
+      "business": "Idioma del negocio ({{language}})"
+    }
   }
 }

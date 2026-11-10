@@ -35,17 +35,27 @@
     "timesAsked_other": "Postavljeno {{count}} puta",
     "lastAsked": "Poslednji put {{date}}",
     "askedSummary": "{{asked}} · {{lastAsked}}",
+    "heardBy": "Ko je čuo: {{names}}",
     "answer": "Odgovori",
     "answerLabel": "Odgovor na: {{question}}",
     "answerPlaceholder": "Napišite šta recepcioner treba da odgovori.",
     "answerTooLong": "Skratite odgovor na najviše {{max}} karaktera.",
+    "audience": {
+      "label": "Ko koristi ovaj odgovor",
+      "everyone": "Svi recepcioneri",
+      "heardOne": "Samo recepcioner koji ga je čuo",
+      "heardMany_one": "Samo {{count}} recepcioner koji ga je čuo",
+      "heardMany_few": "Samo {{count}} recepcionera koji su ga čuli",
+      "heardMany_other": "Samo {{count}} recepcionera koji su ga čuli"
+    },
     "saveAnswer": "Sačuvaj odgovor",
     "cancel": "Otkaži",
     "dismiss": "Odbaci",
     "toast": {
       "answered": "Odgovor je dodat u znanje.",
       "dismissed": "Pitanje je odbačeno.",
-      "alreadyHandled": "Neko je već odgovorio na ovo pitanje ili ga je odbacio."
+      "alreadyHandled": "Neko je već odgovorio na ovo pitanje ili ga je odbacio.",
+      "noneHeard": "Svi recepcioneri koji su ga čuli su arhivirani. Sačuvajte odgovor za sve recepcionere."
     },
     "emptyTitle": "Nema pitanja bez odgovora",
     "emptyDescription": "Kada recepcioner ne zna odgovor na pitanje o vašem poslovanju, videćete ga ovde.",

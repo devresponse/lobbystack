@@ -52,6 +52,7 @@
     "api:openapi": "tsx --tsconfig scripts/tsconfig.json scripts/write-openapi.ts",
     "brands:build": "tsx --tsconfig scripts/tsconfig.json scripts/write-brands.ts",
     "billing": "tsx --tsconfig scripts/tsconfig.json scripts/billing.ts",
+    "billing:scenarios": "tsx --tsconfig scripts/tsconfig.json scripts/billing-scenarios.ts",
     "db:check": "pnpm --filter @lobbystack/db db:check",
     "db:seed": "pnpm --filter @lobbystack/db db:seed",
     "db:reset:test": "pnpm --filter @lobbystack/db db:reset:test",

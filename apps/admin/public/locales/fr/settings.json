@@ -62,7 +62,9 @@
       "requirePhone": "Téléphone obligatoire",
       "showBeforeChat": "Demander avant le clavardage",
       "liveChat": "Permettre aux visiteurs de clavarder avec votre équipe",
-      "liveChatHint": "Pendant les heures d'ouverture, un visiteur qui demande à parler à une personne retrouve quelqu'un de votre équipe dans le clavardage. Votre équipe reçoit une alerte et répond depuis Messages. Si personne ne répond dans les 3 minutes, la réceptionniste propose de prendre un message."
+      "liveChatHint": "Pendant les heures d'ouverture, un visiteur qui demande à parler à une personne retrouve quelqu'un de votre équipe dans le clavardage. Votre équipe reçoit une alerte et répond depuis Messages. Si personne ne répond dans les 3 minutes, la réceptionniste propose de prendre un message.",
+      "receptionist": "Réceptionniste",
+      "receptionistHint": "Les clavardages et appels de ce widget vont à la réceptionniste choisie. Tant qu'elle est en pause, {{name}} y répond."
     },
     "positions": {
       "bottomRight": "Bas à droite",
@@ -115,6 +117,9 @@
       "title": "Votre page",
       "description": "{{business}} a une page à cette adresse, avec vos heures d'ouverture, vos services, votre adresse et le clavardage.",
       "label": "Publiée",
+      "labelOff": "Non publiée",
+      "publishAction": "Publier la page",
+      "unpublishAction": "Annuler la publication",
       "on": "Toute personne qui a le lien peut voir la page, et les moteurs de recherche peuvent la répertorier.",
       "off": "Seule votre équipe peut voir la page jusqu'à ce que vous la publiiez.",
       "since": "Publiée le {{date}}",
@@ -181,9 +186,88 @@
     "title": "Code QR",
     "loading": "Chargement de votre code QR…",
     "unavailable": "Votre code QR ne peut pas être chargé pour le moment.",
-    "card": {
-      "title": "Votre code QR",
-      "description": "Placez-le sur votre porte, votre comptoir ou vos tables. Toute personne qui le scanne arrive sur votre profil public."
+    "links": {
+      "title": "Vos codes QR",
+      "description": "Placez-les sur votre porte, votre comptoir ou vos tables. Chaque code ouvre votre page avec la réceptionniste de votre choix.",
+      "descriptionOne": "Placez-les sur votre porte, votre comptoir ou vos tables. Chaque code ouvre votre page et compte ses propres scans.",
+      "new": "Nouveau lien",
+      "searchLabel": "Rechercher des liens",
+      "search_one": "Rechercher parmi {{total}} lien",
+      "search_many": "Rechercher parmi {{total}} liens",
+      "search_other": "Rechercher parmi {{total}} liens",
+      "columns": {
+        "link": "Lien",
+        "answeredBy": "Réceptionniste qui répond",
+        "opens": "Ouvre",
+        "scans": "Scans, 30 jours",
+        "actions": "Actions"
+      },
+      "businessPage": "Page de l'entreprise",
+      "notCounted": "Non comptés",
+      "untitled": "Lien {{code}}",
+      "paused": "En pause",
+      "answersNow": "{{name}} répond pour le moment",
+      "archivedReceptionist": "Réceptionniste archivée",
+      "loading": "Chargement de vos liens QR…",
+      "unavailable": "Vos liens QR ne peuvent pas être chargés pour le moment.",
+      "retry": "Réessayer",
+      "empty": "Aucun lien pour l'instant. Créez-en un pour chaque affiche afin de voir laquelle est scannée.",
+      "emptyViewer": "Aucun lien pour l'instant. Un propriétaire ou un administrateur peut en créer un pour chaque affiche.",
+      "noMatches": "Aucun lien ne correspond.",
+      "range": "{{from}}–{{to}} sur {{total}}",
+      "previous": "Page précédente",
+      "next": "Page suivante",
+      "menuNote": "Le menu de chaque ligne change sa réceptionniste, le met en pause ou copie son adresse.",
+      "menuNoteOne": "Le menu de chaque ligne le renomme, le met en pause ou copie son adresse.",
+      "menuNoteViewer": "Le menu de chaque ligne copie son adresse.",
+      "routingNote": "Un lien en pause ouvre la page de votre entreprise, et un lien dont la réceptionniste est en pause ou archivée est pris en charge par {{name}}.",
+      "routingNoteOne": "Un lien en pause ouvre la page de votre entreprise.",
+      "menu": {
+        "label": "Plus d'options pour {{name}}",
+        "edit": "Modifier",
+        "copy": "Copier l'adresse",
+        "pause": "Mettre en pause",
+        "resume": "Reprendre"
+      },
+      "toast": {
+        "created": "Le lien « {{name}} » est prêt. Son affiche est plus bas.",
+        "saved": "Le lien « {{name}} » est enregistré.",
+        "paused": "Le lien « {{name}} » est en pause. Son affiche ouvre la page de votre entreprise jusqu'à ce que vous le repreniez.",
+        "resumed": "Le lien « {{name}} » est de nouveau actif.",
+        "copied": "Adresse copiée.",
+        "copyFailed": "L'adresse n'a pas pu être copiée. La voici : {{url}}"
+      },
+      "dialog": {
+        "newTitle": "Nouveau lien",
+        "editTitle": "Modifier le lien",
+        "newDescription": "Créez un code QR qui ouvre votre page, où une réceptionniste répond.",
+        "newDescriptionOne": "Créez un code QR qui ouvre votre page.",
+        "editDescription": "Son code reste le même, donc les affiches déjà imprimées continuent de fonctionner.",
+        "label": "Libellé",
+        "labelPlaceholder": "Vitrine",
+        "labelHint": "Seule votre équipe le voit, ici et dans le nombre de scans.",
+        "labelMissing": "Donnez un libellé au lien, par exemple l'endroit où son affiche est posée.",
+        "answeredBy": "Réceptionniste qui répond",
+        "answeredByHint": "Les scans ouvrent la page de la réceptionniste choisie. Pendant qu'elle est en pause, {{name}} répond.",
+        "address": "Adresse",
+        "addressNewHint": "Créée pour vous à la création du lien.",
+        "addressHint": "Le code ne change jamais.",
+        "cancel": "Annuler",
+        "create": "Créer le lien",
+        "save": "Enregistrer"
+      },
+      "errors": {
+        "limit": "Votre entreprise a {{max}} liens QR, le maximum permis. Modifiez plutôt un lien en pause.",
+        "codeUnavailable": "Un nouveau code n'a pas pu être créé pour le moment. Réessayez.",
+        "invalidLabel": "Les libellés peuvent compter jusqu'à {{max}} caractères."
+      }
+    },
+    "signCard": {
+      "pageTitle": "Affiche de la page de l'entreprise",
+      "linkTitle": "Affiche « {{name}} »",
+      "description": "Imprimez-la, ou téléchargez le code pour votre propre mise en page.",
+      "link": "Lien",
+      "linkPaused": "Ce lien est en pause : son affiche ouvre la page de votre entreprise jusqu'à ce que vous le repreniez."
     },
     "opens": "Ouvre",
     "open": "Ouvrir la page",
@@ -238,9 +322,28 @@
     "noCode": "Cette adresse ne peut pas devenir un code QR.",
     "sign": {
       "defaultMessage": "Des questions?\nNous répondons en tout temps.",
+      "defaultMessageFor": "Des questions?\nDemandez à {{name}}.",
       "scanChat": "Scannez pour discuter avec nous",
+      "scanChatWith": "Scannez pour discuter avec {{name}}",
       "scanPage": "Scannez pour voir notre page",
       "answeredBy": "Accueil assuré par <brand>{{appName}}</brand>"
+    },
+    "chart": {
+      "title": "Scans par jour",
+      "summary_one": "{{total}} scan, {{range}}.",
+      "summary_many": "{{total}} scans, {{range}}.",
+      "summary_other": "{{total}} scans, {{range}}.",
+      "busiest_one": "Journée la plus achalandée : {{day}}, {{scans}} scan.",
+      "busiest_many": "Journée la plus achalandée : {{day}}, {{scans}} scans.",
+      "busiest_other": "Journée la plus achalandée : {{day}}, {{scans}} scans.",
+      "none": "Aucun scan, {{range}}.",
+      "day_one": "{{day}} : {{scans}} scan",
+      "day_many": "{{day}} : {{scans}} scans",
+      "day_other": "{{day}} : {{scans}} scans",
+      "tableCaption": "Scans par jour, {{range}}",
+      "dayColumn": "Jour",
+      "scansColumn": "Scans",
+      "notCounted": "Les scans de l'affiche de la page de l'entreprise ne sont pas comptés. Créez un lien pour une affiche afin de compter ses scans."
     }
   },
   "billing": {
@@ -249,7 +352,12 @@
       "checkoutFailed": "Impossible d'ouvrir le paiement.",
       "portalFailed": "Impossible d'ouvrir le portail client.",
       "rateLimited": "Trop de tentatives. Réessayez plus tard.",
-      "planChanged": "Votre forfait est en cours de changement. Il s'affichera ici dès que Polar l'aura confirmé.",
+      "planChanged": "Votre forfait est en cours de changement. Il s'affichera ici dès que {{provider}} l'aura confirmé.",
+      "planCanceled": "Votre forfait ne sera pas renouvelé. Il reste actif jusqu'à la fin de la période payée.",
+      "planResumed": "Votre forfait continuera de se renouveler.",
+      "planKept": "Vous gardez votre forfait actuel.",
+      "planActionFailed": "Ça n'a pas fonctionné. Réessayez dans une minute.",
+      "resumeFirst": "Votre abonnement doit prendre fin, son forfait ne peut donc pas changer. Réactivez d'abord votre forfait sur cette page.",
       "planChangeFailed": "Impossible de changer votre forfait.",
       "planChangeRefused": {
         "payment_failed": "Votre moyen de paiement enregistré n'a pas pu être débité pour le nouveau forfait. Mettez-le à jour dans Gérer l'abonnement, puis réessayez.",
@@ -277,7 +385,8 @@
       "pro": "Pro",
       "proCard": "Forfait Pro",
       "enterprise": "Entreprise",
-      "enterpriseCard": "Forfait Entreprise"
+      "enterpriseCard": "Forfait Entreprise",
+      "prepaidCard": "Prépayé"
     },
     "subscriptionStates": {
       "active": "Actif",
@@ -303,7 +412,16 @@
       "changingPlan": "Changement de forfait...",
       "openingPortal": "Ouverture du portail...",
       "viewInvoice": "Voir la facture",
+      "completePayment": "Finaliser le paiement",
+      "cancelPlan": "Annuler le forfait",
+      "resume": "Reprendre",
+      "keepPlan": "Garder mon forfait",
       "retry": "Réessayer"
+    },
+    "cancelDialog": {
+      "title": "Annuler votre forfait ?",
+      "description": "Votre forfait reste actif jusqu'au {{date}}, puis passe au forfait Gratuit. L'utilisation au-delà de ce qui est inclus d'ici là reste facturée.",
+      "back": "Retour"
     },
     "currentPlan": {
       "title": "Votre forfait",
@@ -319,6 +437,10 @@
       "billingContactMissing": "Aucun contact de facturation pour le moment.",
       "subscriptionStateTitle": "État de l'abonnement",
       "billingPeriod": "La période en cours se réinitialise le {{resetAt}}",
+      "planEndsOn": "Votre forfait prend fin le {{date}}.",
+      "planChangesOn": "Votre forfait passe à {{plan}} le {{date}}.",
+      "overageNote": "L'utilisation au-delà de ce qui est inclus est facturée sur une facture distincte, le 1er de chaque mois.",
+      "completePaymentHint": "Votre banque demande de confirmer le paiement du nouveau forfait.",
       "selfHostNotice": "Les espaces auto-hébergés utilisent vos propres fournisseurs. Aucune limite d'utilisation ni facturation ne s'applique.",
       "enterpriseNotice": "L'utilisation et les limites sont régies par votre entente entreprise.",
       "proNotice": "L'utilisation incluse se réinitialise chaque mois. L'utilisation supplémentaire est facturée au tarif de dépassement.",
@@ -330,6 +452,9 @@
       "includedVoice_one": "{{count}} minute vocale",
       "includedVoice_many": "{{count}} minutes vocales",
       "includedVoice_other": "{{count}} minutes vocales",
+      "includedReceptionists_one": "{{count}} réceptionniste",
+      "includedReceptionists_many": "{{count}} réceptionnistes",
+      "includedReceptionists_other": "{{count}} réceptionnistes",
       "includedSms_one": "{{count}} alerte SMS",
       "includedSms_many": "{{count}} alertes SMS",
       "includedSms_other": "{{count}} alertes SMS",
@@ -338,21 +463,30 @@
       "includedOutbound_other": "{{count}} tentatives de transfert",
       "includedStorageCustom": "Volume de stockage sur mesure",
       "includedVoiceCustom": "Volume vocal sur mesure",
+      "includedReceptionistsCustom": "Nombre de réceptionnistes sur mesure",
       "includedSmsCustom": "Volume SMS sur mesure",
       "includedOutboundCustom": "Allocation de transferts personnalisée",
-      "includedStorage": "{{amount}} {{unit}} stockage"
+      "includedStorage": "{{amount}} {{unit}} stockage",
+      "prepaidMinutesLeft_one": "minute restante",
+      "prepaidMinutesLeft_many": "de minutes restantes",
+      "prepaidMinutesLeft_other": "minutes restantes",
+      "prepaidUntil": "Jusqu'au {{date}}",
+      "prepaidNeverEnds": "Sans date de fin"
     },
     "upgradeDialog": {
       "title": "Changer de forfait",
       "description": "Choisissez le forfait qui convient le mieux à votre équipe.",
       "changesSubscription": "Vous avez déjà un abonnement : il sera modifié au lieu d'ouvrir un paiement. Toute différence est débitée sur votre moyen de paiement enregistré.",
       "leavesPromo": "Changer de forfait met fin à {{plan}} et à sa réduction.",
+      "endsPacks_one": "Souscrire un forfait met fin à vos packs de minutes, et la {{minutes}} minute restante est perdue.",
+      "endsPacks_many": "Souscrire un forfait met fin à vos packs de minutes, et les {{minutes}} de minutes restantes sont perdues.",
+      "endsPacks_other": "Souscrire un forfait met fin à vos packs de minutes, et les {{minutes}} minutes restantes sont perdues.",
       "enterpriseSubject": "Forfait Entreprise",
       "billingIntervalLabel": "Intervalle de facturation",
       "annualDiscount": "Économisez {{percent}} %",
-      "annualFreeMonths_one": "Obtenez {{count}} mois gratuit\u00a0!",
-      "annualFreeMonths_many": "Obtenez {{count}} mois gratuits\u00a0!",
-      "annualFreeMonths_other": "Obtenez {{count}} mois gratuits\u00a0!",
+      "annualFreeMonths_one": "Obtenez {{count}} mois gratuit !",
+      "annualFreeMonths_many": "Obtenez {{count}} mois gratuits !",
+      "annualFreeMonths_other": "Obtenez {{count}} mois gratuits !",
       "customPrice": "Sur mesure",
       "perMonth": "/mois",
       "billingIntervals": {
@@ -376,6 +510,9 @@
             "voiceMinutes_one": "{{count}} minute vocale dans le navigateur",
             "voiceMinutes_many": "{{count}} minutes vocales dans le navigateur",
             "voiceMinutes_other": "{{count}} minutes vocales dans le navigateur",
+            "receptionists_one": "{{count}} réceptionniste",
+            "receptionists_many": "{{count}} réceptionnistes",
+            "receptionists_other": "{{count}} réceptionnistes",
             "allFeatures": "Aucun numéro de téléphone",
             "support": "Soutien communautaire"
           }
@@ -390,6 +527,9 @@
             "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "receptionists_one": "{{count}} réceptionniste",
+            "receptionists_many": "{{count}} réceptionnistes",
+            "receptionists_other": "{{count}} réceptionnistes",
             "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
             "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
             "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
@@ -409,6 +549,9 @@
             "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "receptionists_one": "{{count}} réceptionniste",
+            "receptionists_many": "{{count}} réceptionnistes",
+            "receptionists_other": "{{count}} réceptionnistes",
             "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
             "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
             "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
@@ -426,6 +569,7 @@
           },
           "highlights": {
             "phoneNumbers": "Plusieurs numéros dédiés",
+            "customReceptionists": "Nombre de réceptionnistes sur mesure",
             "selfHosted": "Option de déploiement auto-hébergé",
             "support": "Accompagnement dédié à l'implantation"
           }
@@ -457,6 +601,8 @@
       "unlimited": "Illimité",
       "blocked": "Limite atteinte",
       "blockedDescription": "Limite atteinte — l'utilisation est suspendue jusqu'à la prochaine période.",
+      "packDescription": "Vos minutes viennent de vos packs de minutes et durent jusqu'à la fin de chaque pack.",
+      "packBlockedDescription": "Plus aucune minute. Les appels sonnent occupé jusqu'à l'achat d'un autre pack de minutes.",
       "overageCount": "{{count}} au-dessus de la limite",
       "overageCost": "≈ {{amount}} de dépassements",
       "noOverages": "Aucun dépassement — l'utilisation est plafonnée au volume inclus.",
@@ -492,9 +638,61 @@
       "saveFailed": "Impossible d’enregistrer le plafond mensuel de dépassement.",
       "removeFailed": "Impossible de supprimer le plafond mensuel de dépassement."
     },
+    "packs": {
+      "title": "Minutes prépayées",
+      "description": "Achetez des minutes d'avance, sans facture mensuelle. Les appels les utilisent jusqu'à épuisement ou jusqu'à la fin du pack.",
+      "minutesLabel": "Minutes",
+      "lengthLabel": "Durée",
+      "minutesOption_one": "{{minutes}} minute",
+      "minutesOption_many": "{{minutes}} de minutes",
+      "minutesOption_other": "{{minutes}} minutes",
+      "daysOption_one": "{{count}} jour",
+      "daysOption_many": "{{count}} de jours",
+      "daysOption_other": "{{count}} jours",
+      "neverEndsOption": "Sans date de fin",
+      "priceSuffix": "payé une fois",
+      "left_one": "{{left}} minute restante sur {{total}}",
+      "left_many": "{{left}} de minutes restantes sur {{total}}",
+      "left_other": "{{left}} minutes restantes sur {{total}}",
+      "endsOn": "Prend fin le {{date}}",
+      "neverEnds": "Sans date de fin",
+      "frozen": "En attente tant qu'un litige de paiement est ouvert",
+      "buy": "Acheter un pack de minutes",
+      "buyMore": "En acheter plus",
+      "unavailable": "Les packs de minutes ne peuvent pas être achetés ici pour le moment.",
+      "refusals": {
+        "managed_plan": "Votre forfait est géré pour vous, donc les packs de minutes ne peuvent pas être achetés ici.",
+        "pack_not_sold_on_plan": "Les packs de minutes ne sont pas vendus avec votre forfait.",
+        "pack_yearly_plan": "Vous avez un forfait annuel. Programmez sa fin au renouvellement, puis achetez un pack de minutes une fois qu'il a pris fin.",
+        "pack_past_due": "Un paiement de votre forfait est en retard. Réglez-le dans Gérer l'abonnement, puis achetez un pack de minutes.",
+        "plan_change_payment_waiting": "Votre banque attend toujours que vous confirmiez un paiement pour votre forfait. Terminez-le d'abord.",
+        "pack_not_on_sale": "Ce pack de minutes n'est pas en vente pour le moment.",
+        "plan_change_pending": "Un autre achat pour cette entreprise est encore en cours. Réessayez dans une minute."
+      },
+      "endsPlanDialog": {
+        "title": "Mettre fin à votre forfait {{plan}} ?",
+        "planEnds": "Payer ce pack de minutes met fin à votre forfait {{plan}} immédiatement.",
+        "noRefund": "Le reste de son mois, jusqu'au {{date}}, n'est pas remboursé. L'utilisation jusqu'ici reste facturée.",
+        "noRefundUndated": "Le reste de son mois n'est pas remboursé. L'utilisation jusqu'ici reste facturée.",
+        "promoLost": "Votre code promo est perdu pour de bon. Il ne peut plus être utilisé.",
+        "receptionistsPaused": "Toutes vos réceptionnistes sauf une sont mises en pause.",
+        "packStarts": "Les minutes et les allocations du pack commencent tout de suite.",
+        "confirm": "Mettre fin et acheter"
+      },
+      "toast": {
+        "added": "Votre pack de minutes a été ajouté.",
+        "failed": "Votre paiement n'a pas abouti, donc aucun pack de minutes n'a été ajouté.",
+        "processing": "Votre paiement est en cours de traitement. Votre pack de minutes s'affichera ici dès son arrivée.",
+        "checkoutFailed": "Impossible d'ouvrir la page de paiement. Réessayez.",
+        "checkoutExpired": "La page de paiement a expiré. Réessayez.",
+        "gaveWay": "Un forfait a démarré avant l'arrivée de ce paiement, donc aucun pack de minutes n'a été ajouté. Le paiement vous sera remboursé.",
+        "refundedFirst": "Ce paiement a été remboursé ou a fait l'objet d'une rétrofacturation, donc aucun pack de minutes n'a été ajouté.",
+        "closedForPlan": "Un forfait a démarré pour cette entreprise, donc le paiement de ce pack de minutes a été fermé."
+      }
+    },
     "transactions": {
       "title": "Historique des transactions",
-      "description": "Commandes, remboursements et frais d'activation synchronisés depuis Polar.",
+      "description": "Commandes, remboursements et frais d'activation synchronisés depuis {{provider}}.",
       "empty": "Aucune transaction pour le moment.",
       "columns": {
         "date": "Date",
@@ -512,7 +710,9 @@
         "partially_refunded": "Remboursement partiel",
         "succeeded": "Effectué",
         "failed": "Échoué",
-        "canceled": "Annulé"
+        "canceled": "Annulé",
+        "void": "Invalidé",
+        "uncollectible": "Impayé"
       },
       "kindLabels": {
         "order": "Commande",
@@ -584,7 +784,10 @@
     "reclaim": {
       "title": "Ce numéro sera libéré le {{date}}",
       "description": "Les forfaits gratuits n'incluent pas de numéro d'entreprise dédié. Passez à Starter ou Pro avant cette date pour conserver {{number}}.",
-      "upgradeCta": "Mettre à niveau pour conserver ce numéro"
+      "upgradeCta": "Mettre à niveau pour conserver ce numéro",
+      "packDescription": "Votre dernier pack de minutes a pris fin. Achetez un pack de minutes ou choisissez un forfait avant cette date pour conserver {{number}}.",
+      "buyPackCta": "Acheter un pack de minutes",
+      "choosePlanCta": "Choisir un forfait"
     },
     "requiresPaidPlan": {
       "title": "Les numéros dédiés sont réservés aux forfaits payants",
@@ -639,6 +842,13 @@
     "toast": {
       "changed": "Numéro de téléphone modifié. Votre ancien numéro restera actif pendant 30 jours.",
       "added": "Numéro de téléphone ajouté."
+    },
+    "answeredBy": {
+      "label": "Réceptionniste qui répond",
+      "hint": "Les appels et textos vers ce numéro vont à la réceptionniste choisie. Tant qu'elle est en pause, {{name}} y répond.",
+      "saved": "Les appels et textos vers {{number}} vont maintenant à {{name}}.",
+      "otherNumbers": "Autres numéros",
+      "otherNumbersDescription": "Les appels et textos de chaque numéro vont à la réceptionniste choisie."
     }
   },
   "appearance": {
@@ -735,7 +945,7 @@
       "steps": {
         "invite": "Acceptez l'invitation à utiliser {{appName}} dans Zapier. Zapier vous demande d'abord de vous connecter ou de créer un compte gratuit.",
         "key": "Créez une clé API pour Zapier. Vous ne la verrez qu'une fois, alors copiez-la avant de fermer la fenêtre.",
-        "zap": "Dans Zapier, créez un Zap et choisissez {{appName}}. Quand Zapier vous demande de vous connecter, collez la clé dans «\u00a0API Key\u00a0» et vérifiez que «\u00a0{{appName}} URL\u00a0» indique {{url}}."
+        "zap": "Dans Zapier, créez un Zap et choisissez {{appName}}. Quand Zapier vous demande de vous connecter, collez la clé dans « API Key » et vérifiez que « {{appName}} URL » indique {{url}}."
       },
       "openInvite": "Ouvrir {{appName}} dans Zapier",
       "createKey": "Créer une clé pour Zapier",
@@ -747,7 +957,7 @@
       "steps": {
         "invite": "Installez {{appName}} dans votre organisation Make à partir de son lien d'invitation. Make vous demande d'abord de vous connecter ou de créer un compte gratuit.",
         "key": "Créez une clé API pour Make. Vous ne la verrez qu'une fois, alors copiez-la avant de fermer la fenêtre.",
-        "scenario": "Dans Make, ajoutez un module {{appName}} à un scénario et choisissez Create a connection. Collez la clé dans «\u00a0API key\u00a0» et vérifiez que «\u00a0{{appName}} URL\u00a0» indique {{url}}."
+        "scenario": "Dans Make, ajoutez un module {{appName}} à un scénario et choisissez Create a connection. Collez la clé dans « API key » et vérifiez que « {{appName}} URL » indique {{url}}."
       },
       "openInvite": "Ouvrir {{appName}} dans Make",
       "createKey": "Créer une clé pour Make",
@@ -927,7 +1137,7 @@
         "onlyBusiness": "C'est la seule entreprise dont vous êtes propriétaire, elle ne peut donc pas être supprimée."
       },
       "action": "Supprimer l'entreprise",
-      "dialogTitle": "Supprimer {{name}}\u00a0?",
+      "dialogTitle": "Supprimer {{name}} ?",
       "dialogDescription": "Ses appels et enregistrements, conversations, contacts, rendez-vous, connaissances, paramètres, historique de facturation et les accès de l'équipe sont effacés. Ses numéros de téléphone sont rendus à l'opérateur, la réceptionniste cesse de répondre et un forfait payant est résilié immédiatement.",
       "permanent": "Cette suppression est définitive. Rien ne peut être restauré, ni par vous ni par le support.",
       "confirmLabel": "Saisissez <name>{{name}}</name> pour confirmer",
@@ -956,7 +1166,7 @@
       "title": "Annuler le compte",
       "description": "Fermez cette entreprise et arrêtez d'utiliser le service. Rien n'est supprimé, et vous pourrez recommencer plus tard avec une nouvelle entreprise.",
       "action": "Annuler le compte",
-      "dialogTitle": "Annuler {{name}}\u00a0?",
+      "dialogTitle": "Annuler {{name}} ?",
       "dialogDescription": "Une fois l'annulation confirmée, plus personne dans l'équipe ne peut l'ouvrir, sa réceptionniste ne répond plus aux appels ni aux textos, son clavardage sur le site web, sa page publique, ses clés d'API et ses applications connectées cessent de fonctionner, et un forfait payant est résilié. Ses numéros de téléphone sont rendus à l'opérateur après 30 jours.",
       "notice": "Rien n'est supprimé, et rien ne change pour l'instant. Nous vous enverrons par courriel un lien de confirmation, valide pendant 24 heures, qui vous demandera de vous connecter et de saisir votre mot de passe.",
       "confirmLabel": "Saisissez <name>{{name}}</name> pour confirmer",
@@ -1434,6 +1644,7 @@
       "appointments_read": "Lire les rendez-vous et les plages libres",
       "appointments_write": "Réserver, annuler et déplacer des rendez-vous",
       "messages_read": "Lire les messages pris par la réceptionniste",
+      "knowledge_read": "Lire les questions auxquelles la réceptionniste n'a pas su répondre",
       "knowledge_write": "Ajouter des entrées de connaissances et des FAQ"
     }
   }

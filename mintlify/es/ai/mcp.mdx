@@ -62,8 +62,9 @@ Los propietarios y administradores ven todos los asistentes conectados al negoci
 | `get_business` | `business:read` | Nombre del negocio, zona horaria, horario de atención y modo de reserva |
 | `list_services` | `business:read` | Servicios que los clientes pueden reservar |
 | `list_staff` | `business:read` | Personas que atienden citas y los servicios que ofrecen |
+| `list_receptionists` | `business:read` | Las recepcionistas de IA que no están archivadas, la predeterminada primero |
 | `update_business_hours` | `business:write` | Reemplaza el horario de atención de la semana |
-| `list_calls` | `calls:read` | Llamadas de la más reciente a la más antigua, filtradas por hora de inicio |
+| `list_calls` | `calls:read` | Llamadas de la más reciente a la más antigua, filtradas por hora de inicio o por recepcionista |
 | `get_call` | `calls:read` | Una llamada con su transcripción |
 | `search_contacts` | `contacts:read` | Contactos por teléfono, correo electrónico o parte del nombre |
 | `get_contact` | `contacts:read` | Un contacto |
@@ -76,7 +77,9 @@ Los propietarios y administradores ven todos los asistentes conectados al negoci
 | `cancel_appointment` | `appointments:write` | Cancela una cita |
 | `reschedule_appointment` | `appointments:write` | Mueve una cita a otro horario libre o a otro miembro del equipo |
 | `list_messages` | `messages:read` | Mensajes que la recepcionista tomó para su equipo |
-| `add_knowledge` | `knowledge:write` | Agrega una pregunta frecuente o un texto que la recepcionista puede usar |
+| `add_knowledge` | `knowledge:write` | Agrega una pregunta frecuente o un texto para todas las recepcionistas o las que elija |
+| `list_questions` | `knowledge:read` | Las preguntas que la recepcionista no supo responder, las más hechas primero |
+| `answer_question` | `knowledge:write` | Guarda la respuesta a una de esas preguntas como conocimiento |
 
 Los permisos (scopes) son los mismos para OAuth y para las claves de API. Las herramientas devuelven los mismos objetos que la API REST, con las horas en UTC. Las herramientas de solo lectura llevan la anotación `readOnlyHint`, y las que cancelan, mueven o reemplazan datos llevan `destructiveHint`, para que su asistente pueda pedirle confirmación antes de ejecutarlas.
 
@@ -107,7 +110,7 @@ El propio servidor responde `401` cuando la clave o el token de acceso falta, es
 
 Cada llamada a una herramienta cuenta para un límite de 120 solicitudes por minuto. Una clave de API comparte su límite con las solicitudes REST hechas con la misma clave; cada conexión OAuth tiene el suyo propio. Listar las herramientas no cuenta. Al superar el límite, la herramienta devuelve `rate_limited` con los segundos que hay que esperar.
 
-`book_appointment`, `create_contact` y `add_knowledge` aceptan un `idempotency_key` opcional. Si reintenta con el mismo valor en un plazo de 24 horas, recibe el primer resultado en lugar de un duplicado. Estas claves son las mismas que el `Idempotency-Key` de REST para `POST /appointments`, `POST /contacts` y `POST /knowledge`: reintentar por MCP una solicitud REST, o al revés, devuelve el primer resultado. La misma clave con datos distintos devuelve `idempotency_key_reused`.
+`book_appointment`, `create_contact`, `add_knowledge` y `answer_question` aceptan un `idempotency_key` opcional. Si reintenta con el mismo valor en un plazo de 24 horas, recibe el primer resultado en lugar de un duplicado. Estas claves son las mismas que el `Idempotency-Key` de REST para `POST /appointments`, `POST /contacts`, `POST /knowledge` y `POST /knowledge/questions/{question_id}/answer`: reintentar por MCP una solicitud REST, o al revés, devuelve el primer resultado. La misma clave con datos distintos devuelve `idempotency_key_reused`.
 
 ## Registro de auditoría
 

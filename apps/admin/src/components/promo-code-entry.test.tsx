@@ -21,7 +21,7 @@ const view: BillingCodeView = {
   currency: "cad",
   current: false,
   prices: [{ interval: "monthly", cents: 2900, discountedCents: 1450, checkoutAvailable: true }, { interval: "annual", cents: 29000, discountedCents: 14500, checkoutAvailable: false }],
-  included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1 },
+  included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1, receptionists: 1 },
   moreThanTier: ["voiceSeconds", "knowledgeStorageBytes"],
 };
 let store: Record<string, string> = {};
@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; window.history.replaceState(null, "", "/"); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-function setup(answer: (url: string, init?: RequestInit) => Response, props: { changesPlan?: boolean } = {}) {
+function setup(answer: (url: string, init?: RequestInit) => Response, props: { changesPlan?: boolean; leavesPacks?: { minutesLeft: number } | null } = {}) {
   const assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, href: window.location.href, assign });
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => answer(url, init));
@@ -64,12 +64,41 @@ describe("Have a promo code?", () => {
     expect(voice.textContent).toContain("billing.promo.moreThanTier");
     expect(screen.getByText('billing.currentPlan.includedStorage {"amount":"10","unit":"MB"}').closest("li")!.textContent).toContain("billing.promo.moreThanTier");
     expect(screen.getByText('billing.currentPlan.includedSms {"count":50}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
+    expect(screen.getByText('billing.currentPlan.includedReceptionists {"count":1}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
     expect(body(fetchMock.mock.calls[0]![1])).toEqual({ code: "salons-2026" });
     expect(screen.getByRole("button", { name: "billing.promo.unavailable" }).hasAttribute("disabled")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "billing.promo.subscribe.monthly" }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.example/promo"), { timeout: 3_000 });
     const checkout = fetchMock.mock.calls.find(([url, init]) => url === "/api/billing/checkout" && init?.method === "POST");
     expect(body(checkout![1])).toEqual({ businessId: "business", target: "starter", billingInterval: "monthly", promoCode: "SALONS-2026" });
+  });
+
+  it("says when a promo plan includes more receptionists than its tier", async () => {
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json({ ...view, included: { ...view.included, receptionists: 3 }, moreThanTier: ["receptionists"] }) : Response.json({}));
+    await userEvent.click(screen.getByRole("button", { name: "billing.promo.link" }));
+    await userEvent.type(screen.getByLabelText("billing.promo.label"), "salons-2026");
+    await userEvent.click(screen.getByRole("button", { name: "billing.promo.apply" }));
+    const receptionists = (await screen.findByText('billing.currentPlan.includedReceptionists {"count":3}')).closest("li")!;
+    expect(receptionists.textContent).toContain("billing.promo.moreThanTier");
+    expect(screen.getByText('billing.currentPlan.includedVoice {"count":300}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
+  });
+
+  it("warns a business with packs that the code's plan ends them and the minutes left on them", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json(view) : Response.json({}), { leavesPacks: { minutesLeft: 1_250 } });
+    expect(await screen.findByText('billing.upgradeDialog.endsPacks {"count":1250,"minutes":"1,250"}')).toBeTruthy();
+  });
+
+  it("says nothing about packs to a business without any, or for the plan it already has", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json(view) : Response.json({}));
+    await screen.findByRole("button", { name: "billing.promo.subscribe.monthly" });
+    expect(screen.queryByText(/^billing\.upgradeDialog\.endsPacks/)).toBeNull();
+    cleanup();
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json({ ...view, current: true }) : Response.json({}), { leavesPacks: { minutesLeft: 1_250 } });
+    await screen.findByText("billing.promo.errors.current");
+    expect(screen.queryByText(/^billing\.upgradeDialog\.endsPacks/)).toBeNull();
   });
 
   it("checks a promo link's code at once and forgets it when it doesn't work", async () => {
@@ -112,10 +141,10 @@ describe("Have a promo code?", () => {
     const { assign } = setup((url, init) => {
       if (url.startsWith("/api/billing/promo?")) return Response.json(view);
       if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "promo-change" });
-      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: true, refusal: null });
+      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: true, refusal: null, providerName: "Polar" });
     }, { changesPlan: true });
     await userEvent.click(await screen.findByRole("button", { name: "billing.promo.change.monthly" }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged {\"provider\":\"Polar\"}"));
     await screen.findByRole("button", { name: "billing.promo.link" });
     expect(assign).not.toHaveBeenCalled();
     expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
@@ -126,13 +155,13 @@ describe("Have a promo code?", () => {
     setup((url, init) => {
       if (url.startsWith("/api/billing/promo?")) return Response.json(view);
       if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "promo-change" });
-      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: false, refusal: null });
+      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: false, refusal: null, providerName: "Polar" });
     }, { changesPlan: true });
     const change = await screen.findByRole("button", { name: "billing.promo.change.monthly" });
     expect(isUpgradeInProgress()).toBe(false);
     setUpgradeInProgress(true);
     await userEvent.click(change);
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged {\"provider\":\"Polar\"}"));
     setUpgradeInProgress(false);
     expect(isUpgradeInProgress()).toBe(true);
     cleanup();

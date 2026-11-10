@@ -46,6 +46,8 @@ export type CatalogStandardPlan = {
   chat_units: number | null;
   kb_bytes: number | null;
   numbers: number | null;
+  /** Receptionists active at once; null on a custom plan. */
+  receptionists: number | null;
   voice_rate: number | null;
   sms_rate: number | null;
   call_rate: number | null;
@@ -61,12 +63,13 @@ export type CatalogPrice = {
   currency: string;
   cents: number;
   per_month: number;
-  polar_id: string | null;
+  /** The provider's object that sells it: a Polar product, or a Stripe price. */
+  provider_ref: string | null;
   retired: boolean;
 };
 
 /** A plan other than the four standard ones, such as a promo plan: what selling it needs. */
-export type CatalogOtherPlan = { code: string; tier: string; status: "draft" | "active" | "retired"; polar_disc: string | null };
+export type CatalogOtherPlan = { code: string; tier: string; status: "draft" | "active" | "retired"; provider_disc: string | null };
 
 export type BillingCatalogSnapshot = { plans: CatalogStandardPlan[]; prices: CatalogPrice[]; others?: CatalogOtherPlan[] };
 
@@ -74,7 +77,7 @@ const numberOrNull = (value: unknown): number | null => (value === null || value
 
 /** The standard plans as the role running the transaction may read them. */
 async function readStandardPlans(tx: DatabaseTransaction): Promise<CatalogStandardPlan[]> {
-  const rows = (await tx.execute<Row>(sql`select code, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code = tier order by sort, code`)).rows;
+  const rows = (await tx.execute<Row>(sql`select code, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, receptionists, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code = tier order by sort, code`)).rows;
   return rows.map(planRow);
 }
 
@@ -92,6 +95,7 @@ function planRow(row: Row): CatalogStandardPlan {
     // bigint arrives as text.
     kb_bytes: numberOrNull(row.kb_bytes),
     numbers: numberOrNull(row.numbers),
+    receptionists: numberOrNull(row.receptionists),
     voice_rate: numberOrNull(row.voice_rate),
     sms_rate: numberOrNull(row.sms_rate),
     call_rate: numberOrNull(row.call_rate),
@@ -105,11 +109,11 @@ function planRow(row: Row): CatalogStandardPlan {
  */
 export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promise<BillingCatalogSnapshot> {
   const plans = await readStandardPlans(tx);
-  const prices = (await tx.execute<Row>(sql`select r.plan, p.tier, p.status, r.period, r.currency, r.cents, r.per_month, r.polar_id, r.retired_at from public.billing_prices r join public.billing_plans p on p.code = r.plan order by r.plan, r.period, r.retired_at nulls first`)).rows;
-  const others = (await tx.execute<Row>(sql`select code, tier, status, polar_disc from public.billing_plans where code <> tier order by code`)).rows;
+  const prices = (await tx.execute<Row>(sql`select r.plan, p.tier, p.status, r.period, r.currency, r.cents, r.per_month, r.provider_ref, r.retired_at from public.billing_prices r join public.billing_plans p on p.code = r.plan order by r.plan, r.period, r.retired_at nulls first`)).rows;
+  const others = (await tx.execute<Row>(sql`select code, tier, status, provider_disc from public.billing_plans where code <> tier order by code`)).rows;
   return {
     plans,
-    others: others.map((row) => ({ code: String(row.code), tier: String(row.tier), status: row.status as CatalogOtherPlan["status"], polar_disc: (row.polar_disc ?? null) as string | null })),
+    others: others.map((row) => ({ code: String(row.code), tier: String(row.tier), status: row.status as CatalogOtherPlan["status"], provider_disc: (row.provider_disc ?? null) as string | null })),
     prices: prices.map((row) => ({
       plan: String(row.plan),
       tier: String(row.tier),
@@ -118,10 +122,22 @@ export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promi
       currency: String(row.currency),
       cents: Number(row.cents),
       per_month: Number(row.per_month),
-      polar_id: (row.polar_id ?? null) as string | null,
+      provider_ref: (row.provider_ref ?? null) as string | null,
       retired: row.retired_at !== null && row.retired_at !== undefined,
     })),
   };
+}
+
+/**
+ * Whether a link ever recorded the provider's object for a prepaid pack's
+ * price, a retired price's too. A pack sells only through a linked price, so
+ * a deployment without one has sold no pack, and Stripe's webhook ignores the
+ * events only packs need and asks Stripe nothing about a dispute there. The
+ * app, the worker and the read-only role may read it; the dispatcher may not.
+ */
+export async function hasLinkedPackPrice(tx: DatabaseTransaction): Promise<boolean> {
+  const rows = (await tx.execute<Row>(sql`select exists (select 1 from public.billing_pack_prices where provider_ref is not null) as linked`)).rows;
+  return rows[0]?.linked === true;
 }
 
 /** Which Polar product sells a plan and interval, and which plan and interval a product sells. */
@@ -163,18 +179,18 @@ export function polarProductLinks(catalog: BillingCatalogSnapshot, env: Record<s
     productFor(plan, interval) {
       const row = catalog.plans.find((entry) => entry.code === plan);
       const prices = catalog.prices.filter((price) => price.plan === plan);
-      if (row?.status === "active") return prices.find((price) => price.period === interval && !price.retired)?.polar_id ?? null;
-      return prices.some((price) => price.polar_id !== null) ? null : productVariable(env, plan, interval);
+      if (row?.status === "active") return prices.find((price) => price.period === interval && !price.retired)?.provider_ref ?? null;
+      return prices.some((price) => price.provider_ref !== null) ? null : productVariable(env, plan, interval);
     },
     saleFor(plan, interval) {
       const row = catalog.others?.find((entry) => entry.code === plan);
       if (row?.status !== "active") return null;
-      const productId = catalog.prices.find((price) => price.plan === plan && price.period === interval && !price.retired)?.polar_id;
-      return productId ? { productId, discountId: row.polar_disc } : null;
+      const productId = catalog.prices.find((price) => price.plan === plan && price.period === interval && !price.retired)?.provider_ref;
+      return productId ? { productId, discountId: row.provider_disc } : null;
     },
     planFor(productId) {
       if (!productId) return null;
-      const linked = catalog.prices.find((price) => price.polar_id === productId);
+      const linked = catalog.prices.find((price) => price.provider_ref === productId);
       if (linked) return isCheckoutPlan(linked.tier) ? { plan: linked.tier, interval: linked.period, code: linked.plan } : null;
       for (const plan of hostedCheckoutPlanSlugs) {
         for (const interval of billingIntervals) {
@@ -207,7 +223,7 @@ export function brandBillingCatalog(brandId: string): BillingCatalogSnapshot | n
       cents: price.cents,
       // As billing_prices computes per_month.
       per_month: perMonthCents(price.period, price.cents),
-      polar_id: null,
+      provider_ref: null,
       retired: false,
     }))),
   };
@@ -241,7 +257,7 @@ export function billingPlanList(catalog: BillingCatalogSnapshot, options: { chec
       slug,
       custom: row.custom,
       overagesBillable: row.overage,
-      included: { voiceSeconds: row.voice_sec, alertSmsSegments: row.sms_seg, outboundCallAttempts: row.calls_out, chatAiUnits: row.chat_units, knowledgeStorageBytes: row.kb_bytes, businessNumbers: row.numbers },
+      included: { voiceSeconds: row.voice_sec, alertSmsSegments: row.sms_seg, outboundCallAttempts: row.calls_out, chatAiUnits: row.chat_units, knowledgeStorageBytes: row.kb_bytes, businessNumbers: row.numbers, receptionists: planReceptionists(row, slug) },
       overageRates: { voiceMinuteCents: row.voice_rate, alertSmsSegmentCents: row.sms_rate, outboundCallAttemptCents: row.call_rate },
       sortOrder: row.sort,
       prices: !row.sold ? [] : billingIntervals.flatMap((interval) => {
@@ -253,8 +269,19 @@ export function billingPlanList(catalog: BillingCatalogSnapshot, options: { chec
   return { currency, source: shown === catalog ? "catalog" : "built_in", plans: plans.sort((a, b) => a.sortOrder - b.sortOrder) };
 }
 
+/**
+ * The receptionists a plan row includes: null on a custom plan, which gets the
+ * deployment's cap, and its tier's built-in number on a row from before
+ * migration 0134 filled the column.
+ */
+function planReceptionists(row: Pick<CatalogStandardPlan, "custom" | "receptionists">, tier: string): number | null {
+  if (row.custom) return null;
+  if (row.receptionists !== null) return row.receptionists;
+  return Object.hasOwn(builtInBillingPlanLimits, tier) ? builtInBillingPlanLimits[tier as BillingPlanSlug].includedReceptionists : null;
+}
+
 /** A plan row's terms, as limits enforce them. */
-function planLimits(row: Omit<CatalogStandardPlan, "code">): BillingPlanLimits {
+function planLimits(row: Omit<CatalogStandardPlan, "code">, tier: string): BillingPlanLimits {
   return {
     knowledgeStorageBytes: row.kb_bytes,
     voiceSecondsIncluded: row.voice_sec,
@@ -262,6 +289,7 @@ function planLimits(row: Omit<CatalogStandardPlan, "code">): BillingPlanLimits {
     outboundCallAttemptsIncluded: row.calls_out,
     chatAiTokensIncluded: row.chat_units,
     includedBusinessNumbers: row.numbers,
+    includedReceptionists: planReceptionists(row, tier),
     overagesBillable: row.overage,
     voiceOverageRatePerMinuteCents: row.voice_rate,
     alertSmsOverageRatePerSegmentCents: row.sms_rate,
@@ -281,7 +309,7 @@ export function billingPlanLimits(plans: CatalogStandardPlan[], brandPlans: Cata
   const rows = catalogApplies(plans) ? plans : brandPlans;
   if (!rows) return builtInBillingPlanLimits;
   const table = { ...builtInBillingPlanLimits };
-  for (const row of rows) table[row.code] = planLimits(row);
+  for (const row of rows) table[row.code] = planLimits(row, row.code);
   return table;
 }
 
@@ -315,7 +343,7 @@ export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Ar
   const tiers = billingPlanLimits(standard, brandPlans);
   // Before the first apply, no other plan has a row.
   if (!catalogApplies(standard)) return { tiers, plans: {} };
-  return { tiers, plans: Object.fromEntries(others.filter((row) => !row.custom).map((row) => [row.code, { tier: row.tier, limits: planLimits(row) }])) };
+  return { tiers, plans: Object.fromEntries(others.filter((row) => !row.custom).map((row) => [row.code, { tier: row.tier, limits: planLimits(row, row.tier) }])) };
 }
 
 /**
@@ -324,7 +352,7 @@ export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Ar
  * business is on and any its usage counted under.
  */
 export async function readBillingPlanLimitBook(tx: DatabaseTransaction, brandCatalog: BillingCatalogSnapshot | null = deploymentBrandCatalog()): Promise<BillingPlanLimitBook> {
-  const others = (await tx.execute<Row>(sql`select code, tier, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code <> tier`)).rows;
+  const others = (await tx.execute<Row>(sql`select code, tier, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, receptionists, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code <> tier`)).rows;
   return billingPlanLimitBook(await readStandardPlans(tx), others.map((row) => ({ ...planRow(row), code: String(row.code), tier: String(row.tier) })), brandCatalog?.plans ?? null);
 }
 
@@ -363,6 +391,7 @@ export async function listBillingPlansForApi(context: DomainContext, env: Record
         chat_ai_units: plan.included.chatAiUnits,
         knowledge_storage_bytes: plan.included.knowledgeStorageBytes,
         business_numbers: plan.included.businessNumbers,
+        receptionists: plan.included.receptionists,
       },
       overage_rates: {
         voice_minute_cents: plan.overageRates.voiceMinuteCents,

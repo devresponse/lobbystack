@@ -20,6 +20,15 @@ export type WidgetSession = {
   defaultLocale: RuntimeLocale;
   config: WidgetConfig;
   visitorId?: string;
+  /**
+   * The receptionist that answers the widget's chats and calls: the one the
+   * page named with its signed token when the session started, else the one
+   * the key names. A paused or archived one's chats go to the default
+   * receptionist; null means the default receptionist.
+   */
+  receptionistId: string | null;
+  /** The receptionist the key names, null for the default one: the key's greeting is written for it. */
+  keyReceptionistId: string | null;
 };
 
 export type WidgetAccessSuccess = { ok: true; session: WidgetSession };
@@ -45,6 +54,8 @@ async function loadWidgetSession(businessId: string, widgetKeyId: string) {
         businessName: business?.name ?? "",
         businessSlug: business?.slug ?? "",
         defaultLocale: normalizeRuntimeLocale(business?.defaultLocale) ?? "en",
+        receptionistId: keyRow.key.receptionistId ?? null,
+        keyReceptionistId: keyRow.key.receptionistId ?? null,
       },
       profile: { published: keyRow.profilePublished, widgetKeyId: keyRow.profileWidgetKeyId },
     };
@@ -87,7 +98,8 @@ export async function resolveWidgetSessionAccess(request: Request): Promise<Widg
   }
   const loaded = await loadWidgetSession(payload.businessId, payload.widgetKeyId);
   if (!loaded) return { ok: false, response: jsonError("The widget session is invalid.", 401, "widget_session_invalid") };
-  const session = { ...loaded.session, keyHash: "", origin: payload.origin, visitorId: payload.visitorId };
+  // The receptionist the page named when the session started wins over the key's.
+  const session = { ...loaded.session, keyHash: "", origin: payload.origin, visitorId: payload.visitorId, receptionistId: payload.receptionistId ?? loaded.session.receptionistId };
   if (session.key.status !== "active") return { ok: false, response: jsonError("The widget is disabled.", 403, "widget_disabled") };
   if (!isAllowedOrigin(payload.origin, loaded, { strictOrigin: true })) {
     return { ok: false, response: jsonError("This website is not authorized to load this widget.", 403, "widget_origin_denied") };

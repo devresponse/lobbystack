@@ -1,4 +1,4 @@
-import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, apiKnowledgeSearchSchema, apiOperations, formatPublicProfileAddress, isUuid, weekdays, type ApiHoursWindow, type ApiPublicProfileUpdate } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, apiKnowledgeSearchSchema, apiOperations, billingProviderNames, formatPublicProfileAddress, isUuid, weekdays, type ApiHoursWindow, type ApiPublicProfileUpdate, type BillingProvider } from "@lobbystack/shared";
 
 import { createClient } from "./client";
 import { stringValue, type Command, type Group } from "./command";
@@ -9,7 +9,14 @@ import { formatTable, print } from "./output";
 import { LOG_DIR_VARIABLE, logFolder, saveLog } from "./searchLog";
 import { readUploadFile, uploadKnowledgeFile } from "./upload";
 import { userAgent, version } from "./version";
-import { checkoutWait, claimWait, sourceWait } from "./waits";
+import { checkoutWait, claimWait, packCheckoutWait, sourceWait, subscriptionChangeWait } from "./waits";
+
+/** What a paid pack checkout came to: the business has the pack, unless a plan started first or the payment went back. */
+function packPaidSentence(packStatus: unknown): string {
+  if (packStatus === "replaced") return "The pack is paid, but a plan the business bought started first, so the pack ended at once. The operator refunds its payment.";
+  if (packStatus === "refunded") return "The pack's payment was refunded or charged back before it arrived, so the business doesn't have the pack.";
+  return "The pack is paid, and the business has it.";
+}
 
 // The command groups. Most commands are specs for operationCommand; the few
 // that need more than one call, or a file, are written out below.
@@ -97,13 +104,15 @@ const hoursSet = (path: string): Command => {
 };
 
 const knowledgeUpload = (path: string): Command => {
-  const usage = `lobbystack ${path} <file> [--title <title>] [--tags <tag,tag>] [--wait]`;
+  const usage = `lobbystack ${path} <file> [--title <title>] [--tags <tag,tag>] [--audience chosen --receptionist-ids <id,id>] [--wait]`;
   return {
     summary: "Upload a document the receptionist can answer from: PDF, Word, text, Markdown or an image, up to 25 MB.",
     usage,
     options: {
       title: { type: "string", placeholder: "<title>", description: "Defaults to the file's name." },
       tags: { type: "string", multiple: true, placeholder: "<tag>", description: "Repeat the flag or separate with commas." },
+      audience: { type: "string", placeholder: "<everyone|chosen>", description: "Who may use it: everyone, the default, or the receptionists in --receptionist-ids." },
+      "receptionist-ids": { type: "string", multiple: true, placeholder: "<id>", description: "With --audience chosen. Repeat the flag or separate with commas." },
       wait: { type: "boolean", description: "Wait until it's read, checking every few seconds. A failure exits with 1." },
     },
     operations: ["createKnowledgeUpload", "completeKnowledgeUpload", "getKnowledgeSource"],
@@ -114,7 +123,8 @@ const knowledgeUpload = (path: string): Command => {
       const file = await readUploadFile(path);
       const { client, connection } = await context.connect();
       const tags = values.tags === undefined ? undefined : (Array.isArray(values.tags) ? values.tags : [String(values.tags)]).flatMap((tag) => tag.split(",")).map((tag) => tag.trim()).filter(Boolean);
-      let source = await uploadKnowledgeFile(client, { baseUrl: connection.url, fetch: io.fetch ?? fetch, file, title: typeof values.title === "string" ? values.title : undefined, tags });
+      const receptionistIds = values["receptionist-ids"] === undefined ? undefined : (Array.isArray(values["receptionist-ids"]) ? values["receptionist-ids"] : [String(values["receptionist-ids"])]).flatMap((id) => id.split(",")).map((id) => id.trim()).filter(Boolean);
+      let source = await uploadKnowledgeFile(client, { baseUrl: connection.url, fetch: io.fetch ?? fetch, file, title: typeof values.title === "string" ? values.title : undefined, tags, audience: typeof values.audience === "string" ? values.audience : undefined, receptionistIds });
       if (values.wait === true) source = await waitUntilDone(client, sourceWait, source, io.sleep ?? defaultSleep);
       print(output, source, () => showRecord(source));
       const failure = values.wait === true ? sourceWait.failed(source) : undefined;
@@ -201,11 +211,22 @@ function planTable(data: Row): string {
       alert_sms: count(included.alert_sms_segments),
       transfers: count(included.outbound_call_attempts),
       numbers: count(included.business_numbers),
+      receptionists: count(included.receptionists),
       overage_per_minute: plan.overage_billable && rates.voice_minute_cents !== null ? amount(rates.voice_minute_cents) : "",
       prices: plan.custom ? "custom" : prices.length ? prices.map((price) => `${amount(price.amount_cents)} ${price.interval === "annual" ? "a year" : "a month"}${price.checkout_available ? "" : " (not sold here)"}`).join(", ") : "free",
     };
   });
-  return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
+  return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "receptionists", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
+}
+
+/** The plan in force, then each prepaid pack with its minutes left and when it ends; no table for a business without packs, or an older server. */
+function billingStatus(data: Row): string {
+  const { packs, ...plan } = data;
+  const held = (packs as Row[] | undefined) ?? [];
+  if (!held.length) return showRecord(plan);
+  const minutes = (seconds: unknown) => Math.floor(Number(seconds) / 60);
+  const rows = held.map((pack) => ({ pack: pack.pack, status: pack.status, minutes_left: minutes(pack.seconds_left), of: minutes(pack.seconds_total), paid_at: pack.paid_at, ends_at: pack.ends_at ?? "never ends" }));
+  return `${showRecord(plan)}\n\n${formatTable(rows, columns("pack", "status", "minutes_left", "of", "paid_at", "ends_at"))}`;
 }
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
@@ -281,20 +302,59 @@ const knowledgeSearch = (path: string): Command => {
   };
 };
 
-/** Every plan the deployment holds with its live prices and how many Polar sells, whether the applied file is the deployed one, and the Polar organization it's linked to. */
+const providerName = (id: unknown) => billingProviderNames[id as BillingProvider] ?? String(id);
+
+/** Where a link run went: Polar's organization as before, or another provider's account. */
+function linkTarget(run: Row): string {
+  if (run.provider === undefined || run.provider === null || run.provider === "polar") return `Polar ${String(run.polar_env)} organization ${String(run.polar_org)}`;
+  return `${providerName(run.provider)} ${String(run.provider_env)} account ${String(run.provider_account)}`;
+}
+
+/** The catalog's provider account and its latest link: Polar's lines as before, any other provider's from the provider block. */
+function providerLine(data: Row): string {
+  const polar = data.polar as Row | null | undefined;
+  if (polar) {
+    const link = polar.last_link as Row | null | undefined;
+    return polar.org === null ? "\nPOLAR_ORGANIZATION_ID isn't set, so nothing links Polar's products yet." : link ? `\nLinked to Polar ${String(link.polar_env)} organization ${String(link.polar_org)} ${String(link.started_at)}.` : `\nPolar ${String(polar.env)} organization ${String(polar.org)}, not linked yet: run pnpm billing apply.`;
+  }
+  const provider = data.provider as Row | undefined;
+  if (!provider) return "";
+  const name = providerName(provider.id);
+  const link = provider.last_link as Row | null;
+  if (provider.account === null) return `\nThe deployment has no ${name} account set, so nothing links ${name}'s objects yet.`;
+  return link ? `\nLinked to ${linkTarget(link)} ${String(link.started_at)}.` : `\n${name} ${String(provider.env)} account ${String(provider.account)}, not linked yet: run pnpm billing apply.`;
+}
+
+/** The prepaid packs with their minutes, length, live price and whether the provider's object is linked; nothing on a deployment without packs, or older than them. */
+function packTable(data: Row): string {
+  const packs = (data.packs as Row[] | undefined) ?? [];
+  if (!packs.length) return "";
+  const rows = packs.map((pack) => {
+    const live = (pack.prices as Row[]).find((price) => price.retired_at === null);
+    return {
+      code: pack.code,
+      status: pack.status,
+      minutes: Math.round(Number(pack.voice_sec) / 60),
+      days: pack.days ?? "never ends",
+      price: live ? `${(Number(live.cents) / 100).toFixed(2)} ${String(live.currency).toUpperCase()} once` : "",
+      linked: live ? ((live.provider_ref ?? null) === null ? "no" : "yes") : "",
+    };
+  });
+  return `\n\n${formatTable(rows, columns("code", "status", "minutes", "days", "price", "linked"))}`;
+}
+
+/** Every plan the deployment holds with its live prices and how many the billing provider sells, its packs, whether the applied file is the deployed one, and the provider account it's linked to. */
 function catalogTables(data: Row): string {
   const plans = (data.plans as Row[]).map((plan) => {
     const live = (plan.prices as Row[]).filter((price) => price.retired_at === null);
-    const linked = live.filter((price) => price.polar_id !== null && price.polar_id !== undefined).length;
-    return { ...plan, prices: live.map(priceText).join(", "), polar: plan.sold && live.length ? `${linked} of ${live.length} linked` : "" };
+    // provider_ref, or polar_id from a deployment older than it.
+    const linked = live.filter((price) => (price.provider_ref ?? price.polar_id ?? null) !== null).length;
+    return { ...plan, prices: live.map(priceText).join(", "), provider: plan.sold && live.length ? `${linked} of ${live.length} linked` : "" };
   });
   const run = data.last_run as Row | null;
   if (!run) return `Nothing applied yet for ${String(data.brand)}. See what applying its file would change with lobbystack billing catalog-preview ${String(data.brand)} --billing-file @brands/${String(data.brand)}/billing.json.`;
   const matches = data.matches_code ? "the file the running code was built with" : data.code_hash ? "not the file the running code was built with: apply the deployed one" : "and the running code has no billing.json for this brand";
-  const polar = data.polar as Row | undefined;
-  const link = polar?.last_link as Row | null | undefined;
-  const polarLine = !polar ? "" : polar.org === null ? "\nPOLAR_ORGANIZATION_ID isn't set, so nothing links Polar's products yet." : link ? `\nLinked to Polar ${String(link.polar_env)} organization ${String(link.polar_org)} ${String(link.started_at)}.` : `\nPolar ${String(polar.env)} organization ${String(polar.org)}, not linked yet: run pnpm billing apply.`;
-  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "polar"))}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${polarLine}`;
+  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "provider"))}${packTable(data)}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${providerLine(data)}`;
 }
 
 const changeTable = (changes: Row[]) => changes.length ? `${formatTable(changes.map((change) => ({ ...change, fields: Object.keys(change.fields as Row).join(", "), warns: [change.lowers_allowance ? "lowers an allowance" : "", change.raises_price ? "raises a price" : ""].filter(Boolean).join(", ") })), columns("action", "table", "key", "fields", "warns"))}\n\n` : "";
@@ -313,16 +373,17 @@ function catalogChanges(data: Row): string {
   return `${table}${data.status === "unchanged" ? "The tables already matched this file" : `Applied ${changeCount(changes)}`} in run ${String(data.id)}.`;
 }
 
-/** What a link of Polar's products changed, or with a dry run would change, and anything that stops it. */
+/** What a link of the provider's objects changed, or with a dry run would change, and anything that stops it. */
 function linkChanges(data: Row): string {
   const changes = data.changes as Row[];
   const blocked = data.blocked_by as Row[];
   const table = changeTable(changes);
+  const objects = data.provider === undefined || data.provider === null || data.provider === "polar" ? "products" : "objects";
   if (data.status === "preview") {
     if (blocked.length) return `${table}Linking would be refused, and nothing would change:\n${refusalLines(blocked)}`;
-    return `${table}${changes.length ? `Linking would make these ${changeCount(changes)}` : "The tables already have these products"}. Nothing was written.`;
+    return `${table}${changes.length ? `Linking would make these ${changeCount(changes)}` : `The tables already have these ${objects}`}. Nothing was written.`;
   }
-  return `${table}${data.status === "unchanged" ? "The tables already had these products" : `Linked Polar ${String(data.polar_env)} organization ${String(data.polar_org)} with ${changeCount(changes)}`} in run ${String(data.id)}.`;
+  return `${table}${data.status === "unchanged" ? `The tables already had these ${objects}` : `Linked ${linkTarget(data)} with ${changeCount(changes)}`} in run ${String(data.id)}.`;
 }
 
 /** The page's settings, with the address on one line. */
@@ -380,6 +441,24 @@ export const groups: Record<string, Group> = Object.fromEntries([
     get: { operation: "getReceptionist" },
     set: { operation: "updateReceptionist", files: ["summary", "booking_policy", "voice_instructions", "sms_instructions", "chat_instructions"] },
   }),
+  group("receptionists", "The business's receptionists: add, change, pause, archive and order them.", {
+    list: { operation: "listReceptionists", columns: columns("id", "name", "status", "is_default", "listed", "handle") },
+    get: { operation: "getReceptionistProfile" },
+    add: { operation: "createReceptionist", args: ["name"] },
+    update: { operation: "updateReceptionistProfile" },
+    pause: { operation: "pauseReceptionist" },
+    resume: { operation: "resumeReceptionist" },
+    archive: { operation: "archiveReceptionist" },
+    restore: { operation: "restoreReceptionist" },
+    "make-default": { operation: "makeDefaultReceptionist" },
+    reorder: { operation: "reorderReceptionists", args: ["...receptionist_ids"], columns: columns("id", "name", "status", "is_default") },
+  }),
+  group("qr-links", "QR short links to a receptionist's page, for printed signs.", {
+    list: { operation: "listQrLinks", columns: columns("id", "label", "status", "receptionist_id", "url", "scans_last_30_days") },
+    get: { operation: "getQrLink" },
+    create: { operation: "createQrLink", show: (data) => `Made ${String(data.url)}. Print its QR code from Settings > QR code.` },
+    update: { operation: "updateQrLink" },
+  }),
   group("services", "The services customers can book.", {
     list: { operation: "listServices", columns: columns("id", "name", "duration_minutes", "active", "staff_ids") },
     add: { operation: "createService", args: ["name"] },
@@ -394,8 +473,8 @@ export const groups: Record<string, Group> = Object.fromEntries([
     remove: { operation: "deleteRule" },
     reorder: { operation: "reorderRules", args: ["...rule_ids"], columns: columns("id", "title", "active") },
   }),
-  group("knowledge", "What the receptionist answers from: text, FAQs, websites and documents.", {
-    list: { operation: "listKnowledgeEntries", columns: columns("id", "type", "title", "active", "updated_at") },
+  group("knowledge", "What the receptionists answer from: text, FAQs, websites and documents, who each is for, and the questions they couldn't answer.", {
+    list: { operation: "listKnowledgeEntries", columns: columns("id", "type", "title", "active", "audience", "updated_at") },
     get: { operation: "getKnowledgeEntry" },
     "add-text": { operation: "createKnowledgeEntry", summary: "Add text the receptionist can answer from.", fixed: { type: "text" }, files: ["content"] },
     "add-faq": { operation: "createKnowledgeEntry", summary: "Add a question and its answer.", fixed: { type: "faq" }, files: ["answer"] },
@@ -403,7 +482,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     remove: { operation: "deleteKnowledgeEntry" },
     "add-website": { operation: "createKnowledgeSource", args: ["url"], fixed: { type: "website" }, wait: sourceWait },
     upload: knowledgeUpload,
-    sources: { operation: "listKnowledgeSources", columns: columns("id", "type", "title", "status", "active", "url") },
+    sources: { operation: "listKnowledgeSources", columns: columns("id", "type", "title", "status", "active", "audience", "url") },
     source: { operation: "getKnowledgeSource" },
     "source-update": { operation: "updateKnowledgeSource" },
     "source-remove": { operation: "deleteKnowledgeSource" },
@@ -411,27 +490,41 @@ export const groups: Record<string, Group> = Object.fromEntries([
     retry: { operation: "retryKnowledgeSource", wait: sourceWait },
     cancel: { operation: "cancelKnowledgeSource" },
     search: knowledgeSearch,
+    audience: { operation: "changeKnowledgeAudience", show: (data) => `Changed ${String(data.entries)} entries and ${String(data.sources)} sources.` },
+    questions: { operation: "listUnansweredQuestions", columns: columns("id", "question", "times_asked", "last_asked_at") },
+    answer: { operation: "answerUnansweredQuestion", files: ["answer"], show: (data) => `Saved the answer as text entry ${String(data.id)}.` },
+    dismiss: { operation: "dismissUnansweredQuestion", show: (data) => `Dismissed question ${String(data.id)}.` },
+    rules: { operation: "listWebsiteRules", columns: columns("id", "site_url", "path_prefix", "receptionist_id", "pages") },
+    "add-rule": { operation: "createWebsiteRule" },
+    "remove-rule": { operation: "deleteWebsiteRule" },
   }),
-  group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
-    status: { operation: "getBilling" },
+  group("billing", "The plan, its checkout, prepaid packs, cancelling and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
+    status: { operation: "getBilling", show: billingStatus },
     plans: { operation: "listBillingPlans", show: planTable },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
     checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : data.status === "changed" ? `The business already paid for a plan, so Polar moved that subscription to ${String(data.plan)} ${String(data.interval)} and charged any difference to the saved payment method. No page is needed.` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
     "checkout-status": { operation: "getCheckout" },
+    "buy-pack": { operation: "createPackCheckout", args: ["pack"], wait: packCheckoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays for the pack: ${String(data.checkout_url)}` : data.status === "paid" ? packPaidSentence(data.pack_status) : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing pack-status ${String(data.id)}.` },
+    "pack-status": { operation: "getPackCheckout" },
+    cancel: { operation: "cancelBillingPlan", wait: subscriptionChangeWait },
+    resume: { operation: "resumeBillingPlan", wait: subscriptionChangeWait },
+    "keep-plan": { operation: "keepBillingPlan", wait: subscriptionChangeWait },
+    "change-status": { operation: "getSubscriptionChange" },
     "managed-plan": { operation: "setManagedPlan", fixed: { plan: "enterprise" } },
     "end-managed-plan": { operation: "endManagedPlan" },
     "end-promo-plan": { operation: "endPromoPlan" },
     catalog: { operation: "getBillingCatalog", show: catalogTables },
     "catalog-preview": { operation: "applyBillingCatalog", summary: "Show what applying a billing.json would change. Nothing is written.", args: ["brand"], fixed: { dry_run: true }, show: catalogChanges },
     "catalog-apply": { operation: "applyBillingCatalog", args: ["brand"], fixed: { dry_run: false }, show: catalogChanges },
-    "catalog-link": { operation: "linkBillingCatalog", summary: "Record the Polar products and discounts that sell the catalog. pnpm billing apply sends this for you.", args: ["brand"], show: linkChanges },
-    "catalog-runs": { operation: "listBillingCatalogRuns", columns: columns("id", "kind", "status", "brand", "hash", "polar_org", "started_at") },
+    "catalog-link": { operation: "linkBillingCatalog", summary: "Record the billing provider's objects that sell the catalog: Polar's products and discounts, or Stripe's prices and coupons. pnpm billing apply sends this for you.", args: ["brand"], show: linkChanges },
+    "catalog-runs": { operation: "listBillingCatalogRuns", columns: columns("id", "kind", "status", "brand", "hash", "provider_account", "started_at") },
     codes: { operation: "listBillingCodes", columns: columns("id", "code", "plan", "business_id", "uses", "max_uses", "expires_at", "status") },
     "code-create": { operation: "createBillingCode", args: ["plan"], show: (data) => `${showRecord(data)}\n\nSend this link, or the code ${String(data.code)} for Settings > Plan: ${String(data.link)}` },
     "code-revoke": { operation: "revokeBillingCode" },
   }),
   group("numbers", "Find, claim, replace and release phone numbers.", {
-    list: { operation: "listPhoneNumbers", columns: columns("id", "phone_number", "status", "release_scheduled_at") },
+    list: { operation: "listPhoneNumbers", columns: columns("id", "phone_number", "status", "receptionist_id", "release_scheduled_at") },
+    update: { operation: "updatePhoneNumber" },
     search: { operation: "searchPhoneNumbers", columns: columns("phone_number", "locality", "region", "kind", "expires_at", "offer_token") },
     claim: { operation: "createPhoneNumberClaim", args: ["offer_token"], wait: claimWait },
     "claim-status": { operation: "getPhoneNumberClaim" },

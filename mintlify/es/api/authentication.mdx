@@ -95,7 +95,7 @@ curl https://app.lobbystack.com/api/v1/services \
   -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
 ```
 
-Sin ese encabezado, la solicitud devuelve `400` con el código `business_required`. Un negocio al que la clave no puede llegar devuelve `404`. `GET /me` funciona sin el encabezado y muestra el socio y el acceso de la clave. La clave de un operador también gestiona el catálogo de facturación del despliegue con `GET /billing/catalog`, `GET` y `POST /billing/catalog/runs`, y `POST /billing/catalog/polar-links`, y sus códigos promocionales con `GET` y `POST /billing/codes` y `DELETE /billing/codes/{code_id}`, que no actúan sobre ningún negocio y no llevan el encabezado.
+Sin ese encabezado, la solicitud devuelve `400` con el código `business_required`. Un negocio al que la clave no puede llegar devuelve `404`. `GET /me` funciona sin el encabezado y muestra el socio y el acceso de la clave. La clave de un operador también gestiona el catálogo de facturación del despliegue con `GET /billing/catalog`, `GET` y `POST /billing/catalog/runs`, y `POST /billing/catalog/links` (también en su ruta anterior, `/billing/catalog/polar-links`), y sus códigos promocionales con `GET` y `POST /billing/codes` y `DELETE /billing/codes/{code_id}`, que no actúan sobre ningún negocio y no llevan el encabezado.
 
 `POST /team/claim-link` entrega un negocio a su propietario. Cuando lo acepta, la clave de un socio ya no llega al negocio, mientras que la de un operador sigue llegando. En ambos casos, `GET /businesses` deja de listarlo.
 

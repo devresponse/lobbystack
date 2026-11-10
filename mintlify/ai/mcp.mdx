@@ -62,8 +62,9 @@ Owners and admins see every connected assistant for the business in **Settings**
 | `get_business` | `business:read` | Business name, time zone, opening hours and booking mode |
 | `list_services` | `business:read` | Services customers can book |
 | `list_staff` | `business:read` | People who take appointments and the services they do |
+| `list_receptionists` | `business:read` | The AI receptionists that aren't archived, the default first |
 | `update_business_hours` | `business:write` | Replaces the week's opening hours |
-| `list_calls` | `calls:read` | Calls newest first, filtered by start time |
+| `list_calls` | `calls:read` | Calls newest first, filtered by start time or receptionist |
 | `get_call` | `calls:read` | One call with its transcript |
 | `search_contacts` | `contacts:read` | Contacts by phone, email or part of the name |
 | `get_contact` | `contacts:read` | One contact |
@@ -76,7 +77,9 @@ Owners and admins see every connected assistant for the business in **Settings**
 | `cancel_appointment` | `appointments:write` | Cancels an appointment |
 | `reschedule_appointment` | `appointments:write` | Moves an appointment to another open time or staff member |
 | `list_messages` | `messages:read` | Messages the receptionist took for your team |
-| `add_knowledge` | `knowledge:write` | Adds an FAQ or a text entry the receptionist can use |
+| `add_knowledge` | `knowledge:write` | Adds an FAQ or a text entry for every receptionist or the ones you choose |
+| `list_questions` | `knowledge:read` | Questions the receptionist couldn't answer, most asked first |
+| `answer_question` | `knowledge:write` | Saves an answer to one of those questions as knowledge |
 
 Scopes are the same for OAuth and API keys. Tools return the same objects as the REST API, with times in UTC. Read-only tools carry the `readOnlyHint` annotation, and tools that cancel, move or replace data carry `destructiveHint`, so your assistant can ask you before it runs them.
 
@@ -107,7 +110,7 @@ The server itself answers `401` when the key or access token is missing, unknown
 
 Each tool call counts against a limit of 120 requests per minute. An API key shares its limit with REST requests made with the same key; each OAuth connection has its own. Listing tools doesn't count. Past the limit, the tool returns `rate_limited` with the seconds to wait.
 
-`book_appointment`, `create_contact` and `add_knowledge` accept an optional `idempotency_key`. Retry with the same value within 24 hours and you get the first result back instead of a duplicate. These keys are the same as the REST `Idempotency-Key` for `POST /appointments`, `POST /contacts` and `POST /knowledge`: a retry through MCP of a REST request, or the reverse, returns the first result. The same key with different details returns `idempotency_key_reused`.
+`book_appointment`, `create_contact`, `add_knowledge` and `answer_question` accept an optional `idempotency_key`. Retry with the same value within 24 hours and you get the first result back instead of a duplicate. These keys are the same as the REST `Idempotency-Key` for `POST /appointments`, `POST /contacts`, `POST /knowledge` and `POST /knowledge/questions/{question_id}/answer`: a retry through MCP of a REST request, or the reverse, returns the first result. The same key with different details returns `idempotency_key_reused`.
 
 ## Audit log
 

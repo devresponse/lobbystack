@@ -107,6 +107,18 @@ describe("admin security headers", () => {
       expect(await policy(path), path).toContain("frame-src 'self' https://challenges.cloudflare.com;");
     }
   });
+
+  it("sends no referrer on from a QR link, and keeps every other security header on it", async () => {
+    const config = await loadConfig({}) as NextConfig;
+    const headersOf = async (path: string) => (await unstable_getResponseFromNextConfig({ url: `https://admin.example.com${path}`, nextConfig: config })).headers;
+    const link = await headersOf("/q/k7m2pq");
+    expect(link.get("referrer-policy")).toBe("no-referrer");
+    expect(link.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(link.get("x-content-type-options")).toBe("nosniff");
+    for (const path of ["/settings/qrcode", "/q", "/qr", "/"]) {
+      expect((await headersOf(path)).get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
+    }
+  });
 });
 
 describe("admin request bodies", () => {

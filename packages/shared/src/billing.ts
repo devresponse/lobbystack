@@ -4,6 +4,10 @@ export const billingPlanSlugs = [
   "starter",
   "pro",
   "enterprise",
+  // In force while a prepaid minute pack has time left (migration 0148). It is
+  // never a billing account's own plan and never on sale as a plan: the
+  // business's live packs make it, and their own limits apply.
+  "prepaid",
 ] as const;
 export type BillingPlanSlug = (typeof billingPlanSlugs)[number];
 
@@ -41,6 +45,51 @@ export const billingUsageKinds = [
 ] as const;
 export type BillingUsageKind = (typeof billingUsageKinds)[number];
 
+/** The usage kinds overage bills, which a money meter prices (Stripe). */
+export type PricedUsageKind = Extract<BillingUsageKind, "voice_seconds" | "alert_sms_segments" | "outbound_call_attempts">;
+
+/**
+ * A usage amount's price in cents, to four decimals: a call's seconds by its
+ * minute's rate, alert text segments and call transfers by their own.
+ */
+export function priceUsage(kind: PricedUsageKind, units: number, rateCents: number): number {
+  const cents = kind === "voice_seconds" ? (units / 60) * rateCents : units * rateCents;
+  return Math.round(cents * 10_000) / 10_000;
+}
+
+/** Stripe takes a meter event dated up to 35 days back. */
+export const METER_EVENT_MAX_AGE_MS = 35 * 24 * 60 * 60_000;
+
+/**
+ * When a money meter's event says the usage happened: its own time while
+ * the invoice that takes it can still do so, until that invoice's date plus
+ * billing.json's usageGraceHours less 30 minutes, else now, so a late
+ * correction lands on the next invoice instead of being counted and never
+ * billed. Usage past Stripe's 35 days goes out with now too. The invoice is
+ * the month's, on the 1st, or with the plan's period given, as when overage
+ * bills on the plan subscription, the one at the renewal that ends the
+ * period the usage happened in. Only the period now open is known, so
+ * usage from before the one it followed, whose invoice is final, goes out
+ * with now as well, and usage it can't place for sure does too.
+ */
+export function meterEventTime(occurredAt: Date, now: Date, graceHours: number, period: { start: Date; end: Date } | null = null): Date {
+  const invoiced = period ? periodInvoice(occurredAt, period) : Date.UTC(occurredAt.getUTCFullYear(), occurredAt.getUTCMonth() + 1, 1);
+  const lastChance = invoiced + graceHours * 3_600_000 - 30 * 60_000;
+  return now.getTime() < lastChance && now.getTime() - occurredAt.getTime() < METER_EVENT_MAX_AGE_MS ? occurredAt : now;
+}
+
+/** When the invoice that takes the usage is made, with the plan's period now open; minus infinity for one long final. */
+function periodInvoice(occurredAt: Date, period: { start: Date; end: Date }): number {
+  // Usage after the period's end, before its renewal is recorded, belongs to the next period, which is still open.
+  if (occurredAt >= period.end) return Number.POSITIVE_INFINITY;
+  if (occurredAt >= period.start) return period.end.getTime();
+  // The period before, which the start's renewal invoiced, is at least this one's length less three days (a month
+  // beside February). Usage before that could be from the one before it: dated now, it's billed a period late,
+  // where with its own time it would be counted and never billed.
+  const previousSurelySince = period.start.getTime() - (period.end.getTime() - period.start.getTime()) + 3 * 86_400_000;
+  return occurredAt.getTime() >= previousSurelySince ? period.start.getTime() : Number.NEGATIVE_INFINITY;
+}
+
 /**
  * States in which a subscription is paying. `past_due` counts, so a failed charge
  * does not strip the number or the voice allowance while the provider retries.
@@ -50,6 +99,20 @@ export const liveSubscriptionStates = ["active", "trialing", "past_due"] as cons
 /** A billable plan on a live subscription: the gate for paid prompts. Numbers follow the plan's own count. */
 export function isPaidSubscription(plan: string | null | undefined, state: string | null | undefined): boolean {
   return ["starter", "pro", "enterprise"].includes(plan ?? "") && (liveSubscriptionStates as readonly string[]).includes(state ?? "");
+}
+
+/**
+ * Whether the account's subscription is the one a prepaid pack replaced,
+ * which LobbyStack treats as ended while the provider confirms its end. False
+ * for every business that never switched to a pack.
+ */
+export function isReplacedSubscription(account: { subscriptionId: string | null; replacedSubscriptionId?: string | null } | null | undefined): boolean {
+  return Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId;
+}
+
+/** A yearly subscription, as the providers' events and read-backs name its interval. */
+export function isYearlyBillingInterval(interval: string | null | undefined): boolean {
+  return interval === "annual" || interval === "year";
 }
 
 const planTierRank: Record<HostedCheckoutPlanSlug, number> = { starter: 1, pro: 2 };
@@ -70,27 +133,53 @@ export function planChangeDirection(
 }
 
 /**
- * Why Polar didn't move a paying business to the plan it picked, or make the
- * customer a new checkout is for. The worker stores the sentence as the
- * checkout request's error, which API callers read; the dashboard turns it
- * back into the code to say it in the viewer's language. The two billing email
- * ones ask for a billing email, which a new checkout request carries.
+ * Why the billing provider didn't move a paying business to the plan it
+ * picked, or make the customer a new checkout is for, in each provider's
+ * words. The worker stores its provider's sentence as the checkout request's
+ * error, which API callers read; the dashboard turns it back into the code to
+ * say it in the viewer's language. Polar's read word for word as they did
+ * before other providers, so the requests stored then still match. The two
+ * billing email ones ask for a billing email, which a new checkout request
+ * carries: only Polar, which keeps one customer per email, refuses that way.
  */
-export const planChangeRefusals = {
-  payment_failed: "Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
-  subscription_ending: "The subscription is set to end, so its plan can't change. Resume it in the billing portal first.",
-  change_pending: "Polar is still applying an earlier change to this subscription. Try again in a minute.",
-  subscription_unavailable: "Polar can't change this subscription right now. Check it in the billing portal.",
-  product_unavailable: "Polar refused the new plan's product. Run pnpm billing verify to check that the plan is linked to a live recurring product.",
-  token_scope: "Polar refused the worker's token. Give the worker's POLAR_ACCESS_TOKEN the subscriptions:write scope.",
-  billing_email_taken: "Polar already has a customer with this email for another business. Start the checkout again with a billing email for this business.",
-  billing_email_invalid: "Polar didn't accept the billing email. Start the checkout again with another one.",
-} as const;
-export type PlanChangeRefusal = keyof typeof planChangeRefusals;
+export const planChangeRefusalSentences = {
+  polar: {
+    payment_failed: "Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
+    subscription_ending: "The subscription is set to end, so its plan can't change. Resume it in the billing portal first.",
+    change_pending: "Polar is still applying an earlier change to this subscription. Try again in a minute.",
+    subscription_unavailable: "Polar can't change this subscription right now. Check it in the billing portal.",
+    product_unavailable: "Polar refused the new plan's product. Run pnpm billing verify to check that the plan is linked to a live recurring product.",
+    token_scope: "Polar refused the worker's token. Give the worker's POLAR_ACCESS_TOKEN the subscriptions:write scope.",
+    billing_email_taken: "Polar already has a customer with this email for another business. Start the checkout again with a billing email for this business.",
+    billing_email_invalid: "Polar didn't accept the billing email. Start the checkout again with another one.",
+  },
+  stripe: {
+    payment_failed: "Stripe couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
+    subscription_ending: "The subscription is set to end, so its plan can't change. Resume the plan in Settings > Plan first.",
+    change_pending: "Stripe is still applying an earlier change to this subscription. Try again in a minute.",
+    subscription_unavailable: "Stripe can't change this subscription right now. Check it in the billing portal.",
+    product_unavailable: "Stripe refused the new plan's price. Run pnpm billing verify to check that the plan is linked to a live recurring price.",
+    token_scope: "Stripe refused the worker's key. Give the worker's STRIPE_API_KEY write access to subscriptions.",
+    billing_email_taken: "Stripe already has a customer with this email for another business. Start the checkout again with a billing email for this business.",
+    billing_email_invalid: "Stripe didn't accept the billing email. Start the checkout again with another one.",
+  },
+} as const satisfies Record<BillingProvider, Record<string, string>>;
+export type PlanChangeRefusal = keyof typeof planChangeRefusalSentences.polar;
+/** Polar's sentences: what a Polar deployment stores. */
+export const planChangeRefusals = planChangeRefusalSentences.polar;
 
-/** The refusal a checkout request's error states, or null for any other error. */
+/** The sentence the worker stores for a refusal, in its provider's words. */
+export function planChangeRefusalSentence(provider: BillingProvider, refusal: PlanChangeRefusal): string {
+  return planChangeRefusalSentences[provider][refusal];
+}
+
+/** The refusal a checkout request's error states in any provider's words, or null for any other error. */
 export function planChangeRefusalOf(error: string | null | undefined): PlanChangeRefusal | null {
-  return (Object.keys(planChangeRefusals) as PlanChangeRefusal[]).find((code) => planChangeRefusals[code] === error) ?? null;
+  for (const sentences of Object.values(planChangeRefusalSentences)) {
+    const code = (Object.keys(sentences) as PlanChangeRefusal[]).find((key) => sentences[key] === error);
+    if (code) return code;
+  }
+  return null;
 }
 
 export const billingTransactionKinds = ["order", "refund"] as const;
@@ -108,6 +197,30 @@ export const billingErrorCodes = {
 export type BillingErrorCode =
   (typeof billingErrorCodes)[keyof typeof billingErrorCodes];
 
+// The billing providers a deployment can bill through (ADR 0010), and their environments.
+export const billingProviders = ["polar", "stripe"] as const;
+export type BillingProvider = (typeof billingProviders)[number];
+
+/**
+ * What Settings > Plan and the API ask of a live subscription where the
+ * provider lets the app do it (Stripe): end it at the renewal, undo that, or
+ * drop a change waiting for the renewal. Polar does these in its billing portal.
+ */
+export const billingSubscriptionActions = ["cancel", "resume", "keep"] as const;
+export type BillingSubscriptionAction = (typeof billingSubscriptionActions)[number];
+
+/** Whether plans are cancelled, resumed and kept in the app on this provider, as the adapter's can.inAppCancel says. */
+export const inAppPlanActions = (provider: BillingProvider): boolean => provider === "stripe";
+export const billingProviderEnvs = ["sandbox", "live"] as const;
+export type BillingProviderEnv = (typeof billingProviderEnvs)[number];
+/** How screens, messages and the CLI name each provider. */
+export const billingProviderNames: Record<BillingProvider, string> = { polar: "Polar", stripe: "Stripe" };
+
+/** The deployment's billing provider, as BILLING_PROVIDER names it: Polar when it's unset. The services check the value when they start. */
+export function billingProviderOf(env: Record<string, string | undefined>): BillingProvider {
+  return env.BILLING_PROVIDER?.trim().toLowerCase() === "stripe" ? "stripe" : "polar";
+}
+
 /** The two Polar servers: sandbox for test payments, production for real ones. Each has its own organizations, ids and tokens. */
 export const polarBaseUrls = { sandbox: "https://sandbox-api.polar.sh", production: "https://api.polar.sh" } as const;
 export type PolarEnv = keyof typeof polarBaseUrls;
@@ -120,6 +233,68 @@ export type PolarEnv = keyof typeof polarBaseUrls;
  * then moves the webhook to it.
  */
 export const POLAR_API_VERSION = "2026-10";
+
+/**
+ * The Stripe API version every call asks for, the one the stripe package was
+ * released with; pnpm billing makes the webhook endpoint with it too, so
+ * event objects match the SDK's types. Change it with the package, on purpose.
+ */
+export const STRIPE_API_VERSION = "2026-10-28.endive";
+
+/** A Stripe secret or restricted key's mode: sandbox for a test key (sk_test_, rk_test_), live for a live one, and null for anything else. */
+export function stripeKeyMode(key: string): BillingProviderEnv | null {
+  const match = /^(?:sk|rk)_(test|live)_[A-Za-z0-9]/.exec(key.trim());
+  if (!match) return null;
+  return match[1] === "test" ? "sandbox" : "live";
+}
+
+/**
+ * The events LobbyStack's Stripe webhook endpoint subscribes to: pnpm billing
+ * makes the endpoint with them, and the webhook route takes no others but the
+ * prepaid packs' below.
+ */
+export const STRIPE_WEBHOOK_EVENTS = [
+  "checkout.session.completed",
+  "checkout.session.expired",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "customer.subscription.paused",
+  "customer.subscription.resumed",
+  "customer.subscription.pending_update_applied",
+  "customer.subscription.pending_update_expired",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "invoice.finalized",
+  // A declined upgrade's invoice is voided, and an operator can void or forgive one.
+  "invoice.voided",
+  "invoice.marked_uncollectible",
+  "charge.refunded",
+  "charge.dispute.created",
+] as const;
+
+/**
+ * The events only prepaid packs need. pnpm billing adds them to the endpoint
+ * for a billing.json with packs, so a file without packs keeps the endpoint it
+ * had before packs, and the webhook route takes them as well.
+ */
+export const STRIPE_PACK_WEBHOOK_EVENTS = [
+  // A prepaid pack paid by a method that settles later, such as a bank debit.
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
+  // A prepaid pack a dispute froze comes back when the dispute is won.
+  "charge.dispute.closed",
+] as const;
+
+/** The thin events Stripe sends when it can't use a meter event, to a destination of their own. */
+export const STRIPE_METER_ERROR_EVENTS = ["v1.billing.meter.error_report_triggered", "v1.billing.meter.no_meter_found"] as const;
+
+/**
+ * The event names of Stripe's three overage meters, by usage kind. Each meter
+ * sums the dollars of overage its events carry, and a meter's event name
+ * never changes.
+ */
+export const stripeOverageMeterEvents = { voice: "ls_overage_voice", alert_sms: "ls_overage_sms", transfer: "ls_overage_transfers" } as const;
 
 /** The server a POLAR_API_BASE_URL names: sandbox for sandbox-api.polar.sh, else production, as an unset one means api.polar.sh. */
 export function polarEnvForBaseUrl(baseUrl: string | null | undefined): PolarEnv {
@@ -162,6 +337,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: null,
     chatAiTokensIncluded: null,
     includedBusinessNumbers: null,
+    includedReceptionists: null,
     overagesBillable: false,
     voiceOverageRatePerMinuteCents: null,
     alertSmsOverageRatePerSegmentCents: null,
@@ -177,6 +353,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: 2,
     chatAiTokensIncluded: 5,
     includedBusinessNumbers: 0,
+    includedReceptionists: 1,
     overagesBillable: false,
     voiceOverageRatePerMinuteCents: null,
     alertSmsOverageRatePerSegmentCents: null,
@@ -192,6 +369,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: 20,
     chatAiTokensIncluded: 50,
     includedBusinessNumbers: 1,
+    includedReceptionists: 1,
     overagesBillable: true,
     voiceOverageRatePerMinuteCents: 20,
     alertSmsOverageRatePerSegmentCents: 2,
@@ -207,6 +385,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: 100,
     chatAiTokensIncluded: 200,
     includedBusinessNumbers: 1,
+    includedReceptionists: 5,
     overagesBillable: true,
     voiceOverageRatePerMinuteCents: 18,
     alertSmsOverageRatePerSegmentCents: 2,
@@ -222,7 +401,29 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: null,
     chatAiTokensIncluded: null,
     includedBusinessNumbers: null,
+    includedReceptionists: null,
     overagesBillable: true,
+    voiceOverageRatePerMinuteCents: null,
+    alertSmsOverageRatePerSegmentCents: null,
+    outboundCallAttemptOverageRateCents: null,
+  },
+  // Only a fallback: a business on a pack gets the limits copied onto its live
+  // packs, and its voice minutes are the packs' balance, never a monthly
+  // allowance, so voice has no monthly number here. Nothing past an allowance
+  // is billed: it stops, as on Free. Starter's allowances, with 20 MB of
+  // knowledge, as both brands' packs give.
+  prepaid: {
+    hostedBilling: true,
+    monthlyChargeCents: null,
+    annualChargeCents: null,
+    knowledgeStorageBytes: 20 * 1024 * 1024,
+    voiceSecondsIncluded: null,
+    alertSmsSegmentsIncluded: 50,
+    outboundCallAttemptsIncluded: 20,
+    chatAiTokensIncluded: 50,
+    includedBusinessNumbers: 1,
+    includedReceptionists: 1,
+    overagesBillable: false,
     voiceOverageRatePerMinuteCents: null,
     alertSmsOverageRatePerSegmentCents: null,
     outboundCallAttemptOverageRateCents: null,
@@ -239,6 +440,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: number | null;
     chatAiTokensIncluded: number | null;
     includedBusinessNumbers: number | null;
+    includedReceptionists: number | null;
     overagesBillable: boolean;
     voiceOverageRatePerMinuteCents: number | null;
     alertSmsOverageRatePerSegmentCents: number | null;
@@ -254,6 +456,12 @@ export type BillingPlanLimits = {
   outboundCallAttemptsIncluded: number | null;
   chatAiTokensIncluded: number | null;
   includedBusinessNumbers: number | null;
+  /**
+   * Receptionists a business may have active at once. Null means the
+   * deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS (receptionistAllowance),
+   * as custom plans and self-hosting have.
+   */
+  includedReceptionists: number | null;
   /** Usage past the allowance is billed rather than blocked. */
   overagesBillable: boolean;
   voiceOverageRatePerMinuteCents: number | null;
@@ -270,6 +478,7 @@ const limitsOf = (plan: BillingPlanLimits): BillingPlanLimits => ({
   outboundCallAttemptsIncluded: plan.outboundCallAttemptsIncluded,
   chatAiTokensIncluded: plan.chatAiTokensIncluded,
   includedBusinessNumbers: plan.includedBusinessNumbers,
+  includedReceptionists: plan.includedReceptionists,
   overagesBillable: plan.overagesBillable,
   voiceOverageRatePerMinuteCents: plan.voiceOverageRatePerMinuteCents,
   alertSmsOverageRatePerSegmentCents: plan.alertSmsOverageRatePerSegmentCents,
@@ -306,6 +515,8 @@ export type BillingPlanOffer = {
     chatAiUnits: number | null;
     knowledgeStorageBytes: number | null;
     businessNumbers: number | null;
+    /** Receptionists active at once; null means the deployment's cap. */
+    receptionists: number | null;
   };
   /** Cents for each unit past the allowance. */
   overageRates: {
@@ -327,6 +538,7 @@ export function billingPlanIncluded(limits: BillingPlanLimits): BillingPlanOffer
     chatAiUnits: limits.chatAiTokensIncluded,
     knowledgeStorageBytes: limits.knowledgeStorageBytes,
     businessNumbers: limits.includedBusinessNumbers,
+    receptionists: limits.includedReceptionists,
   };
 }
 
@@ -367,6 +579,7 @@ export function builtInBillingPlanList(checkoutAvailable: (plan: HostedCheckoutP
           chatAiUnits: plan.chatAiTokensIncluded,
           knowledgeStorageBytes: plan.knowledgeStorageBytes,
           businessNumbers: plan.includedBusinessNumbers,
+          receptionists: plan.includedReceptionists,
         },
         overageRates: {
           voiceMinuteCents: plan.voiceOverageRatePerMinuteCents,
@@ -429,6 +642,91 @@ export function annualSavingPercent(list: Pick<BillingPlanList, "plans">): numbe
   return least > 0 ? least : null;
 }
 
+/** The longest a prepaid pack may last, in days: about three years (billing_pack_plans.days). */
+export const MAX_PACK_DAYS = 1_095;
+
+/**
+ * A prepaid pack's state: active while it has time left, expired at its end
+ * date, replaced when a subscription started, refunded when the provider
+ * refunded all of it, and frozen while a dispute holds its payment.
+ */
+export const billingPackStatuses = ["active", "expired", "replaced", "refunded", "frozen"] as const;
+export type BillingPackStatus = (typeof billingPackStatuses)[number];
+
+/** Whether a stored status is one of a pack's. */
+export function isBillingPackStatus(value: string | null | undefined): value is BillingPackStatus {
+  return (billingPackStatuses as readonly (string | null | undefined)[]).includes(value);
+}
+
+/**
+ * The error of a pack checkout that a plan's start closed, since a pack paid
+ * after the plan started would end at once. The API answers it as the
+ * checkout's error, which the CLI tells apart from a provider's failure.
+ */
+export const PACK_CHECKOUT_CLOSED_FOR_PLAN = "A plan started for this business, so this pack's checkout closed.";
+
+/** What a pack gives a business each UTC month while it lasts, and its limits: everything but the minutes, which last the whole pack. */
+export type BillingPackIncluded = {
+  alertSmsSegments: number;
+  outboundCallAttempts: number;
+  chatAiUnits: number;
+  knowledgeStorageBytes: number;
+  businessNumbers: number;
+  receptionists: number;
+};
+
+/** A prepaid pack on sale, as the screens and the API show it. */
+export type BillingPackOffer = {
+  code: string;
+  /** Display names by language: en, fr, es and sr. */
+  names: Record<string, string>;
+  /** Voice seconds the pack holds for its whole length. */
+  voiceSeconds: number;
+  /** How long it lasts from the payment, in days; null when it never ends. */
+  days: number | null;
+  included: BillingPackIncluded;
+  currency: string;
+  amountCents: number;
+  /** The provider sells it here, so a button can start its checkout. */
+  checkoutAvailable: boolean;
+  sortOrder: number;
+};
+
+/** A pack a business bought, as Settings > Plan and the API show it. */
+export type BillingPackHolding = {
+  id: string;
+  code: string;
+  names: Record<string, string> | null;
+  status: BillingPackStatus;
+  /** The seconds it holds after refunds. */
+  secondsTotal: number;
+  secondsUsed: number;
+  secondsLeft: number;
+  days: number | null;
+  /** ISO 8601. */
+  paidAt: string;
+  endsAt: string | null;
+  endedAt: string | null;
+  currency: string;
+  amountCents: number;
+  refundedCents: number;
+};
+
+/**
+ * The voice seconds a pack holds after refunds: a partial refund takes its
+ * share of the seconds off the pack, rounded down, and a full one all of them.
+ */
+export function packCapacitySeconds(pack: { secondsTotal: number; amountCents: number; refundedCents: number }): number {
+  if (pack.refundedCents <= 0) return pack.secondsTotal;
+  if (pack.amountCents <= 0 || pack.refundedCents >= pack.amountCents) return 0;
+  return Math.floor((pack.secondsTotal * (pack.amountCents - pack.refundedCents)) / pack.amountCents);
+}
+
+/** When a pack paid for at paidAt ends: its days counted as 24-hour days, so no month length or clock change moves it; null when it never ends. */
+export function packEndsAt(paidAt: Date, days: number | null): Date | null {
+  return days === null ? null : new Date(paidAt.getTime() + days * 86_400_000);
+}
+
 export const contentRetentionCategories = [
   "messages",
   "transcripts",
@@ -452,6 +750,8 @@ export const contentRetentionDaysByPlan = {
   starter: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
   pro: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
   enterprise: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
+  // A business on a prepaid pack keeps its content as a paying plan does.
+  prepaid: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
 } as const satisfies Record<
   BillingPlanSlug,
   Record<ContentRetentionCategory, number>

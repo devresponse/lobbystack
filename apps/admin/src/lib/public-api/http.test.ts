@@ -78,6 +78,10 @@ describe("v1 request pipeline", () => {
     const conflict = await handleApiRequest(request("/contacts", { method: "POST", headers: { authorization: "Bearer lsk_x" } }), "createContact", async () => { throw new PublicApiError(409, "conflict", "Duplicate."); }, { resolveKey: async () => key, rateLimit: allow });
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toEqual({ error: { code: "conflict", message: "Duplicate." } });
+    // The dashboard's refusals carry only a status: a 409 is a conflict too.
+    const refused = await handleApiRequest(request("/contacts", { method: "POST", headers: { authorization: "Bearer lsk_x" } }), "createContact", async () => { throw Object.assign(new Error("Another save is running."), { status: 409 }); }, { resolveKey: async () => key, rateLimit: allow });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: { code: "conflict", message: "Another save is running." } });
     const crash = await handleApiRequest(request("/contacts", { headers: { authorization: "Bearer lsk_x" } }), "listContacts", async () => { throw new Error("password=hunter2 connection refused"); }, { resolveKey: async () => key, rateLimit: allow });
     expect(crash.status).toBe(500);
     const body = await crash.json() as { error: { code: string; message: string } };

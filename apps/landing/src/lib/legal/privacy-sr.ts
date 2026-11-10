@@ -1,8 +1,15 @@
-import type { LegalDocument } from "./types"
+import { processorNames } from "./processor"
+import type { LegalDocument, LegalProcessor } from "./types"
+
+// The payment processor among the providers. Stripe Tax also works out the taxes, from the billing address.
+const paymentProvider: Record<LegalProcessor, string> = {
+  polar: `<strong>Polar:</strong> proces kupovine, pretplate, naplata potrošnje i obrada plaćanja;`,
+  stripe: `<strong>Stripe:</strong> proces kupovine, pretplate, naplata potrošnje, obračun poreza i obrada plaćanja;`,
+}
 
 const support = `<a href="mailto:support@lobbystack.com">support@lobbystack.com</a>`
 
-export const privacySr: LegalDocument = {
+export const privacySr = (processor: LegalProcessor): LegalDocument => ({
   updated: "Poslednje ažuriranje: 8. oktobar 2026.",
   h1: "Politika privatnosti",
   intro: `Ova Politika privatnosti objašnjava kako Lobbystack Inc. („LobbyStack“, „mi“, „naš“ ili „nas“) prikuplja, koristi, deli i štiti podatke o ličnosti kada posećujete naše sajtove, koristite hostovanu uslugu LobbyStack, pozovete firmu koja koristi LobbyStack ili se s njom dopisujete putem četa, primite SMS poruku poslatu putem usluge LobbyStack ili nas kontaktirate.`,
@@ -49,7 +56,7 @@ export const privacySr: LegalDocument = {
           ],
         },
         { h3: "3.4 Podaci o naplati" },
-        `Paket, period naplate, potrošnja, fakture, poreski podaci, status plaćanja i podešavanja limita potrošnje. Naš pružalac usluga obrade plaćanja, Polar, direktno prikuplja podatke o platnim karticama. Ne primamo niti čuvamo pune brojeve kartica.`,
+        `Paket, period naplate, potrošnja, fakture, poreski podaci, status plaćanja i podešavanja limita potrošnje. Naš pružalac usluga obrade plaćanja, ${processorNames[processor]}, direktno prikuplja podatke o platnim karticama. Ne primamo niti čuvamo pune brojeve kartica.`,
         { h3: "3.5 Podaci o sajtu, uređaju i korišćenju" },
         `IP adresa, tip pregledača i uređaja, pregledane stranice, stranice sa kojih ste došli, klikovi, približna lokacija izvedena iz IP adrese, evidencije grešaka i način na koji koristite kontrolnu tablu. Uz Vaš pristanak prikupljamo i snimke sesija na našem sajtu, pri čemu su unosi u obrasce maskirani. Pogledajte odeljak 10 i našu <a href="/sr/cookie-policy/">Politiku kolačića</a>.`,
         { h3: "3.6 Komunikacija i podrška" },
@@ -57,7 +64,7 @@ export const privacySr: LegalDocument = {
         { h3: "3.7 Podaci o partnerskom programu i preporukama" },
         `Kodovi za preporuku, vreme klikova, stranice sa kojih su posetioci došli, pripisivanje registracija, evidencije provizija i PayPal imejl adresa koja se koristi za isplate.`,
         { h3: "3.8 Izvori" },
-        `Podatke prikupljamo direktno od Vas, od Pozivalaca kada firma koristi Uslugu, iz Vašeg povezanog naloga Google Calendar, sa Vašeg sajta kada ga uvezete, od naših pružalaca usluga (na primer, status plaćanja od kompanije Polar i status poziva od kompanije Twilio) i automatski sa Vašeg uređaja.`,
+        `Podatke prikupljamo direktno od Vas, od Pozivalaca kada firma koristi Uslugu, iz Vašeg povezanog naloga Google Calendar, sa Vašeg sajta kada ga uvezete, od naših pružalaca usluga (na primer, status plaćanja od kompanije ${processorNames[processor]} i status poziva od kompanije Twilio) i automatski sa Vašeg uređaja.`,
       ],
     },
     {
@@ -155,7 +162,7 @@ export const privacySr: LegalDocument = {
             `<strong>Railway:</strong> hosting aplikacije, baze podataka i skladištenje datoteka, uključujući snimke;`,
             `<strong>Cloudflare:</strong> hosting sajta, isporuka sadržaja, bezbednost i zaštita od botova pri registraciji;`,
             `<strong>PostHog:</strong> analitika sajta i proizvoda i, uz pristanak, snimci sesija na sajtu;`,
-            `<strong>Polar:</strong> proces kupovine, pretplate, naplata potrošnje i obrada plaćanja;`,
+            paymentProvider[processor],
             `<strong>Google:</strong> pristup kalendaru, samo kada povežete Google Calendar;`,
             `<strong>Firecrawl:</strong> čitanje Vašeg javnog sajta, samo kada ga uvezete u znanje svoje firme;`,
             `<strong>Resend:</strong> imejlovi u vezi sa nalogom i obaveštenjima;`,
@@ -316,4 +323,4 @@ export const privacySr: LegalDocument = {
       ],
     },
   ],
-}
+})

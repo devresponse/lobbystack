@@ -1,8 +1,15 @@
-import type { LegalDocument } from "./types"
+import { processorNames } from "./processor"
+import type { LegalDocument, LegalProcessor } from "./types"
+
+// The payment processor among the providers. Stripe Tax also works out the taxes, from the billing address.
+const paymentProvider: Record<LegalProcessor, string> = {
+  polar: `<strong>Polar :</strong> paiement en ligne, abonnements, facturation de l’utilisation et traitement des paiements;`,
+  stripe: `<strong>Stripe :</strong> paiement en ligne, abonnements, facturation de l’utilisation, calcul des taxes et traitement des paiements;`,
+}
 
 const support = `<a href="mailto:support@lobbystack.com">support@lobbystack.com</a>`
 
-export const privacyFr: LegalDocument = {
+export const privacyFr = (processor: LegalProcessor): LegalDocument => ({
   updated: "Dernière mise à jour : 8 octobre 2026",
   h1: "Politique de confidentialité",
   intro: `La présente Politique de confidentialité explique comment Lobbystack Inc. (« LobbyStack », « nous », « notre » ou « nos ») recueille, utilise, communique et protège les renseignements personnels lorsque vous visitez nos sites Web, utilisez le service hébergé LobbyStack, appelez une entreprise qui utilise LobbyStack ou clavardez avec elle, recevez un SMS envoyé au moyen de LobbyStack ou communiquez avec nous.`,
@@ -49,7 +56,7 @@ export const privacyFr: LegalDocument = {
           ],
         },
         { h3: "3.4 Renseignements de facturation" },
-        `Forfait, fréquence de facturation, utilisation, factures, renseignements fiscaux, état des paiements et paramètres du plafond de dépenses. Notre processeur de paiement, Polar, recueille directement les renseignements de carte de paiement. Nous ne recevons ni ne conservons les numéros de carte complets.`,
+        `Forfait, fréquence de facturation, utilisation, factures, renseignements fiscaux, état des paiements et paramètres du plafond de dépenses. Notre processeur de paiement, ${processorNames[processor]}, recueille directement les renseignements de carte de paiement. Nous ne recevons ni ne conservons les numéros de carte complets.`,
         { h3: "3.5 Renseignements sur le site Web, l’appareil et l’utilisation" },
         `Adresse IP, type de navigateur et d’appareil, pages consultées, pages de provenance, clics, emplacement approximatif déduit de l’adresse IP, journaux d’erreurs et utilisation du tableau de bord. Avec votre consentement, nous recueillons aussi des enregistrements de session de notre site Web, où les champs de formulaire sont masqués. Voir la section 10 et notre <a href="/fr/cookie-policy/">Politique relative aux cookies</a>.`,
         { h3: "3.6 Communications et support" },
@@ -57,7 +64,7 @@ export const privacyFr: LegalDocument = {
         { h3: "3.7 Renseignements d’affiliation et de recommandation" },
         `Codes de recommandation, heures des clics, pages de provenance, attribution des inscriptions, registres des commissions et adresse courriel PayPal utilisée pour les paiements.`,
         { h3: "3.8 Sources" },
-        `Nous recueillons les renseignements directement auprès de vous, auprès des Appelants par l’utilisation du Service par une entreprise, dans votre Google Agenda connecté, sur votre site Web lorsque vous l’importez, auprès de nos fournisseurs (par exemple, l’état des paiements auprès de Polar et l’état des appels auprès de Twilio) et automatiquement à partir de votre appareil.`,
+        `Nous recueillons les renseignements directement auprès de vous, auprès des Appelants par l’utilisation du Service par une entreprise, dans votre Google Agenda connecté, sur votre site Web lorsque vous l’importez, auprès de nos fournisseurs (par exemple, l’état des paiements auprès de ${processorNames[processor]} et l’état des appels auprès de Twilio) et automatiquement à partir de votre appareil.`,
       ],
     },
     {
@@ -155,7 +162,7 @@ export const privacyFr: LegalDocument = {
             `<strong>Railway :</strong> hébergement de l’application, bases de données et stockage de fichiers, y compris les enregistrements;`,
             `<strong>Cloudflare :</strong> hébergement du site Web, diffusion de contenu, sécurité et protection contre les robots à l’inscription;`,
             `<strong>PostHog :</strong> analytique du site Web et du produit et, avec consentement, enregistrements de session du site Web;`,
-            `<strong>Polar :</strong> paiement en ligne, abonnements, facturation de l’utilisation et traitement des paiements;`,
+            paymentProvider[processor],
             `<strong>Google :</strong> accès à l’agenda, seulement lorsque vous connectez Google Agenda;`,
             `<strong>Firecrawl :</strong> lecture de votre site Web public, seulement lorsque vous l’importez dans les connaissances de votre entreprise;`,
             `<strong>Resend :</strong> courriels liés au compte et aux notifications;`,
@@ -316,4 +323,4 @@ export const privacyFr: LegalDocument = {
       ],
     },
   ],
-}
+})

@@ -8,6 +8,7 @@ import { billingPlanName, type BillingCodeView, type BillingInterval, type PlanC
 import { Check, LoaderCircle } from "lucide-react";
 
 import { formatMoney, includedLines, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
+import { intlLocale } from "@/lib/locale";
 import { requestJson } from "@/lib/request-json";
 import { capturePromoCodeFromUrl, clearStoredPromoCode, getStoredPromoCode } from "@/lib/promo-code";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
@@ -18,7 +19,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
 type Translate = ReturnType<typeof useTranslation>["t"];
-type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
+type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null; providerName: string };
 type Checkout = { requestId: string; interval: BillingInterval; billingEmail: string | null };
 
 const errorKeys: Record<string, string> = {
@@ -49,8 +50,10 @@ export function promoDiscountText(discount: ResolvedBillingDiscount, currency: s
  * unlocks with its discount, and buys it at the interval chosen. A code from a
  * promo link (?promo=, kept through sign-up) is filled in and checked at once.
  * A business that already pays has its subscription moved instead of a checkout.
+ * leavesPacks holds the minutes left on the business's packs, which a code's
+ * plan ends when it starts, as the plan dialog warns.
  */
-export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId: string; changesPlan?: boolean }) {
+export function PromoCodeEntry({ businessId, changesPlan = false, leavesPacks = null }: { businessId: string; changesPlan?: boolean; leavesPacks?: { minutesLeft: number } | null }) {
   const { i18n, t } = useTranslation("settings");
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -123,7 +126,7 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
     if (announced.current !== checkout.requestId) {
       announced.current = checkout.requestId;
       clearStoredPromoCode();
-      toast.success(t("billing.toast.planChanged"));
+      toast.success(t("billing.toast.planChanged", { provider: status.data.providerName }));
     }
     const finish = () => {
       void client.invalidateQueries({ queryKey: ["billing", businessId] });
@@ -181,12 +184,12 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
       </div>
     </form>
     {error ? <FieldError>{error}</FieldError> : null}
-    {view ? <PromoOffer busy={busy} changesPlan={changesPlan} locale={locale} onChoose={(interval) => { setEmailPrompt(null); start.mutate({ code: view, interval }); }} pendingInterval={start.isPending ? start.variables.interval : checkout?.interval ?? null} t={t} view={view} /> : null}
+    {view ? <PromoOffer busy={busy} changesPlan={changesPlan} leavesPacks={leavesPacks} locale={locale} onChoose={(interval) => { setEmailPrompt(null); start.mutate({ code: view, interval }); }} pendingInterval={start.isPending ? start.variables.interval : checkout?.interval ?? null} t={t} view={view} /> : null}
     {view && emailPrompt ? <BillingEmailForm key={emailPrompt.interval} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => start.mutate({ code: view, interval: emailPrompt.interval, billingEmail })} pending={busy} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /> : null}
   </div>;
 }
 
-function PromoOffer({ view, locale, t, busy, changesPlan, pendingInterval, onChoose }: { view: BillingCodeView; locale: string; t: Translate; busy: boolean; changesPlan: boolean; pendingInterval: BillingInterval | null; onChoose: (interval: BillingInterval) => void }) {
+function PromoOffer({ view, locale, t, busy, changesPlan, leavesPacks, pendingInterval, onChoose }: { view: BillingCodeView; locale: string; t: Translate; busy: boolean; changesPlan: boolean; leavesPacks: { minutesLeft: number } | null; pendingInterval: BillingInterval | null; onChoose: (interval: BillingInterval) => void }) {
   const name = billingPlanName(view.names, locale) ?? t(`billing.planLabels.${view.tier}`);
   const tier = t(`billing.planLabels.${view.tier}`);
   // The plan's own allowances, each one it has more of than its tier marked.
@@ -203,6 +206,7 @@ function PromoOffer({ view, locale, t, busy, changesPlan, pendingInterval, onCho
         </li>)}
       </ul>
     </div>
+    {!view.current && leavesPacks ? <p className="text-sm text-amber-700 dark:text-amber-400">{t("billing.upgradeDialog.endsPacks", { count: leavesPacks.minutesLeft, minutes: leavesPacks.minutesLeft.toLocaleString(intlLocale(locale)) })}</p> : null}
     {view.current ? <p className="text-sm text-muted-foreground">{t("billing.promo.errors.current")}</p> : <div className="flex flex-col gap-3 sm:flex-row">
       {view.prices.map((price) => {
         const discounted = price.discountedCents !== price.cents;

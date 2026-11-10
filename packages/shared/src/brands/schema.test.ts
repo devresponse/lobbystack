@@ -131,12 +131,12 @@ describe("compileBrands", () => {
     expect(plans[1]).toEqual({
       code: "starter", sold: true, custom: false, overage: true,
       voice_sec: 12_000, sms_seg: billing.plans.starter.included.alertSmsSegments, calls_out: billing.plans.starter.included.outboundCallAttempts, chat_units: billing.plans.starter.included.chatAiUnits,
-      kb_bytes: billing.plans.starter.limits.knowledgeStorageMb * 1_048_576, numbers: billing.plans.starter.limits.businessNumbers,
+      kb_bytes: billing.plans.starter.limits.knowledgeStorageMb * 1_048_576, numbers: billing.plans.starter.limits.businessNumbers, receptionists: 1,
       voice_rate: billing.plans.starter.overageCents.voiceMinute, sms_rate: billing.plans.starter.overageCents.alertSmsSegment, call_rate: billing.plans.starter.overageCents.outboundCallAttempt,
       sort: 20,
       prices: [{ period: "annual", currency: billing.currency, cents: 37_000 }, { period: "monthly", currency: billing.currency, cents: 3700 }],
     });
-    expect(plans[3]).toMatchObject({ code: "enterprise", sold: false, custom: true, voice_sec: null, prices: [] });
+    expect(plans[3]).toMatchObject({ code: "enterprise", sold: false, custom: true, voice_sec: null, receptionists: null, prices: [] });
   });
 
   it("keeps a name with its environment suffix within the length limit", () => {

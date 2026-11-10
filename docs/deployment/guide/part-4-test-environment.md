@@ -329,7 +329,7 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    | You use PostHog ([3.7](part-3-outside-services.md#37-optional-services)) | The values in [3.7](part-3-outside-services.md#37-optional-services)'s PostHog table | The services that table names |
    | You use website import ([3.7](part-3-outside-services.md#37-optional-services)) | `FIRECRAWL_API_KEY=<the fc- key>` | worker |
    | You use the map on public profile pages ([3.7](part-3-outside-services.md#37-optional-services)) | `GOOGLE_MAPS_EMBED_API_KEY=<the AIza key>` | admin |
-   | Calls should open with a recorded greeting. Since fork PR #96 phone calls do too, and `LIVE_RECORDED_GREETING_PHONE=false` on the admin keeps them on the spoken greeting | `LIVE_RECORDED_GREETING=true` | admin and worker |
+   | Calls should not open with a recorded greeting. Since fork PR #139 they do unless this is set; on an older copy, set `LIVE_RECORDED_GREETING=true` instead to turn it on. `LIVE_RECORDED_GREETING_PHONE=false` on the admin keeps only phone calls on the spoken greeting | `LIVE_RECORDED_GREETING=false` | admin and worker |
    | Replies to LobbyStack's emails should reach a real inbox ([3.4](part-3-outside-services.md#34-email)) | `EMAIL_REPLY_TO=<the address>` | worker |
    | Feedback sent from the dashboard should reach you ([3.4](part-3-outside-services.md#34-email)) | `FEEDBACK_TO_EMAIL=<your address>` | admin |
 
@@ -433,7 +433,7 @@ Check each part of the environment once, in this order, with test data only. Eac
 3. **Make the business bookable.** Add one service and your opening hours ([6.3](part-6-first-run.md#63-set-up-the-first-business)).
 4. **A browser call.** Click **Test Call** (or **Start a call** under **Getting started**) and talk to the receptionist. Ask it for your opening hours.
    - Proves: OpenAI, and the admin handing the call to the worker over the private network.
-5. **Website chat.** Open **Settings** > **Website widget**. Under **Allowed origins**, enter your own website's address, or `https://example.com` if you have none, and click **Create widget key**. Then open **Settings** > **Public profile**: under **Chat**, choose the widget, turn on **Published**, click **Save**, then **Open page**. Ask the chat a question.
+5. **Website chat.** Open **Settings** > **Website widget**. Under **Allowed origins**, enter your own website's address, or `https://example.com` if you have none, and click **Create widget key**. Then open **Settings** > **Public profile**: under **Chat**, choose the widget, click **Publish page**, then **Open page**. Ask the chat a question.
    - Proves: the chat's AI and the widget. The page works whatever the widget's allowed origins are, because it's on your own address.
 6. **Buy a test number.** Open **Settings** > **Phone Number** and click **Get number**. Choose the country, type an area code, click **Search**, then **Select** next to a number. It spins for up to 2 minutes, then "Phone number added." appears ([6.4](part-6-first-run.md#64-get-a-phone-number-and-make-the-first-calls)).
    - Twilio charges its monthly fee from now on ($1.15 a month for a US or Canadian local number), until the number is released. Only the command line can release it ([6.7](part-6-first-run.md#67-optional-the-api-and-the-command-line)).

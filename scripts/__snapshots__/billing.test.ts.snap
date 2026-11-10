@@ -1,0 +1,975 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`pnpm billing's output > applies alloplace, then verifies it 1`] = `
+{
+  "applied": {
+    "code": 0,
+    "err": "",
+    "out": "alloplace billing.json v1 (85fcec4a8eb3) to https://demo.alloplace.com and Polar sandbox organization Test organization (org_test)
+
+Postgres: the file is applied
+Polar: 20 calls
+  tag Meter "Voice minutes": tag it as LobbyStack's
+  tag Meter "Alert SMS segments": tag it as LobbyStack's
+  tag Meter "Call transfers": tag it as LobbyStack's
+  create Product "Starter annual": 370.00 CAD a year, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each; overage invoiced each month
+  tag Product "Starter monthly": tag it as LobbyStack's; add 37.00 CAD a month; drop 30.00 CAD fixed
+  create Product "Pro annual": 870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each; overage invoiced each month
+  tag Product "Pro monthly": tag it as LobbyStack's; add 87.00 CAD a month; drop 100.00 CAD fixed
+  detach Product "Starter monthly": detach "150 voice minutes a month", "50 alert SMS segments a month", "20 call transfers a month": the worker reports only each month's overage
+  detach Product "Pro monthly": detach "500 voice minutes a month", "200 alert SMS segments a month", "100 call transfers a month": the worker reports only each month's overage
+  create Product "250 minutes, 90 days": 55.00 CAD once; private: only an API checkout sells it
+  create Product "250 minutes, 180 days": 59.00 CAD once; private: only an API checkout sells it
+  create Product "250 minutes, 365 days": 65.00 CAD once; private: only an API checkout sells it
+  create Product "500 minutes, 90 days": 95.00 CAD once; private: only an API checkout sells it
+  create Product "500 minutes, 180 days": 99.00 CAD once; private: only an API checkout sells it
+  create Product "500 minutes, 365 days": 109.00 CAD once; private: only an API checkout sells it
+  create Product "1,000 minutes, 90 days": 179.00 CAD once; private: only an API checkout sells it
+  create Product "1,000 minutes, 180 days": 189.00 CAD once; private: only an API checkout sells it
+  create Product "1,000 minutes, 365 days": 199.00 CAD once; private: only an API checkout sells it
+  archive Product "Starter annual": replaced by a product that invoices its overage each month; its subscribers keep it
+  archive Product "Pro annual": replaced by a product that invoices its overage each month; its subscribers keep it
+Links: 4 live prices of 2 sold plans and 9 packs, written once Polar sells what the file says
+
+Polar:
+  done tag Meter "Voice minutes": tag it as LobbyStack's
+  done tag Meter "Alert SMS segments": tag it as LobbyStack's
+  done tag Meter "Call transfers": tag it as LobbyStack's
+  done create Product "Starter annual": 370.00 CAD a year, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each; overage invoiced each month
+  done tag Product "Starter monthly": tag it as LobbyStack's; add 37.00 CAD a month; drop 30.00 CAD fixed
+  done create Product "Pro annual": 870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each; overage invoiced each month
+  done tag Product "Pro monthly": tag it as LobbyStack's; add 87.00 CAD a month; drop 100.00 CAD fixed
+  done detach Product "Starter monthly": detach "150 voice minutes a month", "50 alert SMS segments a month", "20 call transfers a month": the worker reports only each month's overage
+  done detach Product "Pro monthly": detach "500 voice minutes a month", "200 alert SMS segments a month", "100 call transfers a month": the worker reports only each month's overage
+  done create Product "250 minutes, 90 days": 55.00 CAD once; private: only an API checkout sells it
+  done create Product "250 minutes, 180 days": 59.00 CAD once; private: only an API checkout sells it
+  done create Product "250 minutes, 365 days": 65.00 CAD once; private: only an API checkout sells it
+  done create Product "500 minutes, 90 days": 95.00 CAD once; private: only an API checkout sells it
+  done create Product "500 minutes, 180 days": 99.00 CAD once; private: only an API checkout sells it
+  done create Product "500 minutes, 365 days": 109.00 CAD once; private: only an API checkout sells it
+  done create Product "1,000 minutes, 90 days": 179.00 CAD once; private: only an API checkout sells it
+  done create Product "1,000 minutes, 180 days": 189.00 CAD once; private: only an API checkout sells it
+  done create Product "1,000 minutes, 365 days": 199.00 CAD once; private: only an API checkout sells it
+  done archive Product "Starter annual": replaced by a product that invoices its overage each month; its subscribers keep it
+  done archive Product "Pro annual": replaced by a product that invoices its overage each month; its subscribers keep it
+
+Links: recorded 24 changes in run <uuid>.
+
+alloplace billing.json v1 (85fcec4a8eb3) against Polar sandbox and https://demo.alloplace.com
+
+File and Postgres
+  ok     catalog 85fcec4a8eb3 applied
+  ok     the deployed code was built with this file
+  ok     4 plans, 4 live prices, 9 packs, 9 live pack prices
+  ok     2 sold plans and 9 packs active and linked
+
+File and Polar
+  ok     currency CAD, one subscription per customer, plan changes on in the portal
+  ok     3 meters
+  ok     no Credits on the products: the worker reports only each month's overage
+  ok     4 products and 9 one-time pack products, tagged and priced as the file says, annual ones invoicing overage each month
+  ok     no discounts
+  ok     webhook https://demo.alloplace.com/api/webhooks/polar, Raw, on, API version 2026-10
+  ok     nothing else tagged for alloplace
+
+Postgres and Polar
+  ok     4 products and 9 pack products linked, all live, tagged and priced as the rows say
+  ok     Polar sandbox organization Test organization
+  ok     webhook secrets match
+  warn   product_vars: POLAR_STARTER_ANNUAL_PRODUCT_ID is product_0016, not the linked product product_0035. Checkout sells the linked product and ignores the variable, so remove it from the instance.
+  warn   product_vars: POLAR_PRO_ANNUAL_PRODUCT_ID is product_0029, not the linked product product_0041. Checkout sells the linked product and ignores the variable, so remove it from the instance.
+  info   product_vars: POLAR_STARTER_MONTHLY_PRODUCT_ID, POLAR_PRO_MONTHLY_PRODUCT_ID match their links and aren't needed any more; remove them from the instance when convenient.
+
+Result: in sync (exit 0).",
+  },
+  "verified": {
+    "code": 0,
+    "out": {
+      "checks": [
+        {
+          "code": "catalog_hash",
+          "level": "ok",
+          "message": "catalog 85fcec4a8eb3 applied",
+          "pair": "file_postgres",
+          "subject": "catalog",
+        },
+        {
+          "code": "code_hash",
+          "level": "ok",
+          "message": "the deployed code was built with this file",
+          "pair": "file_postgres",
+          "subject": "code",
+        },
+        {
+          "code": "plan_rows",
+          "level": "ok",
+          "message": "4 plans, 4 live prices, 9 packs, 9 live pack prices",
+          "pair": "file_postgres",
+          "subject": "rows",
+        },
+        {
+          "code": "not_linked",
+          "level": "ok",
+          "message": "2 sold plans and 9 packs active and linked",
+          "pair": "file_postgres",
+          "subject": "links",
+        },
+        {
+          "code": "org_settings",
+          "level": "ok",
+          "message": "currency CAD, one subscription per customer, plan changes on in the portal",
+          "pair": "file_polar",
+          "subject": "org_settings",
+        },
+        {
+          "code": "meter",
+          "level": "ok",
+          "message": "3 meters",
+          "pair": "file_polar",
+          "subject": "meter",
+        },
+        {
+          "code": "credits",
+          "level": "ok",
+          "message": "no Credits on the products: the worker reports only each month's overage",
+          "pair": "file_polar",
+          "subject": "credits",
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "message": "4 products and 9 one-time pack products, tagged and priced as the file says, annual ones invoicing overage each month",
+          "pair": "file_polar",
+          "subject": "product",
+        },
+        {
+          "code": "discount",
+          "level": "ok",
+          "message": "no discounts",
+          "pair": "file_polar",
+          "subject": "discount",
+        },
+        {
+          "code": "webhook",
+          "level": "ok",
+          "message": "webhook https://demo.alloplace.com/api/webhooks/polar, Raw, on, API version 2026-10",
+          "pair": "file_polar",
+          "subject": "webhook",
+        },
+        {
+          "code": "leftover",
+          "level": "ok",
+          "message": "nothing else tagged for alloplace",
+          "pair": "file_polar",
+          "subject": "leftover",
+        },
+        {
+          "code": "linked_id",
+          "level": "ok",
+          "message": "4 products and 9 pack products linked, all live, tagged and priced as the rows say",
+          "pair": "postgres_polar",
+          "subject": "links",
+        },
+        {
+          "code": "polar_org",
+          "level": "ok",
+          "message": "Polar sandbox organization Test organization",
+          "pair": "postgres_polar",
+          "subject": "organization",
+        },
+        {
+          "code": "webhook_secret",
+          "level": "ok",
+          "message": "webhook secrets match",
+          "pair": "postgres_polar",
+          "subject": "webhook",
+        },
+        {
+          "code": "product_vars",
+          "level": "warn",
+          "message": "POLAR_STARTER_ANNUAL_PRODUCT_ID is product_0016, not the linked product product_0035. Checkout sells the linked product and ignores the variable, so remove it from the instance.",
+          "pair": "postgres_polar",
+          "subject": "POLAR_STARTER_ANNUAL_PRODUCT_ID",
+        },
+        {
+          "code": "product_vars",
+          "level": "warn",
+          "message": "POLAR_PRO_ANNUAL_PRODUCT_ID is product_0029, not the linked product product_0041. Checkout sells the linked product and ignores the variable, so remove it from the instance.",
+          "pair": "postgres_polar",
+          "subject": "POLAR_PRO_ANNUAL_PRODUCT_ID",
+        },
+        {
+          "code": "product_vars",
+          "level": "info",
+          "message": "POLAR_STARTER_MONTHLY_PRODUCT_ID, POLAR_PRO_MONTHLY_PRODUCT_ID match their links and aren't needed any more; remove them from the instance when convenient.",
+          "pair": "postgres_polar",
+          "subject": "variables",
+        },
+      ],
+      "status": "passed",
+    },
+  },
+}
+`;
+
+exports[`pnpm billing's output > plans alloplace on an empty organization 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": {
+    "brand": "alloplace",
+    "catalog": [],
+    "hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+    "instance": "https://demo.alloplace.com",
+    "links": {
+      "packs": 9,
+      "plans": 2,
+      "prices": 4,
+    },
+    "polar": {
+      "env": "sandbox",
+      "organization": "org_test",
+    },
+    "refusals": [],
+    "steps": [
+      {
+        "action": "update",
+        "changes": [
+          "allow one subscription per customer",
+          "turn on plan changes in the customer portal",
+        ],
+        "object": "organization",
+        "subject": "Test organization",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Sum of quantity where Name equals billing.voice_minutes",
+        ],
+        "object": "meter",
+        "subject": "Meter "Voice minutes"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Sum of quantity where Name equals billing.alert_sms_segments",
+        ],
+        "object": "meter",
+        "subject": "Meter "Alert SMS segments"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Sum of quantity where Name equals billing.outbound_call_attempts",
+        ],
+        "object": "meter",
+        "subject": "Meter "Call transfers"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "370.00 CAD a year, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Starter annual"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "37.00 CAD a month, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+        ],
+        "object": "product",
+        "subject": "Product "Starter monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Pro annual"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "87.00 CAD a month, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+        ],
+        "object": "product",
+        "subject": "Product "Pro monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Raw, 15 events, API version 2026-10",
+        ],
+        "object": "webhook",
+        "subject": "Webhook https://demo.alloplace.com/api/webhooks/polar",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "55.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "59.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "65.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "95.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "99.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "109.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "179.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "189.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "199.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 365 days"",
+      },
+    ],
+  },
+}
+`;
+
+exports[`pnpm billing's output > plans alloplace on the objects polar-setup.mjs made 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": {
+    "brand": "alloplace",
+    "catalog": [],
+    "hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+    "instance": "https://demo.alloplace.com",
+    "links": {
+      "packs": 9,
+      "plans": 2,
+      "prices": 4,
+    },
+    "polar": {
+      "env": "sandbox",
+      "organization": "org_test",
+    },
+    "refusals": [],
+    "steps": [
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+        ],
+        "object": "meter",
+        "subject": "Meter "Voice minutes"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+        ],
+        "object": "meter",
+        "subject": "Meter "Alert SMS segments"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+        ],
+        "object": "meter",
+        "subject": "Meter "Call transfers"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "370.00 CAD a year, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Starter annual"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+          "add 37.00 CAD a month",
+          "drop 30.00 CAD fixed",
+        ],
+        "object": "product",
+        "subject": "Product "Starter monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Pro annual"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+          "add 87.00 CAD a month",
+          "drop 100.00 CAD fixed",
+        ],
+        "object": "product",
+        "subject": "Product "Pro monthly"",
+      },
+      {
+        "action": "detach",
+        "changes": [
+          "detach "150 voice minutes a month", "50 alert SMS segments a month", "20 call transfers a month": the worker reports only each month's overage",
+        ],
+        "object": "product",
+        "subject": "Product "Starter monthly"",
+      },
+      {
+        "action": "detach",
+        "changes": [
+          "detach "500 voice minutes a month", "200 alert SMS segments a month", "100 call transfers a month": the worker reports only each month's overage",
+        ],
+        "object": "product",
+        "subject": "Product "Pro monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "55.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "59.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "65.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "95.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "99.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "109.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "179.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "189.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "199.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 365 days"",
+      },
+      {
+        "action": "archive",
+        "changes": [
+          "replaced by a product that invoices its overage each month; its subscribers keep it",
+        ],
+        "object": "product",
+        "subject": "Product "Starter annual"",
+      },
+      {
+        "action": "archive",
+        "changes": [
+          "replaced by a product that invoices its overage each month; its subscribers keep it",
+        ],
+        "object": "product",
+        "subject": "Product "Pro annual"",
+      },
+    ],
+  },
+}
+`;
+
+exports[`pnpm billing's output > plans realinfobot on an empty organization 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": {
+    "brand": "realinfobot",
+    "catalog": [],
+    "hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+    "instance": "https://demo.alloplace.com",
+    "links": {
+      "packs": 9,
+      "plans": 2,
+      "prices": 4,
+    },
+    "polar": {
+      "env": "sandbox",
+      "organization": "org_test",
+    },
+    "refusals": [],
+    "steps": [
+      {
+        "action": "update",
+        "changes": [
+          "allow one subscription per customer",
+          "turn on plan changes in the customer portal",
+        ],
+        "object": "organization",
+        "subject": "Test organization",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Sum of quantity where Name equals billing.voice_minutes",
+        ],
+        "object": "meter",
+        "subject": "Meter "Voice minutes"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Sum of quantity where Name equals billing.alert_sms_segments",
+        ],
+        "object": "meter",
+        "subject": "Meter "Alert SMS segments"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Sum of quantity where Name equals billing.outbound_call_attempts",
+        ],
+        "object": "meter",
+        "subject": "Meter "Call transfers"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "370.00 CAD a year, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Starter annual"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "37.00 CAD a month, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+        ],
+        "object": "product",
+        "subject": "Product "Starter monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Pro annual"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "87.00 CAD a month, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+        ],
+        "object": "product",
+        "subject": "Product "Pro monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "Raw, 15 events, API version 2026-10",
+        ],
+        "object": "webhook",
+        "subject": "Webhook https://demo.alloplace.com/api/webhooks/polar",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "55.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "59.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "65.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "95.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "99.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "109.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "179.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "189.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "199.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 365 days"",
+      },
+    ],
+  },
+}
+`;
+
+exports[`pnpm billing's output > plans realinfobot on the objects polar-setup.mjs made 1`] = `
+{
+  "code": 0,
+  "err": "",
+  "out": {
+    "brand": "realinfobot",
+    "catalog": [],
+    "hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+    "instance": "https://demo.alloplace.com",
+    "links": {
+      "packs": 9,
+      "plans": 2,
+      "prices": 4,
+    },
+    "polar": {
+      "env": "sandbox",
+      "organization": "org_test",
+    },
+    "refusals": [],
+    "steps": [
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+        ],
+        "object": "meter",
+        "subject": "Meter "Voice minutes"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+        ],
+        "object": "meter",
+        "subject": "Meter "Alert SMS segments"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+        ],
+        "object": "meter",
+        "subject": "Meter "Call transfers"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "370.00 CAD a year, Voice minutes at 0.20 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Starter annual"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+          "add 37.00 CAD a month",
+          "drop 30.00 CAD fixed",
+        ],
+        "object": "product",
+        "subject": "Product "Starter monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each",
+          "overage invoiced each month",
+        ],
+        "object": "product",
+        "subject": "Product "Pro annual"",
+      },
+      {
+        "action": "tag",
+        "changes": [
+          "tag it as LobbyStack's",
+          "add 87.00 CAD a month",
+          "drop 100.00 CAD fixed",
+        ],
+        "object": "product",
+        "subject": "Product "Pro monthly"",
+      },
+      {
+        "action": "detach",
+        "changes": [
+          "detach "150 voice minutes a month", "50 alert SMS segments a month", "20 call transfers a month": the worker reports only each month's overage",
+        ],
+        "object": "product",
+        "subject": "Product "Starter monthly"",
+      },
+      {
+        "action": "detach",
+        "changes": [
+          "detach "500 voice minutes a month", "200 alert SMS segments a month", "100 call transfers a month": the worker reports only each month's overage",
+        ],
+        "object": "product",
+        "subject": "Product "Pro monthly"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "55.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "59.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "65.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "250 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "95.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "99.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "109.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "500 minutes, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "179.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 90 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "189.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 180 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "199.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "1,000 minutes, 365 days"",
+      },
+      {
+        "action": "archive",
+        "changes": [
+          "replaced by a product that invoices its overage each month; its subscribers keep it",
+        ],
+        "object": "product",
+        "subject": "Product "Starter annual"",
+      },
+      {
+        "action": "archive",
+        "changes": [
+          "replaced by a product that invoices its overage each month; its subscribers keep it",
+        ],
+        "object": "product",
+        "subject": "Product "Pro annual"",
+      },
+    ],
+  },
+}
+`;

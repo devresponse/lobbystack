@@ -6,10 +6,10 @@ import { businesses, enqueueOutbox, users, withBusinessTransaction, type Databas
 import { requireBusinessAdmin } from "../authz";
 import type { DomainContext } from "./context";
 import { attributeBusiness } from "./affiliates";
-import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
+import { limitsFor, type BillingPlanLimitBook } from "./billingPlans";
 import { deploymentAppName } from "./branding";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
-import { loadBillingContext } from "./usage";
+import { loadBusinessPlanLimits } from "./usage";
 
 // French puts no "de" before the name and Serbian never declines it, because
 // the name is configured (see docs/branding.md).
@@ -91,19 +91,24 @@ export function resolveOnboardingRoute(stage: string | null | undefined): string
 const numberStages: ReadonlySet<OnboardingStage> = new Set(["phone_number", "phone_number_claiming"]);
 
 export function resolveOnboardingStageForPlan(stage: OnboardingStage, plan: string | null, limits: BillingPlanLimitBook, planCode: string | null = null): OnboardingStage {
-  return numberStages.has(stage) && isBillingPlanSlug(plan) && limitsFor(limits, plan, planCode).includedBusinessNumbers === 0 ? "plan" : stage;
+  return isBillingPlanSlug(plan) ? resolveOnboardingStageForNumbers(stage, limitsFor(limits, plan, planCode).includedBusinessNumbers) : stage;
+}
+
+/** The same rule from the numbers the plan in force includes, as loadBusinessPlanLimits reads them, a prepaid pack's own included. */
+export function resolveOnboardingStageForNumbers(stage: OnboardingStage, includedBusinessNumbers: number | null): OnboardingStage {
+  return numberStages.has(stage) && includedBusinessNumbers === 0 ? "plan" : stage;
 }
 
 // The step the dashboard shows for a business's stored stage. Only the number
 // steps depend on the plan in force, so only there does this read it, first
 // scoping the transaction to the business. A lapsed subscription or an ended
-// managed plan is Free there, whatever plan the account keeps.
+// managed plan is Free there, whatever plan the account keeps; a business on
+// a prepaid pack has the numbers its packs include.
 export async function resolveOnboardingStageInTransaction(tx: DatabaseTransaction, businessId: string, storedStage: string): Promise<OnboardingStage> {
   const stage = normalizeOnboardingStage(storedStage);
   if (!numberStages.has(stage)) return stage;
   await tx.execute(sql`select set_config('app.business_id', ${businessId}, true)`);
-  const { plan, planCode } = await loadBillingContext(tx, businessId);
-  return resolveOnboardingStageForPlan(stage, plan, await readBillingPlanLimitBook(tx), planCode);
+  return resolveOnboardingStageForNumbers(stage, (await loadBusinessPlanLimits(tx, businessId)).limits.includedBusinessNumbers);
 }
 
 export function isValidOnboardingTransition(from: OnboardingStage, to: OnboardingStage): boolean {

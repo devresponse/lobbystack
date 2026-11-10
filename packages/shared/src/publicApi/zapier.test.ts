@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
 import { apiOperations, offeredApiKeyScopes, zapierApiKeyScopes, zapierOperationIds } from "./operations";
-import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiMessageSchema, apiServiceSchema, apiStaffSchema } from "./schemas";
+import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiMessageSchema, apiReceptionistProfileSchema, apiServiceSchema, apiStaffSchema } from "./schemas";
 
 // The Zapier integration's samples, which people see while they build a Zap
 // before any real data arrives. It is plain CommonJS outside the workspace.
@@ -30,6 +30,7 @@ describe("the Zapier integration's samples", () => {
     knowledgeEntry: apiKnowledgeEntrySchema,
     service: apiServiceSchema,
     staff: apiStaffSchema,
+    receptionist: apiReceptionistProfileSchema,
   };
 
   it.each(Object.keys(schemas))("match what the API returns for a %s", (resource) => {

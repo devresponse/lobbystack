@@ -29,7 +29,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Run the platform](platform.md) | The local stack in Docker, health checks, certification, backups |
 | [Run and debug on your desktop](voice/local-debugging.md) | Docker, VS Code and a tunnel for real calls and texts |
 | [Brand a deployment](branding.md) | The name, logo, colour and outside links each deployment shows |
-| [Polar](providers/polar.md) and [email](providers/resend.md) | Setting up payments and email |
+| [Polar](providers/polar.md), [Stripe](providers/stripe.md) and [email](providers/resend.md) | Setting up payments and email |
 | [Alerts](operations/alerts.md), [backup and restore](operations/backup-restore.md), [error tracking alerts](telemetry/provider-failure-error-tracking.md) | Runbooks for a running deployment |
 | [Railway infrastructure as code](deployment/railway.md) | The original project's `.railway/railway.ts`; the fork deploys by the guide instead |
 
@@ -37,6 +37,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 
 | Page | What it covers |
 | --- | --- |
+| [Several receptionists](features/receptionists.md) | A receptionist for each location, team or language: the Receptionists page, plan limits, who answers each number, widget and QR link, knowledge for chosen receptionists, receptionist pages and QR links with scan counts |
 | [Phone and browser calls](features/calls.md) | GPT-Live, the recorded greeting, the time limit, AI traces, archiving a call |
 | [Caller authentication](features/caller-authentication.md) | The four ways to verify a caller before an appointment change, including keypad PINs |
 | [Phone numbers](features/phone-numbers.md) | Picking or claiming a business's Twilio number, and debugging a failed pick |
@@ -54,7 +55,8 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [API, CLI and integrations](features/api-cli-integrations.md) | The v1 API, MCP server, CLI, webhooks, Zapier, Make and n8n |
 | [Unanswered questions](features/unanswered-questions.md) | The questions the receptionist couldn't answer, and answering them as text entries |
 | [Logs, errors and alerts](features/observability.md) | Logs, PostHog, following one call, and what to alert on |
-| [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar, promo codes, and why it is built this way |
+| [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar and Stripe, promo codes, and why it is built this way |
+| [Prepaid minute packs](features/prepaid-packs.md) | Minutes paid once that last a set number of days, beside the plans: the packs on sale, buying one, how calls draw on it, switching to and from a subscription, refunds, disputes and the end of a pack |
 | [Sign-in email addresses](auth-email-normalization.md) | How addresses are compared |
 
 ## Understand the architecture
@@ -62,7 +64,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 - [Platform architecture](architecture/overview.md), [the voice runtime](voice/runtime.md) and [knowledge](knowledge/architecture.md).
 - [Telemetry](telemetry/architecture.md): its [events](telemetry/event-taxonomy.md), [KPIs](telemetry/kpi-spec.md) and [data quality checks](telemetry/data-quality-checklist.md).
 - [Test a voice change](voice/testing.md) with `pnpm voice:eval` and `pnpm voice:call`.
-- The architecture decisions, [ADR 0001](adr/0001-monorepo.md) to [ADR 0009](adr/0009-ai-conversation-traces.md), listed in [decisions](project/decisions.md#read-the-architecture-decisions).
+- The architecture decisions, [ADR 0001](adr/0001-monorepo.md) to [ADR 0011](adr/0011-prepaid-packs-ledger.md), listed in [decisions](project/decisions.md#read-the-architecture-decisions).
 
 ## Look things up
 

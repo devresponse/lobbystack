@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ access: vi.fn(), mint: vi.fn(), limit: vi.fn(), ip: vi.fn(), register: vi.fn(), touch: vi.fn(), report: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), mint: vi.fn(), limit: vi.fn(), ip: vi.fn(), register: vi.fn(), touch: vi.fn(), report: vi.fn(), pageReceptionist: vi.fn() }));
 vi.mock("@/lib/api-helpers", () => ({ readJson: (request: Request) => request.json() }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
 vi.mock("@/lib/error-reporting", () => ({ reportServerError: mocks.report }));
 vi.mock("@/lib/widget-access", () => ({ resolveWidgetAccess: mocks.access }));
 vi.mock("@/lib/widget-keys", () => ({ createWidgetSessionToken: mocks.mint, requestIpHash: mocks.ip, touchWidgetKeyLastUsed: mocks.touch }));
 vi.mock("@/lib/widget-policy", () => ({ enforceWidgetRateLimits: mocks.limit }));
+vi.mock("@/lib/widget-receptionist", () => ({ receptionistFromPageToken: mocks.pageReceptionist }));
 vi.mock("@lobbystack/domain", () => ({ registerWidgetVisitor: mocks.register }));
 import { POST } from "./route";
 
 const visitorId = "5ef3b4ef-720d-47a7-8320-e6f4707a64e2";
-const request = () => new Request("https://admin.test/api/widget/session", { method: "POST", headers: { origin: "https://business.test", "content-type": "application/json", "user-agent": "Visitor browser" }, body: JSON.stringify({ widgetKey: "widget-key", visitorId }) });
+const request = (extra: Record<string, unknown> = {}) => new Request("https://admin.test/api/widget/session", { method: "POST", headers: { origin: "https://business.test", "content-type": "application/json", "user-agent": "Visitor browser" }, body: JSON.stringify({ widgetKey: "widget-key", visitorId, ...extra }) });
 
 describe("widget session admission", () => {
   beforeEach(() => {
@@ -93,5 +94,41 @@ describe("widget session admission", () => {
     expect(await response.json()).toEqual({ token: "signed", expiresAt: "2026-10-01T00:00:00.000Z", visitorId });
     expect(mocks.register).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(mocks.report).toHaveBeenCalledExactlyOnceWith(failure, { operation: "widget_key_last_used", route: "/api/widget/session" }));
+  });
+  describe("the receptionist a page names", () => {
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    beforeEach(() => mocks.limit.mockResolvedValue({ allowed: true }));
+
+    it("puts the receptionist the page's signed token names in the session", async () => {
+      mocks.pageReceptionist.mockResolvedValue(kitsilano);
+      expect((await POST(request({ receptionistToken: "page-token" }))).status).toBe(200);
+      expect(mocks.pageReceptionist).toHaveBeenCalledExactlyOnceWith("page-token", { businessId: "business", widgetKeyId: "key" });
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith({ widgetKeyId: "key", businessId: "business", visitorId, origin: "https://business.test", receptionistId: kitsilano });
+    });
+
+    it("leaves the session to the widget's key when the token doesn't check out", async () => {
+      mocks.pageReceptionist.mockResolvedValue(undefined);
+      expect((await POST(request({ receptionistToken: "stale-token" }))).status).toBe(200);
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith({ widgetKeyId: "key", businessId: "business", visitorId, origin: "https://business.test" });
+    });
+
+    it("checks nothing on a website that sends no token", async () => {
+      expect((await POST(request())).status).toBe(200);
+      expect(mocks.pageReceptionist).not.toHaveBeenCalled();
+      expect(mocks.mint.mock.calls[0]![0]).not.toHaveProperty("receptionistId");
+    });
+
+    it("refuses a token longer than any page signs", async () => {
+      const response = await POST(request({ receptionistToken: "x".repeat(2049) }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "widget_session_input_invalid" });
+      expect(mocks.pageReceptionist).not.toHaveBeenCalled();
+    });
+
+    it("never names a receptionist for a refused widget", async () => {
+      mocks.access.mockResolvedValue({ ok: false, response: NextResponse.json({ error: "Refused.", code: "widget_origin_denied" }, { status: 403 }) });
+      expect((await POST(request({ receptionistToken: "page-token" }))).status).toBe(403);
+      expect(mocks.pageReceptionist).not.toHaveBeenCalled();
+    });
   });
 });

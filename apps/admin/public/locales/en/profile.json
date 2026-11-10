@@ -3,7 +3,8 @@
     "title": "{{name}} · {{category}} in {{city}}",
     "titleNoCity": "{{name}} · {{category}}",
     "titleNoCategory": "{{name}} · {{city}}",
-    "description": "Hours, services and contact details for {{name}}."
+    "description": "Hours, services and contact details for {{name}}.",
+    "receptionistTitle": "{{receptionist}} · {{title}}"
   },
   "preview": {
     "banner": "This page isn't published. Only your team can see it.",
@@ -77,6 +78,19 @@
     "personDuringHours": "Ask for a person during opening hours.",
     "answeredBy": "Answered by",
     "languages": "Languages"
+  },
+  "receptionists": {
+    "label": "You're talking to",
+    "choose": "Choose who to talk to",
+    "search": "Search by name or what they help with",
+    "noMatches": "Nobody matches that.",
+    "current": "Talking now"
+  },
+  "entryLink": {
+    "notFound": {
+      "title": "This QR code doesn't open a page",
+      "body": "The business may have taken its page down. Ask them for a new code."
+    }
   },
   "notFound": {
     "title": "This page doesn't exist",

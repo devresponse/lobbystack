@@ -215,6 +215,8 @@
         "highlights": {
           "voiceMinutes_one": "{{count}} browser voice minute included",
           "voiceMinutes_other": "{{count}} browser voice minutes included",
+          "receptionists_one": "{{count}} receptionist",
+          "receptionists_other": "{{count}} receptionists",
           "bookingContacts": "No telephone number",
           "support": "Community support"
         }
@@ -233,6 +235,8 @@
         "highlights": {
           "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
           "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+          "receptionists_one": "{{count}} receptionist",
+          "receptionists_other": "{{count}} receptionists",
           "dedicatedNumber_one": "{{count}} dedicated business number",
           "dedicatedNumber_other": "{{count}} dedicated business numbers",
           "alertSms_one": "{{count}} alert SMS segment",
@@ -254,6 +258,8 @@
         "highlights": {
           "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
           "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+          "receptionists_one": "{{count}} receptionist",
+          "receptionists_other": "{{count}} receptionists",
           "dedicatedNumber_one": "{{count}} dedicated business number",
           "dedicatedNumber_other": "{{count}} dedicated business numbers",
           "alertSms_one": "{{count}} alert SMS segment",
@@ -269,6 +275,7 @@
         "cta": "Contact us",
         "highlights": {
           "phoneNumbers": "Multiple dedicated numbers",
+          "customReceptionists": "Custom number of receptionists",
           "selfHosted": "Self-hosted deployment option",
           "support": "Dedicated implementation support"
         }
@@ -286,6 +293,7 @@
       },
       "features": {
         "voiceMinutes": "Voice minutes",
+        "receptionists": "Receptionists",
         "outboundCalls": "Transfer attempts",
         "alertSms": "Alert SMS segments",
         "knowledgeStorage": "Knowledge base",
@@ -331,6 +339,10 @@
             "included_one": "{{count}} included",
             "included_other": "{{count}} included",
             "then": "then {{rate}}/min"
+          },
+          "receptionists": {
+            "included_one": "{{count}} included",
+            "included_other": "{{count}} included"
           },
           "outboundCalls": {
             "included_one": "{{count}} included",
@@ -378,7 +390,19 @@
     "retry": "Try again",
     "current": {
       "title": "This business is already on the {{plan}} plan.",
-      "description": "Its plan is already set up, so you can go on to its phone number."
+      "description": "Its plan is already set up, so you can go on to its phone number.",
+      "prepaidTitle": "This business already has prepaid minutes.",
+      "prepaidDescription": "Its minutes are ready, so you can go on to its phone number."
+    },
+    "packs": {
+      "title": "Prefer prepaid minutes?",
+      "description": "Buy minutes once, with no monthly bill. They last until they run out or the pack ends.",
+      "cta": "Buy pack",
+      "waiting": "Adding your minutes...",
+      "processing": "Your payment is still processing. Check again in a few minutes.",
+      "checkAgain": "Check again",
+      "failed": "Your payment didn't go through. Choose a plan or a pack again.",
+      "refunded": "Your payment was refunded or charged back, so no pack was added. Choose a plan or a pack again."
     }
   }
 }

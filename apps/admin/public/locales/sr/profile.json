@@ -3,7 +3,8 @@
     "title": "{{name}} · {{category}}, {{city}}",
     "titleNoCity": "{{name}} · {{category}}",
     "titleNoCategory": "{{name}} · {{city}}",
-    "description": "Radno vreme, usluge i kontakt podaci za {{name}}."
+    "description": "Radno vreme, usluge i kontakt podaci za {{name}}.",
+    "receptionistTitle": "{{receptionist}} · {{title}}"
   },
   "preview": {
     "banner": "Ova stranica nije objavljena. Vidi je samo Vaš tim.",
@@ -77,6 +78,19 @@
     "personDuringHours": "Tokom radnog vremena možete tražiti da razgovarate sa osobom.",
     "answeredBy": "Odgovara",
     "languages": "Jezici"
+  },
+  "receptionists": {
+    "label": "Razgovarate sa",
+    "choose": "Izaberite s kim razgovarate",
+    "search": "Pretražite po imenu ili temi",
+    "noMatches": "Nema rezultata.",
+    "current": "Sada"
+  },
+  "entryLink": {
+    "notFound": {
+      "title": "Ovaj QR kod ne otvara nijednu stranicu",
+      "body": "Firma je možda uklonila svoju stranicu. Zatražite od nje novi kod."
+    }
   },
   "notFound": {
     "title": "Ova stranica ne postoji",

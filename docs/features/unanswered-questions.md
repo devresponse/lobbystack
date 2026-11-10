@@ -18,11 +18,18 @@ The original project saved the receptionist's query when its `searchKnowledge` l
 
 ## Answer or dismiss a question
 
-1. Go to **Agent > Questions** (`/agent/questions`), right below **Knowledge** in the sidebar. Its **Unanswered Questions** list shows the open questions most asked first, up to 50, with how many times people asked and when they last asked; the badge counts every open one. While any are open, Home also shows a card under **Action required** that opens this page and counts as one action. Only owners and admins see that card.
+1. Go to **Agent > Questions** (`/agent/questions`), right below **Knowledge** in the sidebar. Its **Unanswered Questions** list shows the open questions most asked first, 10 to a page, with how many times people asked and when they last asked; the badge counts every open one. Past 10, the pagination under the list moves between pages and sets how many a page shows, up to 50. While any are open, Home also shows a card under **Action required** that opens this page and counts as one action. Only owners and admins see that card.
 2. Click **Answer**, write what the receptionist should say (up to 5,000 characters), and click **Save Answer**. LobbyStack adds an active text entry titled with the question, at the default priority, and the question leaves the list. The entry appears in the table on the Knowledge page, where it can be edited, paused or deleted like any other. The receptionist's snapshot refreshes like after any new entry, so the next call or chat has it.
 3. Or click **Dismiss** to take a question off the list.
 
 Owners and admins answer and dismiss. Schedulers and viewers see the list on the Questions page without the buttons. If someone else answered or dismissed a question first, the page says so and shows the list as it is now.
+
+## Know who heard each question
+
+Since fork PR #129 a business can have several receptionists, and each question remembers which ones heard it (`unanswered_question_receptionists`, migration `0137`), so the same question asked at three stores is one row with three names ([receptionists](receptionists.md#know-who-answered)). With several receptionists:
+
+- **Each question says who heard it,** such as "Heard by Kitsilano, Gastown", with "(archived)" after a receptionist that's been archived. A receptionist filter keeps the questions one receptionist heard (`GET /api/knowledge/questions?receptionist=<id>`).
+- **An answer asks Who uses this answer:** **Every receptionist**, or **Only the receptionist that heard it** (or the ones that did), which saves the text entry for those receptionists only. `PATCH /api/knowledge/questions/{questionId}` takes `audience`: `everyone`, `asked`, or `chosen` with `receptionistIds`. When every receptionist that heard it is archived, the page asks to save the answer for every receptionist instead.
 
 ## Know what happens when it's asked again
 

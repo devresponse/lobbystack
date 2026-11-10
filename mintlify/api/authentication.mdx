@@ -95,7 +95,7 @@ curl https://app.lobbystack.com/api/v1/services \
   -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
 ```
 
-Without the header, the request returns `400` with the code `business_required`. A business the key can't reach returns `404`. `GET /me` works without the header and shows the key's partner and access. An operator's key also manages the deployment's billing catalog with `GET /billing/catalog`, `GET` and `POST /billing/catalog/runs`, and `POST /billing/catalog/polar-links`, and its promo codes with `GET` and `POST /billing/codes` and `DELETE /billing/codes/{code_id}`, which act on no one business and take no header.
+Without the header, the request returns `400` with the code `business_required`. A business the key can't reach returns `404`. `GET /me` works without the header and shows the key's partner and access. An operator's key also manages the deployment's billing catalog with `GET /billing/catalog`, `GET` and `POST /billing/catalog/runs`, and `POST /billing/catalog/links` (also served at its older path, `/billing/catalog/polar-links`), and its promo codes with `GET` and `POST /billing/codes` and `DELETE /billing/codes/{code_id}`, which act on no one business and take no header.
 
 `POST /team/claim-link` hands a business to its owner. Once they accept, a partner's key no longer reaches it, and an operator's key still does. Either way, `GET /businesses` stops listing it.
 

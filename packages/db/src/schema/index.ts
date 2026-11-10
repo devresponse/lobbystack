@@ -4,10 +4,12 @@ import {
   bigint,
   boolean,
   char,
+  date,
   doublePrecision,
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   pgView,
   primaryKey,
@@ -28,6 +30,12 @@ const legacyId = {
   legacyConvexId: text("legacy_convex_id"),
 };
 
+// The receptionist that answered a call, conversation or inbox item: always
+// set (migration 0143). An insert that leaves it out sends DEFAULT, and the
+// database gives the row its business's default receptionist
+// (app.fill_default_receptionist).
+const answeringReceptionistId = () => uuid("receptionist_id").notNull().$defaultFn(() => sql`default`);
+
 const vector = customType<{ data: number[]; driverData: string }>({
   dataType() {
     return "vector(1536)";
@@ -38,6 +46,12 @@ const vector = customType<{ data: number[]; driverData: string }>({
   fromDriver(value) {
     const raw = String(value).replace(/^\[/, "").replace(/\]$/, "");
     return raw.length === 0 ? [] : raw.split(",").map(Number);
+  },
+});
+
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "tsvector";
   },
 });
 
@@ -156,6 +170,19 @@ export const businesses = pgTable(
     // When and by whom an owner canceled the business (status "canceled"), which closes it to its team and deletes nothing. See migration 0130.
     canceledAt: timestamp("canceled_at", { withTimezone: true }),
     canceledByUserId: uuid("canceled_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    // Settings every receptionist shares (migration 0133): the business
+    // summary, the AI and recording notice and the appointment change rules.
+    summary: text("summary").default("").notNull(),
+    // Who wrote the summary: "placeholder" (sign-up default), "generated" (AI,
+    // from the articles for everyone) or "operator". Generation never replaces
+    // an operator's summary.
+    summarySource: varchar("summary_source", { length: 16 }).$type<"placeholder" | "generated" | "operator">().default("placeholder").notNull(),
+    summaryFingerprint: varchar("summary_fingerprint", { length: 64 }),
+    summaryGeneratedAt: timestamp("summary_generated_at", { withTimezone: true }),
+    // Whether calls say, after the greeting, that the caller is speaking with
+    // an AI and the call is recorded and transcribed.
+    recordingNotice: boolean("recording_notice").default(true).notNull(),
+    appointmentChangePolicy: jsonb("appointment_change_policy").$type<Record<string, unknown>>(),
     ...legacyId,
     ...timestamps,
   },
@@ -349,6 +376,9 @@ export const phoneNumbers = pgTable(
     smsWebhookTargetUrl: text("sms_webhook_target_url"),
     smsWebhookLastSyncedAt: timestamp("sms_webhook_last_synced_at", { withTimezone: true }),
     smsWebhookLastError: text("sms_webhook_last_error"),
+    // Who answers the number; null means the default receptionist. A paused or
+    // archived one's calls go to the default (app.effective_receptionist).
+    receptionistId: uuid("receptionist_id"),
     ...legacyId,
     ...timestamps,
   },
@@ -356,6 +386,7 @@ export const phoneNumbers = pgTable(
     uniqueIndex("phone_numbers_e164_unreclaimed_unique").on(table.e164).where(sql`${table.status} <> 'reclaimed'`),
     uniqueIndex("phone_numbers_provider_id_unique").on(table.providerPhoneId),
     index("phone_numbers_business_idx").on(table.businessId),
+    index("phone_numbers_business_receptionist_idx").on(table.businessId, table.receptionistId),
   ],
 );
 
@@ -374,27 +405,39 @@ export const receptionistProfiles = pgTable(
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
     greeting: text("greeting").notNull(),
     tone: text("tone").notNull(),
-    summary: text("summary").notNull(),
-    // Who wrote the summary: "placeholder" (sign-up default), "generated" (AI,
-    // from the knowledge sources) or "operator". Generation never replaces an
-    // operator's summary.
-    summarySource: varchar("summary_source", { length: 16 }).$type<"placeholder" | "generated" | "operator">().default("placeholder").notNull(),
-    summaryFingerprint: varchar("summary_fingerprint", { length: 64 }),
-    summaryGeneratedAt: timestamp("summary_generated_at", { withTimezone: true }),
     bookingPolicy: text("booking_policy").notNull(),
     voiceInstructions: text("voice_instructions"),
     smsInstructions: text("sms_instructions"),
     chatInstructions: text("chat_instructions"),
     transferMode: varchar("transfer_mode", { length: 32 }).notNull(),
     transferNumber: text("transfer_number"),
-    appointmentChangePolicy: jsonb("appointment_change_policy").$type<Record<string, unknown>>(),
     bookingMode: varchar("booking_mode", { length: 16 }).default("instant").notNull(),
-    // Whether calls say, after the greeting, that the caller is speaking with
-    // an AI and the call is recorded and transcribed. See migration 0118.
-    recordingNotice: boolean("recording_notice").default(true).notNull(),
+    // One row per receptionist since migration 0133. The settings every
+    // receptionist shares are on businesses, and a new business gets its
+    // default receptionist from the database (migration 0143).
+    name: varchar("name", { length: 80 }).default("Front desk").notNull(),
+    // "What it helps with": the picker shows it, and the other receptionists use it to send visitors here.
+    description: varchar("description", { length: 160 }).default("").notNull(),
+    // The page address /profile/<slug>/<handle>; null on the default receptionist.
+    handle: varchar("handle", { length: 60 }),
+    // Exactly one per business. A row inserted without saying is the default.
+    isDefault: boolean("is_default").default(true).notNull(),
+    knowledgeScope: varchar("knowledge_scope", { length: 16 }).$type<"all" | "audience">().default("all").notNull(),
+    // Shown in the business page's picker.
+    listed: boolean("listed").default(true).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    // The language its calls start in; null uses the business's.
+    locale: varchar("locale", { length: 8 }),
+    status: varchar("status", { length: 16 }).$type<"active" | "paused">().default("active").notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [uniqueIndex("receptionist_profiles_business_unique").on(table.businessId)],
+  (table) => [
+    uniqueIndex("receptionist_profiles_business_default_unique").on(table.businessId).where(sql`${table.isDefault}`),
+    uniqueIndex("receptionist_profiles_business_handle_unique").on(table.businessId, table.handle).where(sql`${table.handle} is not null and ${table.archivedAt} is null`),
+    uniqueIndex("receptionist_profiles_business_id_unique").on(table.businessId, table.id),
+    index("receptionist_profiles_business_order_idx").on(table.businessId, table.sortOrder, table.name),
+  ],
 );
 
 export const contacts = pgTable(
@@ -448,11 +491,14 @@ export const widgetKeys = pgTable(
     allowedOrigins: jsonb("allowed_origins").$type<string[]>().notNull().default([]),
     config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    // Who answers the widget; null means the default receptionist.
+    receptionistId: uuid("receptionist_id"),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("widget_keys_key_hash_unique").on(table.keyHash),
     index("widget_keys_business_created_idx").on(table.businessId, table.createdAt),
+    index("widget_keys_business_receptionist_idx").on(table.businessId, table.receptionistId),
   ],
 );
 
@@ -479,6 +525,44 @@ export const businessPublicProfiles = pgTable("business_public_profiles", {
   widgetKeyId: uuid("widget_key_id").references(() => widgetKeys.id, { onDelete: "set null" }),
   ...timestamps,
 });
+
+// QR short links, /q/<code> (migration 0140). Each opens one receptionist's
+// page; a paused link, or one whose receptionist is paused or archived, opens
+// the default receptionist's, so a printed sign always reaches someone.
+export const entryLinks = pgTable(
+  "entry_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    receptionistId: uuid("receptionist_id").notNull(),
+    code: varchar("code", { length: 12 }).notNull(),
+    label: varchar("label", { length: 80 }).default("").notNull(),
+    status: varchar("status", { length: 16 }).$type<"active" | "paused">().default("active").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("entry_links_code_unique").on(table.code),
+    uniqueIndex("entry_links_business_id_unique").on(table.businessId, table.id),
+    index("entry_links_business_created_idx").on(table.businessId, table.createdAt.desc()),
+    index("entry_links_business_receptionist_idx").on(table.businessId, table.receptionistId),
+  ],
+);
+
+// Scans of each entry link per UTC day. Nothing about the visitor; kept 13 months.
+export const entryLinkDailyScans = pgTable(
+  "entry_link_daily_scans",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    entryLinkId: uuid("entry_link_id").notNull(),
+    day: date("day", { mode: "string" }).notNull(),
+    scans: integer("scans").default(0).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.entryLinkId, table.day] }),
+    index("entry_link_daily_scans_business_day_idx").on(table.businessId, table.day),
+  ],
+);
 
 export const widgetVisitors = pgTable(
   "widget_visitors",
@@ -539,11 +623,18 @@ export const conversations = pgTable(
     summary: text("summary"),
     currentIntent: text("current_intent"),
     locale: varchar("locale", { length: 8 }),
+    // The receptionist that answered. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [index("conversations_business_status_idx").on(table.businessId, table.status), index("conversations_contact_idx").on(table.businessId, table.contactId), index("conversations_business_widget_visitor_idx").on(table.businessId, table.widgetVisitorId)],
+  (table) => [
+    index("conversations_business_status_idx").on(table.businessId, table.status),
+    index("conversations_contact_idx").on(table.businessId, table.contactId),
+    index("conversations_business_widget_visitor_idx").on(table.businessId, table.widgetVisitorId),
+    index("conversations_business_receptionist_updated_idx").on(table.businessId, table.receptionistId, table.updatedAt.desc()),
+  ],
 );
 
 export const conversationSessions = pgTable(
@@ -637,12 +728,15 @@ export const calls = pgTable(
     // Set when an owner or admin archives the call, which hides it from the
     // Calls list and Home's recent calls. Nothing is deleted.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    // The receptionist that answered. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
   },
   (table) => [
     uniqueIndex("calls_provider_call_unique").on(table.provider, table.providerCallId),
+    index("calls_business_receptionist_started_idx").on(table.businessId, table.receptionistId, table.startedAt.desc()),
     uniqueIndex("calls_gateway_session_unique").on(table.gatewaySessionId),
     index("calls_business_started_idx").on(table.businessId, table.startedAt),
     index("calls_business_recording_idx").on(table.businessId, table.recordingObjectId).where(sql`${table.recordingObjectId} is not null`),
@@ -663,6 +757,8 @@ export const inboxItems = pgTable(
     contentRetentionStatus: varchar("content_retention_status", { length: 32 }).default("active").notNull(),
     contentExpiresAt: timestamp("content_expires_at", { withTimezone: true }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    // The receptionist whose call or chat made the item. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     ...legacyId,
     ...timestamps,
   },
@@ -810,15 +906,27 @@ export const knowledgeDocuments = pgTable(
     sourceUrl: text("source_url"),
     storageObjectId: uuid("storage_object_id"),
     mimeType: varchar("mime_type", { length: 255 }),
-    status: varchar("status", { length: 32 }).default("pending").notNull(),
+    // The database refuses any other status (migration 0144).
+    status: varchar("status", { length: 32 }).$type<"pending" | "processing" | "indexed" | "error" | "cancelled">().default("pending").notNull(),
     processingProgress: integer("processing_progress").default(0).notNull(),
     contentHash: varchar("content_hash", { length: 128 }),
     error: text("error"),
+    // "everyone", or "chosen": only the receptionists in knowledge_document_receptionists
+    // (and those that see every article) use it. Migration 0136.
+    audience: varchar("audience", { length: 16 }).$type<"everyone" | "chosen">().default("everyone").notNull(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [index("knowledge_documents_business_status_idx").on(table.businessId, table.status), index("knowledge_documents_hash_idx").on(table.businessId, table.contentHash), uniqueIndex("knowledge_documents_business_url_unique").on(table.businessId, table.sourceUrl), index("knowledge_documents_title_keyword_idx").using("gin", sql`to_tsvector('simple', ${table.title})`)],
+  (table) => [
+    index("knowledge_documents_business_status_idx").on(table.businessId, table.status),
+    index("knowledge_documents_hash_idx").on(table.businessId, table.contentHash),
+    uniqueIndex("knowledge_documents_business_url_unique").on(table.businessId, table.sourceUrl),
+    index("knowledge_documents_title_keyword_idx").using("gin", sql`to_tsvector('simple', ${table.title})`),
+    uniqueIndex("knowledge_documents_business_id_unique").on(table.businessId, table.id),
+    // The snapshot's ranking of each receptionist's documents (migration 0141).
+    index("knowledge_documents_business_ranked_idx").on(table.businessId, table.updatedAt.desc(), table.id).where(sql`${table.active} and ${table.status} = 'indexed'`),
+  ],
 );
 
 export const knowledgeChunks = pgTable(
@@ -832,12 +940,15 @@ export const knowledgeChunks = pgTable(
     contentHash: varchar("content_hash", { length: 128 }).notNull(),
     embedding: vector("embedding"),
     embeddingFingerprint: varchar("embedding_fingerprint", { length: 64 }),
-    embeddingStatus: varchar("embedding_status", { length: 16 }).default("pending").notNull(),
+    // The database refuses any other status (migration 0144).
+    embeddingStatus: varchar("embedding_status", { length: 16 }).$type<"pending" | "completed" | "failed">().default("pending").notNull(),
     embeddingError: text("embedding_error"),
     tokenCount: integer("token_count"),
+    // The passage's words with its document's title, kept by triggers (migration 0145).
+    searchWords: tsvector("search_words"),
     ...timestamps,
   },
-  (table) => [uniqueIndex("knowledge_chunks_document_sequence_unique").on(table.documentId, table.sequence), index("knowledge_chunks_business_embedding_fingerprint_idx").on(table.businessId, table.embeddingFingerprint), index("knowledge_chunks_reembed_pending_idx").on(table.businessId).where(sql`${table.embedding} is null or ${table.embeddingStatus} in ('pending', 'failed')`), index("knowledge_chunks_keyword_idx").using("gin", sql`to_tsvector('simple', ${table.content})`)],
+  (table) => [uniqueIndex("knowledge_chunks_document_sequence_unique").on(table.documentId, table.sequence), index("knowledge_chunks_business_embedding_fingerprint_idx").on(table.businessId, table.embeddingFingerprint), index("knowledge_chunks_reembed_pending_idx").on(table.businessId).where(sql`${table.embedding} is null or ${table.embeddingStatus} in ('pending', 'failed')`)],
 );
 
 export const knowledgeSnippets = pgTable(
@@ -850,10 +961,74 @@ export const knowledgeSnippets = pgTable(
     tags: jsonb("tags").$type<string[]>().default([]).notNull(),
     priority: integer("priority").default(0).notNull(),
     active: boolean("active").default(true).notNull(),
+    // "everyone", or "chosen": see knowledge_snippet_receptionists. Migration 0136.
+    audience: varchar("audience", { length: 16 }).$type<"everyone" | "chosen">().default("everyone").notNull(),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [index("knowledge_snippets_business_active_idx").on(table.businessId, table.active)],
+  (table) => [
+    index("knowledge_snippets_business_active_idx").on(table.businessId, table.active),
+    uniqueIndex("knowledge_snippets_business_id_unique").on(table.businessId, table.id),
+    // The snapshot's ranking of each receptionist's text entries (migration 0142).
+    index("knowledge_snippets_business_ranked_idx").on(table.businessId, table.priority.desc(), table.updatedAt.desc(), table.id).where(sql`${table.active}`),
+  ],
+);
+
+// Several receptionists per business (migrations 0136, 0137, 0140). Each row
+// names a receptionist of its own business: the composite foreign keys to
+// receptionist_profiles (business_id, id) live in the SQL migrations.
+
+// A website rule: pages imported under a path of a website source are for the
+// chosen receptionist, added after every crawl.
+export const knowledgeWebsiteRules = pgTable(
+  "knowledge_website_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    rootDocumentId: uuid("root_document_id").notNull(),
+    // Starts and ends with "/", such as "/menu/".
+    pathPrefix: varchar("path_prefix", { length: 300 }).notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_website_rules_unique").on(table.rootDocumentId, table.pathPrefix, table.receptionistId),
+    uniqueIndex("knowledge_website_rules_business_id_unique").on(table.businessId, table.id),
+    index("knowledge_website_rules_business_receptionist_idx").on(table.businessId, table.receptionistId),
+  ],
+);
+
+// Who a chosen document is for. A row a website rule added names the rule, and goes with it.
+export const knowledgeDocumentReceptionists = pgTable(
+  "knowledge_document_receptionists",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    websiteRuleId: uuid("website_rule_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.documentId, table.receptionistId] }),
+    index("knowledge_document_receptionists_receptionist_idx").on(table.businessId, table.receptionistId),
+    index("knowledge_document_receptionists_rule_idx").on(table.businessId, table.websiteRuleId).where(sql`${table.websiteRuleId} is not null`),
+  ],
+);
+
+// Who a chosen text entry is for.
+export const knowledgeSnippetReceptionists = pgTable(
+  "knowledge_snippet_receptionists",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    snippetId: uuid("snippet_id").notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.snippetId, table.receptionistId] }),
+    index("knowledge_snippet_receptionists_receptionist_idx").on(table.businessId, table.receptionistId),
+  ],
 );
 
 // Questions the receptionist found no knowledge for (migration 0131). The same
@@ -883,6 +1058,24 @@ export const unansweredQuestions = pgTable(
     uniqueIndex("unanswered_questions_business_question_unique").on(table.businessId, table.normalizedQuestion).where(sql`${table.status} in ('open', 'dismissed')`),
     index("unanswered_questions_business_status_idx").on(table.businessId, table.status, table.timesAsked.desc(), table.lastAskedAt.desc()),
     index("unanswered_questions_business_expiry_idx").on(table.businessId, table.contentExpiresAt).where(sql`${table.contentExpiresAt} is not null`),
+    uniqueIndex("unanswered_questions_business_id_unique").on(table.businessId, table.id),
+  ],
+);
+
+// Which receptionists heard each unanswered question (migration 0137). The
+// question row keeps the one answer; these rows show who asked and filter the list.
+export const unansweredQuestionReceptionists = pgTable(
+  "unanswered_question_receptionists",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id").notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    timesAsked: integer("times_asked").default(1).notNull(),
+    lastAskedAt: timestamp("last_asked_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.questionId, table.receptionistId] }),
+    index("unanswered_question_receptionists_receptionist_idx").on(table.businessId, table.receptionistId, table.lastAskedAt.desc()),
   ],
 );
 
@@ -1060,6 +1253,7 @@ export const billingAccounts = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    /** Who bills the business: polar, stripe or managed (the operator, outside the provider). A new account names it. The default stays: reconcile's upsert leaves it out for an account that exists, and PostgreSQL checks NOT NULL before it finds the conflict (migration 0147). */
     source: varchar("source", { length: 32 }).default("polar").notNull(),
     billingKey: text("billing_key").notNull(),
     customerId: text("customer_id"),
@@ -1086,10 +1280,30 @@ export const billingAccounts = pgTable(
     subscriptionClaim: uuid("subscription_claim"),
     /** When that run's claim runs out, in case its worker died. */
     subscriptionClaimedUntil: timestamp("subscription_claimed_until", { withTimezone: true }),
+    /** Stripe's monthly overage subscription, beside the plan's, or the plan's own when overage is on its checkout (merchant of record); null on Polar. Migration 0146. */
+    overageSubscriptionId: text("overage_subscription_id"),
+    /** When the subscription ends unless resumed, as the provider last said; null when it renews. */
+    cancelAt: timestamp("cancel_at", { withTimezone: true }),
+    /** The plan a change waiting for the renewal moves the business to; set with nextInterval and nextChangeAt, or none of them. */
+    nextPlanCode: varchar("next_plan_code", { length: 48 }).references(() => billingPlans.code),
+    /** monthly or annual: the waiting change's billing interval. */
+    nextInterval: varchar("next_interval", { length: 16 }),
+    /** When the waiting change takes effect. */
+    nextChangeAt: timestamp("next_change_at", { withTimezone: true }),
+    /** Where this month's allowances start counting, set only when the business switches between a prepaid pack and a subscription; null means the whole month. Migration 0148. */
+    allowancesSince: timestamp("allowances_since", { withTimezone: true }),
+    /** The subscription a prepaid pack replaced, which LobbyStack treats as ended while the provider confirms it; null for every other business. */
+    replacedSubscriptionId: text("replaced_subscription_id"),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [uniqueIndex("billing_accounts_business_unique").on(table.businessId), uniqueIndex("billing_accounts_billing_key_unique").on(table.billingKey), uniqueIndex("billing_accounts_legacy_convex_id_unique").on(table.legacyConvexId), index("billing_accounts_customer_idx").on(table.customerId)],
+  (table) => [
+    uniqueIndex("billing_accounts_business_unique").on(table.businessId),
+    uniqueIndex("billing_accounts_billing_key_unique").on(table.billingKey),
+    uniqueIndex("billing_accounts_legacy_convex_id_unique").on(table.legacyConvexId),
+    index("billing_accounts_customer_idx").on(table.customerId),
+    uniqueIndex("billing_accounts_overage_subscription_unique").on(table.overageSubscriptionId).where(sql`${table.overageSubscriptionId} is not null`),
+  ],
 );
 
 export const billingCheckoutRequests = pgTable(
@@ -1138,7 +1352,8 @@ export const billingTransactions = pgTable(
     invoiceUrl: text("invoice_url"),
     orderId: text("order_id"),
     subscriptionId: text("subscription_id"),
-    polarCustomerId: text("polar_customer_id"),
+    /** The payer's customer at the billing provider. Migration 0146. */
+    providerCustomerId: text("provider_customer_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).defaultNow().notNull(),
     ...timestamps,
@@ -1169,6 +1384,10 @@ export const billingUsageEvents = pgTable(
     syncSeq: integer("sync_seq").default(0).notNull(),
     /** The difference the event numbered syncSeq carries, once a worker run claimed it and until Polar takes it. */
     sendingQuantity: doublePrecision("sending_quantity"),
+    /** Overage cents per unit of the plan the row counted under, set at its first claim, where the provider meters money (Stripe). Migration 0146. */
+    rateCents: integer("rate_cents"),
+    /** When the row's latest event last went to the provider. */
+    syncSentAt: timestamp("sync_sent_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [uniqueIndex("billing_usage_source_unique").on(table.businessId, table.sourceKey), index("billing_usage_status_idx").on(table.syncStatus, table.createdAt), index("billing_usage_events_plan_code_idx").on(table.businessId, table.planCodeAtRecordTime).where(sql`${table.planCodeAtRecordTime} is not null`)],
@@ -1191,6 +1410,12 @@ export const billingUsageMonths = pgTable(
     chatAiBlocked: boolean("chat_ai_tokens_blocked").default(false).notNull(),
     overageSpendCents: integer("overage_spend_cents").default(0).notNull(),
     lastRecordedAt: timestamp("last_recorded_at", { withTimezone: true }).defaultNow().notNull(),
+    /** The month's overage the provider held at the last daily totals check (Stripe). Migration 0146. */
+    providerOverageCents: numeric("provider_overage_cents", { precision: 14, scale: 4 }),
+    /** When the daily totals check last compared the month. */
+    providerCheckedAt: timestamp("provider_checked_at", { withTimezone: true }),
+    /** The number of the next correction the totals check sends for the month. */
+    fixSeq: integer("fix_seq").default(0).notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("billing_usage_months_business_period_unique").on(table.businessId, table.periodKey), index("billing_usage_months_business_idx").on(table.businessId, table.lastRecordedAt)],
@@ -1205,9 +1430,9 @@ export const billingRuns = pgTable(
   "billing_runs",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    /** catalog (an apply), polar (a link to Polar's products) or verify (a check of the file, the tables and Polar). */
+    /** catalog (an apply), link (provider objects linked to the catalog) or verify (a check of the file, the tables and the provider). */
     kind: varchar("kind", { length: 8 }).notNull(),
-    /** applied or unchanged for a catalog or polar run; passed, drift or failed for a verify. */
+    /** applied or unchanged for a catalog or link run; passed, drift or failed for a verify. */
     status: varchar("status", { length: 10 }).notNull(),
     /** The brand whose file it was. */
     brand: varchar("brand", { length: 64 }).notNull(),
@@ -1225,10 +1450,14 @@ export const billingRuns = pgTable(
     changes: jsonb("changes").$type<unknown[]>().notNull().default([]),
     /** Drift a verify found; always empty for a catalog run. */
     problems: jsonb("problems").$type<unknown[]>().notNull().default([]),
-    /** sandbox or production; polar and verify runs only. */
-    polarEnv: varchar("polar_env", { length: 10 }),
-    /** The Polar organization ID; polar and verify runs only. */
-    polarOrg: text("polar_org"),
+    /** polar or stripe: the provider a link or verify run ran against; null for a catalog run. Migration 0146. */
+    provider: varchar("provider", { length: 8 }),
+    /** sandbox or live: the provider's environment. */
+    providerEnv: varchar("provider_env", { length: 8 }),
+    /** The provider's account: the Polar organization ID or the Stripe account ID. */
+    providerAccount: text("provider_account"),
+    /** The provider's objects a link recorded beyond plans and prices, such as Stripe's meters; null for Polar. */
+    providerObjects: jsonb("provider_objects").$type<Record<string, unknown>>(),
     /** The operator platform key that asked; null only for a scheduled verify. */
     keyId: uuid("key_id"),
     /** That key's partner. */
@@ -1282,6 +1511,8 @@ export const billingPlans = pgTable(
     kbBytes: bigint("kb_bytes", { mode: "number" }),
     /** Business phone numbers included. */
     numbers: smallint("numbers"),
+    /** Receptionists included, the default one too; null on custom plans, which get the deployment's cap. Not part of terms_hash. */
+    receptionists: smallint("receptionists"),
     /** Overage cents per voice minute; null when overage isn't billed at fixed rates. */
     voiceRate: integer("voice_rate"),
     /** Overage cents per alert SMS segment. */
@@ -1296,8 +1527,8 @@ export const billingPlans = pgTable(
     offerEnd: timestamp("offer_end", { withTimezone: true }),
     /** Code-less Polar discount applied at checkout: type, basis_points or amount_cents, duration, duration_in_months. */
     discount: jsonb("discount").$type<Record<string, unknown>>(),
-    /** Polar ID of that discount, recorded by a link. */
-    polarDisc: text("polar_disc"),
+    /** The provider's discount for the plan, recorded by a link: a Polar discount or a Stripe coupon. Migration 0146. */
+    providerDisc: text("provider_disc"),
     /** SHA-256 of the terms subscribers and Polar depend on. A change makes a sold plan draft again. */
     termsHash: char("terms_hash", { length: 64 }).notNull(),
     /** When the first business took it; its terms are fixed from then. */
@@ -1310,7 +1541,9 @@ export const billingPlans = pgTable(
     retiredAt: timestamp("retired_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [uniqueIndex("billing_plans_polar_disc_unique").on(table.polarDisc).where(sql`${table.polarDisc} is not null`)],
+  (table) => [
+    uniqueIndex("billing_plans_provider_disc_unique").on(table.providerDisc).where(sql`${table.providerDisc} is not null`),
+  ],
 );
 
 export const billingPrices = pgTable(
@@ -1327,17 +1560,17 @@ export const billingPrices = pgTable(
     cents: integer("cents").notNull(),
     /** Price per month, computed: cents, or for annual cents / 12 rounded to a whole unit (migration 0119). */
     perMonth: integer("per_month").generatedAlwaysAs(sql`CASE WHEN period = 'annual' THEN (round(cents / 1200.0) * 100)::integer ELSE cents END`),
-    /** The Polar product that sells it, recorded by a link. */
-    polarId: text("polar_id"),
+    /** The provider's object that sells it, recorded by a link: a Polar product or a Stripe price. Migration 0146. */
+    providerRef: text("provider_ref"),
     /** The run that last changed the row. */
     runId: uuid("run_id").references(() => billingRuns.id),
-    /** When this price stopped being sold. The row keeps polar_id so its subscribers still match. */
+    /** When this price stopped being sold. The row keeps provider_ref so its subscribers still match. */
     retiredAt: timestamp("retired_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("billing_prices_live_unique").on(table.plan, table.period).where(sql`${table.retiredAt} is null`),
-    uniqueIndex("billing_prices_polar_unique").on(table.polarId).where(sql`${table.polarId} is not null`),
+    uniqueIndex("billing_prices_provider_ref_unique").on(table.providerRef).where(sql`${table.providerRef} is not null`),
   ],
 );
 
@@ -1428,13 +1661,207 @@ export const billingOffers = pgView("billing_offers", {
   ends: varchar("ends", { length: 8 }),
   offerEnd: timestamp("offer_end", { withTimezone: true }),
   discount: jsonb("discount").$type<Record<string, unknown>>(),
-  polarDisc: text("polar_disc"),
   sort: smallint("sort").notNull(),
   period: varchar("period", { length: 8 }),
   currency: char("currency", { length: 3 }),
   cents: integer("cents"),
   perMonth: integer("per_month"),
-  polarId: text("polar_id"),
+  receptionists: smallint("receptionists"),
+  providerDisc: text("provider_disc"),
+  providerRef: text("provider_ref"),
+}).existing();
+
+// Prepaid minute packs of migration 0148: the packs on sale from billing.json's
+// packs section and their prices (the whole deployment's, written only by the
+// worker, retired and never deleted, like the plan catalog), each business's
+// pack checkouts, the ledger of packs bought, and which pack paid for each call.
+export const billingPackPlans = pgTable(
+  "billing_pack_plans",
+  {
+    /** Permanent pack code, its key in billing.json's packs. */
+    code: varchar("code", { length: 48 }).primaryKey(),
+    /** draft (not sellable yet), active, or retired (no one new may buy it). */
+    status: varchar("status", { length: 8 }).default("draft").notNull(),
+    /** Display names by language (en, fr, es, sr). */
+    names: jsonb("names").$type<Record<string, string>>().notNull(),
+    /** Voice seconds the pack holds for its whole length. */
+    voiceSec: integer("voice_sec").notNull(),
+    /** How long the pack lasts from its payment, in 24-hour days; null means it never ends. */
+    days: smallint("days"),
+    /** Alert SMS segments included a month while the pack lasts. */
+    smsSeg: integer("sms_seg").notNull(),
+    /** Outbound call attempts (transfers) included a month. */
+    callsOut: integer("calls_out").notNull(),
+    /** Website chat AI units included a month. */
+    chatUnits: integer("chat_units").notNull(),
+    /** Knowledge storage limit in bytes. */
+    kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
+    /** Business phone numbers included. */
+    numbers: smallint("numbers").notNull(),
+    /** Receptionists included, the default one too. */
+    receptionists: smallint("receptionists").notNull(),
+    /** SHA-256 of the minutes, length, allowances, limits and price. */
+    termsHash: char("terms_hash", { length: 64 }).notNull(),
+    /** When the first business bought it; its minutes and length are fixed from then. */
+    frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    /** Order on pack lists. */
+    sort: smallint("sort").default(100).notNull(),
+    /** The run that last changed the row. */
+    runId: uuid("run_id").references(() => billingRuns.id),
+    /** When the pack was retired; set exactly when status is retired. */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    ...timestamps,
+  },
+);
+
+export const billingPackPrices = pgTable(
+  "billing_pack_prices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** The pack code. */
+    pack: varchar("pack", { length: 48 }).notNull().references(() => billingPackPlans.code),
+    /** Three lowercase letters, from the file. */
+    currency: char("currency", { length: 3 }).notNull(),
+    /** The one-time price. */
+    cents: integer("cents").notNull(),
+    /** The provider's object that sells it, recorded by a link: a Polar product or a Stripe price. */
+    providerRef: text("provider_ref"),
+    /** The run that last changed the row. */
+    runId: uuid("run_id").references(() => billingRuns.id),
+    /** When this price stopped being sold. The row keeps provider_ref so payments at it still match. */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("billing_pack_prices_live_unique").on(table.pack).where(sql`${table.retiredAt} is null`),
+    uniqueIndex("billing_pack_prices_provider_ref_unique").on(table.providerRef).where(sql`${table.providerRef} is not null`),
+  ],
+);
+
+/** A pack's terms as a pack checkout keeps them from when it was asked for (0149): what its payment adds the pack with. */
+export type BillingPackCheckoutTerms = { voiceSec: number; days: number | null; smsSeg: number; callsOut: number; chatUnits: number; kbBytes: number; numbers: number; receptionists: number };
+
+export const billingPackCheckouts = pgTable(
+  "billing_pack_checkouts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    pack: varchar("pack", { length: 48 }).notNull().references(() => billingPackPlans.code),
+    priceId: uuid("price_id").notNull().references(() => billingPackPrices.id),
+    /** pending, processing, ready (the link works), paid, failed or expired. */
+    status: varchar("status", { length: 16 }).default("pending").notNull(),
+    /** The provider's checkout: a Stripe Checkout Session or a Polar checkout. */
+    checkoutId: text("checkout_id"),
+    checkoutUrl: text("checkout_url"),
+    error: text("error"),
+    /** The email a new provider customer gets instead of the requester's. */
+    billingEmail: varchar("billing_email", { length: 320 }),
+    /** When the checkout stops being open, whatever its status. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** The pack's terms when the checkout was asked for, which its payment adds the pack with; null on a row from before 0149. */
+    terms: jsonb("terms").$type<BillingPackCheckoutTerms>(),
+    /** The pack the checkout's payment added, once it arrived. */
+    packId: uuid("pack_id").references(() => billingPacks.id, { onDelete: "set null" }),
+    /** The subscription live on the account when the checkout was asked for, which its payment replaces; null when none was. Read only on a row with terms: a row from before 0149 has neither. */
+    subscriptionId: text("subscription_id"),
+    ...timestamps,
+  },
+  (table) => [
+    index("billing_pack_checkouts_business_idx").on(table.businessId, table.status, table.createdAt),
+    // The billing sweep's open pack checkouts (0148's sweep section).
+    index("billing_pack_checkouts_open_idx").on(table.updatedAt).where(sql`${table.status} in ('pending', 'processing')`),
+  ],
+);
+
+export const billingPacks = pgTable(
+  "billing_packs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    /** The pack bought, from the catalog. */
+    pack: varchar("pack", { length: 48 }).notNull().references(() => billingPackPlans.code),
+    /** The price it was bought at. */
+    priceId: uuid("price_id").references(() => billingPackPrices.id),
+    /** The pack's length in days, copied at purchase; null for a pack that never ends. */
+    days: smallint("days"),
+    /** polar or stripe. */
+    provider: varchar("provider", { length: 8 }).notNull(),
+    /** The payment: a Stripe PaymentIntent or a Polar order. */
+    providerRef: text("provider_ref").notNull(),
+    /** The payment's row in billing_transactions. */
+    transactionId: uuid("transaction_id").references(() => billingTransactions.id, { onDelete: "set null" }),
+    /** What was paid, in currency. */
+    amountCents: integer("amount_cents").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    /** Voice seconds bought. */
+    secondsTotal: integer("seconds_total").notNull(),
+    /** Voice seconds calls have drawn; never more than bought. */
+    secondsUsed: integer("seconds_used").default(0).notNull(),
+    smsSeg: integer("sms_seg").notNull(),
+    callsOut: integer("calls_out").notNull(),
+    chatUnits: integer("chat_units").notNull(),
+    kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
+    numbers: smallint("numbers").notNull(),
+    receptionists: smallint("receptionists").notNull(),
+    /** When the payment cleared. */
+    paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
+    /** paid_at plus days times 24 hours, fixed at purchase; null means never. */
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /** active, expired, replaced (a subscription started), refunded or frozen (a dispute). */
+    status: varchar("status", { length: 10 }).default("active").notNull(),
+    /** Refunds so far, from the provider's events; a partial refund takes its share of the seconds off the pack. */
+    refundedCents: integer("refunded_cents").default(0).notNull(),
+    /** When it ended. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** The seconds left when it ended, for the accounts. */
+    unusedSeconds: integer("unused_seconds"),
+    /** What the daily expiry job already did about the pack: the reminders it sent (low, empty, ends_30, ends_7), and ended once it settled the pack's end. */
+    notices: text("notices").array().default(sql`'{}'::text[]`).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("billing_packs_provider_ref_unique").on(table.provider, table.providerRef),
+    index("billing_packs_business_idx").on(table.businessId, table.paidAt.desc()),
+    index("billing_packs_live_idx").on(table.businessId, table.endsAt).where(sql`${table.status} = 'active'`),
+    index("billing_packs_ending_idx").on(table.endsAt).where(sql`${table.status} in ('active', 'frozen') and ${table.endsAt} is not null`),
+  ],
+);
+
+export const billingPackDraws = pgTable(
+  "billing_pack_draws",
+  {
+    packId: uuid("pack_id").notNull().references(() => billingPacks.id, { onDelete: "cascade" }),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    /** The usage row's source_key, such as voice:<call id>. */
+    sourceKey: varchar("source_key", { length: 255 }).notNull(),
+    /** Seconds the call took from the pack. */
+    seconds: integer("seconds").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    primaryKey({ columns: [table.packId, table.sourceKey] }),
+    index("billing_pack_draws_source_idx").on(table.businessId, table.sourceKey),
+  ],
+);
+
+/** The packs on sale now, each with its live price. Reads with the caller's row-level security. */
+export const billingPackOffers = pgView("billing_pack_offers", {
+  code: varchar("code", { length: 48 }).notNull(),
+  names: jsonb("names").$type<Record<string, string>>().notNull(),
+  voiceSec: integer("voice_sec").notNull(),
+  days: smallint("days"),
+  smsSeg: integer("sms_seg").notNull(),
+  callsOut: integer("calls_out").notNull(),
+  chatUnits: integer("chat_units").notNull(),
+  kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
+  numbers: smallint("numbers").notNull(),
+  receptionists: smallint("receptionists").notNull(),
+  sort: smallint("sort").notNull(),
+  priceId: uuid("price_id").notNull(),
+  currency: char("currency", { length: 3 }).notNull(),
+  cents: integer("cents").notNull(),
+  providerRef: text("provider_ref"),
 }).existing();
 
 export const complianceRecords = pgTable(
@@ -1654,8 +2081,8 @@ export const providerEvents = pgTable(
   (table) => [
     uniqueIndex("provider_events_provider_id_unique").on(table.provider, table.providerEventId),
     index("provider_events_business_idx").on(table.businessId, table.createdAt),
-    // The billing sweep's read of Polar events still waiting to apply. Migration 0114.
-    index("provider_events_polar_received_idx").on(table.createdAt).where(sql`${table.status} = 'received' and ${table.provider} = 'polar'`),
+    // The billing sweep's read of either billing provider's events still waiting to apply. Migration 0146.
+    index("provider_events_billing_received_idx").on(table.createdAt).where(sql`${table.status} = 'received' and ${table.provider} in ('polar', 'stripe')`),
   ],
 );
 
@@ -2079,6 +2506,8 @@ export const allTenantTables = [
   contacts,
   widgetKeys,
   businessPublicProfiles,
+  entryLinks,
+  entryLinkDailyScans,
   widgetVisitors,
   smsConsentEvents,
   conversations,
@@ -2093,7 +2522,11 @@ export const allTenantTables = [
   knowledgeDocuments,
   knowledgeChunks,
   knowledgeSnippets,
+  knowledgeWebsiteRules,
+  knowledgeDocumentReceptionists,
+  knowledgeSnippetReceptionists,
   unansweredQuestions,
+  unansweredQuestionReceptionists,
   agentRules,
   websiteIngestionJobs,
   businessContextSnapshots,
@@ -2150,6 +2583,8 @@ export const schema = {
   contacts,
   widgetKeys,
   businessPublicProfiles,
+  entryLinks,
+  entryLinkDailyScans,
   widgetVisitors,
   smsConsentEvents,
   conversations,
@@ -2164,7 +2599,11 @@ export const schema = {
   knowledgeDocuments,
   knowledgeChunks,
   knowledgeSnippets,
+  knowledgeWebsiteRules,
+  knowledgeDocumentReceptionists,
+  knowledgeSnippetReceptionists,
   unansweredQuestions,
+  unansweredQuestionReceptionists,
   agentRules,
   websiteIngestionJobs,
   businessContextSnapshots,

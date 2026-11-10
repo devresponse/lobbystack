@@ -106,7 +106,8 @@
       "rateLimited": "Too many test calls have been started. Please try again shortly.",
       "unavailable": "Your AI receptionist is unavailable right now.",
       "generic": "Something went wrong while starting the call."
-    }
+    },
+    "receptionist": "Receptionist for test calls"
   },
   "appointments": {
     "title": "Appointments",

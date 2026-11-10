@@ -1,0 +1,11 @@
+{
+  "url": "/receptionists",
+  "method": "GET",
+  "response": {
+    "iterate": "{{body.data}}",
+    "output": {
+      "label": "{{item.name}}",
+      "value": "{{item.id}}"
+    }
+  }
+}

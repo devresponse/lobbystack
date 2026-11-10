@@ -169,6 +169,11 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
   const { domain, snapshot } = context;
   const businessId = snapshot.businessId;
   const timezone = snapshot.timezone;
+  // The receptionist answering (the snapshot is cut to its view): searches
+  // read its articles, and what it saves names it. None on a snapshot from
+  // before receptionists, which the default receptionist answers.
+  const receptionistId = snapshot.receptionist?.id;
+  const answeredBy = receptionistId ? { receptionistId } : {};
   const bookingMode = context.intakeOnly ? "off" : normalizeBookingMode(snapshot.bookingMode);
   const channel = context.channel;
   // Texts about the caller's appointments are offered only on phone calls the
@@ -194,7 +199,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
   async function searchKnowledge(query: string): Promise<KnowledgeToolResult> {
     const fallback = matchKnowledgeSnippets(snapshot.knowledgeSnippets, query);
     try {
-      const evidence = await searchKnowledgeEvidence(domain, { businessId, query, limit: 6, ...(context.callId ? { callId: context.callId } : {}) });
+      const evidence = await searchKnowledgeEvidence(domain, { businessId, query, limit: 6, ...(context.callId ? { callId: context.callId } : {}), ...answeredBy });
       return knowledgeToolResult(evidence, fallback);
     } catch (error) {
       logEvent("warn", "knowledge.search_failed", { businessId, error });
@@ -213,6 +218,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
         channel,
         ...(context.callId ? { callId: context.callId } : {}),
         ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+        ...answeredBy,
       }))
       .catch((error: unknown) => logEvent("warn", "knowledge.unanswered_question_failed", { businessId, error }));
   }
@@ -273,6 +279,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
           ...(input.callbackWindow ? { callbackWindow: input.callbackWindow } : {}),
           ...(context.callId ? { callId: context.callId } : {}),
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+          ...answeredBy,
         });
       },
     }),
@@ -393,6 +400,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
           callerName: input.callerName,
           ...(context.callId ? { callId: context.callId } : {}),
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+          ...answeredBy,
         });
       },
     });
@@ -509,6 +517,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
           ...(callbackPhone ? { callbackPhone } : {}),
           ...(context.callId ? { callId: context.callId } : {}),
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+          ...answeredBy,
         });
         return { ...saved, cancelled: false, status: "The request is saved for the team. The appointment is still booked until the team cancels it." };
       },

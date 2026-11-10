@@ -21,10 +21,10 @@ import { recordProductEventInTransaction } from "./productEvents";
 type Write = { table: unknown; values?: Record<string, unknown>; set?: Record<string, unknown> };
 
 /** Reconciles one stored event and returns what the transaction wrote, by table. */
-async function reconcile(eventType: string, payload: Record<string, unknown>, existing?: Record<string, unknown>) {
+async function reconcile(eventType: string, payload: Record<string, unknown>, existing?: Record<string, unknown>, provider = "polar") {
   const writes: Write[] = [];
   // Selects in order: the provider event, then the existing account, if any.
-  const selects: unknown[][] = [[{ id: "evt_1", providerEventId: "polar_1", eventType, status: "pending", payload, createdAt: new Date() }], existing ? [existing] : []];
+  const selects: unknown[][] = [[{ id: "evt_1", provider, providerEventId: "polar_1", eventType, status: "pending", payload, createdAt: new Date() }], existing ? [existing] : []];
   const chain = (resolved: unknown[], write?: Write): unknown => new Proxy(function () {}, {
     get(_target, property) {
       if (property === "then") return (resolve: (value: unknown) => unknown) => resolve(resolved);
@@ -82,6 +82,14 @@ describe("reconciling a Polar order", () => {
     expect(transaction?.values).toMatchObject({ status: "refunded", amountCents: 105_600, refundedAmountCents: 105_600 });
   });
 
+  it("stores the payer's customer at the provider", async () => {
+    const { transaction } = await reconcile("order.paid", { ...order, status: "paid", customer_id: "cus_1" });
+
+    expect(transaction?.values).toMatchObject({ providerCustomerId: "cus_1" });
+    expect(transaction?.values).not.toHaveProperty("polarCustomerId");
+    expect(transaction?.set).toMatchObject({ providerCustomerId: "cus_1" });
+  });
+
   it("leaves the subscription state alone when the order has no subscription", async () => {
     const { account } = await reconcile("order.paid", { ...order, status: "paid" });
 
@@ -109,10 +117,39 @@ describe("the billing key", () => {
 
   it("is the business's own for a new account, never another business's or Polar's customer ID", async () => {
     const other = await reconcile("subscription.active", { billingKey: "business:biz_2", plan: "starter", status: "active" });
-    expect(other.account?.values).toMatchObject({ billingKey: "business:biz_1" });
+    // A new account pays through the provider whose event made it.
+    expect(other.account?.values).toMatchObject({ billingKey: "business:biz_1", source: "polar" });
 
     const polarId = await reconcile("subscription.active", { customerId: "cust_9", plan: "starter", status: "active" });
     expect(polarId.account?.values).toMatchObject({ billingKey: "business:biz_1", customerId: "cust_9" });
+  });
+});
+
+describe("a subscription's coming end and waiting change", () => {
+  const account = { billingKey: "business:biz_1", customerId: "cust_1", subscriptionId: "sub_1", plan: "pro", subscriptionState: "active", billingInterval: "monthly", source: "polar" };
+  const event = { billingKey: "business:biz_1", subscriptionId: "sub_1", plan: "pro", status: "active" };
+  const schedule = ["cancelAt", "nextPlanCode", "nextInterval", "nextChangeAt"];
+
+  it("stores when the plan ends unless resumed, and clears it once resumed", async () => {
+    const ending = await reconcile("subscription.updated", { ...event, cancelAt: "2026-12-01T00:00:00.000Z", nextChange: null }, account);
+    expect(ending.account?.set).toMatchObject({ cancelAt: new Date("2026-12-01T00:00:00.000Z"), nextPlanCode: null, nextInterval: null, nextChangeAt: null });
+    const resumed = await reconcile("subscription.updated", { ...event, cancelAt: null, nextChange: null }, account);
+    expect(resumed.account?.set).toMatchObject({ cancelAt: null, nextPlanCode: null });
+  });
+
+  it("stores a downgrade waiting for the renewal, all three columns at once, and clears it once kept", async () => {
+    const waiting = await reconcile("subscription.updated", { ...event, cancelAt: null, nextChange: { planCode: "starter", billingInterval: "annual", at: "2026-12-01T00:00:00.000Z" } }, account);
+    expect(waiting.account?.set).toMatchObject({ cancelAt: null, nextPlanCode: "starter", nextInterval: "annual", nextChangeAt: new Date("2026-12-01T00:00:00.000Z") });
+    // A change missing its time is none.
+    const partial = await reconcile("subscription.updated", { ...event, nextChange: { planCode: "starter", billingInterval: "annual" } }, account);
+    expect(partial.account?.set).toMatchObject({ nextPlanCode: null, nextInterval: null, nextChangeAt: null });
+    const kept = await reconcile("subscription.updated", { ...event, cancelAt: null, nextChange: null }, account);
+    expect(kept.account?.set).toMatchObject({ nextPlanCode: null, nextInterval: null, nextChangeAt: null });
+  });
+
+  it("leaves both alone for an event that says nothing about them, such as one stored before them", async () => {
+    const before = await reconcile("subscription.updated", event, account);
+    for (const key of schedule) expect(before.account?.set).not.toHaveProperty(key);
   });
 });
 
@@ -161,6 +198,12 @@ describe("Polar taking over a managed plan", () => {
     expect(recordProductEventInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "billing.subscription_started", properties: expect.objectContaining({ plan: "pro", previousPlan: "enterprise" }) }));
   });
 
+  it("names the provider whose event took over, not Polar by name", async () => {
+    const { account } = await reconcile("subscription.active", { billingKey: "business:biz_1", subscriptionId: "sub_new", plan: "pro", status: "active", billingInterval: "monthly" }, managed, "stripe");
+
+    expect(account?.set).toMatchObject({ source: "stripe", plan: "pro", subscriptionState: "active" });
+  });
+
   it("hands an ended managed plan's account to Polar when Polar next sets its plan", async () => {
     const { account } = await reconcile("subscription.active", { billingKey: "business:biz_1", plan: "starter", status: "active" }, { ...managed, subscriptionState: "canceled" });
 
@@ -200,7 +243,7 @@ describe("managed plan writes", () => {
 
   it("refuses a business with any live Polar subscription, even one for an unmapped product", async () => {
     const { tx, writes } = transaction([{ source: "polar", plan: null, subscriptionState: "active", overageSpendingCapCents: null }]);
-    expect(await setManagedPlanInTransaction(tx, { businessId: "biz_1" })).toBe("paid_through_polar");
+    expect(await setManagedPlanInTransaction(tx, { businessId: "biz_1" })).toBe("paid_through_provider");
     expect(writes).toEqual([]);
   });
 
@@ -210,6 +253,12 @@ describe("managed plan writes", () => {
     expect(writes[0]?.set).toMatchObject({ subscriptionState: "canceled", currentPeriodEnd: expect.any(Date) });
     expect(writes[0]?.set).not.toHaveProperty("source");
     expect(writes[0]?.set).not.toHaveProperty("plan");
+  });
+
+  it("opens a checkout's account on the deployment's provider", async () => {
+    const { tx, writes } = transaction([]);
+    await createBillingCheckoutRequestInTransaction(tx, { userId: "user_1", businessId: "biz_1", target: "pro", billingInterval: "monthly" }, {});
+    expect(writes[0]).toMatchObject({ kind: "insert", values: { businessId: "biz_1", billingKey: "business:biz_1", source: "polar" } });
   });
 
   it("sells no Polar plan to a managed business, from the dashboard or the API", async () => {

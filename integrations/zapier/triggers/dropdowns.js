@@ -90,6 +90,30 @@ const staffList = {
   },
 };
 
+const receptionistList = {
+  key: 'receptionist_list',
+  noun: 'Receptionist',
+  display: {
+    label: 'List Receptionists',
+    description: 'Lists the receptionists that are not archived, the default first. Used for dropdowns.',
+    hidden: true,
+  },
+  operation: {
+    perform: async (z, bundle) => {
+      const body = await listPage(z, bundle, '/receptionists');
+      return Array.isArray(body.data) ? body.data : [];
+    },
+    sample: samples.receptionist,
+    outputFields: [
+      { key: 'id', label: 'Receptionist ID', type: 'string' },
+      { key: 'name', label: 'Name', type: 'string' },
+      { key: 'description', label: 'Description', type: 'string' },
+      { key: 'is_default', label: 'Default', type: 'boolean' },
+      { key: 'status', label: 'Status', type: 'string' },
+    ],
+  },
+};
+
 const contactList = {
   key: 'contact_list',
   noun: 'Contact',
@@ -131,4 +155,4 @@ const appointmentList = {
   },
 };
 
-module.exports = { serviceList, staffList, contactList, appointmentList, cursorPage };
+module.exports = { serviceList, staffList, receptionistList, contactList, appointmentList, cursorPage };

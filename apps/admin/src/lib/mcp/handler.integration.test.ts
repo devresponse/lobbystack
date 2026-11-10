@@ -6,7 +6,7 @@ import { DateTime } from "luxon";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { apiKeys, appointments, auditLogs, businessHours, businesses, calls, contacts, createDatabaseClient, outboxMessages, receptionistProfiles, services, staff } from "@lobbystack/db";
-import { generateApiKey, type DomainContext } from "@lobbystack/domain";
+import { generateApiKey, recordUnansweredQuestion, type DomainContext } from "@lobbystack/domain";
 import type { ApiKeyScope } from "@lobbystack/shared";
 
 import { v1 } from "../public-api/routes";
@@ -58,7 +58,8 @@ async function createKey(businessId: string, scopes: ApiKeyScope[]): Promise<{ i
 async function createFixture(label: string): Promise<Fixture> {
   const businessId = randomUUID();
   await admin!.db.insert(businesses).values({ id: businessId, slug: `mcp-${label}-${businessId}`, name: `MCP ${label}`, timezone: "America/Toronto", businessType: "test" });
-  await admin!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: label, bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+  await admin!.db.update(businesses).set({ summary: label }).where(eq(businesses.id, businessId));
+  await admin!.db.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   await admin!.db.insert(staff).values({ businessId, name: "Sam", timezone: "America/Toronto" });
   const [service] = await admin!.db.insert(services).values({ businessId, name: "Cleaning", slug: "cleaning", durationMinutes: 30 }).returning({ id: services.id });
   await admin!.db.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 8 * 60, closeMinutes: 20 * 60 })));
@@ -233,5 +234,22 @@ describe.skipIf(!testUrl)("MCP server against PostgreSQL with RLS", () => {
     const rows = await admin!.db.select({ eventType: auditLogs.eventType, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, a.businessId), inArray(auditLogs.eventType, ["api.business.updated", "api.knowledge.created"])));
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(row.payload).toMatchObject({ actor: "mcp", apiKeyId: a.apiKeyId });
+  });
+
+  it("lists the receptionists and answers a question for the receptionists that heard it, audited with actor mcp", async () => {
+    const key = await createKey(a.businessId, ["business:read", "knowledge:read", "knowledge:write"]);
+    const client = await connect(key.key);
+    const receptionists = (await call(client, "list_receptionists")).data!.data!;
+    expect(receptionists).toEqual([expect.objectContaining({ is_default: true, status: "active" })]);
+    const defaultId = String(receptionists[0]!.id);
+    await recordUnansweredQuestion({ db: worker!.db } as DomainContext, { businessId: a.businessId, question: "Do you sell gift cards?", channel: "voice" });
+    const [question] = (await call(client, "list_questions")).data!.data!;
+    expect(question).toMatchObject({ question: "Do you sell gift cards?", times_asked: 1, asked_of: [expect.objectContaining({ receptionist_id: defaultId })] });
+    const answered = await call(client, "answer_question", { question_id: question!.id, answer: "Yes, at the front desk.", audience: "asked" });
+    expect(answered.data).toMatchObject({ type: "text", title: "Do you sell gift cards?", audience: "chosen", receptionist_ids: [defaultId] });
+    expect((await call(client, "list_questions")).data!.data).toEqual([]);
+    expect(await call(client, "answer_question", { question_id: question!.id, answer: "Again." })).toEqual({ error: expect.objectContaining({ code: "conflict" }) });
+    const [audit] = await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, a.businessId), eq(auditLogs.eventType, "api.unanswered_question.answered")));
+    expect(audit?.payload).toMatchObject({ actor: "mcp", apiKeyId: key.id });
   });
 });

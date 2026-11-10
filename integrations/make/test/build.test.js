@@ -51,7 +51,7 @@ describe('build', () => {
   it('fills in the brand\'s name and the dashboard everywhere', () => {
     const result = build({ brand: 'alloplace', url: URL }, { outDir });
     assert.equal(result.appName, 'AlloPlace');
-    assert.deepEqual(result.components, { connection: 1, webhook: 6, module: 19, rpc: 5, function: 0, endpoint: 0 });
+    assert.deepEqual(result.components, { connection: 1, webhook: 6, module: 19, rpc: 6, function: 0, endpoint: 0 });
     for (const file of filesIn(outDir)) {
       const content = fs.readFileSync(file, 'utf8');
       assert.doesNotMatch(content, /__[A-Z][A-Z_]*__/, file);

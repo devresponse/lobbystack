@@ -14,7 +14,7 @@ The bar at the top shows eight dots: the first is sign-up, and each of the other
 | 3 | "What is your business's website?" | `/onboarding/website` | `website` | **Continue** saves the address; **I don't have a website** skips. Neither reads the site ([below](#know-what-the-website-step-saves)) |
 | 4 | **Add training documents** | `/onboarding/knowledge` | `knowledge` | Upload files or paste text, or **Skip for now** |
 | 5 | The greeting | `/onboarding/greeting` | `greeting` | Also sets the language calls open in |
-| 6 | The plan | `/onboarding/plan` | `plan` | **Start free** goes on to dot 8; a paid plan to dot 7 |
+| 6 | The plan | `/onboarding/plan` | `plan` | **Start free** goes on to dot 8; a paid plan to dot 7, and so does a prepaid pack where packs are on sale, or to dot 8 when the plan in force after its payment includes no number ([below](#buy-prepaid-minutes-on-the-plan-step)) |
 | 7 | The phone number | `/onboarding/number` | `phone_number`, `phone_number_claiming` | A plan without a number, such as Free, is sent back to dot 6 |
 | 8 | How you heard about the app | `/onboarding/attribution` | `attribution` | Then the dashboard opens, at stage `complete` |
 
@@ -50,6 +50,16 @@ Until fork PR #127 the website step sent `POST /api/knowledge` with `onboarding:
 
 AI still writes the business summary and fills in opening hours from what the receptionist knows. The worker queues both whenever a document, a website or a text entry finishes reading, or one is deleted, so files and text added in the documents step feed them, and so does a website once it's added in **Knowledge** (`enqueueKnowledgeDerivedRefresh` in `packages/domain/src/server/businessHours.ts`).
 
+## Buy prepaid minutes on the plan step
+
+A deployment that sells prepaid minute packs offers them on the plan step too, under the plan cards, as **Prefer prepaid minutes?**: a choice of minutes and of how long they last, the price, paid once, and **Buy pack** (`apps/admin/src/components/onboarding-plan-surface.tsx`). A deployment that sells no packs shows none of it, and neither does an operator-managed account or a plan the packs aren't sold with, so for them the step looks as it did before packs. A pack that can't be bought right now shows with its button turned off and the reason under it.
+
+- **Buy pack** asks for a checkout with `POST /api/billing/packs/checkout`, follows it with `GET /api/billing/packs/checkout` and opens the payment page once it's ready, as the paid plans do. When the provider turns down the payer's email, such as one it already has for another business, the step asks for a billing email and starts again with it.
+- The provider sends the owner back to `/onboarding/plan?pack=success&packCheckoutId=<id>`. The step says "Adding your minutes..." and reads the checkout until it's paid, then reads `GET /api/billing` again, a read of its own rather than one begun before the payment, and moves the business to `phone_number` and opens the number step, as a paid plan does, or to `attribution` and the last step when the plan in force now includes no number, as **Continue** does below. If billing can't be read, it goes to the number step. When a plan the business bought started before the payment arrived, the pack gave way to it at once (`packStatus` `replaced`): the step says "A plan started before this payment arrived, so no pack was added. The payment will be refunded." and moves on the same way, on that plan, and the operator refunds the payment ([prepaid packs](prepaid-packs.md#switch-between-a-pack-and-a-subscription)). A payment made on a page that plan's start closed reads the same once it arrives, or after 90 seconds if it hasn't.
+- A payment that failed says so and shows the plans again, and so does one refunded or charged back before it arrived (`packStatus` `refunded`), with its own notice. One that hasn't arrived after 90 seconds (`PLAN_CHANGE_SYNC_MS`) says it's still processing and offers **Check again**.
+- A business already on a pack sees "This business already has prepaid minutes." and one **Continue** button to the number step, like a business already on a paid plan. When the plan in force includes no number (`limits.includedBusinessNumbers` is 0 in `GET /api/billing`), such as a pack sold without one or a promo plan, **Continue** moves the business to `attribution` and opens the last step instead, since the number step would send it back.
+- The step's product events say `plan: "prepaid"` for a pack: `web.onboarding.plan_selected` and `web.onboarding.plan_checkout_started` on **Buy pack**, and `web.onboarding.plan_checkout_completed` once on the paid return.
+
 ## Know what changed with fork PR #127
 
 - **Onboarding reads no website.** A business that gives its website during onboarding has it saved, but its receptionist answers only from the documents and text added in the next step until the site is added in **Knowledge**.
@@ -63,6 +73,7 @@ AI still writes the business summary and fills in opening hours from what the re
 
 - `packages/domain/src/server/onboardingWebsite.integration.test.ts`, against a real database, checks that saving the website stores the cleaned address, moves the business to `knowledge`, and leaves no knowledge source, website import or crawl message behind; that coming back later changes only the address; that a bad address saves nothing; and that a viewer is turned away.
 - `apps/admin/app/api/onboarding/website/route.test.ts` checks the route's answers, and `apps/admin/src/components/onboarding-website-surface.test.tsx` checks that **Continue** calls `POST /api/onboarding/website` and never the knowledge API.
+- `apps/admin/src/components/onboarding-plan-surface.test.tsx` checks that the plan step offers no pack when none is on sale, and that a pack's checkout, its paid, failed and processing returns, a pack that gave way to a plan or was refunded first, a paid return whose plan in force includes no number, and a business already on a pack, with or without a number in its plan, each go where the list above says.
 - `pnpm replacement:onboarding` (`scripts/replacement-onboarding-check.ts`) runs a business through the steps against a real database, with four website saves at once, and checks that none queues a crawl.
 - The browser tests in `apps/admin/e2e/operator-auth.e2e.ts` sign up, click **I don't have a website**, and go on to the dashboard.
 - `pnpm dev:onboarding:website <businessId>` puts a local business back on the website step to try it by hand.

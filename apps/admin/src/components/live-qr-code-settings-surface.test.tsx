@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({ default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a> }));
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(), usePathname: () => "/settings/qrcode", useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
 vi.mock("react-i18next", () => {
   const i18n = { language: "en", resolvedLanguage: "en" };
   const format = (key: string, options?: Record<string, unknown>) => (options && Object.keys(options).length ? `${key}:${JSON.stringify(options)}` : key);
@@ -67,6 +68,9 @@ async function setup(initial: PublicProfileSettingsResponse | Response) {
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Acme Dental", active: true }] });
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (url.startsWith("/api/business-profile")) return initial instanceof Response ? initial : Response.json(initial);
+    // The business's QR links and receptionists, none here: the sign is the business page's.
+    if (url.startsWith("/api/entry-links")) return Response.json({ links: [], total: 0, page: 1, pageSize: 10 });
+    if (url.startsWith("/api/receptionists/choices")) return Response.json({ receptionists: [] });
     return Response.json({ businesses: [{ businessId: "business", name: "Acme Dental", active: true }] });
   }));
   render(<QueryClientProvider client={client}><LiveQrCodeSettingsSurface /></QueryClientProvider>);

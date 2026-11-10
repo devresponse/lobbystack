@@ -3,6 +3,9 @@
 # bash fails on CRLF, and the repository's other tools expect LF too.
 * text=auto eol=lf
 
+# Changelog rows added on two branches at once both stay when they merge.
+docs/project/changelog.md merge=union
+
 # Windows' command prompt needs CRLF in batch files.
 *.bat text eol=crlf
 *.cmd text eol=crlf

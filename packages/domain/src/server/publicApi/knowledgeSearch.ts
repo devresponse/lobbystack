@@ -4,7 +4,7 @@ import { countKnowledgeTokens, type KnowledgePassage } from "../../knowledgeRank
 import { knowledgeToolResult, matchKnowledgeSnippets, type KnowledgeToolResult } from "../../receptionistKnowledge";
 import type { DomainContext } from "../context";
 import { traceKnowledgeSearch, type KnowledgeSearchTrace } from "../knowledge";
-import { getCachedBusinessSnapshot } from "../snapshotCache";
+import { getCachedReceptionistSnapshot } from "../snapshotCache";
 import type { ApiCaller } from "./operations";
 
 type RankedCandidate = KnowledgeSearchTrace["candidates"][number];
@@ -29,7 +29,10 @@ function passageFields(passage: KnowledgePassage, candidate: RankedCandidate) {
 /**
  * POST /knowledge/search: the receptionist's knowledge search, run as a call or chat
  * runs it (as the worker, over the business's active, indexed sources), with the
- * snapshot a new call or chat loads for its text entries and FAQs. callAnswer turns the
+ * snapshot a new call or chat loads for its text entries and FAQs. It searches as the
+ * receptionist named, or the default one, with that receptionist's audiences and its
+ * view of the snapshot; a paused, archived or unknown one searches as the default,
+ * as its calls would. callAnswer turns the
  * tool's result into what a phone call's voice model hears: agent-core's
  * knowledgeCallAnswer, which this package can't import.
  */
@@ -39,13 +42,16 @@ export async function searchKnowledgeForApi(
   input: ApiKnowledgeSearch,
   options: { callAnswer: (query: string, result: KnowledgeToolResult) => string | undefined },
 ): Promise<ApiKnowledgeSearchResult> {
-  const [snapshot, { result, trace }] = await Promise.all([
-    getCachedBusinessSnapshot(context, { businessId: caller.businessId }),
-    traceKnowledgeSearch(context, { businessId: caller.businessId, query: input.query, source: "api" }),
-  ]);
+  const named = input.receptionist_id?.toLowerCase() ?? null;
+  // The snapshot decides who answers, as at the start of a call: a paused,
+  // archived or unknown receptionist, or one the cached snapshot doesn't know
+  // yet, is the default. The search then runs as that same receptionist.
+  const snapshot = await getCachedReceptionistSnapshot(context, { businessId: caller.businessId, receptionistId: named });
+  const { result, trace } = await traceKnowledgeSearch(context, { businessId: caller.businessId, query: input.query, source: "api", receptionistId: snapshot?.receptionist?.id ?? named });
   const receptionistResult = knowledgeToolResult(result, matchKnowledgeSnippets(snapshot?.knowledgeSnippets, input.query));
   const candidates = new Map(trace.candidates.map((candidate) => [candidate.passage.chunkId, candidate]));
   return {
+    receptionist_id: snapshot?.receptionist?.id ?? null,
     query: trace.query,
     outcome: result.outcome,
     mode: result.mode,

@@ -4,18 +4,23 @@
 // The file lists variables under the services that get them:
 //
 //   [lobbystack-admin, worker]
-//   POLAR_ORGANIZATION_ID=7c1d2e3f-...
-//   POLAR_ACCESS_TOKEN=?
+//   STRIPE_ACCOUNT_ID=acct_...
 //
 //   [lobbystack-admin]
-//   POLAR_WEBHOOK_SECRET=polar_whs_...
+//   STRIPE_API_KEY=?
+//   STRIPE_WEBHOOK_SECRET=whsec_...
+//
+//   [worker]
+//   STRIPE_API_KEY=?
 //
 // A [...] line names one or more services as Railway names them, and the KEY=value
-// lines under it go on each of them. A value of ? means the script asks for it while
-// it runs, with typing hidden, so a secret needn't sit in the file. Lines starting
-// with # are comments. Quotes around a value are optional, and a reference such as
-// ${{Postgres.DATABASE_URL}} goes to Railway as written. polar-setup.mjs writes a
-// file like this when given --railway-file.
+// lines under it go on each of them, so a key each service has its own of, such as
+// STRIPE_API_KEY or POLAR_ACCESS_TOKEN, goes under each service's own line. A value of
+// ? means the script asks for it while it runs, with typing hidden, so a secret needn't
+// sit in the file. Lines starting with # are comments. Quotes around a value are
+// optional, and a reference such as ${{Postgres.DATABASE_URL}} goes to Railway as
+// written. pnpm billing apply writes a file like this when given --railway-file, for
+// Polar or Stripe, and so do polar-setup.mjs and bootstrap.mjs (its .vars file).
 //
 // Run it with Node 18 or later:
 //   node railway-vars.mjs <file>

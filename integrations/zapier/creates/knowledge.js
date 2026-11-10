@@ -32,13 +32,24 @@ const addKnowledge = {
               { key: 'question', label: 'Question', type: 'string', required: true, helpText: 'Up to 300 characters.' },
               { key: 'answer', label: 'Answer', type: 'text', required: true, helpText: 'Up to 20,000 characters.' },
             ],
+      {
+        key: 'receptionist_ids',
+        label: 'Receptionists',
+        dynamic: 'receptionist_list.id.name',
+        list: true,
+        required: false,
+        helpText: 'Only these receptionists use the entry, such as one store\'s receptionist for that store\'s hours. Leave it empty so every receptionist does.',
+      },
     ],
     perform: async (z, bundle) => {
       const input = bundle.inputData;
-      const body =
-        input.type === 'text'
+      const chosen = [].concat(input.receptionist_ids || []).flatMap((value) => String(value).split(',')).map(clean).filter(Boolean);
+      const body = {
+        ...(input.type === 'text'
           ? { type: 'text', title: clean(input.title), content: clean(input.content) }
-          : { type: 'faq', question: clean(input.question), answer: clean(input.answer) };
+          : { type: 'faq', question: clean(input.question), answer: clean(input.answer) }),
+        ...(chosen.length ? { audience: 'chosen', receptionist_ids: [...new Set(chosen)] } : {}),
+      };
       const missing = Object.entries(body).filter(([, value]) => !value).map(([key]) => key);
       if (missing.length) {
         throw new z.errors.Error(`Fill in ${missing.join(' and ')}.`, 'invalid_input', 400);

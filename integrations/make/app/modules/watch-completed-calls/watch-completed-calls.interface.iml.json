@@ -5,6 +5,11 @@
     "label": "Call ID"
   },
   {
+    "name": "receptionist_id",
+    "type": "text",
+    "label": "Receptionist ID"
+  },
+  {
     "name": "channel",
     "type": "text",
     "label": "Channel"

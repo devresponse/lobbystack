@@ -10,6 +10,7 @@ import { listenToBusinessRealtime, realtimeConfigured } from "@/lib/realtime-hub
 import { resolveWidgetSessionAccess } from "@/lib/widget-access";
 import { requestIpHash } from "@/lib/widget-keys";
 import { enforceWidgetRateLimits } from "@/lib/widget-policy";
+import { loadWidgetReceptionist } from "@/lib/widget-receptionist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,9 @@ export async function GET(request: Request): Promise<Response> {
     const rate = await enforceWidgetRateLimits({ businessId: session.businessId, widgetKeyId: session.widgetKeyId, visitorId, ...(ipHash ? { ipHash } : {}), operation: "stream" });
     if (!rate.allowed) return NextResponse.json({ error: "Rate limit reached.", code: rate.code }, { status: rate.status });
     if (!realtimeConfigured() || openStreams >= MAX_OPEN_STREAMS) return jsonError("Live chat updates are unavailable.", 503, "widget_stream_unavailable");
-    const conversationId = await findWidgetConversationId(createWorkerDomainContext(), { businessId: session.businessId, widgetVisitorId: visitorId });
+    const context = createWorkerDomainContext();
+    const { receptionistId } = await loadWidgetReceptionist(context, session);
+    const conversationId = await findWidgetConversationId(context, { businessId: session.businessId, widgetVisitorId: visitorId, ...(receptionistId ? { receptionistId } : {}) });
     if (!conversationId) return jsonError("This visitor has no open chat.", 404, "widget_conversation_not_found");
 
     const encoder = new TextEncoder();

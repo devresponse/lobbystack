@@ -3,7 +3,7 @@
 // sandbox through LobbyStack's own Stripe adapter, each on a test clock of its
 // own so it lives through renewals and the 1st's overage invoices in minutes.
 //
-//   STRIPE_SCENARIOS_KEY=sk_test_... pnpm billing:scenarios [--only usage,refund] [--brand realinfobot] [--parallel 4] [--keep] [--merchant-of-record]
+//   STRIPE_SCENARIOS_KEY=sk_test_... pnpm billing:scenarios [--only usage,refund] [--brand alloplace] [--parallel 4] [--keep] [--merchant-of-record]
 //   pnpm billing:scenarios --list
 //
 // First it sets the sandbox up from the brand's billing.json, as pnpm billing
@@ -470,6 +470,8 @@ async function readProfile(brand: string): Promise<{ profile: BillingProfile; wi
   }
   const parsed = billingProfileSchema.safeParse(JSON.parse(text));
   if (!parsed.success) throw new ScenarioUsage(`brands/${brand}/billing.json doesn't pass the schema.`);
+  // The scenarios subscribe to Starter and Pro, which a file that sells only packs keeps unsold.
+  if (!parsed.data.plans.starter.sold || !parsed.data.plans.pro.sold) throw new ScenarioUsage(`brands/${brand}/billing.json doesn't sell both Starter and Pro, which the scenarios subscribe to. Name a brand that does with --brand, such as alloplace.`);
   if (parsed.data.stripe) return { profile: parsed.data, withBlock: true };
   return { profile: { ...parsed.data, stripe: structuredClone(SCENARIO_STRIPE_BLOCK) } as BillingProfile, withBlock: false };
 }

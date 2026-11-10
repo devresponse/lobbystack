@@ -8,8 +8,10 @@ import { billingProfileForProvider, billingProfileSchema, billingProfileWithoutD
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
-const realinfobotText = readFileSync(new URL("../../../brands/realinfobot/billing.json", import.meta.url), "utf8");
-const realinfobot = (): Record<string, any> => JSON.parse(realinfobotText);
+// The example file of plans and packs: RealInfoBot's file before it moved to listing packs on 2026-11-10,
+// with Starter and Pro sold, nine packs, and a display section that copies the built-in words.
+const plansAndPacksText = readFileSync(new URL("./brands/testing/plans-and-packs.billing.json", import.meta.url), "utf8");
+const plansAndPacks = (): Record<string, any> => JSON.parse(plansAndPacksText);
 
 // The additional plans of the design's examples: a promo with more minutes, a money-off promo and a public plan.
 const examples = {
@@ -337,9 +339,8 @@ describe("prepaid packs", () => {
   const pack = (file: unknown, code: string): ResolvedBillingPack => resolveBillingPacks(parse(file)).find((row) => row.code === code)!;
   const packHash = (file: unknown, code: string) => createHash("sha256").update(packTermsJson(pack(file, code))).digest("hex");
 
-  it("sells nine packs in each brand's file, smallest and shortest first, with Starter's allowances and 20 MB of knowledge", () => {
-    for (const brand of ["alloplace", "realinfobot"]) {
-      const file = JSON.parse(readFileSync(new URL(`../../../brands/${brand}/billing.json`, import.meta.url), "utf8"));
+  it("sells nine packs in AlloPlace's file and the example file, smallest and shortest first, with Starter's allowances and 20 MB of knowledge", () => {
+    for (const file of [alloplace(), plansAndPacks()]) {
       const packs = resolveBillingPacks(parse(file));
       expect(packs.map((row) => row.code)).toEqual(["pack_250_90", "pack_250_180", "pack_250_365", "pack_500_90", "pack_500_180", "pack_500_365", "pack_1000_90", "pack_1000_180", "pack_1000_365"]);
       expect(packs.map((row) => row.sort)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 90]);
@@ -358,6 +359,20 @@ describe("prepaid packs", () => {
         price: { currency: "cad", cents: 9900 },
       });
     }
+  });
+
+  it("sells RealInfoBot's three listing packs, a receptionist per listing, and no plan but Free", () => {
+    const profile = parse(JSON.parse(readFileSync(new URL("../../../brands/realinfobot/billing.json", import.meta.url), "utf8")));
+    expect(Object.entries(profile.plans).filter(([, entry]) => entry.sold).map(([code]) => code)).toEqual([]);
+    expect(resolveBillingPacks(profile).map((row) => [row.code, row.voice_sec / 60, row.days, row.receptionists, row.numbers, row.price.cents])).toEqual([
+      ["listing_1_180", 250, 180, 1, 1, 9900],
+      ["listings_3_365", 750, 365, 3, 1, 24900],
+      ["listings_6_365", 1500, 365, 6, 1, 44900],
+    ]);
+    // The plan screens show Free alone, with no comparison, and the packs' box beside it.
+    expect(profile.display?.plans?.map((card) => card.plan)).toEqual(["free_cloud"]);
+    expect(profile.display?.comparison).toEqual([]);
+    expect(profile.display?.packs?.title?.en).toBe("Upgrade with a listing pack");
   });
 
   it("takes what a pack leaves out from Starter, and keeps what it sets", () => {
@@ -420,18 +435,16 @@ describe("the plan screens' display section", () => {
   // Only the section's own problems, as a path and its message.
   const displayProblems = (file: unknown) => problems(file).filter((problem) => problem.startsWith("display"));
 
-  it("takes RealInfoBot's section, and leaves it out of the hash, the stored profile and what the billing commands send", () => {
-    const file = realinfobot();
+  it("takes the example file's section, and leaves it out of the hash, the stored profile and what the billing commands send", () => {
+    const file = plansAndPacks();
     expect(file.display.plans.map((card: { plan: string }) => card.plan)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
     expect(problems(file)).toEqual([]);
     const { display: _screens, ...withoutDisplay } = file;
     expect(profileHash(file)).toBe(profileHash(withoutDisplay));
-    // RealInfoBot and AlloPlace sell the same plans, so the section is all that tells their files apart.
-    expect(profileHash(file)).toBe(profileHash(alloplace()));
     expect(normalizeBillingProfile(parse(file))).not.toHaveProperty("display");
     expect(billingProfileWithoutDisplay(file)).toEqual(withoutDisplay);
     // Words changed on the screens change nothing sold.
-    const edited = realinfobot();
+    const edited = plansAndPacks();
     edited.display.plans[2].bullets.push(words("Priority onboarding call"));
     edited.display.defaultInterval = "monthly";
     expect(profileHash(edited)).toBe(profileHash(file));

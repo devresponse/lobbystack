@@ -140,7 +140,8 @@ describe("compileBrands", () => {
   });
 
   it("carries a billing.json's display section to the plan screens, apart from the hash", () => {
-    const billing = JSON.parse(readFileSync(new URL("../../../../brands/realinfobot/billing.json", import.meta.url), "utf8"));
+    // The example file of plans and packs, whose section has a card for each of the four plans.
+    const billing = JSON.parse(readFileSync(new URL("./testing/plans-and-packs.billing.json", import.meta.url), "utf8"));
     const { display, ...sold } = billing;
     const withBilling = sources();
     withBilling.brands.alloplace!.billing = billing;

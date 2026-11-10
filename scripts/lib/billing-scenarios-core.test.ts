@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { checkoutRequest, expectedOverageCents, firstOfMonth, inPool, MERCHANT_OF_RECORD_SCENARIOS, nextFirstOfMonth, parseScenarioArgs, redactingOutput, redactKeys, scenarioRun, SCENARIOS, scenarioKeyProblem, scenarioSandboxProblem, ScenarioUsage } from "./billing-scenarios-core";
 
 describe("the sandbox scenarios' command line", () => {
-  it("runs every scenario on RealInfoBot's file, four at once, by default", () => {
-    expect(parseScenarioArgs([])).toEqual({ list: false, help: false, brand: "realinfobot", only: null, keep: false, parallel: 4, merchantOfRecord: false });
+  it("runs every scenario on AlloPlace's file, four at once, by default", () => {
+    expect(parseScenarioArgs([])).toEqual({ list: false, help: false, brand: "alloplace", only: null, keep: false, parallel: 4, merchantOfRecord: false });
   });
 
   it("takes a list of scenarios, a brand, how many at once, and whether to keep the clocks", () => {

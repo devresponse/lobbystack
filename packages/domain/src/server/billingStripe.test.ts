@@ -16,7 +16,13 @@ import type { CatalogPlanOptions } from "./billingProvider";
 
 const brands = ["realinfobot", "alloplace"] as const;
 type Brand = (typeof brands)[number];
-const fileText = (brand: Brand) => readFileSync(new URL(`../../../../brands/${brand}/billing.json`, import.meta.url), "utf8");
+// RealInfoBot's own file sells listing packs and no plan since 2026-11-10, so its slug takes the example
+// file of plans and packs: its file as it was before, which sells the plans AlloPlace's file sells.
+const files: Record<Brand, URL> = {
+  realinfobot: new URL("../../../shared/src/brands/testing/plans-and-packs.billing.json", import.meta.url),
+  alloplace: new URL("../../../../brands/alloplace/billing.json", import.meta.url),
+};
+const fileText = (brand: Brand) => readFileSync(files[brand], "utf8");
 const webhookUrl = (brand: Brand) => `https://dev1.${brand}.com/api/webhooks/stripe`;
 const links = { termsUrl: "https://example.com/legal/terms", privacyUrl: "https://example.com/legal/privacy" };
 const strict: CatalogPlanOptions = { adopt: false, allowReplace: false, allowArchive: false };

@@ -14,9 +14,9 @@ on:
         required: false
         default: ""
       brand:
-        description: "The brand whose billing.json sets the sandbox up"
+        description: "The brand whose billing.json sets the sandbox up, one that sells Starter and Pro"
         required: false
-        default: "realinfobot"
+        default: "alloplace"
 
 permissions:
   contents: read

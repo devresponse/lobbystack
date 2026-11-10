@@ -11,7 +11,7 @@ A business on a cloud deployment can pay once for a pack of voice minutes that l
 
 ## Know the packs on sale
 
-Each brand's `billing.json` has a `packs` section beside its plans. Each size and length is a pack of its own, with its own code, its names in English, French, Spanish and Serbian, its minutes, its days and its one-time price in the file's currency, and its own Stripe price or Polar product. Both brands sell nine:
+Each brand's `billing.json` has a `packs` section beside its plans. Each size and length is a pack of its own, with its own code, its names in English, French, Spanish and Serbian, its minutes, its days and its one-time price in the file's currency, and its own Stripe price or Polar product. AlloPlace sells nine:
 
 | Pack | 90 days | 180 days | 365 days |
 | --- | --- | --- | --- |
@@ -19,9 +19,19 @@ Each brand's `billing.json` has a `packs` section beside its plans. Each size an
 | 500 minutes | CA$95 | CA$99 | CA$109 |
 | 1,000 minutes | CA$179 | CA$189 | CA$199 |
 
-These are starting prices for the maintainer to set before live payments, not decisions: change `priceCents` in both files, then run `pnpm billing apply`. Stripe never changes a price, so for a pack already linked that run makes a new Stripe price and needs `--allow-archive` and `--allow-replace` ([Stripe billing](../providers/stripe.md#know-what-apply-makes-for-packs)); Polar puts the new price on the pack's own product.
+These are starting prices for the maintainer to set before live payments, not decisions: change `priceCents` in AlloPlace's file, then run `pnpm billing apply`. Stripe never changes a price, so for a pack already linked that run makes a new Stripe price and needs `--allow-archive` and `--allow-replace` ([Stripe billing](../providers/stripe.md#know-what-apply-makes-for-packs)); Polar puts the new price on the pack's own product.
 
-A pack's monthly allowances and limits are Starter's unless the pack sets its own: 50 alert text segments, 20 call transfers and 50 website chats a month, one phone number and one receptionist. Both brands' packs set 20 MB of knowledge where Starter has 5 MB. A pack's `days` runs from 1 to 1,095; a pack with no `days` never ends, a setting the brands don't use. [`brands/README.md`](../../brands/README.md#prepaid-packs) describes the section.
+RealInfoBot sells three listing packs and no plan, from realinfobot.com's pricing table (decided on 2026-11-10). A listing is a receptionist: a pack's listings are how many receptionists can be active at once while it lasts, not credits used up. Each listing brings 250 minutes for the pack's whole length, and the monthly allowances and knowledge grow with the listings. Each pack includes one phone number, the most a pack can:
+
+| Pack | Price | Listings (receptionists) | Minutes | Days | Alert text segments, transfers and website chats a month | Knowledge |
+| --- | --- | --- | --- | --- | --- | --- |
+| `listing_1_180` | CA$99 | 1 | 250 | 180 | 50, 20 and 50 | 20 MB |
+| `listings_3_365` | CA$249 | 3 | 750 | 365 | 150, 60 and 150 | 60 MB |
+| `listings_6_365` | CA$449 | 6 | 1,500 | 365 | 300, 120 and 300 | 120 MB |
+
+Its file keeps Starter and Pro unsold, since every file holds the four standard plans, and Enterprise, which its plan screens don't show. Its plan step shows the Free card and, below it, the packs' box, worded for listings ([onboarding](onboarding.md#word-the-plan-step-from-billingjson)). The box and **Settings > Plan** pick a pack by its minutes, 250, 750 or 1,500, each with its only length; they don't name the listings, which the box's description does. The pricing table's "call or text" and its 30-day refund promise aren't in the app's words: the receptionist never answers texts, and a refund is made by hand in the provider's dashboard.
+
+A pack's monthly allowances and limits are Starter's unless the pack sets its own: 50 alert text segments, 20 call transfers and 50 website chats a month, one phone number and one receptionist. AlloPlace's packs set 20 MB of knowledge where Starter has 5 MB, and RealInfoBot's set every allowance and limit themselves. A pack's `days` runs from 1 to 1,095; a pack with no `days` never ends, a setting the brands don't use. [`brands/README.md`](../../brands/README.md#prepaid-packs) describes the section.
 
 ## Know what a business gets
 

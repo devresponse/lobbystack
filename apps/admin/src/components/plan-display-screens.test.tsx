@@ -4,13 +4,15 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { billingIntervals, brandBillingPlans, brandPlanDisplay, perMonthCents, type BillingDisplay, type BillingPlanList, type CloudBillingPlanSlug } from "@lobbystack/shared";
+
+import { billingIntervals, billingProfileSchema, brandBillingPlans, brandPlanDisplay, perMonthCents, resolveBillingPlans, type BillingDisplay, type BillingPlanList, type BrandBillingPlan, type CloudBillingPlanSlug } from "@lobbystack/shared";
 
 import { createI18nInstance } from "@/i18n";
 import { formatMoney } from "@/lib/billing-plans";
 import { localeResources } from "@/lib/i18n-resources";
 import type { SupportedLocale } from "@/lib/locale";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
+import exampleFile from "../../../../packages/shared/src/brands/testing/plans-and-packs.billing.json";
 import { OnboardingPlanSurface } from "./onboarding-plan-surface";
 import { UpgradePlanDialog } from "./upgrade-plan-dialog";
 
@@ -28,9 +30,8 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-/** A brand's plans as GET /api/billing lists them before an apply: the ones its build carries. */
-function brandPlanList(brand: string): BillingPlanList {
-  const rows = brandBillingPlans(brand)!;
+/** Plan rows as GET /api/billing lists them before an apply. */
+function planList(rows: readonly BrandBillingPlan[]): BillingPlanList {
   return {
     currency: rows.flatMap((row) => row.prices)[0]?.currency ?? "usd",
     source: "built_in",
@@ -45,6 +46,15 @@ function brandPlanList(brand: string): BillingPlanList {
     })),
   };
 }
+
+/** A brand's plans as GET /api/billing lists them before an apply: the ones its build carries. */
+const brandPlanList = (brand: string): BillingPlanList => planList(brandBillingPlans(brand)!);
+
+// The example file of plans and packs: RealInfoBot's file before it moved to listing packs on 2026-11-10,
+// with Starter and Pro sold and a display section that copies the built-in words.
+const example = billingProfileSchema.parse(exampleFile);
+const examplePlans = (): BillingPlanList => planList(resolveBillingPlans(example).flatMap((plan) => (plan.code === plan.tier ? [{ ...plan, code: plan.tier }] : [])));
+const exampleDisplay: BillingDisplay | null = example.display ?? null;
 
 function i18nFor(locale: SupportedLocale) {
   const resources = localeResources[locale] as Record<string, Bundle>;
@@ -71,9 +81,9 @@ function cardBullets(root: HTMLElement): Array<[string, string[]]> {
   return within(root).getAllByRole("list").map((list) => [list.closest("section")!.querySelector("h3")!.textContent!, within(list).getAllByRole("listitem").map((item) => item.textContent!)]);
 }
 
-describe.each(locales)("RealInfoBot's display section in %s", (locale) => {
-  const plans = brandPlanList("realinfobot");
-  const display = brandPlanDisplay("realinfobot");
+describe.each(locales)("a section that copies the built-in words, in %s", (locale) => {
+  const plans = examplePlans();
+  const display = exampleDisplay;
 
   it("shows the onboarding plan step word for word as the built-in page, on both tabs", async () => {
     expect(display?.plans).toHaveLength(4);
@@ -102,11 +112,11 @@ describe.each(locales)("RealInfoBot's display section in %s", (locale) => {
   });
 });
 
-describe("RealInfoBot's display section in English", () => {
-  const plans = brandPlanList("realinfobot");
+describe("a section that copies the built-in words, in English", () => {
+  const plans = examplePlans();
 
   it("prints the plans' own numbers and the short-call rule from the code", () => {
-    renderPlanStep("en", { plans, planDisplay: brandPlanDisplay("realinfobot") });
+    renderPlanStep("en", { plans, planDisplay: exampleDisplay });
     expect(cardBullets(document.body).slice(0, 2)).toEqual([
       ["Free", ["30 browser voice minutes included", "1 receptionist", "No telephone number", "Community support"]],
       ["Starter", ["150 voice minutes included\nThen CA$0.20/min", "1 receptionist", "1 dedicated business number", "50 alert SMS segments", "Email support"]],
@@ -121,13 +131,13 @@ describe("RealInfoBot's display section in English", () => {
     const builtIn = renderDialog("en", plans, null);
     const before = screen.getByRole("dialog").textContent;
     builtIn.unmount();
-    renderDialog("en", plans, brandPlanDisplay("realinfobot"));
+    renderDialog("en", plans, exampleDisplay);
     expect(screen.getByRole("dialog").textContent).toBe(before);
   });
 });
 
 describe("a display section of a brand's own", () => {
-  const plans = brandPlanList("realinfobot");
+  const plans = examplePlans();
   const words = (text: string) => ({ en: text, fr: `${text} (fr)`, es: `${text} (es)`, sr: `${text} (sr)` });
   const section: BillingDisplay = {
     defaultInterval: "monthly",
@@ -210,7 +220,7 @@ describe("a display section of a brand's own", () => {
 
 describe("plans sold monthly only, as on Stripe as merchant of record", () => {
   const monthlyOnly = () => {
-    const plans = brandPlanList("realinfobot");
+    const plans = examplePlans();
     for (const plan of plans.plans) plan.prices = plan.prices.filter((price) => price.interval === "monthly");
     return plans;
   };
@@ -226,5 +236,30 @@ describe("plans sold monthly only, as on Stripe as merchant of record", () => {
   it("shows no Annual tab in the upgrade dialog", () => {
     renderDialog("en", monthlyOnly(), null);
     expect(within(screen.getByRole("dialog")).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Monthly"]);
+  });
+});
+
+describe("RealInfoBot's listing packs", () => {
+  const plans = brandPlanList("realinfobot");
+  const display = brandPlanDisplay("realinfobot");
+  const offer = (code: string, minutes: number, days: number, receptionists: number, amountCents: number) => ({ code, names: { en: code }, minutes, voiceSeconds: minutes * 60, days, amountCents, currency: "cad", smsSegments: 50 * receptionists, outboundCalls: 20 * receptionists, chatUnits: 50 * receptionists, knowledgeStorageBytes: 20_971_520 * receptionists, numbers: 1, receptionists, checkoutAvailable: true });
+  const onSale = { packOffers: [offer("listing_1_180", 250, 180, 1, 9_900), offer("listings_3_365", 750, 365, 3, 24_900), offer("listings_6_365", 1_500, 365, 6, 44_900)], packCheckout: { refusal: null, endsSubscription: null } };
+
+  it("shows Free alone on the plan step, with no tabs and no comparison, and the packs' box in the brand's words", () => {
+    renderPlanStep("en", { plans, planDisplay: display, ...onSale });
+    expect(cardBullets(document.body)).toEqual([["Free", ["30 browser voice minutes included", "1 receptionist", "No telephone number", "Community support"]]]);
+    expect(screen.queryAllByRole("tab")).toEqual([]);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("button", { name: "Start free" })).toBeTruthy();
+    expect(screen.getByText("Upgrade with a listing pack")).toBeTruthy();
+    expect(screen.getByText(/^One payment, no subscription\. Try it: 1 listing with 250 minutes for 180 days\./)).toBeTruthy();
+    expect(screen.getByText("CA$99")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Buy pack" })).toBeTruthy();
+  });
+
+  it("speaks the visitor's language in the packs' box", () => {
+    renderPlanStep("fr", { plans, planDisplay: display, ...onSale });
+    expect(screen.getByText("Passez à un pack d'inscriptions")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Acheter le pack" })).toBeTruthy();
   });
 });

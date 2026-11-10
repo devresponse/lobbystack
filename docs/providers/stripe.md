@@ -154,7 +154,7 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
    pnpm billing:scenarios --only usage,refund
    ```
 
-   It sets the sandbox up from `brands/realinfobot/billing.json`, or the brand `--brand` names, with the recommended `stripe` block while the file has none. Four scenarios run at once (`--parallel`), most of their time a test clock advancing; the whole run takes about 15 minutes *(estimated)*. It ends `All 13 scenarios passed.` (exit 0), or with a `FAIL` line for each that didn't (exit 1); exit 2 means it couldn't start. Each scenario's test clock is deleted at the end, with its customers and subscriptions, unless `--keep`.
+   It sets the sandbox up from `brands/alloplace/billing.json`, or the brand `--brand` names, with the recommended `stripe` block while the file has none. The scenarios subscribe to Starter and Pro, so a brand whose file doesn't sell both is refused: RealInfoBot's, which has sold only listing packs since 2026-11-10, can't be named. Four scenarios run at once (`--parallel`), most of their time a test clock advancing; the whole run takes about 15 minutes *(estimated)*. It ends `All 13 scenarios passed.` (exit 0), or with a `FAIL` line for each that didn't (exit 1); exit 2 means it couldn't start. Each scenario's test clock is deleted at the end, with its customers and subscriptions, unless `--keep`.
 
 The `Billing scenarios` workflow (`.github/workflows/billing-scenarios.yml`) runs the same by hand from GitHub, with the key in the repository secret `STRIPE_SCENARIOS_KEY`, once its file is on the default branch: GitHub lists a manual workflow only from there.
 

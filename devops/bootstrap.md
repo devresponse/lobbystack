@@ -6,6 +6,8 @@
 
 Section numbers such as "guide 3.2" in this page and in the script's messages are those of the [deployment guide](../docs/deployment/guide/README.md): mainly [Part 3](../docs/deployment/guide/part-3-outside-services.md) (outside services), [Part 4](../docs/deployment/guide/part-4-test-environment.md) (a test environment), [Part 5](../docs/deployment/guide/part-5-production.md) (production) and [Appendix A](../docs/deployment/guide/appendix-a-variables.md) (variables). The script does most of Parts 3 and 4.
 
+Every setting, secret and Railway variable the script reads, keeps or writes, with where each comes from and how it is checked, is in [Bootstrap script variables](../docs/deployment/bootstrap-variables.md).
+
 ## The whole process
 
 | # | What | Command or place |

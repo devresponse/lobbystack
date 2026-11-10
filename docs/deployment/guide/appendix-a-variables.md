@@ -4,6 +4,8 @@
 
 This appendix is for looking a setting up. [Part 4](part-4-test-environment.md) (on Railway) and [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose) (on a server) say which ones to set, and when. Here, each one has the services it goes on, where its value comes from, and what changing it later does. The ones to leave alone come last, so you know what they are when you see them in `.env`.
 
+For a deployment set up with `devops/bootstrap.mjs`, [Bootstrap script variables](../bootstrap-variables.md) lists what the script sets on each service, where it takes each value from, and how it checks them.
+
 **How to read the tables**
 
 - **On:** the services it goes on. "The same" means the admin and the worker must have the same value ([7.6](part-7-operations.md#76-change-a-setting-safely)).

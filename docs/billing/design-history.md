@@ -142,3 +142,9 @@ Five notes needed no code but shape how billing is run:
 - **O5.** A promo plan with an annual price would get its months of discount on the whole first year, since Polar checks a repeating discount against the start of the period it bills.
 
 The pass also listed what more than one admin or worker needs: database pools under Postgres's connection limit (two of each can open 112 to 136 connections), bucket storage, one Redis, `APP_BASE_URL` set before the admin's build, and drain time on the worker. [Scalability](../reviews/scalability-2026-10-18.md) and the deployment guide's [7.24](../deployment/guide/part-7-operations.md#724-scale-up) cover them.
+
+## Let one email pay for several businesses, 2026-11-11
+
+Polar's rule behind H2, one customer per email, counts only customers with an email of their own. Since fork PR #151 the worker makes each business's customer a team customer (`type: "team"`) with the business's name and no email of its own. Polar makes its owner, a member, with the payer's email, or the billing email they gave, and with the billing key as the member's external ID. One email then owns the customers of every business it pays for, so a second business's checkout no longer asks for a billing email. The screen asks only when Polar doesn't take the email, or finds it taken on a customer with an email of its own: one made before, or one Polar makes at payment for a worker token without `customers:write`. Polar opens a team customer's billing portal for a member, so the portal names the owner by the billing key, and opens a customer made before without one. No migration and no new token scope.
+
+Two choices came with it. The owner is the person who pays, as the customer's email was before, rather than always the business's owner in LobbyStack. A billing email someone gives becomes the owner's email, as it was the customer's, rather than an extra billing manager, which would need `members:write` on the worker's token.

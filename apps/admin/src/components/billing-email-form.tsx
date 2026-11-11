@@ -18,8 +18,10 @@ export function isBillingEmailRefusal(refusal: PlanChangeRefusal | null | undefi
 
 /**
  * Asks for a billing email when Polar wouldn't make this business's customer
- * with the email it was given: Polar keeps one customer per email, so someone
- * who pays for a second business gives it its own. The checkout then starts
+ * with the email it was given: one it doesn't take as an email, or one another
+ * customer has, which Polar keeps one customer per among customers with an
+ * email of their own. The business's customer is a team customer the email
+ * owns, so a second business can use the same one. The checkout then starts
  * again with it. refusedEmail is the billing email Polar refused, or null when
  * it refused the person's own.
  */

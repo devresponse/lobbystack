@@ -318,7 +318,7 @@ export const apiCheckoutCreateSchema = z.strictObject({
   plan: z.enum([...checkoutPlans, "promo"]).describe("starter or pro, or promo for the plan promo_code unlocks."),
   interval: z.enum(billingIntervals),
   promo_code: z.string().min(1).max(64).optional().describe("A promo code the deployment's operator issued, compared regardless of case and spaces. Required with plan promo, and only allowed with it."),
-  billing_email: z.email().max(320).optional().describe("The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here."),
+  billing_email: z.email().max(320).optional().describe("The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own, which can pay for any number of businesses: on Polar it owns each business's customer, and Stripe allows one email on many customers."),
 }).superRefine((value, context) => {
   if ((value.plan === "promo") === (value.promo_code !== undefined)) return;
   context.addIssue({ code: "custom", path: ["promo_code"], message: value.plan === "promo" ? "Required when plan is promo." : "Only allowed when plan is promo." });
@@ -341,7 +341,7 @@ const packCheckoutStatuses = ["pending", "processing", "ready", "paid", "failed"
 
 export const apiPackCheckoutCreateSchema = z.strictObject({
   pack: z.string().trim().min(1).max(48).describe("The pack's code in the deployment's billing catalog, such as pack_250_90."),
-  billing_email: z.email().max(320).optional().describe("The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here."),
+  billing_email: z.email().max(320).optional().describe("The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own, which can pay for any number of businesses: on Polar it owns each business's customer, and Stripe allows one email on many customers."),
 });
 
 export const apiPackCheckoutSchema = z.object({

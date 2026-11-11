@@ -159,8 +159,8 @@ export type BillingCheckoutLimit = (subject: { businessId: string; userId: strin
 
 /**
  * Queues a Polar checkout for a plan in the name of the person asking. A
- * business without a Polar customer gets one with the billing email they
- * gave, else their own. A business on a managed plan is refused, because the
+ * business without a Polar customer gets one owned by the billing email they
+ * gave, else by their own. A business on a managed plan is refused, because the
  * operator bills it and a Polar subscription would bill it twice, and so is a
  * standard plan the business can't buy (standardCheckoutAllowed). Callers
  * authorize first, and check a promo code with billingCodeCheckout.
@@ -335,9 +335,9 @@ export async function loadBillingCheckoutRequest(
   checkoutId: string | null;
   checkoutUrl: string | null;
   error: string | null;
-  /** The email of the person who asked, which Polar's customer gets unless they gave a billing email. */
+  /** The email of the person who asked, which owns the business's new Polar customer unless they gave a billing email. */
   customerEmail: string;
-  /** The email the person gave for this business's billing, when their own already belongs to another Polar customer. */
+  /** The email the person gave for this business's billing, when Polar refused their own. */
   billingEmail: string | null;
   /** The account's billing key: the external ID of the business's Polar customer. */
   externalCustomerId: string;

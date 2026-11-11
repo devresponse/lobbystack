@@ -59,7 +59,12 @@ export interface BillingProvider {
   /** The Polar organization ID or Stripe account ID. */
   readonly account: string;
   readonly can: {
-    /** One customer per email (Polar): the billing email form and the billing_email_* refusals. */
+    /**
+     * One customer per email (Polar): the billing email form and the
+     * billing_email_* refusals. Polar counts only customers with an email of
+     * their own, and the business's is a team customer its owner's email
+     * owns, so the form comes up only for an email Polar doesn't take.
+     */
     uniqueCustomerEmail: boolean;
     /** Usage goes out priced, and the daily totals check runs (Stripe). */
     meterMoney: boolean;

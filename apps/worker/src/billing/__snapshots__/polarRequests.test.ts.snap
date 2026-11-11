@@ -35,9 +35,13 @@ exports[`the requests Polar receives > a checkout > for a new customer 1`] = `
   },
   {
     "body": {
-      "email": "owner@example.com",
       "external_id": "business:00000000-0000-4000-8000-0000000000b1",
       "name": "Allo Salon",
+      "owner": {
+        "email": "owner@example.com",
+        "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      },
+      "type": "team",
     },
     "method": "POST",
     "path": "/v1/customers/",
@@ -70,9 +74,13 @@ exports[`the requests Polar receives > a checkout > with a billing email 1`] = `
   },
   {
     "body": {
-      "email": "billing@example.com",
       "external_id": "business:00000000-0000-4000-8000-0000000000b1",
       "name": "Allo Salon",
+      "owner": {
+        "email": "billing@example.com",
+        "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      },
+      "type": "team",
     },
     "method": "POST",
     "path": "/v1/customers/",
@@ -135,9 +143,13 @@ exports[`the requests Polar receives > a pack's checkout > for a new customer 1`
   },
   {
     "body": {
-      "email": "owner@example.com",
       "external_id": "business:00000000-0000-4000-8000-0000000000b1",
       "name": "Allo Salon",
+      "owner": {
+        "email": "owner@example.com",
+        "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      },
+      "type": "team",
     },
     "method": "POST",
     "path": "/v1/customers/",

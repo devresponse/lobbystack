@@ -65,8 +65,10 @@ function planChangeRefusalFor(error: unknown): PlanChangeRefusal | undefined {
 }
 
 /**
- * Polar's refusal of a new customer's email: one another customer has, as
- * Polar keeps one customer per email, or one it doesn't take as an email.
+ * Polar's refusal of a new customer's email: one it doesn't take as an email,
+ * or one another customer has, as Polar keeps one customer per email among
+ * customers with an email of their own. The business's customer is a team
+ * customer with none, whose owner has the email, so it meets only the first.
  */
 function billingEmailRefusalFor(error: unknown): "billing_email_taken" | "billing_email_invalid" | undefined {
   if (!(error instanceof PolarRequestError) || error.status !== 422 || !error.fields.includes("email")) return undefined;
@@ -93,10 +95,12 @@ export class PolarBilling implements BillingProvider {
    * The business's own Polar customer, found or made by its billing key,
    * which usage and the billing portal name it by. Without one Polar picks a
    * customer by email at payment, so the second business of someone who pays
-   * for two would land on the first's customer. A new customer gets the
-   * billing email the person gave, else their own. Null when the worker's
-   * token can't read or make customers, and the checkout then leaves the
-   * customer to Polar, as before.
+   * for two would land on the first's customer. A new customer is a team
+   * customer with the business's name and no email of its own, owned by the
+   * billing email the person gave, else by their own, so one email pays for
+   * any number of businesses. A customer made before team customers keeps
+   * its email. Null when the worker's token can't read or make customers, and
+   * the checkout then leaves the customer to Polar, as before.
    */
   async findOrCreateCustomer(input: { customer: CustomerRef; businessId: string; email: string; name: string | null; locale: string | null; requestId: string }): Promise<{ id: string; created: boolean } | null> {
     if (!this.client.findCustomerByExternalId || !this.client.createCustomer) return null;
@@ -249,9 +253,21 @@ export class PolarBilling implements BillingProvider {
     return "sent";
   }
 
+  /**
+   * The page of the customer's owner, which has the billing key as its
+   * external ID, as Polar wants a team customer's page to name a member. A
+   * customer made before team customers may have no member by that ID, and
+   * Polar then opens its owner's page when none is named.
+   */
   async createPortalSession(input: { customer: CustomerRef; returnUrl: string; locale: string | null }): Promise<{ url: string }> {
     if (!this.client.createCustomerPortalSession) throw this.unsupported("open the billing portal");
-    return await this.client.createCustomerPortalSession({ externalCustomerId: input.customer.billingKey, returnUrl: input.returnUrl });
+    const session = { externalCustomerId: input.customer.billingKey, returnUrl: input.returnUrl };
+    try {
+      return await this.client.createCustomerPortalSession({ ...session, externalMemberId: input.customer.billingKey });
+    } catch (error) {
+      if (error instanceof PolarRequestError && error.status === 422 && error.fields.includes("external_member_id")) return await this.client.createCustomerPortalSession(session);
+      throw error;
+    }
   }
 
   refusalFor(error: unknown): BillingRefusal | undefined {

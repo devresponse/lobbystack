@@ -22,11 +22,31 @@ describe("the billing provider contract: usage and the billing portal", () => {
       ]);
     });
 
-    it("opens the billing portal for the business's customer by its billing key", async () => {
+    it("opens the billing portal for the owner of the business's customer, both by its billing key", async () => {
       const polar = polarHarness();
       polar.answer("POST", "/v1/customer-sessions/", { customer_portal_url: "https://polar.test/portal/1" }, 201);
       await expect(polar.billing.createPortalSession({ customer: { id: "cus-1", billingKey: "business:b1" }, returnUrl: "https://app.example/settings/plan", locale: "fr" })).resolves.toEqual({ url: "https://polar.test/portal/1" });
-      expect(polar.requests).toEqual([{ method: "POST", path: "/v1/customer-sessions/", body: { external_customer_id: "business:b1", return_url: "https://app.example/settings/plan" } }]);
+      expect(polar.requests).toEqual([{ method: "POST", path: "/v1/customer-sessions/", body: { external_customer_id: "business:b1", external_member_id: "business:b1", return_url: "https://app.example/settings/plan" } }]);
+    });
+
+    it("opens it without a member for a customer made before team customers, which has none by the billing key, and fails on any other refusal", async () => {
+      const polar = polarHarness();
+      const bodies: unknown[] = [];
+      const refusal = (field: string) => new Response(JSON.stringify({ error: "PolarRequestValidationError", detail: [{ loc: ["body", field], msg: "refused" }] }), { status: 422 });
+      vi.stubGlobal("fetch", vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { external_customer_id: string; external_member_id?: string };
+        bodies.push(body);
+        if (body.external_customer_id === "business:gone") return refusal("external_customer_id");
+        return body.external_member_id ? refusal("external_member_id") : new Response(JSON.stringify({ customer_portal_url: "https://polar.test/portal/2" }), { status: 201 });
+      }));
+      await expect(polar.billing.createPortalSession({ customer: { id: "cus-1", billingKey: "business:b1" }, returnUrl: "https://app.example/settings/plan", locale: null })).resolves.toEqual({ url: "https://polar.test/portal/2" });
+      expect(bodies).toEqual([
+        { external_customer_id: "business:b1", external_member_id: "business:b1", return_url: "https://app.example/settings/plan" },
+        { external_customer_id: "business:b1", return_url: "https://app.example/settings/plan" },
+      ]);
+      bodies.length = 0;
+      await expect(polar.billing.createPortalSession({ customer: { id: "cus-2", billingKey: "business:gone" }, returnUrl: "https://app.example/settings/plan", locale: null })).rejects.toMatchObject({ status: 422, fields: ["external_customer_id"] });
+      expect(bodies).toHaveLength(1);
     });
   });
 

@@ -22,12 +22,39 @@ describe("the billing provider contract: the customer", () => {
       expect(polar.requests.map((request) => request.method)).toEqual(["GET"]);
     });
 
-    it("makes one with the email and name when Polar has none", async () => {
+    it("makes a team customer with the name, owned by the email, when Polar has none", async () => {
       const polar = polarHarness();
       polar.answer("GET", "/v1/customers/external/business%3Ab1", { detail: "Not found" }, 404);
       polar.answer("POST", "/v1/customers/", { id: "cus-2", external_id: "business:b1" }, 201);
       await expect(polar.billing.findOrCreateCustomer(input)).resolves.toEqual({ id: "cus-2", created: true });
-      expect(polar.requests[1]).toEqual({ method: "POST", path: "/v1/customers/", body: { external_id: "business:b1", email: "owner@example.com", name: "Allo Salon" } });
+      expect(polar.requests[1]).toEqual({ method: "POST", path: "/v1/customers/", body: { type: "team", external_id: "business:b1", name: "Allo Salon", owner: { email: "owner@example.com", external_id: "business:b1" } } });
+    });
+
+    it("lets one email own the customers of several businesses, even beside a customer that has it as its own", async () => {
+      const polar = polarHarness();
+      // Polar's rules: an external ID once in the organization, and an email once among the customers with an email of their own.
+      type Customer = { id: string; external_id: string; email: string | null; type: string; owner: unknown };
+      const customers: Customer[] = [{ id: "cus-old", external_id: "business:b0", email: "owner@example.com", type: "individual", owner: null }];
+      vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const { pathname } = new URL(String(url));
+        if ((init?.method ?? "GET") === "GET") {
+          const found = customers.find((customer) => pathname === `/v1/customers/external/${encodeURIComponent(customer.external_id)}`);
+          return new Response(JSON.stringify(found ?? { detail: "Not found" }), { status: found ? 200 : 404 });
+        }
+        const body = JSON.parse(String(init?.body)) as { type?: string; external_id: string; email?: string; owner?: unknown };
+        if (body.email && customers.some((customer) => customer.email?.toLowerCase() === body.email!.toLowerCase())) {
+          return new Response(JSON.stringify({ error: "PolarRequestValidationError", detail: [{ loc: ["body", "email"], msg: "A customer with this email address already exists." }] }), { status: 422 });
+        }
+        const made: Customer = { id: `cus-${customers.length + 1}`, external_id: body.external_id, email: body.email ?? null, type: body.type ?? "individual", owner: body.owner ?? null };
+        customers.push(made);
+        return new Response(JSON.stringify(made), { status: 201 });
+      }));
+      await expect(polar.billing.findOrCreateCustomer(input)).resolves.toEqual({ id: "cus-2", created: true });
+      await expect(polar.billing.findOrCreateCustomer({ ...input, customer: { id: null, billingKey: "business:b2" }, businessId: "b2", name: "Allo Spa" })).resolves.toEqual({ id: "cus-3", created: true });
+      expect(customers.slice(1).map(({ external_id, email, type, owner }) => ({ external_id, email, type, owner }))).toEqual([
+        { external_id: "business:b1", email: null, type: "team", owner: { email: "owner@example.com", external_id: "business:b1" } },
+        { external_id: "business:b2", email: null, type: "team", owner: { email: "owner@example.com", external_id: "business:b2" } },
+      ]);
     });
 
     it("finds the one another run made first", async () => {
@@ -50,7 +77,7 @@ describe("the billing provider contract: the customer", () => {
       expect(vi.mocked(reportWarning).mock.calls.map(([error]) => (error as Error).message)).toEqual([expect.stringContaining("customers:write")]);
     });
 
-    it("refuses an email another customer has, and one Polar doesn't take as an email", async () => {
+    it("names an email another customer has as taken, and one Polar doesn't take as an email as invalid", async () => {
       const taken = polarHarness();
       taken.answer("GET", "/v1/customers/external/business%3Ab1", { detail: "Not found" }, 404);
       taken.answer("POST", "/v1/customers/", { error: "PolarRequestValidationError", detail: [{ loc: ["body", "email"], msg: "taken" }] }, 422);
@@ -59,7 +86,7 @@ describe("the billing provider contract: the customer", () => {
 
       const invalid = polarHarness();
       invalid.answer("GET", "/v1/customers/external/business%3Ab1", { detail: "Not found" }, 404);
-      invalid.answer("POST", "/v1/customers/", { error: "RequestValidationError", detail: [{ loc: ["body", "email"], msg: "invalid" }] }, 422);
+      invalid.answer("POST", "/v1/customers/", { error: "RequestValidationError", detail: [{ loc: ["body", "team", "owner", "email"], msg: "invalid" }] }, 422);
       const invalidError = await invalid.billing.findOrCreateCustomer(input).catch((error: unknown) => error);
       expect(invalid.billing.refusalFor(invalidError)).toBe("billing_email_invalid");
     });

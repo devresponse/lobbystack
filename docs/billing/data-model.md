@@ -115,7 +115,7 @@ The columns the fork added to them:
 | `billing_accounts.end_with`, `end_notice_at`, `end_set_at` | `0111` | An operator's early ending (`tier` or `cancel`), when the owners were emailed, and when Polar was told |
 | `billing_accounts.subscription_claim`, `subscription_claimed_until` | `0116` | The worker run changing the Polar subscription, and when its claim runs out, so two changes never overlap |
 | `billing_checkout_requests.plan_code`, `code_id` | `0109` | The plan and code a promo checkout sells |
-| `billing_checkout_requests.billing_email` | `0115` | The email a business's new Polar customer gets when another customer has the requester's |
+| `billing_checkout_requests.billing_email` | `0115` | The email that owns a business's new Polar customer instead of the requester's, when Polar refused the requester's |
 | `billing_usage_events.plan_code_at_record_time` | `0110` | The promo plan the use counted under, so a month that moves onto or off one prices each event on its own terms |
 | `billing_usage_events.synced_quantity`, `sync_seq`, `sending_quantity` | `0116` | What Polar has, the number of the next event to send (`source_key`, then `source_key:<n>`), and the difference being sent |
 | `billing_accounts.source` check | `0146`, `0147` | `polar`, `stripe` or `managed`; `0147` checked the rows from before. The `polar` default stays: reconcile's upsert leaves the source out for an account that exists, and PostgreSQL checks NOT NULL before it finds the conflict |

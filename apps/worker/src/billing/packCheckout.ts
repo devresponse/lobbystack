@@ -52,7 +52,7 @@ export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerD
     return { status: "skipped", entityId: checkoutId };
   }
   try {
-    // The business's own customer, made out to its billing email, else the person's own.
+    // The business's own customer, with its billing email, else the person's own: on Polar, the email owns a team customer.
     const email = request.billingEmail ?? request.customerEmail;
     const customer = await billing.findOrCreateCustomer({ customer: { id: request.customerId, billingKey: request.externalCustomerId }, businessId, email, name: request.businessName, locale: null, requestId: checkoutId });
     const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;

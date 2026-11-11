@@ -1,5 +1,5 @@
-import { BILLING_PROFILE_HASHES, BRAND_BILLING_PLANS, BRAND_INDEX, BRAND_PLAN_DISPLAYS, BRANDS } from "./generated";
-import type { BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex, BrandPlanDisplay } from "./types";
+import { BILLING_PROFILE_HASHES, BRAND_ACCOUNT_LIMITS, BRAND_BILLING_PLANS, BRAND_INDEX, BRAND_PLAN_DISPLAYS, BRANDS } from "./generated";
+import type { BrandAccountLimits, BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex, BrandPlanDisplay } from "./types";
 
 // Which brand a deployment shows. A deployment knows its own address
 // (APP_BASE_URL), and the domain it sits under picks the brand from
@@ -142,6 +142,16 @@ export function brandBillingPlans(brandId: string, plans: Record<string, BrandBi
 /** The plan screens' words and layout from a brand's billing.json, as this build carries them; null for a brand whose file has no display section, or no file. */
 export function brandPlanDisplay(brandId: string, displays: Record<string, BrandPlanDisplay> = BRAND_PLAN_DISPLAYS): BrandPlanDisplay | null {
   return Object.hasOwn(displays, brandId) ? displays[brandId]! : null;
+}
+
+/**
+ * The accounts section of the brand's billing.json as this build carries it:
+ * how many businesses one account may own (maxBusinesses), and on each plan
+ * (maxBusinessesByPlan). Empty for a brand whose file leaves it out, or that
+ * has no file, so every account may own 10 (planBusinessCap).
+ */
+export function brandAccountLimits(brandId: string, limits: Record<string, BrandAccountLimits> = BRAND_ACCOUNT_LIMITS): BrandAccountLimits {
+  return Object.hasOwn(limits, brandId) ? limits[brandId]! : {};
 }
 
 /** Whether a brand file decides the name and logo, rather than onboarding's saved choice. */

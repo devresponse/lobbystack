@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { apiKeys, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, outboxMessages, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, billingAccounts, billingPackPlans, billingPacks, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, outboxMessages, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { findAvailability } from "./booking";
 import { generateApiKey } from "./publicApi/apiKeys";
-import { acceptInvitation, createBusiness, inviteMember, listUserBusinesses, previewInvitation, removeMember } from "./tenancy";
+import { acceptInvitation, createBusiness, insertInvitationInTransaction, inviteMember, listUserBusinesses, listUserBusinessesWithAllowance, previewInvitation, removeMember } from "./tenancy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -27,6 +27,25 @@ async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
   } catch (error) {
     if (error !== rollback) throw error;
   }
+}
+
+type PlanColumns = { plan: string; subscriptionState: string | null; subscriptionId?: string | null; replacedSubscriptionId?: string | null };
+
+/** Puts the business on a plan as the billing provider's events would, as the migrator, then acts as the app again. */
+async function setPlan(tx: DatabaseTransaction, businessId: string, account: PlanColumns) {
+  await tx.execute(sql`reset role`);
+  const values = { plan: account.plan, subscriptionState: account.subscriptionState, subscriptionId: account.subscriptionId ?? null, replacedSubscriptionId: account.replacedSubscriptionId ?? null };
+  await tx.insert(billingAccounts).values({ businessId, billingKey: `test:${businessId}`, ...values }).onConflictDoUpdate({ target: billingAccounts.businessId, set: values });
+  await tx.execute(sql`set local role lobbystack_app`);
+}
+
+/** Gives the business a prepaid pack that ends at endsAt, as the migrator, then acts as the app again. */
+async function addPack(tx: DatabaseTransaction, businessId: string, endsAt: Date) {
+  await tx.execute(sql`reset role`);
+  const names = { en: "Cap test", fr: "Cap test", es: "Cap test", sr: "Cap test" };
+  await tx.insert(billingPackPlans).values({ code: "business_cap_test", status: "active", names, voiceSec: 30_000, days: 180, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, termsHash: "0".repeat(64) }).onConflictDoNothing();
+  await tx.insert(billingPacks).values({ businessId, pack: "business_cap_test", days: 180, provider: "stripe", providerRef: `pi_${randomUUID()}`, amountCents: 9_900, currency: "cad", secondsTotal: 30_000, smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, paidAt: new Date(endsAt.getTime() - 180 * 86_400_000), endsAt });
+  await tx.execute(sql`set local role lobbystack_app`);
 }
 
 describe.skipIf(!client)("createBusiness", () => {
@@ -87,7 +106,7 @@ describe.skipIf(!client)("createBusiness", () => {
     });
   });
 
-  it("stops one account at 10 owned businesses", async () => {
+  it("stops one account at 10 owned businesses when the brand's billing.json sets no limit", async () => {
     await rollbackTest(async (tx) => {
       const userId = randomUUID();
       const email = `${userId}@example.invalid`;
@@ -97,7 +116,104 @@ describe.skipIf(!client)("createBusiness", () => {
       for (let index = 0; index < 10; index++) {
         await createBusiness(context, { userId, name: `Shop ${index}`, timezone: "UTC", businessType: "test" });
       }
-      await expect(createBusiness(context, { userId, name: "Shop 11", timezone: "UTC", businessType: "test" })).rejects.toMatchObject({ status: 403 });
+      await expect(createBusiness(context, { userId, name: "Shop 11", timezone: "UTC", businessType: "test" })).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 10 });
+    });
+  });
+
+  it("stops one account at the limit it is given, counting only the businesses it owns", async () => {
+    await rollbackTest(async (tx) => {
+      const [userId, otherId] = [randomUUID(), randomUUID()];
+      for (const id of [userId, otherId]) await tx.insert(users).values({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid`, name: "Sam Owner", emailVerified: true });
+      await tx.execute(sql`set local role lobbystack_app`);
+      const context = { db: tx as unknown as Database };
+      // Being an admin on someone else's business doesn't use up the allowance.
+      const { businessId: otherBusinessId } = await createBusiness(context, { userId: otherId, name: "Other Shop", timezone: "UTC", businessType: "test" });
+      const { token } = await inviteMember(context, { userId: otherId, businessId: otherBusinessId, email: `${userId}@example.invalid`, role: "business_admin" });
+      await acceptInvitation(context, { userId, tokenHash: createHash("sha256").update(token).digest("hex"), email: `${userId}@example.invalid`, emailVerified: true });
+      await createBusiness(context, { userId, name: "Shop 1", timezone: "UTC", businessType: "test", businessCaps: { maxBusinesses: 2 } });
+      await createBusiness(context, { userId, name: "Shop 2", timezone: "UTC", businessType: "test", businessCaps: { maxBusinesses: 2 } });
+      await expect(createBusiness(context, { userId, name: "Shop 3", timezone: "UTC", businessType: "test", businessCaps: { maxBusinesses: 2 } })).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 2, upgrade: false });
+      // A lower limit keeps what the account owns and only stops the next one.
+      await expect(createBusiness(context, { userId, name: "Shop 3", timezone: "UTC", businessType: "test", businessCaps: { maxBusinesses: 1 } })).rejects.toMatchObject({ code: "business_limit", limit: 1 });
+      expect((await listUserBusinesses(context.db, userId)).map((row) => `${row.name}: ${row.role}`).sort()).toEqual(["Other Shop: business_admin", "Shop 1: business_owner", "Shop 2: business_owner"]);
+    });
+  });
+
+  it("lets an account own as many businesses as the best plan among them allows", async () => {
+    await rollbackTest(async (tx) => {
+      const userId = randomUUID();
+      await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: "Sam Owner", emailVerified: true });
+      await tx.execute(sql`set local role lobbystack_app`);
+      const context = { db: tx as unknown as Database };
+      const caps = { maxBusinesses: 10, maxBusinessesByPlan: { free_cloud: 1, starter: 3 } };
+      const create = (name: string) => createBusiness(context, { userId, name, timezone: "UTC", businessType: "test", deploymentMode: "cloud", businessCaps: caps });
+      const allowance = async () => (await listUserBusinessesWithAllowance(context.db, userId, caps)).businessLimit;
+      // An account that owns nothing may create its first business on Free.
+      expect(await allowance()).toEqual({ owned: 0, max: 1, upgrade: true });
+      const { businessId: first } = await create("Shop 1");
+      await expect(create("Shop 2")).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 1, upgrade: true });
+
+      // Starter on one business lets the account own three, whichever plan the others are on.
+      await setPlan(tx, first, { plan: "starter", subscriptionState: "active", subscriptionId: "sub_cap_test" });
+      expect(await allowance()).toEqual({ owned: 1, max: 3, upgrade: true });
+      await create("Shop 2");
+      await create("Shop 3");
+      // Pro isn't in the map, so it allows maxBusinesses, and a higher plan would still help.
+      await expect(create("Shop 4")).rejects.toMatchObject({ code: "business_limit", limit: 3, upgrade: true });
+
+      // A subscription that lapsed, or that a prepaid pack replaced, is Free: the account keeps its businesses but may add none.
+      await setPlan(tx, first, { plan: "starter", subscriptionState: "canceled" });
+      expect(await allowance()).toEqual({ owned: 3, max: 1, upgrade: true });
+      await setPlan(tx, first, { plan: "starter", subscriptionState: "active", subscriptionId: "sub_cap_test", replacedSubscriptionId: "sub_cap_test" });
+      expect(await allowance()).toEqual({ owned: 3, max: 1, upgrade: true });
+      expect((await listUserBusinessesWithAllowance(context.db, userId, caps)).businesses.map((row) => row.name).sort()).toEqual(["Shop 1", "Shop 2", "Shop 3"]);
+    });
+  });
+
+  it("counts a business with a live prepaid pack on the prepaid plan's cap", async () => {
+    await rollbackTest(async (tx) => {
+      const userId = randomUUID();
+      await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: "Sam Owner", emailVerified: true });
+      await tx.execute(sql`set local role lobbystack_app`);
+      const context = { db: tx as unknown as Database };
+      const caps = { maxBusinessesByPlan: { free_cloud: 1, prepaid: 2, starter: 2, pro: 2, enterprise: 2 } };
+      const create = (name: string) => createBusiness(context, { userId, name, timezone: "UTC", businessType: "test", deploymentMode: "cloud", businessCaps: caps });
+      const { businessId } = await create("Shop 1");
+      // A pack that has ended allows no more than Free.
+      await addPack(tx, businessId, new Date(Date.now() - 86_400_000));
+      await expect(create("Shop 2")).rejects.toMatchObject({ code: "business_limit", limit: 1, upgrade: true });
+      await addPack(tx, businessId, new Date(Date.now() + 30 * 86_400_000));
+      await create("Shop 2");
+      // Every plan allows two, so no plan would let the account own a third.
+      await expect(create("Shop 3")).rejects.toMatchObject({ code: "business_limit", limit: 2, upgrade: false });
+    });
+  });
+
+  it("reads the plans of the signed-in account's own businesses only", async () => {
+    await rollbackTest(async (tx) => {
+      const [userId, otherId] = [randomUUID(), randomUUID()];
+      for (const id of [userId, otherId]) await tx.insert(users).values({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid`, name: "Sam Owner", emailVerified: true });
+      await tx.execute(sql`set local role lobbystack_app`);
+      const context = { db: tx as unknown as Database };
+      await createBusiness(context, { userId, name: "Shop", timezone: "UTC", businessType: "test", deploymentMode: "cloud" });
+      const read = (actorId: string) => withBusinessTransaction(context.db, { userId: actorId, actorType: "operator" }, async (inner) => (await inner.execute<{ plan: string | null; live_pack: boolean }>(sql`select plan, live_pack from app.list_user_business_plans(${userId}::uuid)`)).rows);
+      expect(await read(userId)).toEqual([{ plan: null, live_pack: false }]);
+      expect(await read(otherId)).toEqual([]);
+    });
+  });
+
+  it("leaves a self-hosted business to maxBusinesses, whatever the plans allow", async () => {
+    await rollbackTest(async (tx) => {
+      const userId = randomUUID();
+      await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: "Sam Owner", emailVerified: true });
+      await tx.execute(sql`set local role lobbystack_app`);
+      const context = { db: tx as unknown as Database };
+      const caps = { maxBusinesses: 2, maxBusinessesByPlan: { free_cloud: 1, pro: 20 } };
+      const create = (name: string) => createBusiness(context, { userId, name, timezone: "UTC", businessType: "test", deploymentMode: "self_hosted_standard", businessCaps: caps });
+      await create("Shop 1");
+      await create("Shop 2");
+      // There is no plan to move to, so no upgrade is suggested.
+      await expect(create("Shop 3")).rejects.toMatchObject({ code: "business_limit", limit: 2, upgrade: false });
     });
   });
 
@@ -155,7 +271,9 @@ describe.skipIf(!client)("team membership", () => {
     const invite = async (fromUserId: string, email: string, role: "business_admin" | "viewer") => (await inviteMember(context, { userId: fromUserId, businessId, email, role })).token;
     const accept = (person: { id: string; email: string }, token: string) => acceptInvitation(context, { userId: person.id, tokenHash: hash(token), email: person.email, emailVerified: true });
     const listMembers = async (userId: string) => (await withBusinessTransaction(context.db, { userId, businessId, actorType: "operator" }, (inner) => inner.execute<{ membership_id: string; user_id: string; role: string }>(sql`select membership_id, user_id, role from app.list_business_members(${businessId}::uuid)`))).rows;
-    return { context, businessId, people, invite, accept, listMembers };
+    /** A claim link from the owner, as the API's POST /team/claim-link makes one. */
+    const claimLink = async (email: string) => (await withBusinessTransaction(context.db, { userId: owner.id, businessId, actorType: "operator" }, (inner) => insertInvitationInTransaction(inner, { businessId, invitedByUserId: owner.id, normalizedEmail: email, role: "business_owner", transfersOwnership: true }))).token;
+    return { context, businessId, people, invite, accept, listMembers, claimLink };
   }
 
   it("lists other active members to the owner, and removing a member revokes their pending invitations", async () => {
@@ -247,6 +365,54 @@ describe.skipIf(!client)("team membership", () => {
       await tx.execute(sql`reset role`);
       const [membership] = await tx.select({ role: businessMemberships.role, status: businessMemberships.status }).from(businessMemberships).where(and(eq(businessMemberships.businessId, businessId), eq(businessMemberships.userId, owner!.id)));
       expect(membership).toEqual({ role: "business_owner", status: "active" });
+    });
+  });
+
+  it("refuses a claim link to an account that owns as many businesses as it may, and keeps the link open", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner, claimant], claimLink } = await seedTeam(tx, ["Ana", "Ben"]);
+      await createBusiness(context, { userId: claimant!.id, name: "Ben's Shop", timezone: "UTC", businessType: "test" });
+      const token = await claimLink(claimant!.email);
+      const take = (maxBusinesses: number) => acceptInvitation(context, { userId: claimant!.id, tokenHash: hash(token), email: claimant!.email, emailVerified: true, businessCaps: { maxBusinesses } });
+
+      await expect(take(1)).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 1 });
+      await tx.execute(sql`reset role`);
+      const invitation = async () => (await tx.select({ status: businessInvitations.status }).from(businessInvitations).where(eq(businessInvitations.tokenHash, hash(token))))[0]?.status;
+      const membership = async (userId: string) => (await tx.select({ role: businessMemberships.role, status: businessMemberships.status }).from(businessMemberships).where(and(eq(businessMemberships.businessId, businessId), eq(businessMemberships.userId, userId))))[0];
+      expect(await invitation()).toBe("pending");
+      expect(await membership(claimant!.id)).toBeUndefined();
+      expect(await membership(owner!.id)).toEqual({ role: "business_owner", status: "active" });
+
+      // The same link works once the account may own one more.
+      await tx.execute(sql`set local role lobbystack_app`);
+      await expect(take(2)).resolves.toMatchObject({ businessId, role: "business_owner" });
+      await tx.execute(sql`reset role`);
+      expect(await invitation()).toBe("accepted");
+      expect(await membership(claimant!.id)).toEqual({ role: "business_owner", status: "active" });
+    });
+  });
+
+  it("doesn't count the business a claim link hands over against an account that already owns it", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner], claimLink } = await seedTeam(tx, ["Ana"]);
+      const token = await claimLink(owner!.email);
+      await expect(acceptInvitation(context, { userId: owner!.id, tokenHash: hash(token), email: owner!.email, emailVerified: true, businessCaps: { maxBusinesses: 1 } })).resolves.toMatchObject({ businessId, role: "business_owner" });
+    });
+  });
+
+  it("counts the plan of the business a claim link hands over toward the account's cap", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [, claimant], claimLink } = await seedTeam(tx, ["Ana", "Ben"]);
+      const caps = { maxBusinessesByPlan: { free_cloud: 1, pro: 5 } };
+      await createBusiness(context, { userId: claimant!.id, name: "Ben's Shop", timezone: "UTC", businessType: "test", deploymentMode: "cloud", businessCaps: caps });
+      const token = await claimLink(claimant!.email);
+      const take = () => acceptInvitation(context, { userId: claimant!.id, tokenHash: hash(token), email: claimant!.email, emailVerified: true, businessCaps: caps });
+      // Both businesses are on Free, which allows one.
+      await expect(take()).rejects.toMatchObject({ code: "business_limit", limit: 1, upgrade: true });
+      // On Pro, the business it takes over lets the account own both.
+      await setPlan(tx, businessId, { plan: "pro", subscriptionState: "active", subscriptionId: "sub_claim_test" });
+      await expect(take()).resolves.toMatchObject({ businessId, role: "business_owner" });
+      expect((await listUserBusinessesWithAllowance(context.db, claimant!.id, caps)).businessLimit).toEqual({ owned: 2, max: 5, upgrade: true });
     });
   });
 });

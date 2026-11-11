@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { builtInBillingPlanLimits } from "@lobbystack/shared";
 
 import { limitsFor } from "./billingPlans";
-import { billableQuantityForEvent, effectiveBillingPlan, estimateSmsSegments, periodKeyFor, replayEvents } from "./usage";
+import { billableQuantityForEvent, effectiveBillingPlan, estimateSmsSegments, periodKeyFor, planInForce, replayEvents } from "./usage";
 
 const event = (sourceKey: string, usageKind: string, quantity: number, isFinal: boolean, minute: number, billingInterval = "annual", planCodeAtRecordTime: string | null = null) => ({ sourceKey, usageKind, quantity, isFinal, planAtRecordTime: "starter", planCodeAtRecordTime, billingIntervalAtRecordTime: billingInterval, createdAt: new Date(Date.UTC(2026, 8, 1, 0, minute)) });
 const starter = { plan: "starter" as const, planCode: null };
@@ -92,6 +92,19 @@ describe("replacement non-AI usage policy", () => {
     expect(effectiveBillingPlan({ deploymentMode: "self_hosted", accountPlan: null, subscriptionState: null })).toBe("self_host");
     // Prepaid comes only from live packs: a stored plan of prepaid reads as Free, so the packs decide.
     expect(effectiveBillingPlan({ deploymentMode: "cloud", accountPlan: "prepaid", subscriptionState: "active" })).toBe("free_cloud");
+  });
+
+  it("reads the plan in force from the billing account and whether a pack has time left", () => {
+    const account = (plan: string | null, subscriptionState: string | null, planCode: string | null = null, replaced = false) => ({ plan, planCode, subscriptionState, subscriptionId: "sub_1", replacedSubscriptionId: replaced ? "sub_1" : null });
+    expect(planInForce("cloud", undefined, false)).toEqual({ plan: "free_cloud", planCode: null });
+    expect(planInForce("cloud", null, true)).toEqual({ plan: "prepaid", planCode: null });
+    expect(planInForce("cloud", account("starter", "active", "starter-launch"), true)).toEqual({ plan: "starter", planCode: "starter-launch" });
+    // A lapsed promo plan is Free, and its code no longer counts.
+    expect(planInForce("cloud", account("starter", "canceled", "starter-launch"), false)).toEqual({ plan: "free_cloud", planCode: null });
+    // A subscription a pack replaced counts as ended, so the pack decides.
+    expect(planInForce("cloud", account("pro", "active", null, true), true)).toEqual({ plan: "prepaid", planCode: null });
+    expect(planInForce("cloud", account("pro", "active", null, true), false)).toEqual({ plan: "free_cloud", planCode: null });
+    expect(planInForce("self_hosted_standard", account("pro", "active"), true)).toEqual({ plan: "self_host", planCode: null });
   });
 
   it("estimates GSM and Unicode SMS segments conservatively", () => {

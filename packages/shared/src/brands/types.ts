@@ -3,7 +3,7 @@
 // gets (branding.ts and brandLinks.ts), so code can use it as it stands.
 
 import type { BillingDisplay } from "../billingDisplay";
-import type { BillingPlanTier, ResolvedBillingPlan } from "../billingProfile";
+import type { BillingAccounts, BillingPlanTier, ResolvedBillingPlan } from "../billingProfile";
 
 /** Settings for hosts whose first label matches a pattern, such as dev01 for "dev*". */
 export type BrandEnvironment = {
@@ -60,3 +60,6 @@ export type BrandIndex = {
 
 /** A brand's billing.json display section: the plan screens' words and layout, which sell nothing. */
 export type BrandPlanDisplay = BillingDisplay;
+
+/** A brand's billing.json accounts section: rules for each account, such as how many businesses one may own, which the hash leaves out. */
+export type BrandAccountLimits = BillingAccounts;

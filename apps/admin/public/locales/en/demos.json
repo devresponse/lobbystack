@@ -42,6 +42,10 @@
     "errorDescription": "Something went wrong while claiming this demo. Please try again.",
     "unavailableTitle": "This demo link is unavailable",
     "unavailableDescription": "The demo link is missing or no longer valid.",
+    "businessLimitTitle": "Your account owns the most businesses it can",
+    "businessLimitDescription": "Delete one of your businesses, or sign in with another account, to claim this demo.",
+    "businessLimitUpgradeTitle": "Your account owns the most businesses its plans allow",
+    "businessLimitUpgradeDescription": "Upgrade one of your businesses to a higher plan, delete one, or sign in with another account, to claim this demo.",
     "retry": "Try again"
   },
   "operator": {

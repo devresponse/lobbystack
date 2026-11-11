@@ -158,6 +158,31 @@ describe("compileBrands", () => {
     expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json display.plans: only one plan can be popular");
   });
 
+  it("carries a billing.json's accounts section to the admin, apart from the hash", () => {
+    const billing = JSON.parse(readFileSync(new URL("./testing/plans-and-packs.billing.json", import.meta.url), "utf8"));
+    const withBilling = sources();
+    withBilling.brands.alloplace!.billing = billing;
+    const without = compileBrands(withBilling);
+    expect(without.accountLimits).toEqual({});
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: { maxBusinesses: 3 } };
+    const compiled = compileBrands(withBilling);
+    expect(compiled.accountLimits).toEqual({ alloplace: { maxBusinesses: 3 } });
+    expect(compiled.billingHashes).toEqual(without.billingHashes);
+    expect(compiled.billingPlans).toEqual(without.billingPlans);
+    expect(brandsModuleSource(compiled)).toContain(`export const BRAND_ACCOUNT_LIMITS: Record<string, BrandAccountLimits> = ${JSON.stringify({ alloplace: { maxBusinesses: 3 } }, null, 2)};`);
+    // A number outside 1 to 100 stops the build, naming the file.
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: { maxBusinesses: 101 } };
+    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json accounts.maxBusinesses");
+    // A number for each plan comes along, and a code no plan of the file has stops the build.
+    const byPlan = { maxBusinesses: 3, maxBusinessesByPlan: { free_cloud: 1, starter: 5, prepaid: 2 } };
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: byPlan };
+    const perPlan = compileBrands(withBilling);
+    expect(perPlan.accountLimits).toEqual({ alloplace: byPlan });
+    expect(perPlan.billingHashes).toEqual(without.billingHashes);
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: { maxBusinessesByPlan: { starterr: 5 } } };
+    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json accounts.maxBusinessesByPlan.starterr");
+  });
+
   it("keeps a name with its environment suffix within the length limit", () => {
     const long = sources();
     long.brands.alloplace!.file = { appName: "x".repeat(38), environments: { "dev*": { appNameSuffix: " (dev)" } } };

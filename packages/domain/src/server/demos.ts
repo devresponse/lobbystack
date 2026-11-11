@@ -4,12 +4,14 @@ import { and, desc, eq, sql } from "drizzle-orm";
 
 import { businessContextSnapshots, businessMemberships, businesses, calls, enqueueOutbox, knowledgeDocuments, prospectDemos, receptionistProfiles, services, staff, staffServiceAssignments, users, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
+import type { BillingAccounts } from "@lobbystack/shared";
 import { type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
 import type { DomainContext } from "./context";
 import { deploymentAppName } from "./branding";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { recordProductEventBestEffort } from "./productEvents";
+import { assertBusinessAllowanceInTransaction } from "./tenancy";
 
 export type ProspectDemoPublicState = "preparing" | "active" | "claimed" | "revoked" | "expired" | "invalid";
 
@@ -346,7 +348,7 @@ export async function previewProspectDemo(context: DomainContext, token: string)
 
 export async function claimProspectDemo(
   context: DomainContext,
-  input: { userId: string; token: string },
+  input: { userId: string; token: string; businessCaps?: BillingAccounts },
 ): Promise<{ businessId: string; status: "claimed" | "already_claimed" }> {
   const hash = tokenHash(input.token);
   const resolved = await context.db.execute<{ prospect_demo_id: string; business_id: string }>(sql`select prospect_demo_id, business_id from app.resolve_prospect_demo_by_token(${hash})`);
@@ -368,6 +370,8 @@ export async function claimProspectDemo(
       if (demo.status !== "active" || demo.expiresAt.getTime() <= Date.now()) throw new Error("Demo is invalid, expired, or no longer claimable.");
       const business = (await tx.select({ status: businesses.status }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
       if (business?.status !== "active") throw new Error("Prospect demo business is unavailable.");
+      // Claiming a demo counts against the account's business limit like creating a business.
+      await assertBusinessAllowanceInTransaction(tx, { userId: input.userId, businessId, caps: input.businessCaps });
       await tx.insert(businessMemberships).values({ businessId, userId: input.userId, role: "business_owner", status: "active" }).onConflictDoUpdate({
         target: [businessMemberships.businessId, businessMemberships.userId],
         set: { role: "business_owner", status: "active", updatedAt: new Date() },
@@ -394,6 +398,7 @@ export async function claimProspectDemo(
 }
 
 function claimFailureReason(error: unknown): string {
+  if ((error as { code?: unknown } | null)?.code === "business_limit") return "business_limit";
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("already been claimed")) return "already_claimed";
   if (message.includes("invalid, expired, or no longer claimable")) return "not_claimable";

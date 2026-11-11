@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { businessMemberships, businesses, createDatabaseClient, prospectDemos, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, businessMemberships, businesses, createDatabaseClient, prospectDemos, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { claimProspectDemo, createProspectDemo, expireProspectDemos, getProspectDemoStatus, listProspectDemos, revokeProspectDemo } from "./demos";
 import { getActiveOnboardingState } from "./onboarding";
@@ -160,6 +160,51 @@ describe.skipIf(!testUrl)("prospect demo operator membership against dedicated P
 
       expect(await asApp(tx, () => claimProspectDemo({ db: asDb(tx) }, { userId: claimantUserId, token: demo.token }))).toEqual({ businessId: demo.businessId, status: "already_claimed" });
       expect(await membership(tx, demo.businessId, claimantUserId)).toMatchObject({ status: "active" });
+    });
+  });
+
+  it("refuses a claim by an account that owns as many businesses as it may, and leaves the demo open", async () => {
+    await rollbackTest(async (tx) => {
+      const { operatorUserId } = await operatorWithWorkspace(tx);
+      const claimantUserId = await insertUser(tx);
+      const { businessId: claimantBusinessId } = await asApp(tx, () => createBusiness({ db: asDb(tx) }, { userId: claimantUserId, name: `Claimant ${randomUUID()}`, timezone: "UTC", businessType: "test" }));
+      const demo = await createDemo(tx, operatorUserId);
+      await tx.update(prospectDemos).set({ status: "active", publishedAt: new Date() }).where(eq(prospectDemos.id, demo.demoId));
+      const claim = (maxBusinesses: number) => claimProspectDemo({ db: asDb(tx) }, { userId: claimantUserId, token: demo.token, businessCaps: { maxBusinesses } });
+
+      await tx.execute(sql`set local role lobbystack_app`);
+      await expect(claim(1)).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 1 });
+      await tx.execute(sql`reset role`);
+      expect(await demoRow(tx, demo.demoId)).toMatchObject({ status: "active", claimedByUserId: null });
+      expect(await membership(tx, demo.businessId, claimantUserId)).toBeUndefined();
+      expect(await membership(tx, demo.businessId, operatorUserId)).toMatchObject({ status: "active", role: "business_owner" });
+      expect(await activeBusinessId(tx, claimantUserId)).toBe(claimantBusinessId);
+
+      // The same link works once the account may own one more.
+      expect(await asApp(tx, () => claim(2))).toEqual({ businessId: demo.businessId, status: "claimed" });
+      expect(await membership(tx, demo.businessId, claimantUserId)).toMatchObject({ status: "active", role: "business_owner" });
+    });
+  });
+
+  it("counts a claimant's plans toward its cap when it claims a demo", async () => {
+    await rollbackTest(async (tx) => {
+      const { operatorUserId } = await operatorWithWorkspace(tx);
+      const claimantUserId = await insertUser(tx);
+      const { businessId: claimantBusinessId } = await asApp(tx, () => createBusiness({ db: asDb(tx) }, { userId: claimantUserId, name: `Claimant ${randomUUID()}`, timezone: "UTC", businessType: "test", deploymentMode: "cloud" }));
+      const demo = await createDemo(tx, operatorUserId);
+      await tx.update(prospectDemos).set({ status: "active", publishedAt: new Date() }).where(eq(prospectDemos.id, demo.demoId));
+      // A billed deployment (DEPLOYMENT_MODE=cloud) makes each demo a cloud business, on Free until it buys a plan.
+      await tx.update(businesses).set({ deploymentMode: "cloud" }).where(eq(businesses.id, demo.businessId));
+      const caps = { maxBusinessesByPlan: { free_cloud: 1, starter: 2 } };
+      const claim = () => claimProspectDemo({ db: asDb(tx) }, { userId: claimantUserId, token: demo.token, businessCaps: caps });
+
+      // The claimant's business and the demo are both on Free, which allows one.
+      await tx.execute(sql`set local role lobbystack_app`);
+      await expect(claim()).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 1, upgrade: true });
+      await tx.execute(sql`reset role`);
+      // Starter on the claimant's business allows two.
+      await tx.insert(billingAccounts).values({ businessId: claimantBusinessId, billingKey: `test:${claimantBusinessId}`, plan: "starter", subscriptionState: "active", subscriptionId: `sub_${claimantBusinessId}` });
+      expect(await asApp(tx, () => claim())).toEqual({ businessId: demo.businessId, status: "claimed" });
     });
   });
 

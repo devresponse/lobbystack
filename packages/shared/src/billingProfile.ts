@@ -32,6 +32,10 @@ export const PLAN_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,46}[a-z0-9]$/;
 export const MAX_ADDITIONAL_PLANS = 50;
 /** Prepaid packs a file may hold: each size and length is a pack of its own. */
 export const MAX_BILLING_PACKS = 30;
+/** How many businesses one account may own when its brand's billing.json leaves accounts out: the limit from before the file could set one. */
+export const DEFAULT_MAX_BUSINESSES_PER_ACCOUNT = 10;
+/** The most businesses a billing.json may let one account own, since each business adds recurring worker jobs. */
+export const MAX_BUSINESSES_PER_ACCOUNT_CEILING = 100;
 
 const BYTES_PER_MB = 1_048_576;
 
@@ -87,6 +91,54 @@ const pack = z.strictObject({
   limits: limits.partial().optional(),
 });
 
+// Rules for each account rather than each business. maxBusinesses: how many
+// businesses one account may own, whether it creates them or claims them, 10
+// when left out. maxBusinessesByPlan: that number for each plan, by plan code,
+// or prepaid for a business with a live pack; an account may own as many as
+// the best plan among its businesses allows, and a plan the map leaves out
+// allows maxBusinesses (an additional plan, its tier's number first).
+const businessCap = z.number().int().min(1).max(MAX_BUSINESSES_PER_ACCOUNT_CEILING);
+const accounts = z.strictObject({ maxBusinesses: businessCap.optional(), maxBusinessesByPlan: z.record(z.string(), businessCap).optional() });
+
+/** A billing.json's accounts section: rules for each account, which the admin enforces from its build. */
+export type BillingAccounts = z.output<typeof accounts>;
+
+/** The key of accounts.maxBusinessesByPlan for a business on a live prepaid pack, which has no plan code. */
+export const PREPAID_BUSINESS_CAP_KEY = "prepaid";
+
+/** A business's plan as its account's business cap reads it: its tier (BillingPlanSlug), and its additional plan's code while that plan is live. */
+export type BusinessCapPlan = { plan: string; planCode?: string | null };
+
+// The tiers a business can move to, whose caps say whether a higher plan allows more.
+const CAP_TIERS = ["free_cloud", "starter", "pro", "enterprise", PREPAID_BUSINESS_CAP_KEY] as const;
+
+/**
+ * How many businesses an account may own because one of its businesses is on
+ * this plan: accounts.maxBusinessesByPlan for its additional plan's code, then
+ * for its tier, then accounts.maxBusinesses, then 10. A self-hosted business's
+ * tier is self_host, which the map can't name, so maxBusinesses decides.
+ */
+export function planBusinessCap(accounts: BillingAccounts | undefined, plan: BusinessCapPlan): number {
+  const byPlan = accounts?.maxBusinessesByPlan ?? {};
+  const own = (code: string | null | undefined) => (code && Object.hasOwn(byPlan, code) ? byPlan[code] : undefined);
+  return own(plan.planCode) ?? own(plan.plan) ?? accounts?.maxBusinesses ?? DEFAULT_MAX_BUSINESSES_PER_ACCOUNT;
+}
+
+/**
+ * The most businesses an account may own while it owns, or is about to own,
+ * businesses on these plans: the cap of the best of them. With none,
+ * accounts.maxBusinesses, or 10.
+ */
+export function accountBusinessCap(accounts: BillingAccounts | undefined, plans: readonly BusinessCapPlan[]): number {
+  if (plans.length === 0) return accounts?.maxBusinesses ?? DEFAULT_MAX_BUSINESSES_PER_ACCOUNT;
+  return Math.max(...plans.map((plan) => planBusinessCap(accounts, plan)));
+}
+
+/** The most businesses any plan lets an account own: the cap of the best tier or plan code the section names. */
+export function highestBusinessCap(accounts: BillingAccounts | undefined): number {
+  return Math.max(...CAP_TIERS.map((plan) => planBusinessCap(accounts, { plan })), ...Object.values(accounts?.maxBusinessesByPlan ?? {}));
+}
+
 const additionalPlan = z.strictObject({
   tier: z.enum(["starter", "pro"]),
   access: z.enum(billingPlanAccessLevels),
@@ -137,6 +189,10 @@ const billingProfileShape = z.strictObject({
   plans: z.object({ free_cloud: freePlan, starter: tierPlan, pro: tierPlan, enterprise: customPlan }).catchall(additionalPlan),
   // Prepaid packs by code; a file without the key sells none.
   packs: z.record(z.string(), pack).optional(),
+  // Rules for each account, such as how many businesses one may own. The
+  // admin enforces them from its build, so like display, the hash, the apply
+  // and the stored profile leave them out: a change needs a deploy, not an apply.
+  accounts: accounts.optional(),
   // The plan screens' words and layout (billingDisplay.ts). It sells nothing:
   // the hash, the apply and the stored profile leave it out.
   display: billingDisplaySchema.optional(),
@@ -210,6 +266,10 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
   packs.slice(MAX_BILLING_PACKS).forEach((code) => context.addIssue({ code: "custom", path: ["packs", code], message: `a file holds at most ${MAX_BILLING_PACKS} packs` }));
   // C11: the display section's cards, rows and {{names}}.
   if (profile.display) checkBillingDisplay(profile.display, { starter: profile.plans.starter.sold, pro: profile.plans.pro.sold }, (path, message) => context.addIssue({ code: "custom", path: ["display", ...path], message }));
+  // C12: a cap per plan names a plan of this file, or prepaid for a business with a live pack.
+  for (const code of Object.keys(profile.accounts?.maxBusinessesByPlan ?? {}).sort()) {
+    if (code !== PREPAID_BUSINESS_CAP_KEY && !Object.hasOwn(profile.plans, code)) context.addIssue({ code: "custom", path: ["accounts", "maxBusinessesByPlan", code], message: `not a plan in this file: use a code under plans, or ${PREPAID_BUSINESS_CAP_KEY} for a business with a live pack` });
+  }
   if (profile.stripe) {
     // C8: Managed Payments sells through Checkout alone, so overage can't be a subscription of its own.
     if (profile.stripe.managedPayments && profile.stripe.overage !== "checkout") context.addIssue({ code: "custom", path: ["stripe", "overage"], message: "with managedPayments, overage is checkout: Managed Payments sells only through Checkout" });
@@ -243,8 +303,8 @@ export function billingProfileForProvider<T extends Pick<z.output<typeof billing
 
 /** A billing.json as checked. */
 export type BillingProfile = z.output<typeof billingProfileSchema>;
-/** A checked file without its $schema and its display section, every object's keys in order. */
-export type NormalizedBillingProfile = Omit<BillingProfile, "$schema" | "display">;
+/** A checked file without its $schema and the sections only its build carries (accounts, display), every object's keys in order. */
+export type NormalizedBillingProfile = Omit<BillingProfile, "$schema" | "accounts" | "display">;
 
 function sortedKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortedKeys);
@@ -259,25 +319,27 @@ export function canonicalJson(value: unknown): string {
 
 /**
  * The file as the billing commands send it to a deployment: without its
- * display section, which sells nothing, so a deployment built before the
- * section existed takes the file too.
+ * accounts and display sections, which sell nothing and reach the app
+ * through its build alone, so a deployment built before either section
+ * existed takes the file too.
  */
-export function billingProfileWithoutDisplay<T extends { display?: unknown }>(profile: T): Omit<T, "display"> {
-  const { display: _screens, ...rest } = profile;
+export function billingProfileForCatalog<T extends { accounts?: unknown; display?: unknown }>(profile: T): Omit<T, "accounts" | "display"> {
+  const { accounts: _accounts, display: _screens, ...rest } = profile;
   return rest;
 }
 
 /**
- * The checked file without $schema and display, keys in order: what a run
- * stores and the profile hash covers. Neither sells anything, so editing the
- * plan screens' words never changes the hash, needs an apply or shows drift.
+ * The checked file without $schema, accounts and display, keys in order: what
+ * a run stores and the profile hash covers. None of them sells anything, so
+ * editing the plan screens' words or the business limit never changes the
+ * hash, needs an apply or shows drift.
  */
 export function normalizeBillingProfile(profile: BillingProfile): NormalizedBillingProfile {
-  const { $schema: _editorHint, display: _screens, ...rest } = profile;
+  const { $schema: _editorHint, accounts: _accounts, display: _screens, ...rest } = profile;
   return sortedKeys(rest) as NormalizedBillingProfile;
 }
 
-/** The text the profile hash is the SHA-256 of. Whitespace, key order, $schema and display never change it. */
+/** The text the profile hash is the SHA-256 of. Whitespace, key order, $schema, accounts and display never change it. */
 export function canonicalBillingProfileJson(profile: BillingProfile): string {
   return canonicalJson(normalizeBillingProfile(profile));
 }

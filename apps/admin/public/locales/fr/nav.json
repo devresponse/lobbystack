@@ -27,6 +27,10 @@
     "signOut": "Se déconnecter",
     "version": "version : {{commit}}",
     "createBusiness": "Créer une entreprise",
+    "businessCount": "{{owned}} sur {{max}}",
+    "businessLimitReached": "C'est le nombre maximal d'entreprises pour un compte.",
+    "businessLimitUpgrade": "Passez l'une de vos entreprises à un forfait supérieur pour en ajouter d'autres.",
+    "seePlans": "Voir les forfaits",
     "setupGuide": {
       "title": "Premiers pas",
       "open": "Ouvrir le guide de configuration",

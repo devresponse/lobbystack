@@ -12,13 +12,14 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => k
 const clients: QueryClient[] = [];
 beforeEach(() => { router.replace.mockReset(); sessionStorage.clear(); window.history.replaceState({}, "", "/claim-demo?token=fixture-token"); });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); });
-function setup(state: string | null, claimResponse: () => Promise<Response> = async () => Response.json({ businessId: "business" })) {
+function setup(state: string | null, claimResponse: () => Promise<Response> = async () => Response.json({ businessId: "business" }), businessLimit?: { owned: number; max: number; upgrade: boolean }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
   const claim = vi.fn(claimResponse);
   const fetchMock = vi.fn(async (url: string) => {
     if (url === "/api/demo/claim") return claim();
     if (url === "/api/demo/preview") return state === null ? new Promise<Response>(() => {}) : Response.json({ state });
+    if (url === "/api/businesses" && businessLimit) return Response.json({ businesses: [], businessLimit });
     throw new Error(`Unexpected request ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -68,6 +69,27 @@ describe("main demo-claim behavior through the Next API", () => {
     await userEvent.click(await screen.findByRole("button", { name: "claim.retry" }));
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/onboarding/business"));
     expect(claim).toHaveBeenCalledTimes(2);
+  });
+  it("says the account owns the most businesses it may, keeps the token, and claims on retry", async () => {
+    let attempts = 0;
+    const { claim } = setup("active", async () => ++attempts === 1
+      ? Response.json({ error: "This account already owns 10 businesses, the most one account can own.", code: "business_limit" }, { status: 409 })
+      : Response.json({ businessId: "business" }));
+    expect(await screen.findByText("claim.businessLimitTitle")).toBeTruthy();
+    expect(screen.getByText("claim.businessLimitDescription")).toBeTruthy();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("prospect_demo_token")).toBe("fixture-token");
+    await userEvent.click(screen.getByRole("button", { name: "claim.retry" }));
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/onboarding/business"));
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem("prospect_demo_token")).toBeNull();
+  });
+  it("says a higher plan on one of the account's businesses would let it claim the demo, when one would", async () => {
+    setup("active", async () => Response.json({ error: "This account already owns 1 business, the most its plans allow.", code: "business_limit" }, { status: 409 }), { owned: 1, max: 1, upgrade: true });
+    expect(await screen.findByText("claim.businessLimitUpgradeTitle")).toBeTruthy();
+    expect(screen.getByText("claim.businessLimitUpgradeDescription")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "claim.retry" })).toBeTruthy();
+    expect(sessionStorage.getItem("prospect_demo_token")).toBe("fixture-token");
   });
   it("retains the token while redirecting an unauthenticated claimant to login", async () => {
     setup("active", async () => Response.json({ error: "Unauthorized" }, { status: 401 }));

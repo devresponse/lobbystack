@@ -4,7 +4,7 @@ A business can pay once for a pack of voice minutes that lasts a set number of d
 
 ## Status
 
-Accepted, 2026-11-09 (the fork's). Built on `feature/receptionists` as migration `0148`: [prepaid packs](../features/prepaid-packs.md) describes what it does, and the [decisions](../project/decisions.md#choose-what-to-build) the maintainer made for it.
+Accepted, 2026-11-09 (the fork's). Built on `releases/r2` as migration `0148`: [prepaid packs](../features/prepaid-packs.md) describes what it does, and the [decisions](../project/decisions.md#choose-what-to-build) the maintainer made for it.
 
 ## What was there before
 

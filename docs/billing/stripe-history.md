@@ -2,7 +2,7 @@
 
 This was the roadmap page of Stripe billing, kept as its build history now that it's built: [Stripe billing](../providers/stripe.md) says how it works. Billing ran through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** built on `feature/receptionists` on 2026-11-08, one step at a time; nothing goes to `main`. Every step is done, with Stripe as the merchant of record as a second mode, and Stripe was switched on once its sandbox scenarios had passed twice in a row in that mode.
+- **Status:** built on `releases/r2` on 2026-11-08, one step at a time; nothing goes to `main`. Every step is done, with Stripe as the merchant of record as a second mode, and Stripe was switched on once its sandbox scenarios had passed twice in a row in that mode.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones.
 
@@ -14,7 +14,7 @@ This was the roadmap page of Stripe billing, kept as its build history now that 
 
 ## Follow the plan
 
-Each step lands on `feature/receptionists` once its checks pass, and leaves Polar deployments as they were.
+Each step lands on `releases/r2` once its checks pass, and leaves Polar deployments as they were.
 
 | Phase | Steps |
 | --- | --- |

@@ -163,6 +163,29 @@ describe.skipIf(!testUrl)("prospect demo operator membership against dedicated P
     });
   });
 
+  it("refuses a claim by an account that owns as many businesses as it may, and leaves the demo open", async () => {
+    await rollbackTest(async (tx) => {
+      const { operatorUserId } = await operatorWithWorkspace(tx);
+      const claimantUserId = await insertUser(tx);
+      const { businessId: claimantBusinessId } = await asApp(tx, () => createBusiness({ db: asDb(tx) }, { userId: claimantUserId, name: `Claimant ${randomUUID()}`, timezone: "UTC", businessType: "test" }));
+      const demo = await createDemo(tx, operatorUserId);
+      await tx.update(prospectDemos).set({ status: "active", publishedAt: new Date() }).where(eq(prospectDemos.id, demo.demoId));
+      const claim = (businessLimit: number) => claimProspectDemo({ db: asDb(tx) }, { userId: claimantUserId, token: demo.token, businessLimit });
+
+      await tx.execute(sql`set local role lobbystack_app`);
+      await expect(claim(1)).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 1 });
+      await tx.execute(sql`reset role`);
+      expect(await demoRow(tx, demo.demoId)).toMatchObject({ status: "active", claimedByUserId: null });
+      expect(await membership(tx, demo.businessId, claimantUserId)).toBeUndefined();
+      expect(await membership(tx, demo.businessId, operatorUserId)).toMatchObject({ status: "active", role: "business_owner" });
+      expect(await activeBusinessId(tx, claimantUserId)).toBe(claimantBusinessId);
+
+      // The same link works once the account may own one more.
+      expect(await asApp(tx, () => claim(2))).toEqual({ businessId: demo.businessId, status: "claimed" });
+      expect(await membership(tx, demo.businessId, claimantUserId)).toMatchObject({ status: "active", role: "business_owner" });
+    });
+  });
+
   it("detaches only from closed demos on the business bound to the transaction", async () => {
     await rollbackTest(async (tx) => {
       const { operatorUserId } = await operatorWithWorkspace(tx);

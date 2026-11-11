@@ -27,6 +27,8 @@
     "signOut": "Cerrar sesión",
     "version": "versión: {{commit}}",
     "createBusiness": "Crear negocio",
+    "businessCount": "{{owned}} de {{max}}",
+    "businessLimitReached": "Es el máximo de negocios para una cuenta.",
     "setupGuide": {
       "title": "Primeros pasos",
       "open": "Abrir la guía de configuración",

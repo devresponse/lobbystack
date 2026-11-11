@@ -27,6 +27,8 @@
     "signOut": "Odjavi se",
     "version": "verzija: {{commit}}",
     "createBusiness": "Kreiraj firmu",
+    "businessCount": "{{owned}} od {{max}}",
+    "businessLimitReached": "To je najviše firmi za jedan nalog.",
     "setupGuide": {
       "title": "Prvi koraci",
       "open": "Otvori vodič za podešavanje",

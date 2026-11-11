@@ -38,7 +38,7 @@ import { billingVerifyReport, type BillingVerifyResult } from "../packages/domai
 import { PolarCatalogClient, type PolarSnapshot } from "../packages/providers/src/polar/polarCatalog";
 import { StripeCatalogClient, createStripeCatalogClient, type StripeCatalogApi, type StripeSnapshot } from "../packages/providers/src/stripe/catalog";
 import { BRANDS } from "../packages/shared/src/brands/generated";
-import { billingProfileForProvider, billingProfileSchema, billingProfileWithoutDisplay, billingProviderNames, canonicalBillingProfileJson, polarBaseUrls, stripeKeyMode, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../packages/shared/src/index";
+import { billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, billingProviderNames, canonicalBillingProfileJson, polarBaseUrls, stripeKeyMode, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../packages/shared/src/index";
 
 export type BillingIo = {
   env: NodeJS.ProcessEnv;
@@ -288,7 +288,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   let catalogChanged = catalog.hash !== file.hash;
   if (catalog.brand === options.brand) {
     // An applied file too: new code can resolve the same file to other rows. The undeployed check is the preflight's, so the dry run leaves it out.
-    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
+    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileForCatalog(file.profile), replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
     catalogChanges = preview.changes;
     catalogChanged ||= catalogChanges.length > 0;
     reasons.push(...preview.blocked_by.map(apiRefusalLine));
@@ -340,7 +340,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
 
   // Step 7: the catalog.
   if (catalogChanged) {
-    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
+    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileForCatalog(file.profile), replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
     io.out(`\nPostgres: ${run.status === "unchanged" ? "the tables already matched" : `applied ${run.changes.length} ${run.changes.length === 1 ? "change" : "changes"}`} in run ${String(run.id)}.`);
   }
 
@@ -498,7 +498,7 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
   let catalogChanges: ApiBillingCatalogChange[] = [];
   let catalogChanged = catalog.hash !== file.hash;
   if (catalog.brand === options.brand) {
-    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
+    const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileForCatalog(file.profile), replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
     catalogChanges = preview.changes;
     catalogChanged ||= catalogChanges.length > 0;
     reasons.push(...preview.blocked_by.map(apiRefusalLine));
@@ -554,7 +554,7 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
 
   // Step 7: the catalog.
   if (catalogChanged) {
-    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileWithoutDisplay(file.profile), replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
+    const run = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: billingProfileForCatalog(file.profile), replaces_hash: catalog.hash, allow_undeployed: true }, idempotencyKey: randomUUID() })).data;
     io.out(`\nPostgres: ${run.status === "unchanged" ? "the tables already matched" : `applied ${run.changes.length} ${run.changes.length === 1 ? "change" : "changes"}`} in run ${String(run.id)}.`);
   }
 

@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { apiKeys, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, outboxMessages, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { findAvailability } from "./booking";
 import { generateApiKey } from "./publicApi/apiKeys";
-import { acceptInvitation, createBusiness, inviteMember, listUserBusinesses, previewInvitation, removeMember } from "./tenancy";
+import { acceptInvitation, createBusiness, insertInvitationInTransaction, inviteMember, listUserBusinesses, previewInvitation, removeMember } from "./tenancy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -87,7 +87,7 @@ describe.skipIf(!client)("createBusiness", () => {
     });
   });
 
-  it("stops one account at 10 owned businesses", async () => {
+  it("stops one account at 10 owned businesses when the brand's billing.json sets no limit", async () => {
     await rollbackTest(async (tx) => {
       const userId = randomUUID();
       const email = `${userId}@example.invalid`;
@@ -97,7 +97,26 @@ describe.skipIf(!client)("createBusiness", () => {
       for (let index = 0; index < 10; index++) {
         await createBusiness(context, { userId, name: `Shop ${index}`, timezone: "UTC", businessType: "test" });
       }
-      await expect(createBusiness(context, { userId, name: "Shop 11", timezone: "UTC", businessType: "test" })).rejects.toMatchObject({ status: 403 });
+      await expect(createBusiness(context, { userId, name: "Shop 11", timezone: "UTC", businessType: "test" })).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 10 });
+    });
+  });
+
+  it("stops one account at the limit it is given, counting only the businesses it owns", async () => {
+    await rollbackTest(async (tx) => {
+      const [userId, otherId] = [randomUUID(), randomUUID()];
+      for (const id of [userId, otherId]) await tx.insert(users).values({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid`, name: "Sam Owner", emailVerified: true });
+      await tx.execute(sql`set local role lobbystack_app`);
+      const context = { db: tx as unknown as Database };
+      // Being an admin on someone else's business doesn't use up the allowance.
+      const { businessId: otherBusinessId } = await createBusiness(context, { userId: otherId, name: "Other Shop", timezone: "UTC", businessType: "test" });
+      const { token } = await inviteMember(context, { userId: otherId, businessId: otherBusinessId, email: `${userId}@example.invalid`, role: "business_admin" });
+      await acceptInvitation(context, { userId, tokenHash: createHash("sha256").update(token).digest("hex"), email: `${userId}@example.invalid`, emailVerified: true });
+      await createBusiness(context, { userId, name: "Shop 1", timezone: "UTC", businessType: "test", businessLimit: 2 });
+      await createBusiness(context, { userId, name: "Shop 2", timezone: "UTC", businessType: "test", businessLimit: 2 });
+      await expect(createBusiness(context, { userId, name: "Shop 3", timezone: "UTC", businessType: "test", businessLimit: 2 })).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 2 });
+      // A lower limit keeps what the account owns and only stops the next one.
+      await expect(createBusiness(context, { userId, name: "Shop 3", timezone: "UTC", businessType: "test", businessLimit: 1 })).rejects.toMatchObject({ code: "business_limit", limit: 1 });
+      expect((await listUserBusinesses(context.db, userId)).map((row) => `${row.name}: ${row.role}`).sort()).toEqual(["Other Shop: business_admin", "Shop 1: business_owner", "Shop 2: business_owner"]);
     });
   });
 
@@ -155,7 +174,9 @@ describe.skipIf(!client)("team membership", () => {
     const invite = async (fromUserId: string, email: string, role: "business_admin" | "viewer") => (await inviteMember(context, { userId: fromUserId, businessId, email, role })).token;
     const accept = (person: { id: string; email: string }, token: string) => acceptInvitation(context, { userId: person.id, tokenHash: hash(token), email: person.email, emailVerified: true });
     const listMembers = async (userId: string) => (await withBusinessTransaction(context.db, { userId, businessId, actorType: "operator" }, (inner) => inner.execute<{ membership_id: string; user_id: string; role: string }>(sql`select membership_id, user_id, role from app.list_business_members(${businessId}::uuid)`))).rows;
-    return { context, businessId, people, invite, accept, listMembers };
+    /** A claim link from the owner, as the API's POST /team/claim-link makes one. */
+    const claimLink = async (email: string) => (await withBusinessTransaction(context.db, { userId: owner.id, businessId, actorType: "operator" }, (inner) => insertInvitationInTransaction(inner, { businessId, invitedByUserId: owner.id, normalizedEmail: email, role: "business_owner", transfersOwnership: true }))).token;
+    return { context, businessId, people, invite, accept, listMembers, claimLink };
   }
 
   it("lists other active members to the owner, and removing a member revokes their pending invitations", async () => {
@@ -247,6 +268,38 @@ describe.skipIf(!client)("team membership", () => {
       await tx.execute(sql`reset role`);
       const [membership] = await tx.select({ role: businessMemberships.role, status: businessMemberships.status }).from(businessMemberships).where(and(eq(businessMemberships.businessId, businessId), eq(businessMemberships.userId, owner!.id)));
       expect(membership).toEqual({ role: "business_owner", status: "active" });
+    });
+  });
+
+  it("refuses a claim link to an account that owns as many businesses as it may, and keeps the link open", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner, claimant], claimLink } = await seedTeam(tx, ["Ana", "Ben"]);
+      await createBusiness(context, { userId: claimant!.id, name: "Ben's Shop", timezone: "UTC", businessType: "test" });
+      const token = await claimLink(claimant!.email);
+      const take = (businessLimit: number) => acceptInvitation(context, { userId: claimant!.id, tokenHash: hash(token), email: claimant!.email, emailVerified: true, businessLimit });
+
+      await expect(take(1)).rejects.toMatchObject({ status: 409, code: "business_limit", limit: 1 });
+      await tx.execute(sql`reset role`);
+      const invitation = async () => (await tx.select({ status: businessInvitations.status }).from(businessInvitations).where(eq(businessInvitations.tokenHash, hash(token))))[0]?.status;
+      const membership = async (userId: string) => (await tx.select({ role: businessMemberships.role, status: businessMemberships.status }).from(businessMemberships).where(and(eq(businessMemberships.businessId, businessId), eq(businessMemberships.userId, userId))))[0];
+      expect(await invitation()).toBe("pending");
+      expect(await membership(claimant!.id)).toBeUndefined();
+      expect(await membership(owner!.id)).toEqual({ role: "business_owner", status: "active" });
+
+      // The same link works once the account may own one more.
+      await tx.execute(sql`set local role lobbystack_app`);
+      await expect(take(2)).resolves.toMatchObject({ businessId, role: "business_owner" });
+      await tx.execute(sql`reset role`);
+      expect(await invitation()).toBe("accepted");
+      expect(await membership(claimant!.id)).toEqual({ role: "business_owner", status: "active" });
+    });
+  });
+
+  it("doesn't count the business a claim link hands over against an account that already owns it", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner], claimLink } = await seedTeam(tx, ["Ana"]);
+      const token = await claimLink(owner!.email);
+      await expect(acceptInvitation(context, { userId: owner!.id, tokenHash: hash(token), email: owner!.email, emailVerified: true, businessLimit: 1 })).resolves.toMatchObject({ businessId, role: "business_owner" });
     });
   });
 });

@@ -4,7 +4,7 @@ import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiKeys, auditLogs, businessInvitations, businessMemberships, businesses, calendarConnections, receptionistProfiles, staff, users, webhookEndpoints } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, defaultReceptionistName, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
+import { brandMaxBusinessesPerAccount, currentBrand, defaultAppointmentChangePolicy, defaultReceptionistName, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { disconnectCalendarInTransaction } from "./calendar";
@@ -19,6 +19,8 @@ export type CreateBusinessInput = {
   timezone: string;
   businessType: string;
   deploymentMode?: string;
+  /** The most businesses the account may own; this deployment's (deploymentMaxBusinessesPerAccount) when left out. */
+  businessLimit?: number;
 };
 
 function cleanSlug(slug: string): string {
@@ -29,8 +31,36 @@ function cleanSlug(slug: string): string {
   return result;
 }
 
-// Each business adds recurring worker jobs, so one account cannot create them without bound.
-const maxOwnedBusinesses = 10;
+/**
+ * How many businesses one account may own on this deployment: its brand's
+ * billing.json accounts.maxBusinesses, as the build carries it, or 10 when the
+ * file leaves it out. Each business adds recurring worker jobs, so the file
+ * can't allow more than 100.
+ */
+export function deploymentMaxBusinessesPerAccount(): number {
+  return brandMaxBusinessesPerAccount(currentBrand().id);
+}
+
+/** The refusal when the account already owns as many businesses as one account may. */
+export function businessLimitReached(limit: number): Error {
+  return Object.assign(new Error(`This account already owns ${limit} ${limit === 1 ? "business" : "businesses"}, the most one account can own.`), { status: 409, code: "business_limit", limit });
+}
+
+/**
+ * Refuses with business_limit when the account already owns as many
+ * businesses as one account may, not counting businessId, which it may own
+ * already. It counts what the workspace list shows as the account's: open
+ * businesses it is an owner of. It locks the account's row first, so two
+ * creates or claims at once count each other. Every way an account comes to
+ * own a business checks it, except a platform key's POST /businesses, whose
+ * businesses wait for their customer to claim them, which this checks.
+ */
+export async function assertBusinessAllowanceInTransaction(tx: DatabaseTransaction, input: { userId: string; businessId?: string; limit?: number | undefined }): Promise<void> {
+  const limit = input.limit ?? deploymentMaxBusinessesPerAccount();
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId)).for("update");
+  const owned = await tx.execute<{ count: number }>(sql`select count(*)::int as count from app.list_user_businesses(${input.userId}) where role = 'business_owner'${input.businessId ? sql` and business_id <> ${input.businessId}::uuid` : sql``}`);
+  if ((owned.rows[0]?.count ?? 0) >= limit) throw businessLimitReached(limit);
+}
 
 /**
  * The IANA time zone a value names, spelled the way Intl lists it, such as
@@ -76,12 +106,7 @@ export async function createBusiness(
     businessId,
     actorType: "system",
   }, async (tx) => {
-    // Lock the user row so concurrent creates by the same account count each other.
-    await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId)).for("update");
-    const owned = await tx.execute<{ count: number }>(sql`select count(*)::int as count from app.list_user_businesses(${input.userId}) where role = 'business_owner'`);
-    if ((owned.rows[0]?.count ?? 0) >= maxOwnedBusinesses) {
-      throw Object.assign(new Error(`Too many workspaces. One account can own up to ${maxOwnedBusinesses}.`), { status: 403 });
-    }
+    await assertBusinessAllowanceInTransaction(tx, { userId: input.userId, limit: input.businessLimit });
     const created = await insertBusinessInTransaction(tx, { businessId, userId: input.userId, name: input.name, slug: input.slug, timezone, businessType: input.businessType, deploymentMode: input.deploymentMode });
     await tx.update(users).set({ activeBusinessId: businessId, updatedAt: new Date() }).where(eq(users.id, input.userId));
     return created;
@@ -388,7 +413,7 @@ async function turnOffSenderConnections(tx: DatabaseTransaction, input: { busine
 
 export async function acceptInvitation(
   context: DomainContext,
-  input: { userId: string; tokenHash: string; email: string | null | undefined; emailVerified: boolean | null | undefined },
+  input: { userId: string; tokenHash: string; email: string | null | undefined; emailVerified: boolean | null | undefined; businessLimit?: number },
 ): Promise<{ businessId: string; role: string; turnedOff?: HandoverTurnedOff }> {
   const resolved = await context.db.execute<{ business_id: string }>(sql`select app.resolve_business_by_invitation(${input.tokenHash}) as business_id`);
   const businessId = resolved.rows[0]?.business_id;
@@ -417,6 +442,8 @@ export async function acceptInvitation(
       throw new Error("Invitation is invalid or expired.");
     }
     if (invitation.transfersOwnership) {
+      // Taking a business over counts against the account's limit like creating one.
+      await assertBusinessAllowanceInTransaction(tx, { userId: input.userId, businessId: invitation.businessId, limit: input.businessLimit });
       // A claim link makes the claimant an owner even if they were already on the team.
       await tx.insert(businessMemberships).values({ businessId: invitation.businessId, userId: input.userId, role: "business_owner", status: "active" }).onConflictDoUpdate({
         target: [businessMemberships.businessId, businessMemberships.userId],

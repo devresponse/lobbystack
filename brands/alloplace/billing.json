@@ -2,6 +2,9 @@
   "$schema": "../billing.schema.json",
   "version": 1,
   "currency": "cad",
+  "accounts": {
+    "maxBusinesses": 10
+  },
   "polar": {
     "allowMultipleSubscriptions": false,
     "portalPlanChanges": true,

@@ -26,6 +26,9 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
   const [name, setName] = useState(() => typeof document === "undefined" ? "" : (document.getElementById("onboarding-business-name") as HTMLInputElement | null)?.value ?? "");
   const [error, setError] = useState<string | null>(null);
   const { businesses, business: existing } = useActiveBusiness();
+  const limit = businesses.data?.businessLimit;
+  // A new business at the account's limit would be refused, so say so before anyone types a name.
+  const atLimit = createNew && limit !== undefined && limit.owned >= limit.max;
   const create = useMutation({
     mutationFn: () => requestJson<{ businessId: string }>("/api/businesses", {
       method: "POST",
@@ -82,7 +85,9 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
       }
       await create.mutateAsync();
     } catch (cause) {
-      setError(getSafeOnboardingErrorMessage(cause, t, "businessName.submitFailed"));
+      // Another tab may have taken the last place, so the count here and in the sidebar catches up.
+      if ((cause as { code?: unknown } | null)?.code === "business_limit") void queryClient.invalidateQueries({ queryKey: ["businesses"] });
+      setError(getSafeOnboardingErrorMessage(cause, t, "businessName.submitFailed", limit?.max));
     }
   }
 
@@ -96,8 +101,8 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
             <Input autoComplete="organization" autoFocus className="h-11 pl-9" id="onboarding-business-name" onChange={(event) => setName(event.target.value)} placeholder={t("businessName.placeholder")} required type="text" value={name} />
           </div>
         </Field>
-        {error || businesses.isError ? <FieldError>{error ?? t("businessName.unavailable")}</FieldError> : null}
-        <Button className="mt-2 h-11 w-full" disabled={businesses.isLoading || create.isPending || update.isPending || navigating || name.trim().length === 0} type="submit">{create.isPending || update.isPending || navigating ? <><LoaderCircle className="size-4 animate-spin" />{t("businessName.submitting")}</> : t("businessName.continue")}</Button>
+        {error || businesses.isError || atLimit ? <FieldError>{error ?? (atLimit ? t("errors.tooManyBusinesses", { count: limit.max }) : t("businessName.unavailable"))}</FieldError> : null}
+        <Button className="mt-2 h-11 w-full" disabled={atLimit || businesses.isLoading || create.isPending || update.isPending || navigating || name.trim().length === 0} type="submit">{create.isPending || update.isPending || navigating ? <><LoaderCircle className="size-4 animate-spin" />{t("businessName.submitting")}</> : t("businessName.continue")}</Button>
       </FieldGroup>
     </form>
   );

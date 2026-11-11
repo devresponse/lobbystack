@@ -22991,6 +22991,20 @@
                   "additionalProperties": false
                 }
               },
+              "accounts": {
+                "type": "object",
+                "properties": {
+                  "maxBusinesses": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "maxBusinesses"
+                ],
+                "additionalProperties": false
+              },
               "display": {
                 "type": "object",
                 "properties": {

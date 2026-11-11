@@ -59,6 +59,12 @@ export function AcceptInviteSurface() {
     setErrorMessage(null);
     try {
       const response = await fetch("/api/team/accept", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }) });
+      if (response.status === 409 && (await response.clone().json().catch(() => null) as { code?: unknown } | null)?.code === "business_limit") {
+        // A claim link makes the account an owner, and it already owns as many businesses as one account may.
+        setErrorMessage(t("acceptInvite.businessLimit"));
+        setIsSubmitting(false);
+        return;
+      }
       if (response.status === 403) {
         // The signed-in account is not the invited address, or that address is not verified yet.
         setWrongAccount(true);

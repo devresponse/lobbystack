@@ -5,7 +5,10 @@
     "privacy": "Privatnost"
   },
   "errors": {
-    "tooManyBusinesses": "Već posedujete 10 radnih prostora, što je ograničenje za jedan nalog."
+    "tooManyBusinesses_one": "Već posedujete {{count}} firmu, što je najviše za jedan nalog.",
+    "tooManyBusinesses_few": "Već posedujete {{count}} firme, što je najviše za jedan nalog.",
+    "tooManyBusinesses_other": "Već posedujete {{count}} firmi, što je najviše za jedan nalog.",
+    "businessLimit": "Već posedujete najviše firmi koje jedan nalog može da ima."
   },
   "adminRequired": {
     "eyebrow": "Podešavanje radnog prostora",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { brandBillingPlans, brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
+import { brandBillingPlans, brandFileMatched, brandHost, brandImage, brandMaxBusinessesPerAccount, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
 import type { BrandDefinition } from "./types";
 
 const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null, makeUrl: null };
@@ -144,6 +144,16 @@ describe("brandBillingPlans", () => {
     expect(brandBillingPlans("lobbystack")).toBeNull();
     expect(brandBillingPlans("nobody")).toBeNull();
     expect(brandBillingPlans("toString", {})).toBeNull();
+  });
+});
+
+describe("brandMaxBusinessesPerAccount", () => {
+  it("is the brand's billing.json accounts.maxBusinesses, or 10 when the file leaves it out or there's no file", () => {
+    const limits = { alloplace: { maxBusinesses: 3 } };
+    expect(brandMaxBusinessesPerAccount("alloplace", limits)).toBe(3);
+    expect(brandMaxBusinessesPerAccount("realinfobot", limits)).toBe(10);
+    expect(brandMaxBusinessesPerAccount("lobbystack")).toBe(10);
+    expect(brandMaxBusinessesPerAccount("toString", {})).toBe(10);
   });
 });
 

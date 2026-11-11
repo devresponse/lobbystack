@@ -69,6 +69,20 @@ describe("main demo-claim behavior through the Next API", () => {
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/onboarding/business"));
     expect(claim).toHaveBeenCalledTimes(2);
   });
+  it("says the account owns the most businesses it may, keeps the token, and claims on retry", async () => {
+    let attempts = 0;
+    const { claim } = setup("active", async () => ++attempts === 1
+      ? Response.json({ error: "This account already owns 10 businesses, the most one account can own.", code: "business_limit" }, { status: 409 })
+      : Response.json({ businessId: "business" }));
+    expect(await screen.findByText("claim.businessLimitTitle")).toBeTruthy();
+    expect(screen.getByText("claim.businessLimitDescription")).toBeTruthy();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("prospect_demo_token")).toBe("fixture-token");
+    await userEvent.click(screen.getByRole("button", { name: "claim.retry" }));
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/onboarding/business"));
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem("prospect_demo_token")).toBeNull();
+  });
   it("retains the token while redirecting an unauthenticated claimant to login", async () => {
     setup("active", async () => Response.json({ error: "Unauthorized" }, { status: 401 }));
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/en/login?returnTo=%2Fen%2Fclaim-demo"));

@@ -2,17 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { getSafeOnboardingErrorMessage } from "./onboarding-errors";
 
-const t = (key: string): string => key;
+const t = (key: string, options?: Record<string, unknown>): string => options ? `${key} ${JSON.stringify(options)}` : key;
 
 describe("getSafeOnboardingErrorMessage", () => {
-  it("maps the owned workspace limit", () => {
-    expect(
-      getSafeOnboardingErrorMessage(
-        new Error("Too many workspaces. One account can own up to 10."),
-        t,
-        "businessName.submitFailed",
-      ),
-    ).toBe("errors.tooManyBusinesses");
+  const limitReached = Object.assign(new Error("This account already owns 3 businesses, the most one account can own."), { code: "business_limit" });
+
+  it("says the account's business limit, with the number the page has", () => {
+    expect(getSafeOnboardingErrorMessage(limitReached, t, "businessName.submitFailed", 3)).toBe('errors.tooManyBusinesses {"count":3}');
+  });
+
+  it("says the business limit without a number when the page doesn't have it", () => {
+    expect(getSafeOnboardingErrorMessage(limitReached, t, "businessName.submitFailed")).toBe("errors.businessLimit");
   });
 
   it("maps number search rate limits", () => {

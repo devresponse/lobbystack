@@ -27,6 +27,8 @@
     "signOut": "Sign out",
     "version": "version: {{commit}}",
     "createBusiness": "Create Business",
+    "businessCount": "{{owned}} of {{max}}",
+    "businessLimitReached": "That's the most businesses one account can own.",
     "setupGuide": {
       "title": "Getting started",
       "open": "Open setup guide",

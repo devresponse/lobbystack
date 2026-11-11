@@ -77,3 +77,28 @@ it("explains a 403 and lets the user sign in with the invited account", async ()
   await waitFor(() => expect(spies.replace).toHaveBeenCalledWith(expect.stringContaining("/login?returnTo=")));
   expect(fetchMock).toHaveBeenCalledWith("/api/auth/sign-out", expect.objectContaining({ method: "POST" }));
 });
+
+it("says the account owns the most businesses it may when a claim link would make it own one more", async () => {
+  window.history.replaceState({}, "", "/accept-invite?token=fixture-token");
+  let refusal = { error: "This account already owns 10 businesses, the most one account can own.", code: "business_limit" };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("get-session")) return Response.json({ user: { id: "fixture" } });
+    if (init?.method === "POST") return Response.json(refusal, { status: 409 });
+    return Response.json({ invitation: { businessName: "Clinic", email: "invitee@example.invalid", expired: false, status: "pending" } });
+  }));
+  render(<AcceptInviteSurface />);
+  const submit = await screen.findByRole("button", { name: "acceptInvite.submit" });
+  await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false));
+  await userEvent.click(submit);
+  await screen.findByText("acceptInvite.businessLimit");
+  expect(screen.queryByRole("button", { name: "acceptInvite.switchAccount" })).toBeNull();
+  expect(spies.replace).not.toHaveBeenCalled();
+  expect(spies.success).not.toHaveBeenCalled();
+
+  // Any other 409, such as a claim link whose sender stopped being an owner, still reads as a failure.
+  refusal = { error: "This claim link no longer works. Ask whoever sent it for a new one.", code: "" };
+  await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false));
+  await userEvent.click(submit);
+  await screen.findByText("acceptInvite.failed");
+  expect(screen.queryByText("acceptInvite.businessLimit")).toBeNull();
+});

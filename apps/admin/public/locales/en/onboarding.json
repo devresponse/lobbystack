@@ -5,7 +5,9 @@
     "privacy": "Privacy"
   },
   "errors": {
-    "tooManyBusinesses": "You already own 10 workspaces, the limit for one account."
+    "tooManyBusinesses_one": "You already own {{count}} business, the most one account can own.",
+    "tooManyBusinesses_other": "You already own {{count}} businesses, the most one account can own.",
+    "businessLimit": "You already own the most businesses one account can own."
   },
   "adminRequired": {
     "eyebrow": "Workspace setup",

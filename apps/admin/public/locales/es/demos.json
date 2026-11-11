@@ -42,6 +42,8 @@
     "errorDescription": "Algo salió mal al reclamar esta demo. Inténtelo de nuevo.",
     "unavailableTitle": "Este enlace de demo no está disponible",
     "unavailableDescription": "Falta el enlace de demo o ya no es válido.",
+    "businessLimitTitle": "Su cuenta tiene el máximo de negocios",
+    "businessLimitDescription": "Elimine uno de sus negocios, o inicie sesión con otra cuenta, para reclamar esta demo.",
     "retry": "Reintentar"
   },
   "operator": {

@@ -430,17 +430,23 @@ describe("billing catalog", () => {
     const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { body: { data: { ...run, id: null, status: "preview", prev_hash: "b".repeat(64), changes } } } });
     const result = await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", `@${brandFile.pathname}`], { fetch: api.fetch });
     expect(result.code).toBe(exitCodes.ok);
-    expect(api.sent[0]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: JSON.parse(await readFile(brandFile, "utf8")) });
+    // The file as it stands, but its accounts section, which reaches a deployment through its build.
+    const { accounts: _accounts, ...sold } = JSON.parse(await readFile(brandFile, "utf8")) as Record<string, unknown>;
+    expect(api.sent[0]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: sold });
     expect(result.out).toContain("lowers an allowance");
     expect(result.out).toContain("Applying would make these 2 changes. Nothing was written.");
     expect(result.out).toContain(`--replaces-hash ${"b".repeat(64)}`);
   });
 
-  it("leaves billing.json's display section out of what it sends, since it sells nothing", async () => {
+  it("leaves billing.json's accounts and display sections out of what it sends, since they sell nothing", async () => {
     const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { body: { data: { ...run, id: null, status: "preview", prev_hash: "b".repeat(64), changes: [] } } } });
     const file = { version: 1, currency: "cad", plans: {}, display: { defaultInterval: "monthly" } };
     await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", JSON.stringify(file)], { fetch: api.fetch });
     expect(api.sent[0]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: { version: 1, currency: "cad", plans: {} } });
+    await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", JSON.stringify({ ...file, accounts: { maxBusinesses: 3 } })], { fetch: api.fetch });
+    expect(api.sent[1]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: { version: 1, currency: "cad", plans: {} } });
+    await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", JSON.stringify({ version: 1, currency: "cad", plans: {}, accounts: { maxBusinesses: 3 } })], { fetch: api.fetch });
+    expect(api.sent[2]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: { version: 1, currency: "cad", plans: {} } });
   });
 
   it("lists every refusal a preview found", async () => {

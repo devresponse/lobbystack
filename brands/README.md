@@ -10,7 +10,7 @@ See [docs/branding.md](../docs/branding.md) for the fields and how a deployment 
 
 ## billing.json
 
-A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. It may also hold [prepaid packs](#prepaid-packs), and the [words of the plan screens](#the-plan-screens-words). `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
+A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. It may also hold [prepaid packs](#prepaid-packs), the [words of the plan screens](#the-plan-screens-words), and [how many businesses one account may own](#businesses-per-account). `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
 
 It also holds the settings of the billing providers its deployments use: the `polar` block and the `stripe` block ([Stripe billing](../docs/providers/stripe.md)). An apply refuses a file without the block of its deployment's provider. Once a Stripe deployment is linked, an apply refuses a change to `stripe.overage` or `managedPayments` (`selling_mode_changed`): its customers' subscriptions were made that way. AlloPlace's and RealInfoBot's `stripe` blocks sell with Stripe as the merchant of record (`managedPayments`, with `overage` on the plan's checkout), so AlloPlace's Stripe deployments sell monthly prices only, while its Polar deployments sell the yearly ones too. RealInfoBot's file sells packs and no plan.
 
@@ -98,6 +98,28 @@ Every text has all four languages, `en`, `fr`, `es` and `sr`, up to 300 characte
 What stays in the code: the plans' names, Starter and Pro, which the checkout and receipts use; the prices, the Annual tab's badge and which intervals can be bought, from the plan list; "/mo", Enterprise's "Custom" price and its **Contact us** mail to the brand's sales address; and in the **Upgrade plan** dialog, the short line under each price and the buttons, which follow the business's current plan. The dialog shows the cards, their order, the popular one, the opening tab and the bullets from the section.
 
 `pnpm brands:build` refuses a section with a language missing, an unknown plan, allowance or field, a plan's second card, a second popular card, a Starter or Pro card the file doesn't sell, an unknown `{{name}}`, a value for a plan without a card, or a row of the brand's own without a value for a plan with a card.
+
+### Businesses per account
+
+The optional `accounts` section sets how many businesses one account may own on the brand's deployments:
+
+```json
+"accounts": { "maxBusinesses": 10 }
+```
+
+`maxBusinesses` is a whole number from 1 to 100. A file without the section, and a brand without a file, such as LobbyStack, allow 10, as before the section existed. Each business adds recurring worker jobs, which is why a file can't allow more than 100. AlloPlace's and RealInfoBot's files set 10.
+
+An account owns a business when it is one of the business's owners and the business is open, so a business where it's an admin, a scheduler or a viewer doesn't count, and neither does a deleted or canceled one. The dashboard checks the number in three places, and at the limit answers 409 `business_limit` and changes nothing:
+
+- creating a business (`POST /api/businesses`), which the sidebar's **Create Business** and onboarding lead to;
+- accepting a claim link, the invitation that hands a business over (`POST /api/team/accept`), which stays open, so the same link works once the account owns fewer;
+- claiming a prospect demo (`POST /api/demo/claim`), which leaves the demo unclaimed.
+
+The sidebar shows how many the account owns beside **Create Business**, such as "2 of 10", and at the limit turns it off and says why. A platform key's `POST /v1/businesses` doesn't check it: the account the key acts as owns those businesses only until their customers claim them, and each claim checks the customer's number. That account's businesses still count when it creates one in the dashboard. So do an operator's open prospect demos, until they're claimed or closed, though making a demo doesn't check the number.
+
+Lowering the number takes nothing away. An account that owns more keeps every business, and can't create or claim another until it owns fewer than the new number.
+
+Like `display`, it sells nothing. The file's hash, the apply, `pnpm billing verify` and the daily check leave it out, and `pnpm billing` and `lobbystack billing catalog-preview` and `catalog-apply` leave it out of what they send, so a deployment built before the section still takes the file. `pnpm brands:build` writes it into the code beside the plans, so a change takes effect with the next deploy, with no apply.
 
 ### Promo codes
 

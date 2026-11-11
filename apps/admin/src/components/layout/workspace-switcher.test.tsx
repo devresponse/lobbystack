@@ -9,16 +9,16 @@ const router = vi.hoisted(() => ({ refresh: vi.fn() }));
 const pendingAnalytics = vi.hoisted(() => ({ record: vi.fn() }));
 vi.mock("@/lib/workspace-analytics", () => ({ recordPendingWorkspaceSwitch: pendingAnalytics.record }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en-US" }, t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en-US" }, t: (key: string, options?: Record<string, unknown>) => options ? `${key} ${JSON.stringify(options)}` : key }) }));
 const clients: QueryClient[] = [];
 beforeEach(() => {
   vi.stubGlobal("matchMedia", vi.fn(query => ({ matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(name = "Tim Hortons", loading = false) {
+function setup(name = "Tim Hortons", loading = false, businessLimit?: { owned: number; max: number }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   const businesses = [{ businessId: "business-1", name, active: true }, { businessId: "business-2", name: "Acme Clinic", active: false }];
-  if (!loading) client.setQueryData(["businesses"], { businesses });
+  if (!loading) client.setQueryData(["businesses"], { businesses, ...(businessLimit ? { businessLimit } : {}) });
   client.setQueryData(["phone-numbers", "business-1"], { phoneNumbers: [{ e164: "+14155550100", status: "active" }] });
   const fetchMock = vi.fn(async (url: string) => {
     if (loading) return new Promise<Response>(() => {});
@@ -65,5 +65,31 @@ describe("original workspace switcher behavior", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/businesses/switch", expect.objectContaining({ method: "POST", body: JSON.stringify({ businessId: "business-2" }) }));
     expect(client.getQueryData(["contacts", "business-1"])).toBeUndefined();
     expect(pendingAnalytics.record).toHaveBeenCalledWith("business-2", "business-1");
+  });
+});
+describe("business limit", () => {
+  it("shows how many businesses the account owns beside Create business", async () => {
+    setup("Tim Hortons", false, { owned: 2, max: 10 });
+    await userEvent.click(screen.getByRole("button", { name: /Tim Hortons/ }));
+    const create = await screen.findByRole("menuitem", { name: /sidebar\.createBusiness/ });
+    expect(create.getAttribute("href")).toBe("/onboarding/business?create=true");
+    expect(create.textContent).toContain('sidebar.businessCount {"owned":2,"max":10}');
+    expect(screen.queryByText("sidebar.businessLimitReached")).toBeNull();
+  });
+  it("turns Create business off and says why once the account owns as many as it may", async () => {
+    setup("Tim Hortons", false, { owned: 3, max: 3 });
+    await userEvent.click(screen.getByRole("button", { name: /Tim Hortons/ }));
+    const create = await screen.findByRole("menuitem", { name: /sidebar\.createBusiness/ });
+    expect(create.getAttribute("href")).toBeNull();
+    expect(create.getAttribute("aria-disabled")).toBe("true");
+    expect(create.textContent).toContain('sidebar.businessCount {"owned":3,"max":3}');
+    expect(screen.getByText("sidebar.businessLimitReached")).toBeTruthy();
+  });
+  it("keeps Create business as it was when the server sends no limit", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: /Tim Hortons/ }));
+    const create = await screen.findByRole("menuitem", { name: /sidebar\.createBusiness/ });
+    expect(create.getAttribute("href")).toBe("/onboarding/business?create=true");
+    expect(create.textContent).not.toContain("sidebar.businessCount");
   });
 });

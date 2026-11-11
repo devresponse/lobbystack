@@ -10,7 +10,7 @@ The bar at the top shows eight dots: the first is sign-up, and each of the other
 | --- | --- | --- | --- | --- |
 | 1 | Sign up and verify the email | `/signup` | None yet | |
 | 2 | **Make this app your own** | `/onboarding/brand` | None yet | Only for the first account on an instance with no brand of its own ([guide 6.2](../deployment/guide/part-6-first-run.md#62-the-brand-step)) |
-| 2 | The business's name | `/onboarding/business` | `create_business` | Creates the business, which starts on `website`. A claimed demo starts here with its business already made |
+| 2 | The business's name | `/onboarding/business` | `create_business` | Creates the business, which starts on `website`. A claimed demo starts here with its business already made. An account that owns as many businesses as one may is told so here, and can't create another ([businesses per account](multitenancy.md#limit-how-many-businesses-an-account-owns)) |
 | 3 | "What is your business's website?" | `/onboarding/website` | `website` | **Continue** saves the address; **I don't have a website** skips. Neither reads the site ([below](#know-what-the-website-step-saves)) |
 | 4 | **Add training documents** | `/onboarding/knowledge` | `knowledge` | Upload files or paste text, or **Skip for now** |
 | 5 | The greeting | `/onboarding/greeting` | `greeting` | Also sets the language calls open in |

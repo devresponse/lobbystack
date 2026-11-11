@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { hostedCheckoutPlanSlugs } from "./billing";
-import { billingProfileForProvider, billingProfileSchema, billingProfileWithoutDisplay, canonicalBillingProfileJson, normalizeBillingProfile, packTermsJson, planTermsJson, resolveBillingPacks, resolveBillingPlans, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
+import { billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, canonicalBillingProfileJson, normalizeBillingProfile, packTermsJson, planTermsJson, resolveBillingPacks, resolveBillingPlans, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
@@ -424,6 +424,30 @@ describe("prepaid packs", () => {
   });
 });
 
+describe("the accounts section", () => {
+  const withAccounts = (accounts: unknown) => ({ ...alloplace(), accounts });
+  const accountProblems = (file: unknown) => problems(file).filter((problem) => problem.startsWith("accounts"));
+
+  it("takes how many businesses one account may own, from 1 to 100, and nothing else", () => {
+    for (const maxBusinesses of [1, 3, 10, 100]) expect(accountProblems(withAccounts({ maxBusinesses }))).toEqual([]);
+    for (const maxBusinesses of [0, 101, 2.5, "3", null]) expect(accountProblems(withAccounts({ maxBusinesses }))).not.toEqual([]);
+    expect(accountProblems(withAccounts({}))).not.toEqual([]);
+    expect(accountProblems(withAccounts({ maxBusinesses: 3, maxFreeBusinesses: 1 }))).not.toEqual([]);
+    const { accounts: _accounts, ...without } = alloplace();
+    expect(problems(without)).toEqual([]);
+  });
+
+  it("leaves the section out of the hash, the stored profile and what the billing commands send", () => {
+    const { accounts: _accounts, ...without } = alloplace();
+    const file = withAccounts({ maxBusinesses: 3 });
+    expect(profileHash(file)).toBe(profileHash(without));
+    expect(profileHash(withAccounts({ maxBusinesses: 50 }))).toBe(profileHash(file));
+    expect(normalizeBillingProfile(parse(file))).not.toHaveProperty("accounts");
+    expect(billingProfileForCatalog(file)).toEqual(billingProfileForCatalog(without));
+    expect(billingProfileForCatalog(file)).not.toHaveProperty("accounts");
+  });
+});
+
 describe("the plan screens' display section", () => {
   const words = (text: string) => ({ en: text, fr: text, es: text, sr: text });
   const withDisplay = (display: Record<string, unknown>, change: (file: Record<string, any>) => void = () => undefined) => {
@@ -442,7 +466,7 @@ describe("the plan screens' display section", () => {
     const { display: _screens, ...withoutDisplay } = file;
     expect(profileHash(file)).toBe(profileHash(withoutDisplay));
     expect(normalizeBillingProfile(parse(file))).not.toHaveProperty("display");
-    expect(billingProfileWithoutDisplay(file)).toEqual(withoutDisplay);
+    expect(billingProfileForCatalog(file)).toEqual(withoutDisplay);
     // Words changed on the screens change nothing sold.
     const edited = plansAndPacks();
     edited.display.plans[2].bullets.push(words("Priority onboarding call"));

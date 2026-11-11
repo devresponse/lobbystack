@@ -27,6 +27,8 @@
     "signOut": "Se déconnecter",
     "version": "version : {{commit}}",
     "createBusiness": "Créer une entreprise",
+    "businessCount": "{{owned}} sur {{max}}",
+    "businessLimitReached": "C'est le nombre maximal d'entreprises pour un compte.",
     "setupGuide": {
       "title": "Premiers pas",
       "open": "Ouvrir le guide de configuration",

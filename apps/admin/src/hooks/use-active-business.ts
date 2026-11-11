@@ -23,8 +23,11 @@ export type Business = {
   isAccountRoot?: boolean;
 };
 
+/** How many businesses the signed-in account owns, and the most one account may own (billing.json's accounts.maxBusinesses). */
+export type BusinessLimit = { owned: number; max: number };
+
 /** Loads the operator's workspaces and picks the server-selected active one. */
 export function useActiveBusiness() {
-  const businesses = useQuery({ queryKey: ["businesses"], queryFn: () => requestJson<{ businesses: Business[] }>("/api/businesses") });
+  const businesses = useQuery({ queryKey: ["businesses"], queryFn: () => requestJson<{ businesses: Business[]; businessLimit?: BusinessLimit }>("/api/businesses") });
   return { businesses, business: selectActiveBusiness(businesses.data?.businesses) };
 }

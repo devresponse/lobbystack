@@ -5,7 +5,10 @@
     "privacy": "Confidentialité"
   },
   "errors": {
-    "tooManyBusinesses": "Vous possédez déjà 10 espaces de travail, la limite pour un compte."
+    "tooManyBusinesses_one": "Vous possédez déjà {{count}} entreprise, le maximum pour un compte.",
+    "tooManyBusinesses_many": "Vous possédez déjà {{count}} entreprises, le maximum pour un compte.",
+    "tooManyBusinesses_other": "Vous possédez déjà {{count}} entreprises, le maximum pour un compte.",
+    "businessLimit": "Vous possédez déjà le nombre maximal d'entreprises pour un compte."
   },
   "adminRequired": {
     "eyebrow": "Configuration de l'espace de travail",

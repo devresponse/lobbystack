@@ -38,7 +38,7 @@ By default, someone who skips the code can still sign in and use their business;
 
 **Who else can sign up**
 
-Anyone who can open your address can create an account. Nothing turns sign-up off or limits it to some emails ([Appendix E](appendix-e-doc-problems.md)), and the address can't stay secret, because the public pages and the website chat use it. Each account can own up to 10 businesses. What a stranger's business gets depends on whether your instance sells plans ([1.3](part-1-prepare.md#13-decide-these-before-any-data-exists)):
+Anyone who can open your address can create an account. Nothing turns sign-up off or limits it to some emails ([Appendix E](appendix-e-doc-problems.md)), and the address can't stay secret, because the public pages and the website chat use it. Each account can own up to 10 businesses, or the number the brand's `billing.json` sets, from 1 to 100 ([businesses per account](../../../brands/README.md#businesses-per-account)). What a stranger's business gets depends on whether your instance sells plans ([1.3](part-1-prepare.md#13-decide-these-before-any-data-exists)):
 
 - **It doesn't sell plans:** the business has no limits. It runs on your OpenAI key, and it can buy a phone number on your Twilio account: one per business, and at most 2 a day and 5 in 30 days per person.
 - **It sells plans:** the business starts on the Free plan, with 30 minutes of browser calls and no phone number until it pays.

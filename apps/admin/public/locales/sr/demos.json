@@ -42,6 +42,8 @@
     "errorDescription": "Došlo je do greške pri preuzimanju ovog demoa. Pokušajte ponovo.",
     "unavailableTitle": "Ovaj demo link nije dostupan",
     "unavailableDescription": "Demo link nedostaje ili više nije važeći.",
+    "businessLimitTitle": "Vaš nalog već ima najviše firmi koje može da ima",
+    "businessLimitDescription": "Obrišite jednu od svojih firmi ili se prijavite drugim nalogom da biste preuzeli ovaj demo.",
     "retry": "Pokušaj ponovo"
   },
   "operator": {

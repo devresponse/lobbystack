@@ -5,7 +5,10 @@
     "privacy": "Privacidad"
   },
   "errors": {
-    "tooManyBusinesses": "Ya es propietario de 10 espacios de trabajo, el límite para una cuenta."
+    "tooManyBusinesses_one": "Ya es propietario de {{count}} negocio, el máximo para una cuenta.",
+    "tooManyBusinesses_many": "Ya es propietario de {{count}} negocios, el máximo para una cuenta.",
+    "tooManyBusinesses_other": "Ya es propietario de {{count}} negocios, el máximo para una cuenta.",
+    "businessLimit": "Ya es propietario del máximo de negocios para una cuenta."
   },
   "adminRequired": {
     "eyebrow": "Configuración del espacio de trabajo",

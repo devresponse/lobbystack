@@ -54,7 +54,7 @@ The admin and the worker keep nothing between requests that another copy couldn'
 | Area | Limit found | Since |
 | --- | --- | --- |
 | Sign-up | Always open: no invite-only mode, allowlist or off switch; sign-in looks users up by an unindexed column. | Open ([open items](../project/open-items.md)) |
-| Onboarding | One owner can create 10 businesses, because each adds worker jobs; the partner API skips the cap. | Open |
+| Onboarding | One owner can create 10 businesses, because each adds worker jobs; the partner API skips the cap. | Since fork PR #154 on `feature/receptionists`, the number comes from the brand's `billing.json` (1 to 100, 10 without it), and claim links and demo claims check it too; the partner API still skips it, on purpose ([multitenancy](../features/multitenancy.md#limit-how-many-businesses-an-account-owns)) |
 | Accounts | No deletion, suspension or export of a user or business, no 2FA or SSO, no operator console. | Open |
 | Plans | Upgrading opened a second checkout, and any subscription's event overwrote the account's one subscription ID. | Fixed in fork PRs #60 and #75 |
 | Usage | Each reservation replays the business's month under one lock; events go to Polar one request each, were dropped after about 3 hours of retries, and corrections reused their ID. | Retries and corrections fixed in #71 and #75; the replay and one-event requests are unchanged |

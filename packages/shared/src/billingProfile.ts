@@ -32,6 +32,10 @@ export const PLAN_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,46}[a-z0-9]$/;
 export const MAX_ADDITIONAL_PLANS = 50;
 /** Prepaid packs a file may hold: each size and length is a pack of its own. */
 export const MAX_BILLING_PACKS = 30;
+/** How many businesses one account may own when its brand's billing.json leaves accounts out: the limit from before the file could set one. */
+export const DEFAULT_MAX_BUSINESSES_PER_ACCOUNT = 10;
+/** The most businesses a billing.json may let one account own, since each business adds recurring worker jobs. */
+export const MAX_BUSINESSES_PER_ACCOUNT_CEILING = 100;
 
 const BYTES_PER_MB = 1_048_576;
 
@@ -87,6 +91,13 @@ const pack = z.strictObject({
   limits: limits.partial().optional(),
 });
 
+// Rules for each account rather than each business. maxBusinesses: how many
+// businesses one account may own, whether it creates them or claims them.
+const accounts = z.strictObject({ maxBusinesses: z.number().int().min(1).max(MAX_BUSINESSES_PER_ACCOUNT_CEILING) });
+
+/** A billing.json's accounts section: rules for each account, which the admin enforces from its build. */
+export type BillingAccounts = z.output<typeof accounts>;
+
 const additionalPlan = z.strictObject({
   tier: z.enum(["starter", "pro"]),
   access: z.enum(billingPlanAccessLevels),
@@ -137,6 +148,10 @@ const billingProfileShape = z.strictObject({
   plans: z.object({ free_cloud: freePlan, starter: tierPlan, pro: tierPlan, enterprise: customPlan }).catchall(additionalPlan),
   // Prepaid packs by code; a file without the key sells none.
   packs: z.record(z.string(), pack).optional(),
+  // Rules for each account, such as how many businesses one may own. The
+  // admin enforces them from its build, so like display, the hash, the apply
+  // and the stored profile leave them out: a change needs a deploy, not an apply.
+  accounts: accounts.optional(),
   // The plan screens' words and layout (billingDisplay.ts). It sells nothing:
   // the hash, the apply and the stored profile leave it out.
   display: billingDisplaySchema.optional(),
@@ -243,8 +258,8 @@ export function billingProfileForProvider<T extends Pick<z.output<typeof billing
 
 /** A billing.json as checked. */
 export type BillingProfile = z.output<typeof billingProfileSchema>;
-/** A checked file without its $schema and its display section, every object's keys in order. */
-export type NormalizedBillingProfile = Omit<BillingProfile, "$schema" | "display">;
+/** A checked file without its $schema and the sections only its build carries (accounts, display), every object's keys in order. */
+export type NormalizedBillingProfile = Omit<BillingProfile, "$schema" | "accounts" | "display">;
 
 function sortedKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortedKeys);
@@ -259,25 +274,27 @@ export function canonicalJson(value: unknown): string {
 
 /**
  * The file as the billing commands send it to a deployment: without its
- * display section, which sells nothing, so a deployment built before the
- * section existed takes the file too.
+ * accounts and display sections, which sell nothing and reach the app
+ * through its build alone, so a deployment built before either section
+ * existed takes the file too.
  */
-export function billingProfileWithoutDisplay<T extends { display?: unknown }>(profile: T): Omit<T, "display"> {
-  const { display: _screens, ...rest } = profile;
+export function billingProfileForCatalog<T extends { accounts?: unknown; display?: unknown }>(profile: T): Omit<T, "accounts" | "display"> {
+  const { accounts: _accounts, display: _screens, ...rest } = profile;
   return rest;
 }
 
 /**
- * The checked file without $schema and display, keys in order: what a run
- * stores and the profile hash covers. Neither sells anything, so editing the
- * plan screens' words never changes the hash, needs an apply or shows drift.
+ * The checked file without $schema, accounts and display, keys in order: what
+ * a run stores and the profile hash covers. None of them sells anything, so
+ * editing the plan screens' words or the business limit never changes the
+ * hash, needs an apply or shows drift.
  */
 export function normalizeBillingProfile(profile: BillingProfile): NormalizedBillingProfile {
-  const { $schema: _editorHint, display: _screens, ...rest } = profile;
+  const { $schema: _editorHint, accounts: _accounts, display: _screens, ...rest } = profile;
   return sortedKeys(rest) as NormalizedBillingProfile;
 }
 
-/** The text the profile hash is the SHA-256 of. Whitespace, key order, $schema and display never change it. */
+/** The text the profile hash is the SHA-256 of. Whitespace, key order, $schema, accounts and display never change it. */
 export function canonicalBillingProfileJson(profile: BillingProfile): string {
   return canonicalJson(normalizeBillingProfile(profile));
 }

@@ -14,7 +14,7 @@ import { localizePublicPath } from "@/lib/locale-path";
 
 type Preview = { state: "active" | "claimed" | "preparing" | "invalid" | "expired" | "revoked" };
 
-type ClaimStatus = "claiming" | "unavailable" | "error";
+type ClaimStatus = "claiming" | "unavailable" | "business-limit" | "error";
 
 function ClaimShell({
   title,
@@ -90,7 +90,10 @@ export function ClaimDemoSurface() {
           if (response.status === 401) {
             return "authentication-required";
           }
-          if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? "Claim failed.");
+          if (!response.ok) {
+            const body = await response.json().catch(() => null) as { error?: string; code?: string } | null;
+            throw Object.assign(new Error(body?.error ?? "Claim failed."), body?.code ? { code: body.code } : {});
+          }
           return await response.json();
         }),
       };
@@ -115,6 +118,10 @@ export function ClaimDemoSurface() {
           return;
         }
         const message = error instanceof Error ? error.message : "";
+        if ((error as { code?: unknown } | null)?.code === "business_limit") {
+          setStatus("business-limit");
+          return;
+        }
         if (
           preview.state === "claimed" ||
           message.includes("already been claimed")
@@ -130,12 +137,33 @@ export function ClaimDemoSurface() {
     };
   }, [attempt, locale, router, preview, token]);
 
+  function retry() {
+    if (previewQuery.isError) void previewQuery.refetch();
+    claimAttemptRef.current = null;
+    setStatus("claiming");
+    setAttempt((value) => value + 1);
+  }
+
   if (status === "unavailable") {
     return (
       <ClaimShell
         description={t("claim.unavailableDescription")}
         title={t("claim.unavailableTitle")}
       />
+    );
+  }
+
+  if (status === "business-limit") {
+    // The token stays in this tab, so the claim can go ahead once a business is deleted.
+    return (
+      <ClaimShell
+        description={t("claim.businessLimitDescription")}
+        title={t("claim.businessLimitTitle")}
+      >
+        <Button className="h-11 w-full" onClick={retry} type="button">
+          {t("claim.retry")}
+        </Button>
+      </ClaimShell>
     );
   }
 
@@ -147,12 +175,7 @@ export function ClaimDemoSurface() {
       >
         <Button
           className="h-11 w-full"
-          onClick={() => {
-            if (previewQuery.isError) void previewQuery.refetch();
-            claimAttemptRef.current = null;
-            setStatus("claiming");
-            setAttempt((value) => value + 1);
-          }}
+          onClick={retry}
           type="button"
         >
           {t("claim.retry")}

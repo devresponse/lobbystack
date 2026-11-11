@@ -362,14 +362,15 @@ const changeCount = (changes: Row[]) => `${changes.length} ${changes.length === 
 const refusalLines = (blocked: Row[]) => blocked.map((refusal) => `  ${String(refusal.code)} (${String(refusal.path)}): ${String(refusal.message)}`).join("\n");
 
 /**
- * The catalog commands' body without billing.json's display section: it holds
- * the plan screens' words, which sell nothing and never reach the catalog, so
- * a deployment built before the section existed takes the file too.
+ * The catalog commands' body without billing.json's accounts and display
+ * sections: they hold the business limit and the plan screens' words, which
+ * sell nothing and reach a deployment through its build, never the catalog,
+ * so a deployment built before either section existed takes the file too.
  */
-function withoutPlanScreens(body: Row): Row {
+function withoutBuildSections(body: Row): Row {
   const file = body.billing_file;
-  if (!file || typeof file !== "object" || Array.isArray(file) || !("display" in file)) return body;
-  const { display: _screens, ...rest } = file as Row;
+  if (!file || typeof file !== "object" || Array.isArray(file) || !("display" in file || "accounts" in file)) return body;
+  const { accounts: _accounts, display: _screens, ...rest } = file as Row;
   return { ...body, billing_file: rest };
 }
 
@@ -526,8 +527,8 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "end-managed-plan": { operation: "endManagedPlan" },
     "end-promo-plan": { operation: "endPromoPlan" },
     catalog: { operation: "getBillingCatalog", show: catalogTables },
-    "catalog-preview": { operation: "applyBillingCatalog", summary: "Show what applying a billing.json would change. Nothing is written.", args: ["brand"], fixed: { dry_run: true }, prepare: withoutPlanScreens, show: catalogChanges },
-    "catalog-apply": { operation: "applyBillingCatalog", args: ["brand"], fixed: { dry_run: false }, prepare: withoutPlanScreens, show: catalogChanges },
+    "catalog-preview": { operation: "applyBillingCatalog", summary: "Show what applying a billing.json would change. Nothing is written.", args: ["brand"], fixed: { dry_run: true }, prepare: withoutBuildSections, show: catalogChanges },
+    "catalog-apply": { operation: "applyBillingCatalog", args: ["brand"], fixed: { dry_run: false }, prepare: withoutBuildSections, show: catalogChanges },
     "catalog-link": { operation: "linkBillingCatalog", summary: "Record the billing provider's objects that sell the catalog: Polar's products and discounts, or Stripe's prices and coupons. pnpm billing apply sends this for you.", args: ["brand"], show: linkChanges },
     "catalog-runs": { operation: "listBillingCatalogRuns", columns: columns("id", "kind", "status", "brand", "hash", "provider_account", "started_at") },
     codes: { operation: "listBillingCodes", columns: columns("id", "code", "plan", "business_id", "uses", "max_uses", "expires_at", "status") },

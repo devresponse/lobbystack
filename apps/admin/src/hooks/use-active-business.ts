@@ -23,8 +23,12 @@ export type Business = {
   isAccountRoot?: boolean;
 };
 
-/** How many businesses the signed-in account owns, and the most one account may own (billing.json's accounts.maxBusinesses). */
-export type BusinessLimit = { owned: number; max: number };
+/**
+ * How many businesses the signed-in account owns, the most it may own on its
+ * plans (billing.json's accounts section), and whether a higher plan on one of
+ * its businesses would allow more.
+ */
+export type BusinessLimit = { owned: number; max: number; upgrade?: boolean };
 
 /** Loads the operator's workspaces and picks the server-selected active one. */
 export function useActiveBusiness() {

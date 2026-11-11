@@ -73,6 +73,15 @@ describe("business limit", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("says a higher plan on one of the account's businesses would allow more, when one does", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: owned, businessLimit: { owned: 2, max: 2, upgrade: true } });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ businessId: "three" })));
+    render(<QueryClientProvider client={client}><OnboardingBusinessSurface createNew /></QueryClientProvider>);
+    expect(screen.getByText('errors.tooManyBusinessesUpgrade {"count":2}')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "businessName.continue" })).toHaveProperty("disabled", true);
+  });
+
   it("says so when the server refuses a business another tab took the last place for, and reloads the count", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
     client.setQueryData(["businesses"], { businesses: owned, businessLimit: { owned: 2, max: 3 } });

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronsUpDown, Plus } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Sparkles } from "lucide-react";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { SidebarTeamSkeleton } from "@/components/loading-skeletons";
 import { recordPendingWorkspaceSwitch } from "@/lib/workspace-analytics";
@@ -83,7 +83,13 @@ export function WorkspaceSwitcher() {
                   {t("sidebar.createBusiness")}
                   <span className="ml-auto pl-3 text-xs text-muted-foreground">{t("sidebar.businessCount", { owned: limit.owned, max: limit.max })}</span>
                 </DropdownMenuItem>
-                <p className="max-w-56 px-3 pb-2 text-xs text-muted-foreground">{t("sidebar.businessLimitReached")}</p>
+                <p className="max-w-56 px-3 pb-2 text-xs text-muted-foreground">{t(limit.upgrade ? "sidebar.businessLimitUpgrade" : "sidebar.businessLimitReached")}</p>
+                {limit.upgrade ? (
+                  <DropdownMenuItem className="gap-2.5 px-3 py-2" render={<Link href="/settings/plan" />}>
+                    <Sparkles className="size-4" />
+                    {t("sidebar.seePlans")}
+                  </DropdownMenuItem>
+                ) : null}
               </>
             ) : (
               <DropdownMenuItem className="gap-2.5 px-3 py-2" render={<Link href="/onboarding/business?create=true" />}>

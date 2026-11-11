@@ -8,6 +8,9 @@
     "tooManyBusinesses_one": "Ya es propietario de {{count}} negocio, el máximo para una cuenta.",
     "tooManyBusinesses_many": "Ya es propietario de {{count}} negocios, el máximo para una cuenta.",
     "tooManyBusinesses_other": "Ya es propietario de {{count}} negocios, el máximo para una cuenta.",
+    "tooManyBusinessesUpgrade_one": "Ya es propietario de {{count}} negocio, el máximo que permite su plan actual. Cámbielo a un plan superior para agregar más.",
+    "tooManyBusinessesUpgrade_many": "Ya es propietario de {{count}} negocios, el máximo que permiten sus planes actuales. Cambie uno de ellos a un plan superior para agregar más.",
+    "tooManyBusinessesUpgrade_other": "Ya es propietario de {{count}} negocios, el máximo que permiten sus planes actuales. Cambie uno de ellos a un plan superior para agregar más.",
     "businessLimit": "Ya es propietario del máximo de negocios para una cuenta."
   },
   "adminRequired": {

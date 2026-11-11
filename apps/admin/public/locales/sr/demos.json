@@ -44,6 +44,8 @@
     "unavailableDescription": "Demo link nedostaje ili više nije važeći.",
     "businessLimitTitle": "Vaš nalog već ima najviše firmi koje može da ima",
     "businessLimitDescription": "Obrišite jednu od svojih firmi ili se prijavite drugim nalogom da biste preuzeli ovaj demo.",
+    "businessLimitUpgradeTitle": "Vaš nalog već ima najviše firmi koje njegovi paketi dozvoljavaju",
+    "businessLimitUpgradeDescription": "Prebacite jednu od svojih firmi na viši paket, obrišite jednu ili se prijavite drugim nalogom da biste preuzeli ovaj demo.",
     "retry": "Pokušaj ponovo"
   },
   "operator": {

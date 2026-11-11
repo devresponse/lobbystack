@@ -1036,7 +1036,7 @@ The instance has no administrator screen. Each business manages its own team ([6
 
 **Shutting someone out of every business**
 
-Nothing locks an account: someone you've removed can still sign in, and create businesses of their own, up to 10 or the number the brand's `billing.json` sets ([7.20](#720-decide-who-can-sign-up)). To take them off every business at once, someone technical:
+Nothing locks an account: someone you've removed can still sign in, and create businesses of their own, up to 10 or the numbers the brand's `billing.json` sets ([7.20](#720-decide-who-can-sign-up)). To take them off every business at once, someone technical:
 
 1. Lists their memberships, signed in to the database as `postgres` (the start of Part 7):
 
@@ -1070,7 +1070,7 @@ Nothing deletes an account, and only one of its owners can delete a business, ne
 
 ### 7.20 Decide who can sign up
 
-No setting limits sign-up (`apps/admin/src/lib/auth.ts:255-400`): anyone who opens `/en/signup` can make an account, and Turnstile stops only robots. Each account can own 10 businesses, or the `accounts.maxBusinesses` of the brand's `billing.json`, from 1 to 100, which takes a deploy to change (`assertBusinessAllowanceInTransaction` in `packages/domain/src/server/tenancy.ts`, [businesses per account](../../../brands/README.md#businesses-per-account)). On an instance that doesn't sell plans, each of them can buy a number on your Twilio account, within 2 a day and 5 in 30 days per person (`packages/db/migrations/0084_number_claim_in_progress.sql:24-29`), and every call and chat runs on your OpenAI account.
+No setting limits sign-up (`apps/admin/src/lib/auth.ts:255-400`): anyone who opens `/en/signup` can make an account, and Turnstile stops only robots. Each account can own 10 businesses, or the `accounts.maxBusinesses` of the brand's `billing.json`, or the number its `accounts.maxBusinessesByPlan` gives the best plan among the account's businesses, each from 1 to 100, which takes a deploy to change (`assertBusinessAllowanceInTransaction` in `packages/domain/src/server/tenancy.ts`, [businesses per account](../../../brands/README.md#businesses-per-account)). On an instance that doesn't sell plans, each of them can buy a number on your Twilio account, within 2 a day and 5 in 30 days per person (`packages/db/migrations/0084_number_claim_in_progress.sql:24-29`), and every call and chat runs on your OpenAI account.
 
 Choose one:
 

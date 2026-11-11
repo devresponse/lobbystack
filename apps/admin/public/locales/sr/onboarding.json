@@ -8,6 +8,9 @@
     "tooManyBusinesses_one": "Već posedujete {{count}} firmu, što je najviše za jedan nalog.",
     "tooManyBusinesses_few": "Već posedujete {{count}} firme, što je najviše za jedan nalog.",
     "tooManyBusinesses_other": "Već posedujete {{count}} firmi, što je najviše za jedan nalog.",
+    "tooManyBusinessesUpgrade_one": "Već posedujete {{count}} firmu, što je najviše što vaš trenutni paket dozvoljava. Prebacite je na viši paket da biste dodali još.",
+    "tooManyBusinessesUpgrade_few": "Već posedujete {{count}} firme, što je najviše što vaši trenutni paketi dozvoljavaju. Prebacite jednu od njih na viši paket da biste dodali još.",
+    "tooManyBusinessesUpgrade_other": "Već posedujete {{count}} firmi, što je najviše što vaši trenutni paketi dozvoljavaju. Prebacite jednu od njih na viši paket da biste dodali još.",
     "businessLimit": "Već posedujete najviše firmi koje jedan nalog može da ima."
   },
   "adminRequired": {

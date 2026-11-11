@@ -208,22 +208,45 @@ function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" 
   return config.overagesBillable ? (billing.capCents === null ? 0 : remainingIncluded + capSeconds) : remainingIncluded;
 }
 
+/** The billing account columns that decide a business's plan in force; undefined for a business without a billing account. */
+export type PlanAccountColumns = { plan: string | null; planCode: string | null; subscriptionState: string | null; subscriptionId: string | null; replacedSubscriptionId: string | null } | null | undefined;
+
+/** The tier a business's billing account puts it on before its packs count. */
+function accountTier(deploymentMode: string, account: PlanAccountColumns): BillingPlanSlug {
+  return effectiveBillingPlan({ deploymentMode, accountPlan: account?.plan ?? null, subscriptionState: accountSubscriptionState(account) });
+}
+
+// A subscription a prepaid pack replaced counts as ended while the provider confirms it (decision 6).
+function accountSubscriptionState(account: PlanAccountColumns): string | null {
+  return isReplacedSubscription(account) ? null : account?.subscriptionState ?? null;
+}
+
+/**
+ * A business's plan in force from its deployment mode and billing account:
+ * the tier effectiveBillingPlan gives, the prepaid tier instead of Free while
+ * a pack has time left (livePack), and its promo plan's code while that
+ * plan's subscription is live. loadBillingContext and the business cap per
+ * plan (tenancy.ts) both read the plan this way.
+ */
+export function planInForce(deploymentMode: string, account: PlanAccountColumns, livePack: boolean): PlanInForce {
+  const tier = accountTier(deploymentMode, account);
+  // A business that would be on Free is on the prepaid tier while a pack has time left.
+  const plan: BillingPlanSlug = tier === "free_cloud" && livePack ? "prepaid" : tier;
+  // A promo plan counts only while its subscription is live, so a lapsed one is Free like any other.
+  const live = (liveSubscriptionStates as readonly (string | null)[]).includes(accountSubscriptionState(account));
+  return { plan, planCode: live && plan === account?.plan ? account.planCode ?? null : null };
+}
+
 export async function loadBillingContext(tx: DatabaseTransaction, businessId: string): Promise<BillingContext> {
   const [business] = await tx.select({ deploymentMode: businesses.deploymentMode }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode, subscriptionState: billingAccounts.subscriptionState, overageSpendingCapCents: billingAccounts.overageSpendingCapCents, billingInterval: billingAccounts.billingInterval, source: billingAccounts.source, overageSubscriptionId: billingAccounts.overageSubscriptionId, subscriptionId: billingAccounts.subscriptionId, allowancesSince: billingAccounts.allowancesSince, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
-  // A subscription a prepaid pack replaced counts as ended while the provider confirms it (decision 6).
-  const replaced = isReplacedSubscription(account);
-  const subscriptionState = replaced ? null : account?.subscriptionState ?? null;
   const deploymentMode = business?.deploymentMode ?? "cloud";
-  const tier = effectiveBillingPlan({ deploymentMode, accountPlan: account?.plan ?? null, subscriptionState });
-  // A business that would be on Free is on the prepaid tier while a pack has time left.
-  const packs = tier === "free_cloud" ? packBalance(await readLivePacks(tx, businessId)) : null;
-  const plan: BillingPlanSlug = packs ? "prepaid" : tier;
-  // A promo plan counts only while its subscription is live, so a lapsed one is Free like any other.
-  const live = (liveSubscriptionStates as readonly (string | null)[]).includes(subscriptionState);
+  // Only a business that would be on Free reads its packs.
+  const packs = accountTier(deploymentMode, account) === "free_cloud" ? packBalance(await readLivePacks(tx, businessId)) : null;
+  const { plan, planCode } = planInForce(deploymentMode, account, packs !== null);
   return {
     plan,
-    planCode: live && plan === account?.plan ? account.planCode ?? null : null,
+    planCode,
     capCents: account?.overageSpendingCapCents ?? null,
     billingInterval: account?.billingInterval ?? null,
     noOverage: account?.source === "stripe" && !account.overageSubscriptionId,

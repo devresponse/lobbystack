@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { hostedCheckoutPlanSlugs } from "./billing";
-import { billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, canonicalBillingProfileJson, normalizeBillingProfile, packTermsJson, planTermsJson, resolveBillingPacks, resolveBillingPlans, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
+import { accountBusinessCap, billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, canonicalBillingProfileJson, highestBusinessCap, normalizeBillingProfile, packTermsJson, planBusinessCap, planTermsJson, resolveBillingPacks, resolveBillingPlans, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
@@ -425,16 +425,30 @@ describe("prepaid packs", () => {
 });
 
 describe("the accounts section", () => {
-  const withAccounts = (accounts: unknown) => ({ ...alloplace(), accounts });
+  const withAccounts = (accounts: unknown, plans: Record<string, unknown> = {}) => ({ ...withPlans(plans), accounts });
   const accountProblems = (file: unknown) => problems(file).filter((problem) => problem.startsWith("accounts"));
 
   it("takes how many businesses one account may own, from 1 to 100, and nothing else", () => {
     for (const maxBusinesses of [1, 3, 10, 100]) expect(accountProblems(withAccounts({ maxBusinesses }))).toEqual([]);
     for (const maxBusinesses of [0, 101, 2.5, "3", null]) expect(accountProblems(withAccounts({ maxBusinesses }))).not.toEqual([]);
-    expect(accountProblems(withAccounts({}))).not.toEqual([]);
+    // Both numbers may be left out, which gives every account 10.
+    expect(accountProblems(withAccounts({}))).toEqual([]);
     expect(accountProblems(withAccounts({ maxBusinesses: 3, maxFreeBusinesses: 1 }))).not.toEqual([]);
     const { accounts: _accounts, ...without } = alloplace();
     expect(problems(without)).toEqual([]);
+  });
+
+  it("takes a number from 1 to 100 for each plan of the file, and for prepaid", () => {
+    const caps = { free_cloud: 1, starter: 3, pro: 10, enterprise: 100, prepaid: 2 };
+    expect(accountProblems(withAccounts({ maxBusinessesByPlan: caps }))).toEqual([]);
+    expect(accountProblems(withAccounts({ maxBusinesses: 5, maxBusinessesByPlan: { "pro-plus": 20 } }, { "pro-plus": examples["pro-plus"] }))).toEqual([]);
+    for (const cap of [0, 101, 2.5, "3", null]) expect(accountProblems(withAccounts({ maxBusinessesByPlan: { starter: cap } }))).not.toEqual([]);
+    // A code no plan has, such as a misspelling or a pack's code, stops the build.
+    expect(accountProblems(withAccounts({ maxBusinessesByPlan: { starterr: 3, pack_250_90: 2, self_host: 4 } }))).toEqual([
+      "accounts.maxBusinessesByPlan.pack_250_90: not a plan in this file: use a code under plans, or prepaid for a business with a live pack",
+      "accounts.maxBusinessesByPlan.self_host: not a plan in this file: use a code under plans, or prepaid for a business with a live pack",
+      "accounts.maxBusinessesByPlan.starterr: not a plan in this file: use a code under plans, or prepaid for a business with a live pack",
+    ]);
   });
 
   it("leaves the section out of the hash, the stored profile and what the billing commands send", () => {
@@ -442,9 +456,47 @@ describe("the accounts section", () => {
     const file = withAccounts({ maxBusinesses: 3 });
     expect(profileHash(file)).toBe(profileHash(without));
     expect(profileHash(withAccounts({ maxBusinesses: 50 }))).toBe(profileHash(file));
+    expect(profileHash(withAccounts({ maxBusinesses: 3, maxBusinessesByPlan: { free_cloud: 1, pro: 20 } }))).toBe(profileHash(file));
     expect(normalizeBillingProfile(parse(file))).not.toHaveProperty("accounts");
     expect(billingProfileForCatalog(file)).toEqual(billingProfileForCatalog(without));
     expect(billingProfileForCatalog(file)).not.toHaveProperty("accounts");
+  });
+});
+
+describe("business caps per plan", () => {
+  const accounts = { maxBusinesses: 5, maxBusinessesByPlan: { free_cloud: 1, starter: 3, "starter-launch": 4, prepaid: 2 } };
+
+  it("gives a business's plan its own code's number, then its tier's, then maxBusinesses, then 10", () => {
+    expect(planBusinessCap(accounts, { plan: "starter", planCode: "starter-launch" })).toBe(4);
+    expect(planBusinessCap(accounts, { plan: "starter", planCode: "starter-yearly" })).toBe(3);
+    expect(planBusinessCap(accounts, { plan: "starter", planCode: null })).toBe(3);
+    expect(planBusinessCap(accounts, { plan: "free_cloud" })).toBe(1);
+    expect(planBusinessCap(accounts, { plan: "prepaid" })).toBe(2);
+    expect(planBusinessCap(accounts, { plan: "pro" })).toBe(5);
+    // A self-hosted business has no plan the map can name.
+    expect(planBusinessCap(accounts, { plan: "self_host" })).toBe(5);
+    expect(planBusinessCap({ maxBusinessesByPlan: { free_cloud: 1 } }, { plan: "pro" })).toBe(10);
+    expect(planBusinessCap({}, { plan: "toString" })).toBe(10);
+    expect(planBusinessCap(undefined, { plan: "free_cloud" })).toBe(10);
+  });
+
+  it("lets an account own as many businesses as its best plan allows", () => {
+    expect(accountBusinessCap(accounts, [{ plan: "free_cloud" }])).toBe(1);
+    expect(accountBusinessCap(accounts, [{ plan: "free_cloud" }, { plan: "starter" }, { plan: "free_cloud" }])).toBe(3);
+    expect(accountBusinessCap(accounts, [{ plan: "prepaid" }, { plan: "starter", planCode: "starter-launch" }])).toBe(4);
+    expect(accountBusinessCap(accounts, [{ plan: "free_cloud" }, { plan: "pro" }])).toBe(5);
+    expect(accountBusinessCap(accounts, [])).toBe(5);
+    expect(accountBusinessCap(undefined, [{ plan: "pro" }])).toBe(10);
+  });
+
+  it("knows the most any plan allows", () => {
+    // Pro and Enterprise aren't in the map, so they allow maxBusinesses.
+    expect(highestBusinessCap(accounts)).toBe(5);
+    expect(highestBusinessCap({ maxBusinesses: 2, maxBusinessesByPlan: { "pro-plus": 20 } })).toBe(20);
+    // With every tier in the map, maxBusinesses counts only for a self-hosted business.
+    expect(highestBusinessCap({ maxBusinesses: 50, maxBusinessesByPlan: { free_cloud: 1, starter: 3, pro: 5, enterprise: 8, prepaid: 2 } })).toBe(8);
+    expect(highestBusinessCap({ maxBusinesses: 3 })).toBe(3);
+    expect(highestBusinessCap(undefined)).toBe(10);
   });
 });
 

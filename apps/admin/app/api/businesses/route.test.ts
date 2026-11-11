@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ update: vi.fn(), remove: vi.fn(), verify: vi.fn(), enforce: vi.fn(), log: vi.fn(), list: vi.fn(), create: vi.fn(), attribute: vi.fn(), maxBusinesses: vi.fn() }));
+const fixture = vi.hoisted(() => ({ update: vi.fn(), remove: vi.fn(), verify: vi.fn(), enforce: vi.fn(), log: vi.fn(), list: vi.fn(), create: vi.fn(), attribute: vi.fn() }));
 vi.mock("@/lib/api-helpers", async (original) => ({
   ...await original<typeof import("@/lib/api-helpers")>(),
   requireApiSession: async () => ({ user: { id: "user_1" } }),
@@ -13,10 +13,9 @@ vi.mock("@/lib/domain-context", () => ({ createDomainContext: () => ({ db: "app"
 vi.mock("@lobbystack/domain", () => ({
   updateBusiness: fixture.update,
   deleteBusiness: fixture.remove,
-  listUserBusinesses: fixture.list,
+  listUserBusinessesWithAllowance: fixture.list,
   createBusiness: fixture.create,
   attributeBusiness: fixture.attribute,
-  deploymentMaxBusinessesPerAccount: fixture.maxBusinesses,
   ianaTimeZone: (zone: string) => zone,
 }));
 vi.mock("@lobbystack/telemetry/node", async (original) => ({ ...await original<typeof import("@lobbystack/telemetry/node")>(), logEvent: fixture.log }));
@@ -32,17 +31,17 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("listing and creating businesses", () => {
-  it("lists the account's businesses with how many it owns and the most it may own", async () => {
-    fixture.list.mockResolvedValue([
+  it("lists the account's businesses with how many it owns, the most its plans let it own, and whether a higher plan allows more", async () => {
+    const businesses = [
       { businessId: "business_1", name: "Main", role: "business_owner" },
       { businessId: "business_2", name: "Studio", role: "business_owner" },
       { businessId: "business_3", name: "Friend's Shop", role: "business_admin" },
-    ]);
-    fixture.maxBusinesses.mockReturnValue(3);
+    ];
+    fixture.list.mockResolvedValue({ businesses, businessLimit: { owned: 2, max: 3, upgrade: true } });
     const response = await GET(new Request("http://localhost:3000/api/businesses"));
     expect(response.status).toBe(200);
     expect(fixture.list).toHaveBeenCalledWith("app-db", "user_1");
-    expect(await response.json()).toMatchObject({ businesses: [{ businessId: "business_1" }, { businessId: "business_2" }, { businessId: "business_3" }], businessLimit: { owned: 2, max: 3 } });
+    expect(await response.json()).toEqual({ businesses, businessLimit: { owned: 2, max: 3, upgrade: true } });
   });
 
   it("answers 409 business_limit when the account already owns as many businesses as it may", async () => {

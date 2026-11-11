@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", vi.fn(query => ({ matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(name = "Tim Hortons", loading = false, businessLimit?: { owned: number; max: number }) {
+function setup(name = "Tim Hortons", loading = false, businessLimit?: { owned: number; max: number; upgrade?: boolean }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   const businesses = [{ businessId: "business-1", name, active: true }, { businessId: "business-2", name: "Acme Clinic", active: false }];
   if (!loading) client.setQueryData(["businesses"], { businesses, ...(businessLimit ? { businessLimit } : {}) });
@@ -84,6 +84,16 @@ describe("business limit", () => {
     expect(create.getAttribute("aria-disabled")).toBe("true");
     expect(create.textContent).toContain('sidebar.businessCount {"owned":3,"max":3}');
     expect(screen.getByText("sidebar.businessLimitReached")).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /sidebar\.seePlans/ })).toBeNull();
+  });
+  it("points to the plans when a higher plan on one of the account's businesses would allow more", async () => {
+    setup("Tim Hortons", false, { owned: 1, max: 1, upgrade: true });
+    await userEvent.click(screen.getByRole("button", { name: /Tim Hortons/ }));
+    const create = await screen.findByRole("menuitem", { name: /sidebar\.createBusiness/ });
+    expect(create.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("sidebar.businessLimitUpgrade")).toBeTruthy();
+    expect(screen.queryByText("sidebar.businessLimitReached")).toBeNull();
+    expect(screen.getByRole("menuitem", { name: /sidebar\.seePlans/ }).getAttribute("href")).toBe("/settings/plan");
   });
   it("keeps Create business as it was when the server sends no limit", async () => {
     setup();

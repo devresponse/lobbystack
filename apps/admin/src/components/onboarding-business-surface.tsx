@@ -9,7 +9,7 @@ import { Building2, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getStoredAffiliateReferralCode } from "@/lib/affiliate-referral";
-import { getSafeOnboardingErrorMessage } from "@/lib/onboarding-errors";
+import { businessLimitMessage, getSafeOnboardingErrorMessage } from "@/lib/onboarding-errors";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -87,7 +87,7 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
     } catch (cause) {
       // Another tab may have taken the last place, so the count here and in the sidebar catches up.
       if ((cause as { code?: unknown } | null)?.code === "business_limit") void queryClient.invalidateQueries({ queryKey: ["businesses"] });
-      setError(getSafeOnboardingErrorMessage(cause, t, "businessName.submitFailed", limit?.max));
+      setError(getSafeOnboardingErrorMessage(cause, t, "businessName.submitFailed", limit));
     }
   }
 
@@ -101,7 +101,7 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
             <Input autoComplete="organization" autoFocus className="h-11 pl-9" id="onboarding-business-name" onChange={(event) => setName(event.target.value)} placeholder={t("businessName.placeholder")} required type="text" value={name} />
           </div>
         </Field>
-        {error || businesses.isError || atLimit ? <FieldError>{error ?? (atLimit ? t("errors.tooManyBusinesses", { count: limit.max }) : t("businessName.unavailable"))}</FieldError> : null}
+        {error || businesses.isError || atLimit ? <FieldError>{error ?? (atLimit ? businessLimitMessage(t, limit) : t("businessName.unavailable"))}</FieldError> : null}
         <Button className="mt-2 h-11 w-full" disabled={atLimit || businesses.isLoading || create.isPending || update.isPending || navigating || name.trim().length === 0} type="submit">{create.isPending || update.isPending || navigating ? <><LoaderCircle className="size-4 animate-spin" />{t("businessName.submitting")}</> : t("businessName.continue")}</Button>
       </FieldGroup>
     </form>

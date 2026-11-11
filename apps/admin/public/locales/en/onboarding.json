@@ -7,6 +7,8 @@
   "errors": {
     "tooManyBusinesses_one": "You already own {{count}} business, the most one account can own.",
     "tooManyBusinesses_other": "You already own {{count}} businesses, the most one account can own.",
+    "tooManyBusinessesUpgrade_one": "You already own {{count}} business, the most your current plan allows. Upgrade it to a higher plan to add more.",
+    "tooManyBusinessesUpgrade_other": "You already own {{count}} businesses, the most your current plans allow. Upgrade one of them to a higher plan to add more.",
     "businessLimit": "You already own the most businesses one account can own."
   },
   "adminRequired": {

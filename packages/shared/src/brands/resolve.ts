@@ -1,4 +1,3 @@
-import { DEFAULT_MAX_BUSINESSES_PER_ACCOUNT } from "../billingProfile";
 import { BILLING_PROFILE_HASHES, BRAND_ACCOUNT_LIMITS, BRAND_BILLING_PLANS, BRAND_INDEX, BRAND_PLAN_DISPLAYS, BRANDS } from "./generated";
 import type { BrandAccountLimits, BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex, BrandPlanDisplay } from "./types";
 
@@ -146,12 +145,13 @@ export function brandPlanDisplay(brandId: string, displays: Record<string, Brand
 }
 
 /**
- * How many businesses one account may own on the brand: its billing.json's
- * accounts.maxBusinesses as this build carries it, or 10 for a brand whose
- * file leaves it out, or that has no file.
+ * The accounts section of the brand's billing.json as this build carries it:
+ * how many businesses one account may own (maxBusinesses), and on each plan
+ * (maxBusinessesByPlan). Empty for a brand whose file leaves it out, or that
+ * has no file, so every account may own 10 (planBusinessCap).
  */
-export function brandMaxBusinessesPerAccount(brandId: string, limits: Record<string, BrandAccountLimits> = BRAND_ACCOUNT_LIMITS): number {
-  return Object.hasOwn(limits, brandId) ? limits[brandId]!.maxBusinesses : DEFAULT_MAX_BUSINESSES_PER_ACCOUNT;
+export function brandAccountLimits(brandId: string, limits: Record<string, BrandAccountLimits> = BRAND_ACCOUNT_LIMITS): BrandAccountLimits {
+  return Object.hasOwn(limits, brandId) ? limits[brandId]! : {};
 }
 
 /** Whether a brand file decides the name and logo, rather than onboarding's saved choice. */

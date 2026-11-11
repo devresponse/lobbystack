@@ -29,6 +29,8 @@
     "createBusiness": "Crear negocio",
     "businessCount": "{{owned}} de {{max}}",
     "businessLimitReached": "Es el máximo de negocios para una cuenta.",
+    "businessLimitUpgrade": "Cambie uno de sus negocios a un plan superior para agregar más.",
+    "seePlans": "Ver planes",
     "setupGuide": {
       "title": "Primeros pasos",
       "open": "Abrir la guía de configuración",

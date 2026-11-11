@@ -8,7 +8,12 @@ describe("getSafeOnboardingErrorMessage", () => {
   const limitReached = Object.assign(new Error("This account already owns 3 businesses, the most one account can own."), { code: "business_limit" });
 
   it("says the account's business limit, with the number the page has", () => {
-    expect(getSafeOnboardingErrorMessage(limitReached, t, "businessName.submitFailed", 3)).toBe('errors.tooManyBusinesses {"count":3}');
+    expect(getSafeOnboardingErrorMessage(limitReached, t, "businessName.submitFailed", { max: 3 })).toBe('errors.tooManyBusinesses {"count":3}');
+    expect(getSafeOnboardingErrorMessage(limitReached, t, "businessName.submitFailed", { max: 3, upgrade: false })).toBe('errors.tooManyBusinesses {"count":3}');
+  });
+
+  it("says a higher plan on one of the account's businesses allows more, when one does", () => {
+    expect(getSafeOnboardingErrorMessage(limitReached, t, "businessName.submitFailed", { max: 1, upgrade: true })).toBe('errors.tooManyBusinessesUpgrade {"count":1}');
   });
 
   it("says the business limit without a number when the page doesn't have it", () => {

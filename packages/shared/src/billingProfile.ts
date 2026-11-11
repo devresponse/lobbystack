@@ -92,11 +92,52 @@ const pack = z.strictObject({
 });
 
 // Rules for each account rather than each business. maxBusinesses: how many
-// businesses one account may own, whether it creates them or claims them.
-const accounts = z.strictObject({ maxBusinesses: z.number().int().min(1).max(MAX_BUSINESSES_PER_ACCOUNT_CEILING) });
+// businesses one account may own, whether it creates them or claims them, 10
+// when left out. maxBusinessesByPlan: that number for each plan, by plan code,
+// or prepaid for a business with a live pack; an account may own as many as
+// the best plan among its businesses allows, and a plan the map leaves out
+// allows maxBusinesses (an additional plan, its tier's number first).
+const businessCap = z.number().int().min(1).max(MAX_BUSINESSES_PER_ACCOUNT_CEILING);
+const accounts = z.strictObject({ maxBusinesses: businessCap.optional(), maxBusinessesByPlan: z.record(z.string(), businessCap).optional() });
 
 /** A billing.json's accounts section: rules for each account, which the admin enforces from its build. */
 export type BillingAccounts = z.output<typeof accounts>;
+
+/** The key of accounts.maxBusinessesByPlan for a business on a live prepaid pack, which has no plan code. */
+export const PREPAID_BUSINESS_CAP_KEY = "prepaid";
+
+/** A business's plan as its account's business cap reads it: its tier (BillingPlanSlug), and its additional plan's code while that plan is live. */
+export type BusinessCapPlan = { plan: string; planCode?: string | null };
+
+// The tiers a business can move to, whose caps say whether a higher plan allows more.
+const CAP_TIERS = ["free_cloud", "starter", "pro", "enterprise", PREPAID_BUSINESS_CAP_KEY] as const;
+
+/**
+ * How many businesses an account may own because one of its businesses is on
+ * this plan: accounts.maxBusinessesByPlan for its additional plan's code, then
+ * for its tier, then accounts.maxBusinesses, then 10. A self-hosted business's
+ * tier is self_host, which the map can't name, so maxBusinesses decides.
+ */
+export function planBusinessCap(accounts: BillingAccounts | undefined, plan: BusinessCapPlan): number {
+  const byPlan = accounts?.maxBusinessesByPlan ?? {};
+  const own = (code: string | null | undefined) => (code && Object.hasOwn(byPlan, code) ? byPlan[code] : undefined);
+  return own(plan.planCode) ?? own(plan.plan) ?? accounts?.maxBusinesses ?? DEFAULT_MAX_BUSINESSES_PER_ACCOUNT;
+}
+
+/**
+ * The most businesses an account may own while it owns, or is about to own,
+ * businesses on these plans: the cap of the best of them. With none,
+ * accounts.maxBusinesses, or 10.
+ */
+export function accountBusinessCap(accounts: BillingAccounts | undefined, plans: readonly BusinessCapPlan[]): number {
+  if (plans.length === 0) return accounts?.maxBusinesses ?? DEFAULT_MAX_BUSINESSES_PER_ACCOUNT;
+  return Math.max(...plans.map((plan) => planBusinessCap(accounts, plan)));
+}
+
+/** The most businesses any plan lets an account own: the cap of the best tier or plan code the section names. */
+export function highestBusinessCap(accounts: BillingAccounts | undefined): number {
+  return Math.max(...CAP_TIERS.map((plan) => planBusinessCap(accounts, { plan })), ...Object.values(accounts?.maxBusinessesByPlan ?? {}));
+}
 
 const additionalPlan = z.strictObject({
   tier: z.enum(["starter", "pro"]),
@@ -225,6 +266,10 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
   packs.slice(MAX_BILLING_PACKS).forEach((code) => context.addIssue({ code: "custom", path: ["packs", code], message: `a file holds at most ${MAX_BILLING_PACKS} packs` }));
   // C11: the display section's cards, rows and {{names}}.
   if (profile.display) checkBillingDisplay(profile.display, { starter: profile.plans.starter.sold, pro: profile.plans.pro.sold }, (path, message) => context.addIssue({ code: "custom", path: ["display", ...path], message }));
+  // C12: a cap per plan names a plan of this file, or prepaid for a business with a live pack.
+  for (const code of Object.keys(profile.accounts?.maxBusinessesByPlan ?? {}).sort()) {
+    if (code !== PREPAID_BUSINESS_CAP_KEY && !Object.hasOwn(profile.plans, code)) context.addIssue({ code: "custom", path: ["accounts", "maxBusinessesByPlan", code], message: `not a plan in this file: use a code under plans, or ${PREPAID_BUSINESS_CAP_KEY} for a business with a live pack` });
+  }
   if (profile.stripe) {
     // C8: Managed Payments sells through Checkout alone, so overage can't be a subscription of its own.
     if (profile.stripe.managedPayments && profile.stripe.overage !== "checkout") context.addIssue({ code: "custom", path: ["stripe", "overage"], message: "with managedPayments, overage is checkout: Managed Payments sells only through Checkout" });

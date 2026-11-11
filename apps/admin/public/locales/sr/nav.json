@@ -29,6 +29,8 @@
     "createBusiness": "Kreiraj firmu",
     "businessCount": "{{owned}} od {{max}}",
     "businessLimitReached": "To je najviše firmi za jedan nalog.",
+    "businessLimitUpgrade": "Prebacite jednu od svojih firmi na viši paket da biste dodali još.",
+    "seePlans": "Pogledajte pakete",
     "setupGuide": {
       "title": "Prvi koraci",
       "open": "Otvori vodič za podešavanje",

@@ -78,6 +78,23 @@ it("explains a 403 and lets the user sign in with the invited account", async ()
   expect(fetchMock).toHaveBeenCalledWith("/api/auth/sign-out", expect.objectContaining({ method: "POST" }));
 });
 
+it("says a higher plan on one of the account's businesses would let it take a claim link, when one would", async () => {
+  window.history.replaceState({}, "", "/accept-invite?token=fixture-token");
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("get-session")) return Response.json({ user: { id: "fixture" } });
+    if (url === "/api/businesses") return Response.json({ businesses: [], businessLimit: { owned: 1, max: 1, upgrade: true } });
+    if (init?.method === "POST") return Response.json({ error: "This account already owns 1 business, the most its plans allow.", code: "business_limit" }, { status: 409 });
+    return Response.json({ invitation: { businessName: "Clinic", email: "invitee@example.invalid", expired: false, status: "pending" } });
+  }));
+  render(<AcceptInviteSurface />);
+  const submit = await screen.findByRole("button", { name: "acceptInvite.submit" });
+  await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false));
+  await userEvent.click(submit);
+  await screen.findByText("acceptInvite.businessLimitUpgrade");
+  expect(screen.queryByText("acceptInvite.businessLimit")).toBeNull();
+  expect(spies.replace).not.toHaveBeenCalled();
+});
+
 it("says the account owns the most businesses it may when a claim link would make it own one more", async () => {
   window.history.replaceState({}, "", "/accept-invite?token=fixture-token");
   let refusal = { error: "This account already owns 10 businesses, the most one account can own.", code: "business_limit" };

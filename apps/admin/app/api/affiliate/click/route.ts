@@ -4,7 +4,7 @@ import { normalizeIP } from "@better-auth/core/utils/ip";
 import { normalizeAffiliateReferralCode, recordAffiliateClick } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
-import { enforceFixedWindow, fixedWindowLimit } from "@/lib/fixed-window-limit";
+import { clientIpDigest, enforceFixedWindow, fixedWindowLimit } from "@/lib/fixed-window-limit";
 import { trustedClientIp } from "@/lib/trusted-client-ip";
 
 const hour = 60 * 60;
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const limits = [fixedWindowLimit("affiliate-click", "code-hour", normalizeAffiliateReferralCode(body.referralCode), 500, hour, "rate_limit_code_hour")];
     const ip = trustedClientIp(request);
     // One host usually owns a whole IPv6 /64, so count the subnet as one client.
-    if (ip) limits.push(fixedWindowLimit("affiliate-click", "ip-hour", normalizeIP(ip, { ipv6Subnet: 64 }), 30, hour, "rate_limit_ip_hour"));
+    if (ip) limits.push(fixedWindowLimit("affiliate-click", "ip-hour", clientIpDigest(normalizeIP(ip, { ipv6Subnet: 64 })), 30, hour, "rate_limit_ip_hour"));
     // A click only feeds statistics, so a limited click is dropped rather than reported as an error.
     if (!(await enforceFixedWindow(limits)).allowed) return NextResponse.json({ recorded: false });
     const recorded = await recordAffiliateClick(createDomainContext(), {

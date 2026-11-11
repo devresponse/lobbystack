@@ -4,6 +4,7 @@ const redis = vi.hoisted(() => ({ eval: vi.fn() }));
 const readyRedis = vi.hoisted(() => vi.fn());
 vi.mock("./redis", () => ({ readyRedis }));
 
+import { clientIpDigest } from "./fixed-window-limit";
 import { buildCalendarOAuthRateLimits, enforceCalendarOAuthRateLimits } from "./google-calendar-oauth-limit";
 
 afterEach(() => {
@@ -19,10 +20,11 @@ describe("Google Calendar OAuth rate limits", () => {
       ["user-hour", 20, 3600],
       ["business-hour", 60, 3600],
     ]);
-    const keys = limits.map((entry) => entry.key).join(" ");
-    expect(keys).not.toContain("operator-9f3");
-    expect(keys).not.toContain("tenant-7c2");
-    expect(keys).not.toContain("203.0.113.10");
+    const [ip, user, business] = limits.map((entry) => entry.key);
+    expect(user).toContain(":calendar-oauth:user-hour:start:operator-9f3:");
+    expect(business).toContain(":calendar-oauth:business-hour:start:tenant-7c2:");
+    expect(ip).toContain(`:calendar-oauth:ip-hour:start:${clientIpDigest("203.0.113.10")}:`);
+    expect(limits.map((entry) => entry.key).join(" ")).not.toContain("203.0.113.10");
   });
 
   it("keeps the start flow bounded by identity when no trusted IP is configured", () => {

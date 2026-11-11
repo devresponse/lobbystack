@@ -4,12 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveMessagesSurface } from "./live-messages-surface";
+import { testNavigation } from "@/lib/navigation-testing";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
 
 const telemetryRef = vi.hoisted(() => ({ current: null as ReturnType<typeof createRecordedBrowserTelemetry> | null }));
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => telemetryRef.current!.telemetry }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string) => key }) }));
 vi.mock("@/lib/realtime-query", () => ({ subscribeRealtimeQuery: () => () => {} }));
+vi.mock("next/navigation", async () => (await import("@/lib/navigation-testing")).nextNavigationMock);
 
 const clients: QueryClient[] = [];
 beforeEach(() => {
@@ -17,7 +19,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", { getItem: () => "en", setItem: vi.fn() });
   vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
 });
-afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); testNavigation.reset(); });
 
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });

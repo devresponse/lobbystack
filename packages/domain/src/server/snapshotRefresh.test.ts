@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   withBusinessTransaction: vi.fn(),
   enqueueOutbox: vi.fn(),
   resolveSmsSender: vi.fn(),
+  loadSnapshotKnowledge: vi.fn(),
 }));
 
 vi.mock("@lobbystack/db", async (importOriginal) => ({
@@ -16,6 +17,11 @@ vi.mock("@lobbystack/db", async (importOriginal) => ({
   enqueueOutbox: mocks.enqueueOutbox,
 }));
 vi.mock("./smsSender", () => ({ resolveSmsSender: mocks.resolveSmsSender }));
+// Each receptionist's articles are ranked in SQL, which the database tests cover (knowledgeAudience.integration.test.ts).
+vi.mock("./snapshotKnowledge", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./snapshotKnowledge")>()),
+  loadSnapshotKnowledge: mocks.loadSnapshotKnowledge,
+}));
 
 import type { SnapshotCacheClient } from "./snapshotCache";
 import { refreshBusinessSnapshot } from "./knowledge";
@@ -29,11 +35,22 @@ function memoryCache(): SnapshotCacheClient {
 const profileRow = {
   id: "00000000-0000-4000-8000-000000000002",
   businessId,
+  name: "Front desk",
+  description: "",
+  isDefault: true,
+  status: "active",
+  archivedAt: null,
+  listed: true,
+  sortOrder: 0,
+  handle: null,
+  locale: null,
+  knowledgeScope: "all",
   greeting: "Hello",
   tone: "professional",
   summary: "A clinic",
   bookingPolicy: "Confirm before booking.",
 };
+const noKnowledge = { defaultSnippets: [], extraSnippets: [], defaultDocuments: [], snippetIds: new Map() };
 
 function tableName(table: unknown): string {
   if (table && typeof table === "object") {
@@ -51,6 +68,7 @@ function makeTx(selectRows: Record<string, unknown>) {
     return name in selectRows ? selectRows[name] : [];
   };
   const tx = {
+    execute: vi.fn(async (statement: SQL) => { executed.push(new PgDialect().sqlToQuery(statement).sql); return { rows: [] }; }),
     select: vi.fn(() => fromChain(rowsFor)),
     insert: vi.fn(() => ({ values: () => Promise.resolve([{ id: "saved" }]) })),
     delete: vi.fn((table: unknown) => ({ where: (condition: SQL) => { deleted.push({ table: tableName(table), where: new PgDialect().sqlToQuery(condition) }); return Promise.resolve(); } })),
@@ -70,6 +88,8 @@ function makeTx(selectRows: Record<string, unknown>) {
         }
         return {
           where: () => whenable(rows(table)),
+          // The business with its public page: none here, as a left join leaves it.
+          leftJoin: () => ({ where: () => whenable((rows(table) as unknown[]).map((row) => ({ business: row, published: null }))) }),
         };
       },
     };
@@ -78,14 +98,17 @@ function makeTx(selectRows: Record<string, unknown>) {
 
 const businessRow = { id: businessId, name: "Maple Family Clinic", timezone: "America/Toronto", defaultLocale: "en" };
 let deleted: { table: string; where: { sql: string; params: unknown[] } }[] = [];
+let executed: string[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
   deleted = [];
+  executed = [];
   vi.stubEnv("REDIS_PREFIX", "lobbystack");
   mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => await callback(makeTx({ businesses: [businessRow], receptionist_profiles: [profileRow] })));
   mocks.enqueueOutbox.mockResolvedValue(undefined);
   mocks.resolveSmsSender.mockResolvedValue(null);
+  mocks.loadSnapshotKnowledge.mockResolvedValue(noKnowledge);
 });
 
 afterEach(() => {
@@ -93,6 +116,11 @@ afterEach(() => {
 });
 
 describe("refreshBusinessSnapshot write-through", () => {
+  it("turns query compiling off for the whole rebuild, before its first read", async () => {
+    await refreshBusinessSnapshot({ db: {} as never, snapshotCache: memoryCache() }, { businessId });
+    expect(executed[0]).toBe("SET LOCAL jit = off");
+  });
+
   it("preserves business identity, active contact numbers, locale labels, and opt-out", async () => {
     // The number customer texts come from, which the business's plan decides.
     mocks.resolveSmsSender.mockResolvedValue("+14165550003");
@@ -120,13 +148,24 @@ describe("refreshBusinessSnapshot write-through", () => {
     }
   });
 
-  it("keeps up to the snapshot's snippet limit, not just the few that prompts list", async () => {
+  it("keeps every text entry the default receptionist's ranking gives, not just the few that prompts list", async () => {
     // Answers saved from the unanswered questions inbox are text entries too; knowledge search needs them all.
     const snippetRows = Array.from({ length: 12 }, (_, index) => ({ id: `snippet-${index}`, title: `Question ${index}`, content: `Answer ${index}`, tags: [], priority: 100 - index }));
-    mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => callback(makeTx({ businesses: [businessRow], receptionist_profiles: [profileRow], knowledge_snippets: snippetRows })));
+    mocks.loadSnapshotKnowledge.mockResolvedValue({ ...noKnowledge, defaultSnippets: snippetRows, snippetIds: new Map([[profileRow.id, snippetRows.map((row) => row.id)]]) });
     const cache = memoryCache();
     await refreshBusinessSnapshot({ db: {} as never, snapshotCache: cache }, { businessId });
-    expect((await cache.get(businessId))?.knowledgeSnippets?.map((snippet) => snippet.id)).toEqual(snippetRows.map((row) => row.id));
+    const cached = await cache.get(businessId);
+    expect(cached?.knowledgeSnippets?.map((snippet) => snippet.id)).toEqual(snippetRows.map((row) => row.id));
+    expect(cached?.receptionists?.[0]?.snippetIds).toEqual(snippetRows.map((row) => row.id));
+    expect(mocks.loadSnapshotKnowledge).toHaveBeenCalledWith(expect.anything(), { businessId, receptionists: [{ id: profileRow.id, isDefault: true, status: "active", knowledgeScope: "all" }] });
+  });
+
+  it("builds nothing for a business without its default receptionist, which the database never leaves", async () => {
+    mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => callback(makeTx({ businesses: [businessRow] })));
+    const cache = memoryCache();
+    await expect(refreshBusinessSnapshot({ db: {} as never, snapshotCache: cache }, { businessId })).rejects.toThrow("The business has no default receptionist.");
+    expect(mocks.loadSnapshotKnowledge).not.toHaveBeenCalled();
+    expect(await cache.get(businessId)).toBeNull();
   });
 
   it("pushes the regenerated snapshot into the shared cache", async () => {

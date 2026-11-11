@@ -1,10 +1,12 @@
 # Set up a LobbyStack environment with `devops/bootstrap.mjs`
 
-`bootstrap.mjs` sets up one LobbyStack environment on Railway, with the outside services it needs: an OpenAI project and key, a Twilio subaccount and SIP trunk, a Resend sending domain, Cloudflare DNS records and a Turnstile widget, and the Polar tokens in cloud mode. You describe the environment in one small settings file, and what it makes is named after the dashboard's address (`APP_BASE_URL`), or after `NAME` without one. The script does the rest through each provider's API, records every finished step, and stops with exact instructions where only a person can act.
+`bootstrap.mjs` sets up one LobbyStack environment on Railway, with the outside services it needs: an OpenAI project and key, a Twilio subaccount and SIP trunk, a Resend sending domain, Cloudflare DNS records and a Turnstile widget, and in cloud mode the Polar tokens or the Stripe keys. You describe the environment in one small settings file, and what it makes is named after the dashboard's address (`APP_BASE_URL`), or after `NAME` without one. The script does the rest through each provider's API, records every finished step, and stops with exact instructions where only a person can act.
 
 **Status:** checked on 2 November 2026 against `main` at `df0a0ed` plus this change. A test harness ran every command against stand-ins for each API: 67 checks covering a fresh run named after `APP_BASE_URL` or after `NAME`, an older state file, a changed `APP_BASE_URL`, reruns, `--yes`, `redo`, a deleted project, duplicate names, a running deployment's variables, the lock and the state-file guard. Before that, on 1 and 2 November 2026, the script set up a real test environment several times, from a private template and with its own address, and on 2 November that environment answered a phone call. The parts not yet run against a real service are listed in [What isn't confirmed](#what-isnt-confirmed). Set up a test environment first.
 
 Section numbers such as "guide 3.2" in this page and in the script's messages are those of the [deployment guide](../docs/deployment/guide/README.md): mainly [Part 3](../docs/deployment/guide/part-3-outside-services.md) (outside services), [Part 4](../docs/deployment/guide/part-4-test-environment.md) (a test environment), [Part 5](../docs/deployment/guide/part-5-production.md) (production) and [Appendix A](../docs/deployment/guide/appendix-a-variables.md) (variables). The script does most of Parts 3 and 4.
+
+Every setting, secret and Railway variable the script reads, keeps or writes, with where each comes from and how it is checked, is in [Bootstrap script variables](../docs/deployment/bootstrap-variables.md).
 
 ## The whole process
 
@@ -17,7 +19,7 @@ Section numbers such as "guide 3.2" in this page and in the script's messages ar
 | 5 | The steps only a person can do | the OpenAI, Twilio and Cloudflare dashboards |
 | 6 | Connect the incoming-call webhook, and make the platform key | `connect` |
 | 7 | Sign up, and sign the command line in | the dashboard, `pnpm lobbystack login` |
-| 8 | Cloud mode only: sell plans through Polar | `pnpm billing plan`, `apply`, `verify` |
+| 8 | Cloud mode only: sell plans through Polar or Stripe | `pnpm billing plan`, `apply`, `verify` |
 | 9 | Check that it all works | health check, a test call, `pnpm smoke:production` |
 
 `<name>` is the environment's name, such as `acme-test`, and the settings file is `.env.bootstrap-<name>`. Run every command from the repository folder.
@@ -35,10 +37,11 @@ Section numbers such as "guide 3.2" in this page and in the script's messages ar
 | Turnstile | Creates the widget, or adds this deployment's addresses to the widget whose keys you gave | Nothing, if the Cloudflare token can edit Turnstile |
 | `connect` | Checks the admin's health, takes the webhook's secret, makes the operator's platform key, and sets both on the admin | Create the webhook in OpenAI first |
 | Polar, in cloud mode | Takes the admin's and the worker's tokens | Make those tokens, and later run `pnpm billing` ([step 8](#8-cloud-mode-sell-plans-through-polar)) |
+| Stripe, in cloud mode with `BILLING_PROVIDER=stripe` | Takes the admin's and the worker's restricted keys, checks that each is of the deployment's mode and that both belong to one account, and puts that account on both services as `STRIPE_ACCOUNT_ID`, with `BILLING_PROVIDER` | Make those keys, and later run `pnpm billing --stripe` ([step 8](#8-cloud-mode-sell-plans-through-polar)) |
 
 ## Before you start
 
-**Accounts:** Railway on a paid plan, OpenAI with prepaid credit, Twilio upgraded from trial (a trial account has no SIP trunking), Resend, Cloudflare holding the domain's DNS, and Polar for cloud mode ([guide 1.1](../docs/deployment/guide/part-1-prepare.md#11-accounts-youll-need)).
+**Accounts:** Railway on a paid plan, OpenAI with prepaid credit, Twilio upgraded from trial (a trial account has no SIP trunking), Resend, Cloudflare holding the domain's DNS, and Polar or Stripe for cloud mode ([guide 1.1](../docs/deployment/guide/part-1-prepare.md#11-accounts-youll-need)).
 
 **Your computer:**
 
@@ -62,7 +65,7 @@ Section numbers such as "guide 3.2" in this page and in the script's messages ar
 | `RESEND_ADMIN_KEY` | A **Full access** key, used only to create the domain and the sending key. Delete it afterwards | `resend.com/api-keys` |
 | `CLOUDFLARE_API_TOKEN` | **Zone > DNS > Edit** on the zone, and **Account > Turnstile > Edit** on the account | `dash.cloudflare.com/profile/api-tokens` |
 
-Two more come later, and the script never sees them: a **Polar setup token** for `pnpm billing` ([step 8](#8-cloud-mode-sell-plans-through-polar)), and a **Railway project token** for `node devops/railway-vars.mjs`.
+Two more come later, and the script never sees them: a **Polar setup token** or a **Stripe setup key** for `pnpm billing` ([step 8](#8-cloud-mode-sell-plans-through-polar)), and a **Railway project token** for `node devops/railway-vars.mjs`.
 
 ## 2. Write the settings and secrets files
 
@@ -78,7 +81,7 @@ This writes `.env.bootstrap-<name>` for the settings and `.env.bootstrap-<name>.
 | `BRAND` | `acme` | A folder under `brands/` on `BRANCH`. In cloud mode it also needs a `billing.json` ([guide 3.6](../docs/deployment/guide/part-3-outside-services.md#36-your-brand)) |
 | `ENVIRONMENT` | `test` | `test` or `production`. Production adds `REQUIRE_EMAIL_VERIFICATION=true`, sets no `BRAND_PRESET`, and so needs `APP_BASE_URL` on one of the brand's domains |
 | `REPO`, `BRANCH` | `your-org/lobbystack`, `main` | The fork and the branch Railway builds. Railway's GitHub app must reach the repository: Railway can build a public repository it can't reach, but then never redeploys on a push, and `up` warns about it |
-| `DEPLOYMENT_MODE` | `self_hosted_standard` | `self_hosted_standard` (every business unlimited) or `cloud` (businesses buy plans through Polar). Hard to change once businesses exist ([guide 1.3](../docs/deployment/guide/part-1-prepare.md#13-decide-these-before-any-data-exists), decision 1) |
+| `DEPLOYMENT_MODE` | `self_hosted_standard` | `self_hosted_standard` (every business unlimited) or `cloud` (businesses buy plans, through `BILLING_PROVIDER`'s provider). Hard to change once businesses exist ([guide 1.3](../docs/deployment/guide/part-1-prepare.md#13-decide-these-before-any-data-exists), decision 1) |
 | `OPERATOR_EMAIL` | `ops@example.com` | Owns the platform key, signs up first, and receives DMARC reports |
 | `RAILWAY_WORKSPACE_ID` | the workspace's ID | Railway won't create a project without it. It's in the workspace's **Settings**, **General** tab, and `doctor` lists the workspaces the token reaches |
 | `BUCKET_REGION` | `iad` | `sjc`, `iad`, `ams` or `sin`. It can't change later |
@@ -88,7 +91,9 @@ This writes `.env.bootstrap-<name>` for the settings and `.env.bootstrap-<name>.
 | `CLOUDFLARE_ZONE` | `example.com` | The zone's domain name, not its 32-character Zone ID. Empty: the script prints every DNS record for you to add |
 | `CLOUDFLARE_ACCOUNT_ID` | 32 characters | From the zone's **Overview** page. Empty: you make the Turnstile widget by hand |
 | `TWILIO_TOLLFREE` | `buy` | Cloud mode only: `buy`, a number already in the subaccount such as `+18445550123`, or empty for none |
-| `POLAR_ORGANIZATION_ID`, `POLAR` | the ID, `sandbox` | Cloud mode only. `POLAR` is `sandbox` or `live` |
+| `BILLING_PROVIDER` | `polar` | Cloud mode only: `polar` or `stripe`, who sells the plans. A deployment keeps its provider ([Stripe billing](../docs/providers/stripe.md)) |
+| `POLAR_ORGANIZATION_ID`, `POLAR` | the ID, `sandbox` | With `BILLING_PROVIDER=polar` only. `POLAR` is `sandbox` or `live` |
+| `STRIPE` | `sandbox` | With `BILLING_PROVIDER=stripe` only: `sandbox` or `live`. The account is the one the keys belong to |
 | `STEP_GITHUB` … `STEP_TURNSTILE` | `yes` | `no` skips that service's API, and its values then come from the secrets file, or are asked for |
 | `RAILWAY_TEMPLATE` | the code `template` printed | Optional: make the Railway layout from your private template in one call ([below](#optional-a-private-railway-template)) |
 | `TEMPLATE_PROJECT`, `TEMPLATE_REPO` | `lobbystack-template`, `your-org/lobbystack` | Optional, read only by `template` |
@@ -116,7 +121,7 @@ What the script makes at the providers is named after `APP_BASE_URL`'s address, 
 | The OpenAI service account that owns the key | `demo.example.com platform` |
 | The Twilio trunk | `demo.example.com to OpenAI` |
 | The shared toll-free number (cloud mode) | `demo.example.com shared texts` |
-| The two Polar tokens you make | `demo.example.com admin` and `demo.example.com worker` |
+| The two Polar tokens or Stripe keys you make | `demo.example.com admin` and `demo.example.com worker` |
 
 An address longer than 50 characters leaves the names to `NAME`, since Twilio's names stop at 64 characters.
 
@@ -136,6 +141,7 @@ It holds keys, one `KEY=value` per line. Fill in only what you have: an empty li
   - `SMTP_PASSWORD`, Resend's sending key;
   - `TURNSTILE_SITE_KEY` with `TURNSTILE_SECRET_KEY`;
   - `POLAR_ADMIN_TOKEN` with `POLAR_WORKER_TOKEN`, in cloud mode;
+  - `STRIPE_ADMIN_KEY` with `STRIPE_WORKER_KEY`, in cloud mode with `BILLING_PROVIDER=stripe`, or as `STRIPE_API_KEY` under each service's `[...]` line of a `railway-vars.mjs` file;
   - `OPENAI_WEBHOOK_SECRET`, for `connect`;
   - any of the 13 platform secrets, such as `ENCRYPTION_KEY`, to reuse ones already made: at least 32 letters, digits, dashes or underscores each.
 
@@ -165,7 +171,7 @@ node devops/bootstrap.mjs up .env.bootstrap-<name>
 
 It asks you to type `yes`, since the services bill your accounts. Then it works through the steps, one line each: `+` runs a step, and `=` skips one that's already done.
 
-1. **GitHub, OpenAI, Twilio, email, Polar:** the outside services, in that order.
+1. **GitHub, OpenAI, Twilio, email, then Polar or Stripe:** the outside services, in that order. On Stripe, `stripe.keys` reads each key's account from Stripe and stops when the two differ, or when a key is of the other mode.
 2. **Railway:** the project, found by name or made in `RAILWAY_WORKSPACE_ID`. Then the services, volumes and bucket, from your template or one by one, and each service's settings and migrate's pre-deploy command.
 3. **Address:** the admin's Railway address; with `APP_BASE_URL`, the custom domain and its DNS records; then the Turnstile widget.
 4. **Variables:** the 13 platform secrets (kept, given, read back from Railway, or new), then every service's variables, without deploying yet. They're also written to `.env.bootstrap-<name>.vars`. On a deployment that's already running, this step sets only the values that differ, and Railway deploys each service that changed again; the worker deploys again too when an admin value it refers to changed. It never changes a running database's settings.
@@ -184,7 +190,7 @@ It ends with the address, and with any step still waiting for you. A **BY HAND**
 
 **Options:**
 
-- `--yes` doesn't stop at questions or at **BY HAND** steps. A step it didn't wait at isn't recorded as done: `up` lists it at the end, `status` shows it as `OPEN`, and it runs again, and waits, the next time you run without `--yes`. A value the script needs, such as a token, is still asked for.
+- `--yes` doesn't stop at questions or at **BY HAND** steps. A step it didn't wait at isn't recorded as done: `up` and `connect` list it at the end with the command that finishes it, `status` shows it as `OPEN`, and it runs again, and waits, the next time you run that command without `--yes`. A value the script needs, such as a token, is still asked for.
 - `--verbose` shows each API call.
 - `--dry-run` shows the steps and calls nothing.
 
@@ -268,6 +274,24 @@ Until this step, the plan dialog shows the brand's prices from `brands/<brand>/b
 
 **Start Starter** and **Upgrade to Pro** now open Polar's checkout. In the sandbox, pay with Polar's test card. Polar's webhook then moves the business onto the plan, and a plan that includes a number lets the business buy one.
 
+### On Stripe
+
+With `BILLING_PROVIDER=stripe`, the same four moves go to Stripe, as [guide 3.7](../docs/deployment/guide/part-3-outside-services.md#selling-plans-stripe), "Selling plans (Stripe)", steps 6 to 8 say. The brand's `billing.json` needs a `stripe` block first, added in a pull request and deployed: `doctor` and `connect` say when it has none.
+
+1. **A setup key.** In the same sandbox as the deployment's keys, make a restricted key with write access to products, prices, coupons, meters, the billing portal's configurations, webhook endpoints and event destinations ([Stripe billing](../docs/providers/stripe.md#know-the-keys)). Give it as `STRIPE_SETUP_KEY`, or paste it when asked.
+2. **Preview, then apply:**
+
+   ```sh
+   pnpm billing plan  --brand <brand> --stripe sandbox --profile <name>
+   pnpm billing apply --brand <brand> --stripe sandbox --profile <name> --railway-file .env.stripe-<name>
+   ```
+
+   `apply` makes Stripe's products, prices, meters, billing portal configuration, webhook endpoint and meter error destination, links them, and writes `STRIPE_ACCOUNT_ID` for the admin and the worker, which the script set already, and the two secrets Stripe shows once, `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET`, for the admin.
+3. **Put the secrets on the admin,** as in step 3 above, with `.env.stripe-<name>`. Then set what `plan` listed for Stripe's Dashboard: the grace period before an invoice with usage is finalized, the retries after a failed payment, and the branding.
+4. **Check:** `pnpm billing verify --brand <brand> --stripe sandbox --profile <name>` should end `Result: in sync (exit 0)`. Then delete the setup key in Stripe.
+
+**Start Starter** then opens Stripe's checkout. In the sandbox, pay with Stripe's test card `4242 4242 4242 4242`. Stripe's webhook moves the business onto the plan, and the worker makes its overage subscription, anchored to the 1st.
+
 ## 9. Check that it all works
 
 - `https://<address>/api/health/ready` answers `"ok":true` with the brand, and `database`, `storage` and `redis` all `ok`. With `APP_BASE_URL`, check both addresses.
@@ -336,6 +360,8 @@ The script stops at the failing step, names it, and lists **What to try**. Finis
 | `RAILWAY_WORKSPACE_ID is empty`, or `You must specify a workspaceId` | Put the workspace's ID in the settings. The error and `doctor` list the ones the token reaches |
 | `didn't accept <TOKEN>` | Run `doctor`, and copy the token again in full. Railway needs an account or workspace token, OpenAI an admin key, Resend a Full access key, and Twilio the main account's Auth Token |
 | `isn't allowed to do this` | The token lacks a permission, such as Cloudflare's **DNS Edit** or **Turnstile Edit**, or Twilio is still a trial |
+| `STRIPE_ADMIN_KEY is a live key, and STRIPE is sandbox`, or the reverse | Make the key in the deployment's mode: a sandbox's keys start with `rk_test_` |
+| `the admin's key belongs to Stripe account …, and the worker's to …` | Make both keys in the deployment's own account or sandbox, put them in the secrets file, and run `up` again |
 | `can't see a zone named …` | `CLOUDFLARE_ZONE` is the domain name, not the Zone ID, and the token's Zone Resources must include it |
 | `couldn't be reached` | Check the internet connection, a VPN or a firewall. Behind a proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` |
 | `another bootstrap.mjs run (…, process …) is using …` | Let that run finish, or close its window. If no such run is left, delete the `.lock` file it names |
@@ -378,6 +404,7 @@ The script stops at the failing step, names it, and lists **What to try**. Finis
 | `.env.bootstrap-<name>.template.state.json`, `.template.json` | Only after `template`. Nothing secret |
 | `.platform-keys/<prefix>.json` | Written by `connect`: the platform key. Move it to the password manager, then delete it |
 | `.env.polar-<name>` | Written by `pnpm billing apply`: Polar's webhook secret, until Railway has it. Delete it then |
+| `.env.stripe-<name>` | Written by `pnpm billing apply --stripe`: Stripe's two signing secrets, until Railway has them. Delete it then |
 
 Git ignores all of them. Once the environment works, copy the state and variable files into the environment's entry in the password manager, keeping a second copy of `ENCRYPTION_KEY` and `OTP_HASH_SECRET` ([guide 1.3](../docs/deployment/guide/part-1-prepare.md#13-decide-these-before-any-data-exists), decision 6). Delete the tokens from the secrets file, and never commit or send these files. Production gets its own settings file and new secrets: never copy test's.
 
@@ -385,7 +412,7 @@ Git ignores all of them. Once the environment works, copy the state and variable
 
 - **OpenAI's webhook, GPT-Live SIP access and spending limit.** OpenAI's API has no endpoint for any of them: its webhook and project-limit settings exist only in the dashboard, and it documents no switch for SIP calls. So the webhook is the one step between `up` and `connect`, and SIP access may need OpenAI support.
 - **Twilio's geo permissions, business profile, texting registration and toll-free verification.** Twilio has APIs for these, but each needs a decision or documents the script can't supply. Each country you allow for transfers adds a risk of toll fraud, so you choose them. The business profile and registrations need your business's details and Twilio's review, which takes days.
-- **Polar's tokens.** Polar makes organization tokens only in its dashboard. Selling plans is `pnpm billing`, a separate command that works through the running deployment with the operator's key, so it comes after `connect` and signing the command line in.
+- **Polar's tokens and Stripe's keys.** Polar makes organization tokens, and Stripe restricted keys, only in their dashboards. Selling plans is `pnpm billing`, a separate command that works through the running deployment with the operator's key, so it comes after `connect` and signing the command line in.
 - **The Polar webhook's secret on Railway.** `pnpm billing apply` writes it to a file that uses the original project's service name, `lobbystack-admin`, and `railway-vars.mjs` needs a project token. It takes one rename and one command ([step 8](#8-cloud-mode-sell-plans-through-polar), step 3).
 - **Signing up, the command-line login, and phone numbers.** Signing up needs the code emailed to a person, and each business buys its own number from the dashboard (in cloud mode, once its plan includes one).
 - **DNS outside Cloudflare.** The script prints the records for you to add.
@@ -395,12 +422,10 @@ Git ignores all of them. Once the environment works, copy the state and variable
 
 ## What isn't confirmed
 
-The real runs on 1 and 2 November 2026 settled how Railway behaves (templates, volumes that appear a few seconds late, the admin's address, custom domains and their records, variables that apply at once with no **Deploy** banner), Cloudflare's DNS and Turnstile updates, OpenAI's project and key, Twilio's subaccount and trunk, Resend's domain, `connect`, `pnpm billing` against Polar's sandbox, and a phone call answered through the trunk and the webhook. Not yet run against a real service:
+The real runs on 1 and 2 November 2026 settled how Railway behaves (templates, volumes that appear a few seconds late, the admin's address, custom domains and their records, variables that apply at once with no **Deploy** banner), Cloudflare's DNS and Turnstile updates, OpenAI's project and key, Twilio's subaccount and trunk, Resend's domain, `connect`, `pnpm billing` against Polar's sandbox, and a phone call answered through the trunk and the webhook. A fresh run on 5 November 2026 settled names taken from `APP_BASE_URL`, including the first Railway project with a dot in its name, and creating a Turnstile widget through Cloudflare's API. On 7 November 2026 that environment's number answered 10 scripted calls through the OpenAI project the script made, with the webhook made by hand in that project and no request to OpenAI support. Not yet run against a real service:
 
-- **Whether a project the script makes takes phone calls with no request to OpenAI.** On 2 November 2026 the first test calls rang unanswered: the webhook had been made in a different OpenAI project from the one the trunk sends calls to. With the deployment moved to the webhook's project, which was made by hand in OpenAI's dashboard, the next call was answered, with no request to OpenAI support. The project the script made never got a webhook, so it's untested.
 - **The checks added on 2 November 2026,** against the real services rather than stand-ins: the deployment-trigger warning (Railway's `deploymentTriggers` query was read once against a real project), the lock, the deleted-project stop, and the full names given to DNS records that Railway names relative to the zone.
-- **Names taken from `APP_BASE_URL`,** such as `demo.example.com`, on a fresh run. OpenAI, Twilio and Cloudflare already hold things named that way, but no Railway project has been made with a dot in its name. If Railway refuses one, the run stops at `railway.project` with Railway's message. The environment set up so far keeps the names it was made with.
 - **The variables step on a running deployment,** which sets only what differs and deploys the worker again for the admin's values. It uses the same two Railway calls as the one-off move of that environment to another OpenAI project on 2 November 2026, where the admin and the worker deployed again with the new key.
 - **Resend's field that limits a key to one domain** (`domain_id`). The environment set up so far took its sending key from its secrets file. If Resend refuses it, the run stops at `resend.key` with the workaround.
-- **Creating a Turnstile widget,** since that environment gave its keys, and **buying the toll-free number.**
+- **Buying the toll-free number.**
 - **`fullName`,** which turns Resend's record names into names in the zone. Check the email records in Cloudflare after the first run.

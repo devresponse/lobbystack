@@ -10,6 +10,9 @@ import { isInterfaceLocale, widgetEmbedSnippet, type InterfaceLocale } from "@lo
 import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { LiveNotificationSettingsSurface } from "./live-notification-settings-surface";
+import { EntryPointReceptionist } from "./receptionists/entry-point-receptionist";
+import { useReceptionistChoices, type ReceptionistOption } from "./receptionists/receptionist-choices";
+import { entryPointErrorMessage, isEntryPointError } from "./receptionists/receptionist-errors";
 import { PageSurface } from "./page-surface";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -27,7 +30,9 @@ const WIDGET_LOCALE_OPTIONS: Array<{ value: InterfaceLocale; labelKey: string }>
 ];
 type WidgetKeyConfig = { color?: string; position?: "bottom-right" | "bottom-left" | "bottom-center"; title?: string; subtitle?: string; greeting?: string; localeOverride?: InterfaceLocale; leadForm?: { enabled?: boolean; requirePhone?: boolean; requireEmail?: boolean; showBeforeChat?: boolean }; liveChat?: { enabled: boolean } };
 // `key` is null for revoked keys and for keys created before keys were kept.
-type WidgetKeyRecord = { id: string; key: string | null; label: string | null; status: "active" | "disabled" | "revoked"; allowedOrigins: string[]; config: WidgetKeyConfig; lastUsedAt: string | null; createdAt: string };
+// receptionistId names who answers the key's chats (the default receptionist unless the owner picked another).
+type WidgetKeyRecord = { id: string; key: string | null; label: string | null; status: "active" | "disabled" | "revoked"; allowedOrigins: string[]; config: WidgetKeyConfig; lastUsedAt: string | null; createdAt: string; receptionistId?: string | null };
+type WidgetKeySave = { id: string; label: string; allowedOrigins: string[]; config: WidgetKeyConfig; receptionistId?: string };
 type KeysResponse = { keys: WidgetKeyRecord[] };
 type CreatedKey = { id: string; key: string } | null;
 const DEFAULT_COLOR = "#0f766e";
@@ -57,21 +62,26 @@ export function LiveWidgetSettingsSurface() {
   const [subtitle, setSubtitle] = useState("");
   const [greeting, setGreeting] = useState("");
   const [localeOverride, setLocaleOverride] = useState<"" | InterfaceLocale>("");
+  // Null, or the default receptionist, leaves a new key with whoever is the default.
+  const [receptionistId, setReceptionistId] = useState<string | null>(null);
   const [createdKey, setCreatedKey] = useState<CreatedKey>(null);
   const [copied, setCopied] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const { businesses, business } = useActiveBusiness();
   const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<{ widgetIssuanceEnabled?: boolean }>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId) });
   const keys = useQuery({ queryKey: ["widget-keys", business?.businessId], queryFn: () => requestJson<KeysResponse>(`/api/widget-keys?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId) });
+  // With several receptionists each key names who answers its chats.
+  const { receptionists } = useReceptionistChoices(business?.businessId);
+  const defaultReceptionistId = receptionists.find((receptionist) => receptionist.isDefault)?.id ?? null;
 
   const create = useMutation({
     mutationFn: async () => await requestJson<{ key: { id: string; key: string } }>(`/api/widget-keys?businessId=${encodeURIComponent(business!.businessId)}`, {
       method: "POST",
-      body: JSON.stringify({ ...(label.trim() ? { label: label.trim() } : {}), allowedOrigins: originsFromText(origins), config: { color, position, ...(title.trim() ? { title: title.trim() } : {}), ...(subtitle.trim() ? { subtitle: subtitle.trim() } : {}), ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(localeOverride ? { localeOverride } : {}), leadForm: { enabled: leadEnabled, requireEmail: leadRequireEmail, requirePhone: leadRequirePhone, showBeforeChat: leadShowBeforeChat }, liveChat: { enabled: liveChatEnabled } } }),
+      body: JSON.stringify({ ...(label.trim() ? { label: label.trim() } : {}), allowedOrigins: originsFromText(origins), config: { color, position, ...(title.trim() ? { title: title.trim() } : {}), ...(subtitle.trim() ? { subtitle: subtitle.trim() } : {}), ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(localeOverride ? { localeOverride } : {}), leadForm: { enabled: leadEnabled, requireEmail: leadRequireEmail, requirePhone: leadRequirePhone, showBeforeChat: leadShowBeforeChat }, liveChat: { enabled: liveChatEnabled } }, ...(receptionistId && receptionistId !== defaultReceptionistId ? { receptionistId } : {}) }),
     }),
     onSuccess: async (result) => {
       setCreatedKey(result.key);
-      setLabel(""); setOrigins(""); setCopied(false);
+      setLabel(""); setOrigins(""); setCopied(false); setReceptionistId(null);
       setColor(DEFAULT_COLOR); setPosition("bottom-right"); setTitle(""); setSubtitle(""); setGreeting(""); setLocaleOverride("");
       setLeadEnabled(false); setLeadRequireEmail(false); setLeadRequirePhone(false); setLeadShowBeforeChat(false); setLiveChatEnabled(false);
       await queryClient.invalidateQueries({ queryKey: ["widget-keys", business?.businessId] });
@@ -80,7 +90,7 @@ export function LiveWidgetSettingsSurface() {
   });
 
   const patch = useMutation({
-    mutationFn: async (input: { id: string; label: string; allowedOrigins: string[]; config: WidgetKeyConfig }) => await requestJson(`/api/widget-keys?businessId=${encodeURIComponent(business!.businessId)}&id=${encodeURIComponent(input.id)}`, { method: "PATCH", body: JSON.stringify({ label: input.label, allowedOrigins: input.allowedOrigins, config: input.config }) }),
+    mutationFn: async (input: WidgetKeySave) => await requestJson(`/api/widget-keys?businessId=${encodeURIComponent(business!.businessId)}&id=${encodeURIComponent(input.id)}`, { method: "PATCH", body: JSON.stringify({ label: input.label, allowedOrigins: input.allowedOrigins, config: input.config, ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}) }) }),
     onMutate: () => setSavedId(null),
     onSuccess: async (_result, input) => {
       setSavedId(input.id);
@@ -131,7 +141,8 @@ export function LiveWidgetSettingsSurface() {
             <label className="flex items-center gap-2 text-sm font-medium sm:col-span-2"><input className="size-4" type="checkbox" checked={leadEnabled} onChange={(event) => setLeadEnabled(event.target.checked)} />{t("widget.fields.leadEnabled")}</label>
             {leadEnabled ? <div className="grid gap-2 sm:col-span-2 sm:grid-cols-3"><label className="flex items-center gap-2 text-sm"><input className="size-4" type="checkbox" checked={leadRequireEmail} onChange={(event) => setLeadRequireEmail(event.target.checked)} />{t("widget.fields.requireEmail")}</label><label className="flex items-center gap-2 text-sm"><input className="size-4" type="checkbox" checked={leadRequirePhone} onChange={(event) => setLeadRequirePhone(event.target.checked)} />{t("widget.fields.requirePhone")}</label><label className="flex items-center gap-2 text-sm"><input className="size-4" type="checkbox" checked={leadShowBeforeChat} onChange={(event) => setLeadShowBeforeChat(event.target.checked)} />{t("widget.fields.showBeforeChat")}</label></div> : null}
             <label className="flex items-start gap-2 text-sm font-medium sm:col-span-2"><input className="mt-0.5 size-4" type="checkbox" checked={liveChatEnabled} onChange={(event) => setLiveChatEnabled(event.target.checked)} /><span>{t("widget.fields.liveChat")}<span className="block text-xs font-normal text-muted-foreground">{t("widget.fields.liveChatHint")}</span></span></label>
-            <div className="sm:col-span-2"><Button loading={create.isPending} disabled={!business || !origins.trim()} onClick={() => create.mutate()}>{t("widget.create.action")}</Button>{create.isError ? <p className="mt-2 text-sm text-destructive">{create.error.message}</p> : null}</div>
+            {receptionists.length > 1 ? <div className="sm:col-span-2"><WidgetKeyReceptionist receptionists={receptionists} value={receptionistId} onChange={setReceptionistId} t={t} /></div> : null}
+            <div className="sm:col-span-2"><Button loading={create.isPending} disabled={!business || !origins.trim()} onClick={() => create.mutate()}>{t("widget.create.action")}</Button>{create.isError ? <p className="mt-2 text-sm text-destructive">{isEntryPointError(create.error) ? entryPointErrorMessage(create.error, t) : create.error.message}</p> : null}</div>
           </CardContent>
         </Card>
       ) : billing.isSuccess ? (
@@ -153,8 +164,8 @@ export function LiveWidgetSettingsSurface() {
           {businesses.isLoading || keys.isLoading ? <p className="py-12 text-center text-sm text-muted-foreground">{t("widget.keys.loading")}</p> : null}
           {businesses.isError || keys.isError ? <p className="py-12 text-center text-sm text-destructive">{t("widget.keys.unavailable")}</p> : null}
           {!keys.isLoading && !keys.isError ? <div className="space-y-3">
-            {rows.length ? rows.map((row) => <WidgetKeyEditor key={row.id} row={row} onSave={(input) => patch.mutate(input)} onStatus={(status) => setStatus.mutate({ id: row.id, status })} busy={patch.isPending || setStatus.isPending} saved={savedId === row.id} embedOrigin={embedOrigin} locale={i18n.resolvedLanguage ?? i18n.language} t={t} />) : <p className="py-12 text-center text-sm text-muted-foreground">{t("widget.keys.empty")}</p>}
-            {patch.isError ? <p className="text-sm text-destructive">{patch.error.message}</p> : null}
+            {rows.length ? rows.map((row) => <WidgetKeyEditor key={row.id} row={row} receptionists={receptionists} onSave={(input) => patch.mutate(input)} onStatus={(status) => setStatus.mutate({ id: row.id, status })} busy={patch.isPending || setStatus.isPending} saved={savedId === row.id} embedOrigin={embedOrigin} locale={i18n.resolvedLanguage ?? i18n.language} t={t} />) : <p className="py-12 text-center text-sm text-muted-foreground">{t("widget.keys.empty")}</p>}
+            {patch.isError ? <p className="text-sm text-destructive">{isEntryPointError(patch.error) ? entryPointErrorMessage(patch.error, t) : patch.error.message}</p> : null}
             {setStatus.isError ? <p className="text-sm text-destructive">{setStatus.error.message}</p> : null}
           </div> : null}
         </CardContent>
@@ -164,11 +175,20 @@ export function LiveWidgetSettingsSurface() {
   );
 }
 
-function WidgetKeyEditor({ row, onSave, onStatus, busy, saved, embedOrigin, locale, t }: { row: WidgetKeyRecord; onSave: (input: { id: string; label: string; allowedOrigins: string[]; config: WidgetKeyConfig }) => void; onStatus: (status: "active" | "disabled" | "revoked") => void; busy: boolean; saved: boolean; embedOrigin: string; locale: string; t: TFunction<"settings"> }) {
+/** Who answers a widget key's chats, and what the choice does. */
+function WidgetKeyReceptionist({ receptionists, value, onChange, disabled = false, t }: { receptionists: ReceptionistOption[]; value: string | null | undefined; onChange: (receptionistId: string) => void; disabled?: boolean; t: TFunction<"settings"> }) {
+  const defaultName = receptionists.find((receptionist) => receptionist.isDefault)?.name ?? "";
+  return <EntryPointReceptionist disabled={disabled} hint={t("widget.fields.receptionistHint", { name: defaultName })} label={t("widget.fields.receptionist")} onChange={onChange} receptionists={receptionists} value={value} />;
+}
+
+function WidgetKeyEditor({ row, receptionists, onSave, onStatus, busy, saved, embedOrigin, locale, t }: { row: WidgetKeyRecord; receptionists: ReceptionistOption[]; onSave: (input: WidgetKeySave) => void; onStatus: (status: "active" | "disabled" | "revoked") => void; busy: boolean; saved: boolean; embedOrigin: string; locale: string; t: TFunction<"settings"> }) {
   const [snippetCopied, setSnippetCopied] = useState(false);
   const [label, setLabel] = useState(row.label ?? "");
   const [origins, setOrigins] = useState(originsToText(row.allowedOrigins));
   const [config, setConfig] = useState<WidgetKeyConfig>(row.config);
+  // Sent with Save only when the owner picked a receptionist other than the one answering now (a key that names nobody has the default).
+  const [receptionistId, setReceptionistId] = useState<string | null>(row.receptionistId ?? null);
+  const answering = row.receptionistId ?? receptionists.find((receptionist) => receptionist.isDefault)?.id ?? null;
   return (
     <article className="rounded-xl border border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -194,6 +214,7 @@ function WidgetKeyEditor({ row, onSave, onStatus, busy, saved, embedOrigin, loca
         <p className="text-xs text-muted-foreground sm:col-span-2">{t("widget.keys.appearanceHint")}</p>
         <div className="space-y-2 text-sm sm:col-span-2"><p className="font-medium">{t("widget.leadCapture.title")}</p><div className="flex flex-wrap gap-x-4 gap-y-2"><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.enabled)} onChange={(event) => setConfig({ ...config, leadForm: { ...config.leadForm, enabled: event.target.checked } })} />{t("widget.leadCapture.enabled")}</label><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.requireEmail)} onChange={(event) => setConfig({ ...config, leadForm: { enabled: Boolean(config.leadForm?.enabled), ...config.leadForm, requireEmail: event.target.checked } })} />{t("widget.fields.requireEmail")}</label><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.requirePhone)} onChange={(event) => setConfig({ ...config, leadForm: { enabled: Boolean(config.leadForm?.enabled), ...config.leadForm, requirePhone: event.target.checked } })} />{t("widget.fields.requirePhone")}</label><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.showBeforeChat)} onChange={(event) => setConfig({ ...config, leadForm: { enabled: Boolean(config.leadForm?.enabled), ...config.leadForm, showBeforeChat: event.target.checked } })} />{t("widget.fields.showBeforeChat")}</label></div></div>
         <label className="flex items-start gap-2 text-sm sm:col-span-2"><input className="mt-0.5" type="checkbox" checked={Boolean(config.liveChat?.enabled)} onChange={(event) => setConfig({ ...config, liveChat: { enabled: event.target.checked } })} /><span className="font-medium">{t("widget.fields.liveChat")}<span className="block text-xs font-normal text-muted-foreground">{t("widget.fields.liveChatHint")}</span></span></label>
+        {receptionists.length > 1 && row.status !== "revoked" ? <div className="sm:col-span-2"><WidgetKeyReceptionist disabled={busy} receptionists={receptionists} value={receptionistId} onChange={setReceptionistId} t={t} /></div> : null}
       </div>
       {row.status !== "revoked" ? (
         <div className="mt-3 space-y-2">
@@ -207,7 +228,7 @@ function WidgetKeyEditor({ row, onSave, onStatus, busy, saved, embedOrigin, loca
         </div>
       ) : null}
       <div className="mt-3 flex items-center gap-3">
-        <Button size="sm" disabled={busy} onClick={() => onSave({ id: row.id, label: label.trim() || (row.label ?? ""), allowedOrigins: originsFromText(origins), config })}>{t("widget.keys.save")}</Button>
+        <Button size="sm" disabled={busy} onClick={() => onSave({ id: row.id, label: label.trim() || (row.label ?? ""), allowedOrigins: originsFromText(origins), config, ...(receptionistId && receptionistId !== answering ? { receptionistId } : {}) })}>{t("widget.keys.save")}</Button>
         {saved ? <p className="flex items-center gap-1 text-xs text-muted-foreground" role="status"><Check className="size-3.5" />{t("widget.keys.saved")}</p> : null}
         {row.lastUsedAt ? <p className="text-xs text-muted-foreground">{t("widget.keys.lastUsed", { date: new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: "medium" }).format(new Date(row.lastUsedAt)) })}</p> : null}
       </div>

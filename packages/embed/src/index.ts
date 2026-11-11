@@ -156,6 +156,8 @@ export function initWidget(): boolean {
   const labels = loaderLabels(currentScriptAttribute("data-locale") ?? document.documentElement.lang ?? "en");
   // A selector for an element on the page that shows the chat itself, instead of a bubble.
   const inlineTarget = currentScriptAttribute("data-inline-target")?.trim() ?? "";
+  // The business's own pages sign which receptionist answers their chat; other websites leave it to the key.
+  const receptionistToken = currentScriptAttribute("data-receptionist-token")?.trim() ?? "";
   const adminOrigin = resolveOrigin();
   let visitorId = makeVisitorId(widgetKey);
   // The chat page draws itself in the bubble's color and the business's language from its first
@@ -272,7 +274,7 @@ export function initWidget(): boolean {
       const response = await fetch(`${adminOrigin}/api/widget/session`, {
         method: "POST",
         headers: { "content-type": "text/plain" },
-        body: JSON.stringify({ widgetKey, visitorId }),
+        body: JSON.stringify({ widgetKey, visitorId, ...(receptionistToken ? { receptionistToken } : {}) }),
       });
       status = response.status;
       const payload = await response.json() as { token?: string; expiresAt?: string; code?: string };

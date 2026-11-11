@@ -18,6 +18,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => ({
 vi.mock("@lobbystack/telemetry/node", async (importOriginal) => ({ ...await importOriginal<typeof import("@lobbystack/telemetry/node")>(), reportWarning: vi.fn() }));
 
 import { handleJob, type WorkerDependencies } from "./handlers";
+import { polarFake } from "./billing/polarFake";
+import type { PolarBillingClient } from "@lobbystack/providers/polar/adapter";
 
 const domain = { db: {} as never };
 
@@ -40,13 +42,13 @@ const warnings = () => vi.mocked(reportWarning).mock.calls.map(([error]) => (err
 
 describe("ending a deleted business's paid plan", () => {
   function polar(after: PolarSubscription | null, revoke = vi.fn(async () => undefined)) {
-    return { recordUsage: vi.fn(), revokeSubscription: revoke, getSubscription: vi.fn(async () => after) } satisfies WorkerDependencies["polar"];
+    return { recordUsage: vi.fn(), revokeSubscription: revoke, getSubscription: vi.fn(async () => after) } satisfies PolarBillingClient;
   }
 
   it("ends the subscription in Polar now and records it, so the delete can go ahead", async () => {
     const businessId = randomUUID();
     const provider = polar(subscription({ status: "canceled", endedAt: "2026-10-30T08:00:00Z" }));
-    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, polar: provider })).toEqual({ status: "completed", entityId: businessId });
+    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, billing: polarFake(provider) })).toEqual({ status: "completed", entityId: businessId });
     expect(provider.revokeSubscription).toHaveBeenCalledWith("sub_1");
     expect(recordDeletedBusinessPlanEnded).toHaveBeenCalledWith(domain, { businessId, subscriptionId: "sub_1" });
     expect(releaseBillingSubscription).toHaveBeenCalledWith(domain, { businessId, claimId: "subscription-claim" });
@@ -55,19 +57,19 @@ describe("ending a deleted business's paid plan", () => {
   it("counts a subscription Polar has set to end with its period as ended, since nothing renews it", async () => {
     const businessId = randomUUID();
     const provider = polar(subscription({ cancelAtPeriodEnd: true }));
-    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, polar: provider })).toMatchObject({ status: "completed" });
+    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, billing: polarFake(provider) })).toMatchObject({ status: "completed" });
     expect(recordDeletedBusinessPlanEnded).toHaveBeenCalledTimes(1);
   });
 
   it("counts a subscription Polar no longer has as ended", async () => {
     const businessId = randomUUID();
-    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, polar: polar(null) })).toMatchObject({ status: "completed" });
+    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, billing: polarFake(polar(null)) })).toMatchObject({ status: "completed" });
     expect(recordDeletedBusinessPlanEnded).toHaveBeenCalledTimes(1);
   });
 
   it("fails the try, recording nothing, while Polar still shows the plan live", async () => {
     const businessId = randomUUID();
-    await expect(handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, polar: polar(subscription({ status: "past_due" })) })).rejects.toThrow("Polar still shows the subscription live after ending it.");
+    await expect(handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, billing: polarFake(polar(subscription({ status: "past_due" }))) })).rejects.toThrow("Polar still shows the subscription live after ending it.");
     expect(recordDeletedBusinessPlanEnded).not.toHaveBeenCalled();
     expect(releaseBillingSubscription).toHaveBeenCalledWith(domain, { businessId, claimId: "subscription-claim" });
   });
@@ -76,7 +78,7 @@ describe("ending a deleted business's paid plan", () => {
     const retryAt = new Date("2026-10-30T08:10:00Z");
     vi.mocked(claimBillingSubscription).mockResolvedValueOnce({ retryAt });
     const provider = polar(null);
-    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, randomUUID()), { domain, polar: provider })).toMatchObject({ status: "deferred", retryAt });
+    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, randomUUID()), { domain, billing: polarFake(provider) })).toMatchObject({ status: "deferred", retryAt });
     expect(provider.revokeSubscription).not.toHaveBeenCalled();
     expect(recordDeletedBusinessPlanEnded).not.toHaveBeenCalled();
   });
@@ -84,7 +86,7 @@ describe("ending a deleted business's paid plan", () => {
   it("tells the operator, and stops trying, when the worker's token can't end plans", async () => {
     const businessId = randomUUID();
     const provider = polar(null, vi.fn(async () => { throw new PolarRequestError(403, "insufficient_scope"); }));
-    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, polar: provider })).toMatchObject({ status: "skipped" });
+    expect(await handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, businessId), { domain, billing: polarFake(provider) })).toMatchObject({ status: "skipped" });
     expect(warnings()).toEqual([expect.stringContaining("needs subscriptions:write")]);
     expect(recordDeletedBusinessPlanEnded).not.toHaveBeenCalled();
     expect(releaseBillingSubscription).toHaveBeenCalledTimes(1);
@@ -92,7 +94,7 @@ describe("ending a deleted business's paid plan", () => {
 
   it("tries again after any other failure", async () => {
     const provider = polar(null, vi.fn(async () => { throw new PolarRequestError(502, null); }));
-    await expect(handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, randomUUID()), { domain, polar: provider })).rejects.toMatchObject({ status: 502 });
+    await expect(handleJob(job("billing.revokeSubscription", { subscriptionId: "sub_1" }, randomUUID()), { domain, billing: polarFake(provider) })).rejects.toMatchObject({ status: 502 });
     expect(recordDeletedBusinessPlanEnded).not.toHaveBeenCalled();
     expect(releaseBillingSubscription).toHaveBeenCalledTimes(1);
   });
@@ -105,7 +107,7 @@ describe("ending a deleted business's paid plan", () => {
 
   it("skips a job that names no subscription", async () => {
     const provider = polar(null);
-    expect(await handleJob(job("billing.revokeSubscription", {}, randomUUID()), { domain, polar: provider })).toMatchObject({ status: "skipped" });
+    expect(await handleJob(job("billing.revokeSubscription", {}, randomUUID()), { domain, billing: polarFake(provider) })).toMatchObject({ status: "skipped" });
     expect(provider.revokeSubscription).not.toHaveBeenCalled();
   });
 });

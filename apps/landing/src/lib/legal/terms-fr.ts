@@ -1,8 +1,16 @@
-import type { LegalDocument } from "./types"
+import { processorNames } from "./processor"
+import type { LegalDocument, LegalProcessor } from "./types"
+
+// 12.2 says who sells. Polar resells the plans as the merchant of record. With Stripe the operator sells
+// them and Stripe only processes the payment, which the operator's lawyer reviews before live payments.
+const payment: Record<LegalProcessor, string> = {
+  polar: `12.2 <strong>Paiement.</strong> Notre processeur de paiement, actuellement Polar, gère le paiement en ligne et les prélèvements. Vous nous autorisez, ainsi que Polar, à débiter votre mode de paiement pour les frais d’abonnement, les frais d’utilisation et les taxes à leur échéance. Les conditions de Polar s’appliquent aussi à votre achat.`,
+  stripe: `12.2 <strong>Paiement.</strong> Notre processeur de paiement, actuellement Stripe, gère pour nous le paiement en ligne et les prélèvements. Nous sommes le vendeur, et vous nous autorisez à débiter votre mode de paiement, par l’intermédiaire de Stripe, pour les frais d’abonnement, les frais d’utilisation et les taxes à leur échéance. Les conditions de Stripe s’appliquent aussi au traitement de votre paiement.`,
+}
 
 const support = `<a href="mailto:support@lobbystack.com">support@lobbystack.com</a>`
 
-export const termsFr: LegalDocument = {
+export const termsFr = (processor: LegalProcessor): LegalDocument => ({
   updated: "Dernière mise à jour : 26 septembre 2026",
   h1: "Conditions d’utilisation",
   intro: `Les présentes conditions d’utilisation (les « Conditions ») régissent votre utilisation du service hébergé, des sites Web et du support de LobbyStack. Lisez-les avant d’utiliser LobbyStack. Elles limitent notre responsabilité, vous rendent responsable du consentement à l’enregistrement des appels et de la conformité des SMS, et précisent comment nous réglons les litiges.`,
@@ -145,7 +153,7 @@ export const termsFr: LegalDocument = {
       nav: "Services tiers",
       title: "11. Services tiers",
       blocks: [
-        `11.1 Le Service dépend de Services tiers, notamment OpenAI pour la voix et le texte par IA, Twilio pour les numéros de téléphone, les appels et les SMS, Google Agenda lorsque vous le connectez, Polar pour la facturation et Firecrawl lorsque vous importez votre site Web. La <a href="/fr/privacy/">Politique de confidentialité</a> énumère les fournisseurs qui traitent des renseignements personnels.`,
+        `11.1 Le Service dépend de Services tiers, notamment OpenAI pour la voix et le texte par IA, Twilio pour les numéros de téléphone, les appels et les SMS, Google Agenda lorsque vous le connectez, ${processorNames[processor]} pour la facturation et Firecrawl lorsque vous importez votre site Web. La <a href="/fr/privacy/">Politique de confidentialité</a> énumère les fournisseurs qui traitent des renseignements personnels.`,
         `11.2 Lorsque vous connectez ou utilisez un Service tiers, ses propres conditions et politiques s’appliquent aussi à vous. Vous êtes responsable de les respecter et de tout compte que vous détenez auprès de ce fournisseur.`,
         `11.3 Nous ne contrôlons pas les Services tiers et ne sommes pas responsables de leur disponibilité, de leur exactitude, de leur sécurité, de leurs prix ni de leurs changements. Si un fournisseur modifie ou cesse un service dont nous dépendons, nous pouvons modifier ou retirer la fonctionnalité liée.`,
       ],
@@ -156,12 +164,12 @@ export const termsFr: LegalDocument = {
       title: "12. Forfaits, frais et facturation",
       blocks: [
         `12.1 <strong>Forfaits.</strong> Nous offrons un forfait gratuit, les forfaits payants Starter et Pro, et des forfaits Enterprise conclus par Commande. La <a href="/fr/pricing/">page des tarifs</a>, le paiement en ligne ou votre Commande indiquent les prix courants, l’utilisation incluse et les tarifs de dépassement.`,
-        `12.2 <strong>Paiement.</strong> Notre processeur de paiement, actuellement Polar, gère le paiement en ligne et les prélèvements. Vous nous autorisez, ainsi que Polar, à débiter votre mode de paiement pour les frais d’abonnement, les frais d’utilisation et les taxes à leur échéance. Les conditions de Polar s’appliquent aussi à votre achat.`,
+        payment[processor],
         `12.3 <strong>Renouvellement automatique.</strong> Les forfaits payants se renouvellent automatiquement à la fin de chaque période mensuelle ou annuelle au prix alors en vigueur, jusqu’à ce que vous annuliez. Vous pouvez annuler depuis le tableau de bord ou en communiquant avec le support. L’annulation prend effet à la fin de la période en cours.`,
         `12.4 <strong>Frais d’utilisation.</strong> Les forfaits payants comprennent des quantités d’utilisation déterminées, comme des minutes d’appel et des alertes par SMS. L’utilisation au-delà de ces quantités est facturée comme dépassement aux tarifs indiqués sur la page des tarifs ou dans votre Commande. Nos registres d’utilisation, et ceux de nos fournisseurs, font foi, sauf erreur manifeste.`,
         `12.5 <strong>Plafonds de dépenses.</strong> Avec les forfaits Starter et Pro, vous pouvez fixer un plafond de dépenses de dépassement. Lorsque vous l’atteignez, le Service arrête les fonctionnalités qui entraîneraient d’autres frais de dépassement jusqu’à la période de facturation suivante ou jusqu’à ce que vous augmentiez le plafond. <strong>Le réceptionniste IA peut donc cesser de répondre aux appels.</strong> Un plafond limite seulement les frais de dépassement. Il ne limite ni les frais d’abonnement ni les taxes. Nous ne sommes pas responsables des appels manqués en raison d’un plafond ou parce que vous avez épuisé votre utilisation incluse.`,
         `12.6 <strong>Taxes.</strong> Les prix excluent les taxes, sauf indication contraire. Vous payez toutes les taxes de vente, d’utilisation, sur les produits et services, sur la valeur ajoutée et autres taxes semblables, sauf les impôts sur notre revenu.`,
-        `12.7 <strong>Retard ou échec de paiement.</strong> Si un paiement échoue, nous ou Polar pouvons le tenter de nouveau. Si le montant demeure impayé, nous pouvons suspendre votre compte ou le passer à un forfait inférieur, libérer votre numéro de téléphone ou fermer votre compte.`,
+        `12.7 <strong>Retard ou échec de paiement.</strong> Si un paiement échoue, nous ou ${processorNames[processor]} pouvons le tenter de nouveau. Si le montant demeure impayé, nous pouvons suspendre votre compte ou le passer à un forfait inférieur, libérer votre numéro de téléphone ou fermer votre compte.`,
         `12.8 <strong>Remboursements.</strong> Les frais ne sont pas remboursables, y compris pour les périodes partielles, l’utilisation inutilisée, les passages à un forfait inférieur et les annulations, sauf si la loi l’exige ou si nous en convenons par écrit.`,
         `12.9 <strong>Changements de prix.</strong> Nous pouvons modifier les prix et l’utilisation incluse. Pour un forfait payant actif, nous vous donnerons un préavis d’au moins 30 jours, et le changement s’appliquera à compter de votre prochain renouvellement. Si vous n’êtes pas d’accord, annulez avant le renouvellement.`,
         `12.10 <strong>Contestations de facturation.</strong> Vous devez nous signaler toute contestation de facturation dans les 60 jours suivant le prélèvement. Communiquez avec nous avant de demander une rétrofacturation.`,
@@ -379,4 +387,4 @@ export const termsFr: LegalDocument = {
       ],
     },
   ],
-}
+})

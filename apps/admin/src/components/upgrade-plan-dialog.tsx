@@ -4,6 +4,7 @@ import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 import type { TFunction } from "i18next";
 
+import { useBranding } from "@/components/branding-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,11 +14,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
+import { intlLocale } from "@/lib/locale";
+import { cardBullets, openingInterval, planCardColumns, planCards, planTextValues, pricedIntervals, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
 import { cn } from "@/lib/utils";
 import {
+  billingIntervals,
+  type BillingDisplay,
   type BillingInterval,
   type BillingPlanList,
   type BillingPlanSlug,
+  type CloudBillingPlanSlug,
   type HostedCheckoutPlanIntervals,
 } from "@lobbystack/shared";
 
@@ -25,21 +31,18 @@ export type HostedUpgradePlan = "starter" | "pro";
 
 type BillingTranslation = TFunction<"settings">;
 
-type UpgradePlanCard = {
-  slug: "free_cloud" | HostedUpgradePlan | "enterprise";
-  highlights: string[];
-  highlighted?: boolean;
+// Prices and allowances come from the plan list. The cards, their order, the
+// popular one and their bullets come from billing.json's display section, as
+// on the onboarding plan step; these built-in bullets fill a card it gives none.
+// The short line under the price and the buttons stay the dialog's own.
+const builtInHighlights: Record<CloudBillingPlanSlug, string[]> = {
+  free_cloud: ["voiceMinutes", "receptionists", "allFeatures", "support"],
+  starter: ["voiceMinutes", "receptionists", "dedicatedNumber", "phoneNumber", "support"],
+  pro: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"],
+  enterprise: ["phoneNumbers", "customReceptionists", "selfHosted", "support"],
 };
 
-// Prices and allowances come from the plan list; the cards keep their order and words.
-const upgradePlanCards: UpgradePlanCard[] = [
-  { slug: "free_cloud", highlights: ["voiceMinutes", "allFeatures", "support"] },
-  { slug: "starter", highlights: ["voiceMinutes", "dedicatedNumber", "phoneNumber", "support"] },
-  { slug: "pro", highlights: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"], highlighted: true },
-  { slug: "enterprise", highlights: ["phoneNumbers", "selfHosted", "support"] },
-];
-
-function isHostedUpgradePlan(slug: UpgradePlanCard["slug"]): slug is HostedUpgradePlan {
+function isHostedUpgradePlan(slug: CloudBillingPlanSlug): slug is HostedUpgradePlan {
   return slug === "starter" || slug === "pro";
 }
 
@@ -49,7 +52,9 @@ export function UpgradePlanDialog({
   billingInterval,
   changesPlan = false,
   currentPlan,
+  display = null,
   leavesPromoPlan = null,
+  leavesPacks = null,
   loading,
   loadingPlan,
   locale,
@@ -64,12 +69,17 @@ export function UpgradePlanDialog({
 }: {
   availableCheckoutPlans: Array<"starter" | "pro">;
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
-  billingInterval: BillingInterval;
+  /** The tab the person picked, or null for the opening one: billing.json's choice, else Annual. */
+  billingInterval: BillingInterval | null;
   /** The business already pays, so a plan button changes its subscription instead of opening a checkout. */
   changesPlan?: boolean;
   currentPlan: BillingPlanSlug;
+  /** The deployment's billing.json display section, from GET /api/billing. */
+  display?: BillingDisplay | null;
   /** The name of the promo plan the business is on, which changing plan ends. */
   leavesPromoPlan?: string | null;
+  /** The minutes left on the business's prepaid packs, which starting a plan ends. */
+  leavesPacks?: { minutesLeft: number } | null;
   loading: "checkout" | null;
   loadingPlan: HostedUpgradePlan | null;
   locale: string;
@@ -84,21 +94,22 @@ export function UpgradePlanDialog({
   prompt?: ReactNode;
   t: BillingTranslation;
 }) {
+  const { appName } = useBranding();
+  const translate: PlanDisplayTranslate = (key, options) => t(key, options ?? {});
+  const cards = planCards(display);
   const annualBadgeText = annualBadge(plans, (key, options) => t(key, options), "billing.upgradeDialog.annualFreeMonths", "billing.upgradeDialog.annualDiscount");
-  const availableBillingIntervals = (["monthly", "annual"] as const).filter(
+  const availableBillingIntervals = billingIntervals.filter(
     (interval) =>
       availableCheckoutPlans.some((plan) =>
         availableCheckoutIntervals[plan].includes(interval),
       ),
   );
+  // The intervals a plan can be bought on, else each one a plan has a price for: no Annual tab where plans sell monthly only.
   const switcherIntervals =
     availableBillingIntervals.length > 0
       ? availableBillingIntervals
-      : (["monthly", "annual"] as const);
-  const fallbackBillingInterval: BillingInterval = switcherIntervals[0] ?? "monthly";
-  const selectedBillingInterval = switcherIntervals.includes(billingInterval)
-    ? billingInterval
-    : fallbackBillingInterval;
+      : pricedIntervals(plans, cards);
+  const selectedBillingInterval = shownInterval(billingInterval ?? openingInterval(display), switcherIntervals, availableBillingIntervals);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -120,11 +131,16 @@ export function UpgradePlanDialog({
               {t("billing.upgradeDialog.leavesPromo", { plan: leavesPromoPlan })}
             </p>
           ) : null}
+          {leavesPacks ? (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              {t("billing.upgradeDialog.endsPacks", { count: leavesPacks.minutesLeft, minutes: leavesPacks.minutesLeft.toLocaleString(intlLocale(locale)) })}
+            </p>
+          ) : null}
         </DialogHeader>
 
         {prompt}
 
-        <div className="flex justify-center">
+        {switcherIntervals.length > 0 ? <div className="flex justify-center">
           {/* On a narrow phone the Annual tab puts its badge under its name, and wraps it if need be, rather than overflow the dialog. */}
           <div
             aria-label={t("billing.upgradeDialog.billingIntervalLabel")}
@@ -156,13 +172,13 @@ export function UpgradePlanDialog({
               </Button>
             ))}
           </div>
-        </div>
+        </div> : null}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {upgradePlanCards.map((card) => {
-            const isCurrentPlan = currentPlan === card.slug;
-            const checkoutPlan = isHostedUpgradePlan(card.slug) ? card.slug : null;
-            const isEnterprisePlan = card.slug === "enterprise";
+        <div className={cn("grid gap-4", planCardColumns(cards.length))}>
+          {cards.map(({ plan: slug, popular, display: card }) => {
+            const isCurrentPlan = currentPlan === slug;
+            const checkoutPlan = isHostedUpgradePlan(slug) ? slug : null;
+            const isEnterprisePlan = slug === "enterprise";
             const isSelectedIntervalAvailable =
               checkoutPlan === null ||
               availableCheckoutIntervals[checkoutPlan].includes(selectedBillingInterval);
@@ -174,11 +190,14 @@ export function UpgradePlanDialog({
                 !isDowngrade &&
                 availableCheckoutPlans.includes(checkoutPlan) &&
                 isSelectedIntervalAvailable);
-            const offer = findPlan(plans, card.slug);
+            const offer = findPlan(plans, slug);
             const values = planValues(offer, plans.currency, locale);
+            const highlights = card?.bullets
+              ? cardBullets(card.bullets, offer, plans.currency, locale, translate, planTextValues(offer, plans.currency, locale, translate, appName))
+              : builtInHighlights[slug].map((highlight) => t(`billing.upgradeDialog.plans.${slug}.highlights.${highlight}`, planStringValues(highlight, values)));
             // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
             const monthly = checkoutPlan !== null ? monthlyPriceCents(offer, selectedBillingInterval) : undefined;
-            const price = card.slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : isEnterprisePlan || offer?.custom ? t("billing.upgradeDialog.customPrice") : monthly !== undefined ? formatMoney(monthly, plans.currency, locale) : "—";
+            const price = slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : isEnterprisePlan || offer?.custom ? t("billing.upgradeDialog.customPrice") : monthly !== undefined ? formatMoney(monthly, plans.currency, locale) : "—";
             const actionLabel = isCurrentPlan
               ? t("billing.upgradeDialog.actions.currentPlan")
               : checkoutPlan !== null
@@ -189,15 +208,15 @@ export function UpgradePlanDialog({
               <section
                 className={cn(
                   "flex min-h-[29rem] flex-col rounded-xl border bg-background p-5",
-                  card.highlighted
+                  popular
                     ? "border-foreground/30 bg-muted/20"
                     : "border-border/70",
                 )}
-                key={card.slug}
+                key={slug}
               >
                 <div className="mb-5">
                   <h3 className="font-heading text-lg font-medium tracking-[-0.03em]">
-                    {t(`billing.upgradeDialog.plans.${card.slug}.name`)}
+                    {t(`billing.upgradeDialog.plans.${slug}.name`)}
                   </h3>
                   <div className="mt-4 flex items-baseline gap-1">
                     <span className="font-heading text-4xl font-medium tracking-[-0.05em] tabular-nums">
@@ -211,22 +230,17 @@ export function UpgradePlanDialog({
                   </div>
                   <p className="mt-3 text-sm leading-6 text-muted-foreground">
                     {t(
-                      `billing.upgradeDialog.plans.${card.slug}.description.${selectedBillingInterval}`,
+                      `billing.upgradeDialog.plans.${slug}.description.${selectedBillingInterval}`,
                     )}
                   </p>
                 </div>
 
                 <div className="flex-1 border-t border-border/60 pt-4">
                   <ul className="flex flex-col gap-3">
-                    {card.highlights.map((highlight) => (
-                      <li className="flex items-start gap-2.5 text-sm" key={highlight}>
+                    {highlights.map((highlight, index) => (
+                      <li className="flex items-start gap-2.5 text-sm" key={index}>
                         <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
-                        <span className="whitespace-pre-line">
-                          {t(
-                            `billing.upgradeDialog.plans.${card.slug}.highlights.${highlight}`,
-                            planStringValues(highlight, values),
-                          )}
-                        </span>
+                        <span className="whitespace-pre-line">{highlight}</span>
                       </li>
                     ))}
                   </ul>
@@ -249,7 +263,7 @@ export function UpgradePlanDialog({
                     }
                   }}
                   type="button"
-                  variant={card.highlighted ? "default" : "outline"}
+                  variant={popular ? "default" : "outline"}
                 >
                   {actionLabel}
                 </Button>

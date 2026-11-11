@@ -25,6 +25,7 @@ describe("affiliate click API", () => {
       ["code-hour", 500, 3600],
       ["ip-hour", 30, 3600],
     ]);
+    expect(limits.map((entry: { key: string }) => entry.key).join(" ")).not.toContain("203.0.113.7");
   });
 
   it("drops a click over the limit without writing it", async () => {

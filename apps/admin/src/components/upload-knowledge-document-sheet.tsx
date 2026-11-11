@@ -23,6 +23,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { audienceErrorMessage, isAudienceError } from "@/components/knowledge-audience";
+import { AudienceField, audienceChoiceOf, EVERYONE, type AudienceChoice, type AudienceValue } from "@/components/receptionists/audience-field";
+import type { ReceptionistOption } from "@/components/receptionists/receptionist-choices";
 import { uploadErrorMessage } from "@/lib/storage-upload";
 const ACCEPTED_FILE_TYPES = ".pdf,.docx,.txt,.md,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -73,25 +76,36 @@ function resolveFileContentType(file: File): string {
   return inferContentTypeFromFileName(file.name);
 }
 
+export type KnowledgeDocumentUploadInput = { file: File; contentType: string; title: string; tags: string[]; audience?: AudienceChoice };
+
 export function UploadKnowledgeDocumentSheet({
   upload,
+  receptionists = [],
   open,
   onOpenChange,
 }: {
-  upload: (input: { file: File; contentType: string; title: string; tags: string[] }) => Promise<void>;
+  /** Uploads the file; audience is there only when the owner chose receptionists for it. */
+  upload: (input: KnowledgeDocumentUploadInput) => Promise<void>;
+  /** The business's receptionists; with several, the file says who it's available to. */
+  receptionists?: ReceptionistOption[] | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { t } = useTranslation("agent");
+  const { t } = useTranslation(["agent", "receptionists"]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [tags, setTags] = useState("");
+  const [audienceValue, setAudienceValue] = useState<AudienceValue>(EVERYONE);
+  const [audienceSubmitted, setAudienceSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resolvedFileName = useMemo(() => selectedFile?.name ?? "", [selectedFile]);
+  // A file is for everyone unless the owner chose receptionists, which needs at least one.
+  const sendAudience = receptionists.length > 1 && audienceValue.audience === "chosen";
+  const audienceChoice = audienceChoiceOf(audienceValue, receptionists);
 
   function resetState(): void {
     if (fileInputRef.current) {
@@ -100,6 +114,8 @@ export function UploadKnowledgeDocumentSheet({
     setSelectedFile(null);
     setTitle("");
     setTags("");
+    setAudienceValue(EVERYONE);
+    setAudienceSubmitted(false);
     setErrorMessage(null);
     setIsUploading(false);
     setIsDraggingFile(false);
@@ -142,19 +158,27 @@ export function UploadKnowledgeDocumentSheet({
       return;
     }
 
+    setAudienceSubmitted(true);
+    if (sendAudience && !audienceChoice) {
+      setErrorMessage(null);
+      return;
+    }
+
     setIsUploading(true);
     setErrorMessage(null);
     try {
-      await upload({ file: selectedFile, contentType, title: title.trim(), tags: parseTags(tags) });
+      await upload({ file: selectedFile, contentType, title: title.trim(), tags: parseTags(tags), ...(sendAudience && audienceChoice ? { audience: audienceChoice } : {}) });
 
       onOpenChange(false);
       resetState();
     } catch (error) {
       setErrorMessage(
-        uploadErrorMessage(
-          error,
-          t("sections.knowledge.uploadValidation.uploadFailed"),
-        ),
+        isAudienceError(error)
+          ? audienceErrorMessage(error, t)
+          : uploadErrorMessage(
+            error,
+            t("sections.knowledge.uploadValidation.uploadFailed"),
+          ),
       );
     } finally {
       setIsUploading(false);
@@ -171,7 +195,7 @@ export function UploadKnowledgeDocumentSheet({
       }}
       open={open}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t("sections.knowledge.uploadDocument")}</DialogTitle>
           <DialogDescription>
@@ -271,6 +295,14 @@ export function UploadKnowledgeDocumentSheet({
                 onChange={(event) => setTags(event.target.value)}
               />
             </Field>
+
+            <AudienceField
+              disabled={isUploading}
+              invalid={audienceSubmitted && sendAudience && !audienceChoice}
+              onChange={setAudienceValue}
+              receptionists={receptionists}
+              value={audienceValue}
+            />
           </FieldGroup>
 
           {errorMessage ? <FieldError>{errorMessage}</FieldError> : null}

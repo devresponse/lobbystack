@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { builtInBillingPlanLimits, type BillingPlanSlug } from "@lobbystack/shared";
 import { LivePhoneNumberSettingsSurface } from "./live-phone-number-settings-surface";
+import { receptionistChoicesQueryKey } from "./receptionists/receptionist-choices";
 
 const actions = vi.hoisted(() => ({ upgrade: vi.fn(), navigate: vi.fn() }));
 vi.mock("./upgrade-plan-dialog-context", () => ({ useOpenUpgradePlanDialog: () => actions.upgrade }));
@@ -13,12 +14,14 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 const clients: QueryClient[] = [];
 beforeEach(() => { vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(plan: string, role = "business_owner", usedAt: string | null = null, primary = true, reclaimScheduledAt: string | null = null, pending = false) {
+function setup(plan: string, role = "business_owner", usedAt: string | null = null, primary = true, reclaimScheduledAt: string | null = null, pending = false, reclaimReason: string | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role }] });
-  client.setQueryData(["phone-numbers", "business"], { phoneNumbers: primary ? [{ id: "phone", e164: "+14165550100", status: "active", reclaimScheduledAt }] : [], replacement: { usedAt, activeClaim: pending ? { id: "claim", status: "provisioning" } : null } });
+  client.setQueryData(["phone-numbers", "business"], { phoneNumbers: primary ? [{ id: "phone", e164: "+14165550100", status: "active", reclaimScheduledAt, reclaimReason }] : [], replacement: { usedAt, activeClaim: pending ? { id: "claim", status: "provisioning" } : null } });
   client.setQueryData(["billing", "business"], { effectivePlan: plan, account: { plan }, limits: builtInBillingPlanLimits[plan as BillingPlanSlug] });
+  // One receptionist, the default, as most businesses have, so the "Answered by" dropdown stays hidden and nothing more is fetched.
+  client.setQueryData(receptionistChoicesQueryKey("business"), { receptionists: [{ id: "00000000-0000-4000-8000-0000000000a1", name: "Front desk", description: "", handle: null, isDefault: true, status: "active", listed: true, sortOrder: 0, locale: null, knowledgeScope: "all" }] });
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (input.includes("/claim/claim?")) return Response.json({ claim: { status: "claimed", phoneNumberId: "claimed-phone", requestedE164: "+14165550200" } });
     if (input.includes("/claim?")) return Response.json({ claimId: "claim" });
@@ -87,6 +90,22 @@ describe("phone-number replacement permissions", () => {
     expect(screen.getByText("phoneNumber.reclaim.title")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "phoneNumber.reclaim.upgradeCta" }));
     expect(actions.upgrade).toHaveBeenCalledOnce();
+  });
+  it("says the last pack ended and offers a pack or a plan to keep the number", async () => {
+    setup("free_cloud", "business_owner", null, true, "2026-10-01T00:00:00Z", false, "pack_ended");
+    expect(screen.getByText("phoneNumber.reclaim.title")).toBeTruthy();
+    expect(screen.getByText("phoneNumber.reclaim.packDescription")).toBeTruthy();
+    expect(screen.queryByText("phoneNumber.reclaim.description")).toBeNull();
+    expect(screen.getByRole("link", { name: "phoneNumber.reclaim.buyPackCta" }).getAttribute("href")).toBe("/settings/plan");
+    expect(screen.queryByRole("button", { name: "phoneNumber.reclaim.upgradeCta" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "phoneNumber.reclaim.choosePlanCta" }));
+    expect(actions.upgrade).toHaveBeenCalledOnce();
+  });
+  it("keeps the plan wording for a number released for another reason", () => {
+    setup("free_cloud", "business_owner", null, true, "2026-10-01T00:00:00Z", false, "subscription_canceled");
+    expect(screen.getByText("phoneNumber.reclaim.description")).toBeTruthy();
+    expect(screen.queryByText("phoneNumber.reclaim.packDescription")).toBeNull();
+    expect(screen.queryByRole("link", { name: "phoneNumber.reclaim.buyPackCta" })).toBeNull();
   });
   it("keeps the verified country and area code when inventory is empty", async () => {
     const { fetchMock } = setup("starter", "business_owner", null, false);

@@ -4,6 +4,7 @@ import { v1 } from "@/lib/public-api/routes";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// The same operation as POST /billing/catalog/links, kept for clients written before it.
 export const POST = v1.linkBillingCatalog;
 
 const notAllowed = methodNotAllowed(["POST"]);

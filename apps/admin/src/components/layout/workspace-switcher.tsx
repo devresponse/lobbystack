@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronsUpDown, Plus } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Sparkles } from "lucide-react";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { SidebarTeamSkeleton } from "@/components/loading-skeletons";
 import { recordPendingWorkspaceSwitch } from "@/lib/workspace-analytics";
@@ -19,6 +19,9 @@ export function WorkspaceSwitcher() {
   const { isMobile } = useSidebar();
   const { businesses, business: active } = useActiveBusiness();
   const [switching, setSwitching] = useState(false);
+  const limit = businesses.data?.businessLimit;
+  // At the limit the server refuses another business, so the menu says so instead of opening the form.
+  const atLimit = limit !== undefined && limit.owned >= limit.max;
 
   async function selectBusiness(businessId: string) {
     if (businessId === active?.businessId) return;
@@ -73,10 +76,28 @@ export function WorkspaceSwitcher() {
               ))}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-2.5 px-3 py-2" render={<Link href="/onboarding/business?create=true" />}>
-              <Plus className="size-4" />
-              {t("sidebar.createBusiness")}
-            </DropdownMenuItem>
+            {atLimit ? (
+              <>
+                <DropdownMenuItem className="gap-2.5 px-3 py-2" disabled>
+                  <Plus className="size-4" />
+                  {t("sidebar.createBusiness")}
+                  <span className="ml-auto pl-3 text-xs text-muted-foreground">{t("sidebar.businessCount", { owned: limit.owned, max: limit.max })}</span>
+                </DropdownMenuItem>
+                <p className="max-w-56 px-3 pb-2 text-xs text-muted-foreground">{t(limit.upgrade ? "sidebar.businessLimitUpgrade" : "sidebar.businessLimitReached")}</p>
+                {limit.upgrade ? (
+                  <DropdownMenuItem className="gap-2.5 px-3 py-2" render={<Link href="/settings/plan" />}>
+                    <Sparkles className="size-4" />
+                    {t("sidebar.seePlans")}
+                  </DropdownMenuItem>
+                ) : null}
+              </>
+            ) : (
+              <DropdownMenuItem className="gap-2.5 px-3 py-2" render={<Link href="/onboarding/business?create=true" />}>
+                <Plus className="size-4" />
+                {t("sidebar.createBusiness")}
+                {limit ? <span className="ml-auto pl-3 text-xs text-muted-foreground">{t("sidebar.businessCount", { owned: limit.owned, max: limit.max })}</span> : null}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

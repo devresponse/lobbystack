@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { brandBillingPlans, brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
+import { brandAccountLimits, brandBillingPlans, brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
 import type { BrandDefinition } from "./types";
 
 const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null, makeUrl: null };
@@ -144,6 +144,16 @@ describe("brandBillingPlans", () => {
     expect(brandBillingPlans("lobbystack")).toBeNull();
     expect(brandBillingPlans("nobody")).toBeNull();
     expect(brandBillingPlans("toString", {})).toBeNull();
+  });
+});
+
+describe("brandAccountLimits", () => {
+  it("is the brand's billing.json accounts section, or empty when the file leaves it out or there's no file", () => {
+    const limits = { alloplace: { maxBusinesses: 3, maxBusinessesByPlan: { free_cloud: 1 } } };
+    expect(brandAccountLimits("alloplace", limits)).toEqual({ maxBusinesses: 3, maxBusinessesByPlan: { free_cloud: 1 } });
+    expect(brandAccountLimits("realinfobot", limits)).toEqual({});
+    expect(brandAccountLimits("lobbystack")).toEqual({});
+    expect(brandAccountLimits("toString", {})).toEqual({});
   });
 });
 

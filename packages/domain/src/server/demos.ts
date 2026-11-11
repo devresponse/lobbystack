@@ -4,12 +4,14 @@ import { and, desc, eq, sql } from "drizzle-orm";
 
 import { businessContextSnapshots, businessMemberships, businesses, calls, enqueueOutbox, knowledgeDocuments, prospectDemos, receptionistProfiles, services, staff, staffServiceAssignments, users, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
+import type { BillingAccounts } from "@lobbystack/shared";
 import { type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
 import type { DomainContext } from "./context";
 import { deploymentAppName } from "./branding";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { recordProductEventBestEffort } from "./productEvents";
+import { assertBusinessAllowanceInTransaction } from "./tenancy";
 
 export type ProspectDemoPublicState = "preparing" | "active" | "claimed" | "revoked" | "expired" | "invalid";
 
@@ -186,18 +188,19 @@ export async function createProspectDemo(
   const appName = await deploymentAppName(context.db);
   const serviceNames = (input.services ?? []).map((value) => value.trim()).filter(Boolean);
   return await withBusinessTransaction(context.db, { userId: input.operatorUserId, businessId, actorType: "system" }, async (tx) => {
-    await tx.insert(businesses).values({ id: businessId, slug, name, timezone, defaultLocale: locale, websiteUrl: normalizedWebsiteUrl, businessType: "general", deploymentMode: process.env.DEPLOYMENT_MODE === "cloud" ? "cloud" : "development" });
+    const summary = `${name} virtual receptionist`;
+    await tx.insert(businesses).values({ id: businessId, slug, name, timezone, defaultLocale: locale, websiteUrl: normalizedWebsiteUrl, businessType: "general", deploymentMode: process.env.DEPLOYMENT_MODE === "cloud" ? "cloud" : "development", summary });
     await tx.insert(businessMemberships).values({ businessId, userId: input.operatorUserId, role: "business_owner", status: "active" });
-    await tx.insert(receptionistProfiles).values({
-      businessId,
+    // The database made the demo's default receptionist with the business (migration 0143).
+    const [receptionist] = await tx.update(receptionistProfiles).set({
       greeting: input.greeting?.trim() || `Thanks for calling ${name}.`,
       tone: "professional and friendly",
-      summary: `${name} virtual receptionist`,
       bookingPolicy: "Do not book appointments during this prospect demo.",
       voiceInstructions: `This is a prospect demo made with ${appName}. Answer from public business knowledge. Collect sample contact details for a quote or service request. Do not book appointments, transfer calls, or promise outbound messages.`,
       smsInstructions: "Do not send SMS during prospect demos.",
       transferMode: "on_request",
-    });
+    }).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).returning({ id: receptionistProfiles.id });
+    if (!receptionist) throw new Error("The demo's receptionist could not be set up.");
     const [defaultStaff] = await tx.insert(staff).values({ businessId, name: name, timezone }).returning({ id: staff.id });
     if (!defaultStaff) throw new Error("Default demo staff could not be created.");
     for (const [index, serviceName] of serviceNames.entries()) {
@@ -219,7 +222,7 @@ export async function getProspectDemoStatus(context: DomainContext, input: { ope
       .from(prospectDemos)
       .innerJoin(businesses, eq(businesses.id, prospectDemos.businessId))
       .leftJoin(websiteIngestionJobs, eq(websiteIngestionJobs.id, prospectDemos.websiteIngestionJobId))
-      .leftJoin(receptionistProfiles, eq(receptionistProfiles.businessId, prospectDemos.businessId))
+      .leftJoin(receptionistProfiles, and(eq(receptionistProfiles.businessId, prospectDemos.businessId), eq(receptionistProfiles.isDefault, true)))
       .where(and(eq(prospectDemos.id, input.demoId), eq(prospectDemos.operatorUserId, input.operatorUserId))).limit(1))[0];
     if (!row) throw new Error("Prospect demo not found.");
     const snapshot = (await tx.select({ id: businessContextSnapshots.id }).from(businessContextSnapshots).where(eq(businessContextSnapshots.businessId, row.demo.businessId)).orderBy(desc(businessContextSnapshots.generatedAt)).limit(1))[0];
@@ -257,7 +260,7 @@ export async function publishProspectDemo(context: DomainContext, input: { opera
     const prompts = input.suggestedPrompts ? cleanPrompts(input.suggestedPrompts) : demo.suggestedPrompts;
     if (prompts.length < 2) throw new Error("Two suggested prompts are required before publish.");
     const ingestion = demo.websiteIngestionJobId ? await tx.select({ status: websiteIngestionJobs.status }).from(websiteIngestionJobs).where(eq(websiteIngestionJobs.id, demo.websiteIngestionJobId)).limit(1) : [];
-    const profile = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, demo.businessId)).limit(1);
+    const profile = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, demo.businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
     const snapshot = await tx.select({ id: businessContextSnapshots.id }).from(businessContextSnapshots).where(eq(businessContextSnapshots.businessId, demo.businessId)).limit(1);
     const indexedDocument = await tx.select({ id: knowledgeDocuments.id }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, demo.businessId), eq(knowledgeDocuments.status, "indexed"))).limit(1);
     if (ingestion[0]?.status !== "completed" || !indexedDocument[0]) throw new Error("Website ingestion must be completed before publish.");
@@ -345,7 +348,7 @@ export async function previewProspectDemo(context: DomainContext, token: string)
 
 export async function claimProspectDemo(
   context: DomainContext,
-  input: { userId: string; token: string },
+  input: { userId: string; token: string; businessCaps?: BillingAccounts },
 ): Promise<{ businessId: string; status: "claimed" | "already_claimed" }> {
   const hash = tokenHash(input.token);
   const resolved = await context.db.execute<{ prospect_demo_id: string; business_id: string }>(sql`select prospect_demo_id, business_id from app.resolve_prospect_demo_by_token(${hash})`);
@@ -367,6 +370,8 @@ export async function claimProspectDemo(
       if (demo.status !== "active" || demo.expiresAt.getTime() <= Date.now()) throw new Error("Demo is invalid, expired, or no longer claimable.");
       const business = (await tx.select({ status: businesses.status }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
       if (business?.status !== "active") throw new Error("Prospect demo business is unavailable.");
+      // Claiming a demo counts against the account's business limit like creating a business.
+      await assertBusinessAllowanceInTransaction(tx, { userId: input.userId, businessId, caps: input.businessCaps });
       await tx.insert(businessMemberships).values({ businessId, userId: input.userId, role: "business_owner", status: "active" }).onConflictDoUpdate({
         target: [businessMemberships.businessId, businessMemberships.userId],
         set: { role: "business_owner", status: "active", updatedAt: new Date() },
@@ -393,6 +398,7 @@ export async function claimProspectDemo(
 }
 
 function claimFailureReason(error: unknown): string {
+  if ((error as { code?: unknown } | null)?.code === "business_limit") return "business_limit";
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("already been claimed")) return "already_claimed";
   if (message.includes("invalid, expired, or no longer claimable")) return "not_claimable";

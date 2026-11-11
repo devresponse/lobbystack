@@ -5,7 +5,13 @@
     "privacy": "Privacidad"
   },
   "errors": {
-    "tooManyBusinesses": "Ya es propietario de 10 espacios de trabajo, el límite para una cuenta."
+    "tooManyBusinesses_one": "Ya es propietario de {{count}} negocio, el máximo para una cuenta.",
+    "tooManyBusinesses_many": "Ya es propietario de {{count}} negocios, el máximo para una cuenta.",
+    "tooManyBusinesses_other": "Ya es propietario de {{count}} negocios, el máximo para una cuenta.",
+    "tooManyBusinessesUpgrade_one": "Ya es propietario de {{count}} negocio, el máximo que permite su plan actual. Cámbielo a un plan superior para agregar más.",
+    "tooManyBusinessesUpgrade_many": "Ya es propietario de {{count}} negocios, el máximo que permiten sus planes actuales. Cambie uno de ellos a un plan superior para agregar más.",
+    "tooManyBusinessesUpgrade_other": "Ya es propietario de {{count}} negocios, el máximo que permiten sus planes actuales. Cambie uno de ellos a un plan superior para agregar más.",
+    "businessLimit": "Ya es propietario del máximo de negocios para una cuenta."
   },
   "adminRequired": {
     "eyebrow": "Configuración del espacio de trabajo",
@@ -217,6 +223,9 @@
           "voiceMinutes_one": "{{count}} minuto de voz en el navegador incluido",
           "voiceMinutes_many": "{{count}} minutos de voz en el navegador incluidos",
           "voiceMinutes_other": "{{count}} minutos de voz en el navegador incluidos",
+          "receptionists_one": "{{count}} recepcionista",
+          "receptionists_many": "{{count}} recepcionistas",
+          "receptionists_other": "{{count}} recepcionistas",
           "bookingContacts": "Sin número de teléfono",
           "support": "Soporte de la comunidad"
         }
@@ -236,6 +245,9 @@
           "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
           "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
           "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+          "receptionists_one": "{{count}} recepcionista",
+          "receptionists_many": "{{count}} recepcionistas",
+          "receptionists_other": "{{count}} recepcionistas",
           "dedicatedNumber_one": "{{count}} número del negocio dedicado",
           "dedicatedNumber_many": "{{count}} números del negocio dedicados",
           "dedicatedNumber_other": "{{count}} números del negocio dedicados",
@@ -260,6 +272,9 @@
           "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
           "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
           "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+          "receptionists_one": "{{count}} recepcionista",
+          "receptionists_many": "{{count}} recepcionistas",
+          "receptionists_other": "{{count}} recepcionistas",
           "dedicatedNumber_one": "{{count}} número del negocio dedicado",
           "dedicatedNumber_many": "{{count}} números del negocio dedicados",
           "dedicatedNumber_other": "{{count}} números del negocio dedicados",
@@ -277,6 +292,7 @@
         "cta": "Contáctenos",
         "highlights": {
           "phoneNumbers": "Varios números dedicados",
+          "customReceptionists": "Número de recepcionistas a medida",
           "selfHosted": "Opción de despliegue con autoalojamiento",
           "support": "Soporte de implementación dedicado"
         }
@@ -294,16 +310,18 @@
       },
       "features": {
         "voiceMinutes": "Minutos de voz",
+        "receptionists": "Recepcionistas",
         "outboundCalls": "Intentos de transferencia",
         "alertSms": "Segmentos de SMS de alerta",
         "knowledgeStorage": "Base de conocimiento",
         "phoneNumbers": "Números de teléfono",
+        "chatAiUnits": "Chat del sitio web",
         "callAnswering": "Atención de llamadas 24/7",
         "callerDetails": "Datos de quien llama y toma de mensajes",
         "knowledgeAnswers": "Respuestas de la base de conocimiento",
         "workflows": "Flujos de trabajo en lenguaje sencillo",
         "spamFiltering": "Filtro de spam",
-        "shortCalls": "Llamadas de menos de 10 s sin facturar",
+        "shortCalls": "Llamadas de menos de {{seconds}} s sin facturar",
         "concurrentCalls": "Llamadas simultáneas",
         "multilingual": "Responde en el idioma de quien llama",
         "appointmentBooking": "Reserva de citas",
@@ -341,6 +359,11 @@
             "included_other": "{{count}} incluidos",
             "then": "luego {{rate}}/min"
           },
+          "receptionists": {
+            "included_one": "{{count}} incluida",
+            "included_many": "{{count}} incluidas",
+            "included_other": "{{count}} incluidas"
+          },
           "outboundCalls": {
             "included_one": "{{count}} incluido",
             "included_many": "{{count}} incluidos",
@@ -361,6 +384,11 @@
             "dedicated_one": "{{count}} dedicado",
             "dedicated_many": "{{count}} dedicados",
             "dedicated_other": "{{count}} dedicados"
+          },
+          "chatAiUnits": {
+            "included_one": "{{count}} incluido",
+            "included_many": "{{count}} incluidos",
+            "included_other": "{{count}} incluidos"
           }
         },
         "data": {
@@ -390,7 +418,19 @@
     "retry": "Reintentar",
     "current": {
       "title": "Este negocio ya tiene el plan {{plan}}.",
-      "description": "Su plan ya está listo, así que puede pasar a su número de teléfono."
+      "description": "Su plan ya está listo, así que puede pasar a su número de teléfono.",
+      "prepaidTitle": "Este negocio ya tiene minutos prepagados.",
+      "prepaidDescription": "Sus minutos ya están listos, así que puede pasar a su número de teléfono."
+    },
+    "packs": {
+      "title": "¿Prefiere minutos prepagados?",
+      "description": "Compre minutos una sola vez, sin factura mensual. Duran hasta que se agotan o termina el paquete.",
+      "cta": "Comprar paquete de minutos",
+      "waiting": "Agregando sus minutos...",
+      "processing": "Su pago aún se está procesando. Vuelva a comprobarlo en unos minutos.",
+      "checkAgain": "Comprobar de nuevo",
+      "failed": "Su pago no se completó. Elija de nuevo un plan o un paquete de minutos.",
+      "refunded": "Su pago se reembolsó o se anuló por un contracargo, así que no se agregó ningún paquete de minutos. Elija de nuevo un plan o un paquete de minutos."
     }
   }
 }

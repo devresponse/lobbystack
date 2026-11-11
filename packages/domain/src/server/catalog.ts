@@ -1,12 +1,13 @@
 import { and, asc, count, eq, ilike, inArray, isNull } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { agentRules, businesses, businessHours, closures, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments } from "@lobbystack/db";
+import { agentRules, businesses, businessHours, closures, phoneNumbers, services, staff, staffServiceAssignments } from "@lobbystack/db";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { normalizeHoursWindows } from "../hours";
 import { writeBusinessHoursInTransaction } from "./businessHours";
 import type { DomainContext } from "./context";
+import { loadReceptionistView } from "./receptionistProfile";
 
 export async function listCatalog(
   context: DomainContext,
@@ -19,7 +20,7 @@ export async function listCatalog(
     const hoursRows = await tx.select().from(businessHours).where(eq(businessHours.businessId, input.businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
     const closureRows = await tx.select().from(closures).where(eq(closures.businessId, input.businessId)).orderBy(asc(closures.startsAt));
     const numberRows = await tx.select().from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"))).orderBy(asc(phoneNumbers.e164));
-    const profileRows = await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1);
+    const receptionistProfile = await loadReceptionistView(tx, { businessId: input.businessId });
     const ruleRows = await tx.select().from(agentRules).where(eq(agentRules.businessId, input.businessId)).orderBy(asc(agentRules.sortOrder), asc(agentRules.createdAt), asc(agentRules.id));
     const limit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 100);
     const offset = Math.max(Math.trunc(input.offset ?? 0), 0);
@@ -27,7 +28,7 @@ export async function listCatalog(
     const page = serviceRows.slice(0, limit);
     const serviceIds = page.map((service) => service.id);
     const assignments = serviceIds.length ? await tx.select({ serviceId: staffServiceAssignments.serviceId, staffId: staffServiceAssignments.staffId }).from(staffServiceAssignments).where(and(eq(staffServiceAssignments.businessId, input.businessId), inArray(staffServiceAssignments.serviceId, serviceIds))) : [];
-    return { staff: staffRows, services: page.map((service) => ({ ...service, assignedStaffIds: assignments.filter((assignment) => assignment.serviceId === service.id).map((assignment) => assignment.staffId) })), servicesPagination: { limit, offset, total: Number(total?.count ?? 0), hasNext: serviceRows.length > limit }, hours: hoursRows, closures: closureRows, phoneNumbers: numberRows, receptionistProfile: profileRows[0] ?? null, rules: ruleRows };
+    return { staff: staffRows, services: page.map((service) => ({ ...service, assignedStaffIds: assignments.filter((assignment) => assignment.serviceId === service.id).map((assignment) => assignment.staffId) })), servicesPagination: { limit, offset, total: Number(total?.count ?? 0), hasNext: serviceRows.length > limit }, hours: hoursRows, closures: closureRows, phoneNumbers: numberRows, receptionistProfile, rules: ruleRows };
   });
 }
 

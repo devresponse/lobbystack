@@ -10,6 +10,9 @@ export async function register(): Promise<void> {
     "OTP_HASH_SECRET",
     ...(process.env.STORAGE_PROVIDER === "s3" ? [] : ["LOCAL_STORAGE_SIGNING_SECRET"]),
   ]);
+  // A BILLING_PROVIDER the worker refuses stops the admin too, which would otherwise show Polar's plans.
+  const { readBillingProviderId } = await import("@lobbystack/providers/billing/factory");
+  readBillingProviderId(process.env);
   // The admin shows the brand its build resolved (NEXT_PUBLIC_BRAND_BASE_URL),
   // so the prerendered pages and the browser agree with the server. Say so when
   // the address it runs with now would pick another: it needs a rebuild.

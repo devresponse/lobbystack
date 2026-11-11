@@ -5,13 +5,15 @@ export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, i
 export type { InterfaceLocale, RuntimeLocale } from "./locales";
 import { interfaceLocales, type InterfaceLocale, type RuntimeLocale } from "./locales";
 import { appointmentChangeVerificationModes, bookingModes, transferModes } from "./receptionist";
+import type { KnowledgeAudience, ReceptionistKnowledgeScope, ReceptionistStatus } from "./receptionists";
 import { widgetPositions, type WidgetPosition } from "./widget";
 export * from "./receptionist";
+export * from "./receptionists";
 export * from "./branding";
 export * from "./brandLinks";
 export * from "./brands/resolve";
-export type { BrandBillingPlan, BrandDefinition, BrandEnvironment, BrandImage, BrandIndex } from "./brands/types";
-export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
+export type { BrandBillingPlan, BrandDefinition, BrandEnvironment, BrandImage, BrandIndex, BrandPlanDisplay } from "./brands/types";
+export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox, assertCertificationStripeKey } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";
 
@@ -131,6 +133,50 @@ export type KnowledgeSnippet = {
   priority: number;
 };
 
+/** A document the knowledge digest lists, as the stored snapshot keeps it. */
+export type SnapshotKnowledgeDocument = {
+  title: string;
+  sourceUrl: string | null;
+  tags: Array<string>;
+  revision: number;
+  /** "chosen" for a document only some receptionists use, with the ones that aren't archived. */
+  audience?: KnowledgeAudience;
+  receptionistIds?: Array<string>;
+};
+
+/**
+ * A receptionist as the stored snapshot keeps it: its own settings, ready for
+ * the prompt. The settings every receptionist shares stay on the snapshot.
+ */
+export type SnapshotReceptionist = {
+  id: string;
+  name: string;
+  /** What it helps with, which other receptionists' prompts and the visitor dropdown show. */
+  description: string;
+  /** Its page, /profile/<slug>/<handle>, when it has a handle and the business page is published. */
+  pageUrl?: string;
+  isDefault: boolean;
+  status: ReceptionistStatus;
+  /** Whether visitors can pick it on the business page and other receptionists name it. */
+  listed: boolean;
+  order: number;
+  /** The language its calls open in, when it has its own. */
+  locale?: RuntimeLocale;
+  knowledgeScope: ReceptionistKnowledgeScope;
+  greeting: string;
+  voiceInstructions: string;
+  smsInstructions: string;
+  chatInstructions: string;
+  bookingPolicy: string;
+  bookingMode: BookingMode;
+  transferPolicy: TransferPolicy;
+  /** Its text entries, best first: ids from knowledgeSnippets and extraKnowledgeSnippets. */
+  snippetIds: Array<string>;
+};
+
+/** Another listed receptionist the agent can send a visitor to. */
+export type OtherReceptionist = { name: string; description: string; pageUrl?: string };
+
 export type AgentRuleSummary = {
   id: string;
   title: string;
@@ -185,6 +231,25 @@ export type BusinessContextSnapshot = {
     smsNumber?: string;
     email?: string;
   };
+  /**
+   * In a stored snapshot: the business's receptionists that aren't archived,
+   * the default one first. The fields above are the default receptionist's
+   * view; snapshotForReceptionist cuts any other receptionist's. Absent in
+   * snapshots built before receptionists, which are the default's view.
+   */
+  receptionists?: Array<SnapshotReceptionist>;
+  /** In a stored snapshot: text entries other receptionists use that knowledgeSnippets, the default's, leaves out. */
+  extraKnowledgeSnippets?: Array<KnowledgeSnippet>;
+  /** In a stored snapshot: the documents the receptionists' digests list, newest first. */
+  knowledgeDocuments?: Array<SnapshotKnowledgeDocument>;
+  /** The business page, /profile/<slug>, when it is published. */
+  publicPageUrl?: string;
+  /** In a cut view: the receptionist it is for. */
+  receptionist?: { id: string; name: string; description: string; isDefault: boolean };
+  /** In a cut view: other listed receptionists, at most 12 in the Receptionists page's order. */
+  otherReceptionists?: Array<OtherReceptionist>;
+  /** In a cut view: listed receptionists beyond otherReceptionists, which the business page lists. */
+  moreReceptionists?: number;
 };
 
 export type AvailabilitySlot = {
@@ -328,6 +393,8 @@ export const widgetConfigSchema = z.object({
 export const widgetSessionRequestSchema = z.object({
   widgetKey: z.string().min(1),
   visitorId: z.guid(),
+  /** The signed token a business or receptionist page gives its chat, naming the receptionist that answers. */
+  receptionistToken: z.string().min(1).max(2048).optional(),
 });
 export type WidgetSessionRequest = z.infer<typeof widgetSessionRequestSchema>;
 
@@ -381,15 +448,11 @@ export type {
   NotificationDeliveryStatus,
   SmsMessageStatus,
 } from "./twilioMessageStatus";
-/** Strips trailing slashes with a linear scan; a `/\/+$/` regex backtracks on long runs of slashes. */
-export function trimTrailingSlashes(value: string): string {
-  let end = value.length;
-  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
-  return value.slice(0, end);
-}
+export { trimEndWhere, trimTrailingSlashes } from "./text";
 
 export * from "./billing";
 export * from "./billingProfile";
+export * from "./billingDisplay";
 export * from "./billingCodes";
 export * from "./product-capabilities";
 export { normalizeAuthEmail } from "./auth";

@@ -19,7 +19,7 @@ vi.mock("@lobbystack/db", async (importOriginal) => {
   };
 });
 
-import { createWidgetSessionToken, hashWidgetKey, isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyWidgetSessionToken } from "./widget-keys";
+import { createReceptionistPageToken, createWidgetSessionToken, hashWidgetKey, isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyReceptionistPageToken, verifyWidgetSessionToken } from "./widget-keys";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -122,6 +122,66 @@ describe("widget key hashing and origin policy", () => {
     });
     expect(verifyWidgetSessionToken(expired.token)).toBeNull();
     expect(verifyWidgetSessionToken(`${expired.token.slice(0, -1)}x`)).toBeNull();
+  });
+});
+
+describe("the receptionist a page names for its chat", () => {
+  const BUSINESS = "00000000-0000-4000-8000-000000000011";
+  const KEY = "00000000-0000-4000-8000-000000000010";
+  const RECEPTIONIST = "00000000-0000-4000-8000-0000000000aa";
+  const session = { widgetKeyId: KEY, businessId: BUSINESS, visitorId: "00000000-0000-4000-8000-000000000012", origin: "https://app.example.com" };
+
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("WIDGET_SESSION_SECRET", "session-secret");
+  });
+
+  it("carries the receptionist in the chat's session when the page named one", () => {
+    const created = createWidgetSessionToken({ ...session, receptionistId: RECEPTIONIST });
+    expect(verifyWidgetSessionToken(created.token)).toMatchObject({ ...session, receptionistId: RECEPTIONIST });
+    expect(verifyWidgetSessionToken(createWidgetSessionToken(session).token)).not.toHaveProperty("receptionistId");
+  });
+
+  it("refuses a session whose receptionist isn't an id, however it was signed", () => {
+    const created = createWidgetSessionToken({ ...session, receptionistId: "front-desk" });
+    expect(verifyWidgetSessionToken(created.token)).toBeNull();
+  });
+
+  it("signs the page's token for one business, widget and receptionist, for 30 days", () => {
+    vi.useFakeTimers({ now: new Date("2026-11-03T12:00:00Z"), toFake: ["Date"] });
+    try {
+      const token = createReceptionistPageToken({ businessId: BUSINESS, widgetKeyId: KEY, receptionistId: RECEPTIONIST.toUpperCase() });
+      expect(verifyReceptionistPageToken(token)).toEqual({
+        v: 1,
+        purpose: "receptionist_page",
+        businessId: BUSINESS,
+        widgetKeyId: KEY,
+        receptionistId: RECEPTIONIST,
+        exp: Math.floor(Date.parse("2026-12-03T12:00:00Z") / 1000),
+      });
+      vi.setSystemTime(new Date("2026-12-03T12:00:01Z"));
+      expect(verifyReceptionistPageToken(token)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses a tampered page token, or one signed with another secret", () => {
+    const token = createReceptionistPageToken({ businessId: BUSINESS, widgetKeyId: KEY, receptionistId: RECEPTIONIST });
+    const [header, , signature] = token.split(".");
+    const forged = Buffer.from(JSON.stringify({ v: 1, purpose: "receptionist_page", businessId: BUSINESS, widgetKeyId: KEY, receptionistId: "00000000-0000-4000-8000-0000000000bb", exp: 4_102_444_800 })).toString("base64url");
+    expect(verifyReceptionistPageToken(`${header}.${forged}.${signature}`)).toBeNull();
+    expect(verifyReceptionistPageToken(`${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`)).toBeNull();
+    expect(verifyReceptionistPageToken("not-a-token")).toBeNull();
+    vi.stubEnv("WIDGET_SESSION_SECRET", "another-secret");
+    expect(verifyReceptionistPageToken(token)).toBeNull();
+  });
+
+  it("never lets a page token pass for a chat's session, or a session for a page token", () => {
+    const pageToken = createReceptionistPageToken({ businessId: BUSINESS, widgetKeyId: KEY, receptionistId: RECEPTIONIST });
+    expect(verifyWidgetSessionToken(pageToken)).toBeNull();
+    const sessionToken = createWidgetSessionToken({ ...session, receptionistId: RECEPTIONIST }).token;
+    expect(verifyReceptionistPageToken(sessionToken)).toBeNull();
   });
 });
 

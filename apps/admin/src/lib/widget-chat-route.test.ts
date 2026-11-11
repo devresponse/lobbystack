@@ -26,7 +26,9 @@ const mocks = vi.hoisted(() => ({
   reportServerError: vi.fn(async (..._args: unknown[]) => undefined),
 }));
 
-vi.mock("@lobbystack/domain", () => ({
+vi.mock("@lobbystack/domain", async () => ({
+  // The real cut, without the rest of the domain package and its database.
+  snapshotForReceptionist: (await import("../../../../packages/domain/src/snapshot")).snapshotForReceptionist,
   announceLateWidgetReply: mocks.announceLateWidgetReply,
   recordAiTrace: mocks.recordAiTrace,
   appendMessage: mocks.appendMessage,
@@ -144,7 +146,29 @@ const session = {
   defaultLocale: "en" as const,
   config: {},
   visitorId,
+  receptionistId: null as string | null,
 };
+
+const frontDeskId = "00000000-0000-4000-8000-0000000000a0";
+const kitsilanoId = "00000000-0000-4000-8000-0000000000a2";
+const pausedId = "00000000-0000-4000-8000-0000000000a3";
+
+function receptionistEntry(id: string, name: string, overrides: Record<string, unknown> = {}) {
+  return { id, name, description: "", isDefault: false, status: "active", listed: true, order: 0, knowledgeScope: "audience", greeting: `Hi, this is ${name}.`, voiceInstructions: "", smsInstructions: "", chatInstructions: `Answer for ${name}.`, bookingPolicy: "Confirm first.", bookingMode: "instant", transferPolicy: { mode: "never" }, snippetIds: [], ...overrides };
+}
+
+/** A business with a default receptionist, a store and a paused store. */
+const chainSnapshot = {
+  businessId,
+  version: "v9",
+  greeting: "Hi, this is Front desk.",
+  chatInstructions: "Answer for Front desk.",
+  receptionists: [
+    receptionistEntry(frontDeskId, "Front desk", { isDefault: true, knowledgeScope: "all" }),
+    receptionistEntry(kitsilanoId, "Kitsilano", { order: 1 }),
+    receptionistEntry(pausedId, "Old store", { status: "paused", order: 2 }),
+  ],
+} as unknown as BusinessContextSnapshot;
 
 function widgetRequest(overrides: Record<string, unknown> = {}, signal?: AbortSignal): Request {
   mocks.readJson.mockResolvedValue({
@@ -337,6 +361,46 @@ describe("POST /api/widget/chat", () => {
       provider: "test",
       model: "test",
     })));
+  });
+
+  it("starts or continues the chat with the widget's receptionist, which answers in it with its own settings", async () => {
+    vi.stubEnv("AI_CHAT_API_KEY", "test-api-key");
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, receptionistId: kitsilanoId } });
+    mocks.getCachedBusinessSnapshot.mockResolvedValue(chainSnapshot);
+    mocks.getOrCreateWidgetConversation.mockResolvedValue({ conversationId, automationState: "ai_active", receptionistId: kitsilanoId });
+    mocks.loadWidgetChatHistory.mockResolvedValue([]);
+
+    await readSse(await POST(widgetRequest()));
+    expect(mocks.getOrCreateWidgetConversation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ businessId, widgetVisitorId: visitorId, receptionistId: kitsilanoId }));
+    const [{ context }] = mocks.createReceptionistAgent.mock.calls[0] as [{ context: { snapshot: BusinessContextSnapshot } }];
+    expect(context.snapshot).toMatchObject({ greeting: "Hi, this is Kitsilano.", chatInstructions: "Answer for Kitsilano.", receptionist: { id: kitsilanoId, name: "Kitsilano" } });
+    expect(context.snapshot).not.toHaveProperty("receptionists");
+  });
+
+  it("answers a paused receptionist's widget as the default receptionist", async () => {
+    vi.stubEnv("AI_CHAT_API_KEY", "test-api-key");
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, receptionistId: pausedId } });
+    mocks.getCachedBusinessSnapshot.mockResolvedValue(chainSnapshot);
+    mocks.getOrCreateWidgetConversation.mockResolvedValue({ conversationId, automationState: "ai_active", receptionistId: frontDeskId });
+    mocks.loadWidgetChatHistory.mockResolvedValue([]);
+
+    await readSse(await POST(widgetRequest()));
+    expect(mocks.getOrCreateWidgetConversation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: frontDeskId }));
+    const [{ context }] = mocks.createReceptionistAgent.mock.calls[0] as [{ context: { snapshot: BusinessContextSnapshot } }];
+    expect(context.snapshot.receptionist).toMatchObject({ id: frontDeskId, isDefault: true });
+  });
+
+  it("keeps a chat the team handed back answering as its own receptionist after the visitor moved to another page", async () => {
+    vi.stubEnv("AI_CHAT_API_KEY", "test-api-key");
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, receptionistId: frontDeskId } });
+    mocks.getCachedBusinessSnapshot.mockResolvedValue(chainSnapshot);
+    mocks.getOrCreateWidgetConversation.mockResolvedValue({ conversationId, automationState: "human_handoff", receptionistId: kitsilanoId });
+    mocks.returnQuietTeamChat.mockResolvedValue("ai_active");
+    mocks.loadWidgetChatHistory.mockResolvedValue([]);
+
+    await readSse(await POST(widgetRequest()));
+    const [{ context }] = mocks.createReceptionistAgent.mock.calls[0] as [{ context: { snapshot: BusinessContextSnapshot } }];
+    expect(context.snapshot.receptionist).toMatchObject({ id: kitsilanoId });
   });
 
   it("hands each reply's instructions, history, steps and text to the AI debug trace", async () => {

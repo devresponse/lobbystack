@@ -4,11 +4,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { billingPlanName, brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
+import { billingPlanName, isPaidSubscription, type BillingDisplay, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
-import { isBillingRateLimited, isPlanChangePending, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
+import { enterpriseSalesHref, isBillingRateLimited, isPlanChangePending, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import type { WorkspaceViewModel } from "@/lib/page-view-models";
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "./billing-email-form";
@@ -18,22 +18,29 @@ import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
 type WorkspaceResponse = { businesses: WorkspaceViewModel[] };
 type Billing = {
   account: { plan: string | null; billingInterval: string | null; subscriptionState: string | null } | null;
+  /** The plan in force: prepaid while a pack has time left, even beside a subscription the pack replaced. */
+  effectivePlan?: BillingPlanSlug;
+  /** The packs the business holds with time left: live, or frozen while a dispute holds them. */
+  packs?: Array<{ secondsLeft: number }>;
   availableCheckoutPlans: HostedUpgradePlan[];
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
   plans: BillingPlanList;
+  /** billing.json's words for the plan screens. */
+  planDisplay?: BillingDisplay | null;
   promoPlan?: BillingPromoPlanView | null;
 };
 type CheckoutInput = { businessId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail?: string };
 type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail: string | null };
 /** A checkout Polar couldn't make this business's customer for, which starts again with a billing email. */
 type EmailPrompt = { refusal: BillingEmailRefusal; email: string | null; target: HostedUpgradePlan; billingInterval: BillingInterval };
-type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
+type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null; providerName: string };
 
 export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const { i18n, t } = useTranslation("settings");
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [interval, setInterval] = useState<BillingInterval>("annual");
+  // The tab the person picked; until then the dialog opens on billing.json's choice, else Annual.
+  const [interval, setInterval] = useState<BillingInterval | null>(null);
   const [checkout, setCheckout] = useState<Checkout | null>(null);
   const [emailPrompt, setEmailPrompt] = useState<EmailPrompt | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -45,12 +52,17 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const billing = useQuery({ queryKey: ["billing", businessId], enabled: Boolean(businessId && open), queryFn: () => requestJson<Billing>(`/api/billing?businessId=${encodeURIComponent(businessId!)}`) });
   const rawPlan = billing.data?.account?.plan;
   // A cancelled or lapsed tier is not the plan someone is on, and marking its
-  // card as current leaves them unable to start the tier they just lost.
-  const plan: BillingPlanSlug = rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
+  // card as current leaves them unable to start the tier they just lost. On a
+  // pack no card is current, and a plan starts with a checkout, even while the
+  // provider still reports the subscription the pack replaced as live.
+  const plan: BillingPlanSlug = billing.data?.effectivePlan === "prepaid" ? "prepaid" : rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
   // Starter or Pro already paid through Polar: picking another plan changes that subscription.
   const changesPlan = plan === "starter" || plan === "pro";
   // Moving off a promo plan drops it, its discount and its allowances.
   const promoPlan = changesPlan && billing.data?.promoPlan?.tier === plan ? billing.data.promoPlan : null;
+  // A checkout from Free or a pack starts a subscription, which ends every pack the business
+  // holds, frozen ones too, and the minutes left on them. A plan changed in place ends none.
+  const packMinutesLeft = plan === "free_cloud" || plan === "prepaid" ? Math.floor((billing.data?.packs ?? []).reduce((seconds, pack) => seconds + pack.secondsLeft, 0) / 60) : 0;
   const activeBusinessId = () => selectActiveBusiness(client.getQueryData<WorkspaceResponse>(["businesses"])?.businesses)?.businessId;
   const mutation = useMutation({
     mutationFn: (input: CheckoutInput) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),
@@ -107,7 +119,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
     if (announcedRequestId.current !== checkout.requestId) {
       announcedRequestId.current = checkout.requestId;
       setOpen(false);
-      toast.success(t("billing.toast.planChanged"));
+      toast.success(t("billing.toast.planChanged", { provider: result.data.providerName }));
     }
     const finish = () => {
       void client.invalidateQueries({ queryKey: ["billing", checkout.businessId] });
@@ -134,12 +146,14 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       billingInterval={interval}
       changesPlan={changesPlan}
       currentPlan={plan}
+      display={billing.data.planDisplay ?? null}
       leavesPromoPlan={promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? promoPlan.plan : null}
+      leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null}
       loading={pending ? "checkout" : null}
       loadingPlan={checkout?.target ?? (mutation.isPending ? mutation.variables.target : null)}
       locale={i18n.language}
       onBillingIntervalChange={setInterval}
-      onContactEnterprise={() => window.location.assign(`mailto:${contactEmailFor(brandLinks(), "sales")}?subject=${encodeURIComponent(t("billing.upgradeDialog.enterpriseSubject"))}`)}
+      onContactEnterprise={() => window.location.assign(enterpriseSalesHref(t("billing.upgradeDialog.enterpriseSubject")))}
       onOpenChange={(next) => { setOpen(next); if (!next) setEmailPrompt(null); }}
       onStartCheckout={(target, billingInterval) => { setEmailPrompt(null); mutation.mutate({ businessId, target, billingInterval }); }}
       open={open}

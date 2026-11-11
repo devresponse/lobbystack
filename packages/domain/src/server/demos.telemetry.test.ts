@@ -20,6 +20,7 @@ import {
   recordProspectDemoCallOutcome,
   recordProspectDemoCallStarted,
 } from "./demos";
+import { businessLimitReached } from "./tenancy";
 
 const context = { db: { execute: mocks.execute } } as never;
 
@@ -103,6 +104,17 @@ describe("prospect demo claim telemetry", () => {
       businessId: "biz_1",
       distinctId: "prospect_demo:demo_1",
       properties: { prospectDemoId: "demo_1", reason: "not_claimable" },
+    }));
+  });
+
+  it("records claim_failed with business_limit when the account owns as many businesses as it may", async () => {
+    mocks.withBusinessTransaction.mockRejectedValue(businessLimitReached(3));
+
+    await expect(claimProspectDemo(context, { userId: "user_1", token: "token" })).rejects.toMatchObject({ code: "business_limit" });
+
+    expect(mocks.recordProductEvent).toHaveBeenCalledWith(context, expect.objectContaining({
+      name: "prospect_demo.claim_failed",
+      properties: { prospectDemoId: "demo_1", reason: "business_limit" },
     }));
   });
 });

@@ -144,7 +144,40 @@ describe('new_call performList', () => {
   });
 });
 
+describe('the receptionist on call and message triggers', () => {
+  const other = '9e8d7c6b-5a4f-4b3a-8d2c-1b0a9f8e7d6c';
+  const delivery = (type, data) => signedDelivery({ id: 'e0000000-0000-4000-8000-000000000003', type, created_at: '2026-09-22T15:05:16Z', business_id: samples.business.id, data });
+  const subscribeData = { id: WEBHOOK_ID, secret: SECRET };
+
+  it.each([['new_call', 'call.completed', 'call'], ['new_message', 'message.taken', 'message']])('%s keeps only the chosen receptionist\'s', async (key, type, resource) => {
+    const { perform } = App.triggers[key].operation;
+    expect(App.triggers[key].operation.inputFields).toEqual([expect.objectContaining({ key: 'receptionist_id', dynamic: 'receptionist_list.id.name', required: false })]);
+    const theirs = await appTester(perform, bundleWith({ subscribeData, inputData: { receptionist_id: other }, ...delivery(type, samples[resource]) }));
+    expect(theirs).toEqual([]);
+    const ours = await appTester(perform, bundleWith({ subscribeData, inputData: { receptionist_id: samples[resource].receptionist_id.toUpperCase() }, ...delivery(type, samples[resource]) }));
+    expect(ours).toEqual([samples[resource]]);
+    const everyone = await appTester(perform, bundleWith({ subscribeData, ...delivery(type, samples[resource]) }));
+    expect(everyone).toEqual([samples[resource]]);
+  });
+
+  it('asks the list for the chosen receptionist\'s samples', async () => {
+    const scope = api().get('/messages').query({ limit: '25', receptionist_id: samples.message.receptionist_id }).reply(200, page([samples.message]));
+    const results = await appTester(App.triggers.new_message.operation.performList, bundleWith({ inputData: { receptionist_id: samples.message.receptionist_id } }));
+    expect(results).toEqual([samples.message]);
+    scope.done();
+  });
+
+  it('leaves the appointment and contact triggers without one', () => {
+    for (const key of ['new_appointment', 'appointment_rescheduled', 'appointment_cancelled', 'new_contact']) expect(App.triggers[key].operation.inputFields).toBeUndefined();
+  });
+});
+
 describe('dropdown triggers', () => {
+  it('lists receptionists', async () => {
+    api().get('/receptionists').reply(200, page([samples.receptionist]));
+    const results = await appTester(App.triggers.receptionist_list.operation.perform, bundleWith());
+    expect(results).toEqual([samples.receptionist]);
+  });
   it('lists services', async () => {
     api().get('/services').reply(200, page([samples.service]));
     const results = await appTester(App.triggers.service_list.operation.perform, bundleWith());

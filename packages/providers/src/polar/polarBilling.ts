@@ -92,6 +92,16 @@ export class PolarBillingProvider {
   }
 
   /**
+   * Moves the end of a subscription's current period, earlier or later but in
+   * the future. One set to cancel at its period's end then ends on the new
+   * date. Polar refuses it on a subscription that isn't active. Needs
+   * subscriptions:write.
+   */
+  async moveSubscriptionPeriodEnd(subscriptionId: string, at: Date): Promise<PolarSubscription> {
+    return await this.patchSubscription(subscriptionId, { current_billing_period_end: at.toISOString() });
+  }
+
+  /**
    * Ends a subscription now rather than at the end of its period, as for a
    * business being deleted. One Polar no longer has, or that has already
    * ended, counts as ended; any other refusal, such as a token without the
@@ -126,14 +136,18 @@ export class PolarBillingProvider {
   }
 
   /**
-   * Makes a customer with an external ID, which usage and the billing portal
-   * name it by. Polar keeps one customer per email in an organization and
-   * refuses a second with a 422 naming the email field, as it names
-   * external_id for an external ID it has. Needs customers:write.
+   * Makes a team customer with an external ID, which usage and the billing
+   * portal name it by, and no email of its own. Its owner, a member Polar
+   * makes with it, has the email and the same external ID. Polar keeps one
+   * customer per email in an organization, but only among customers with an
+   * email of their own, and a member's email is unique within its customer
+   * only, so one email can own any number of customers. Polar refuses an
+   * external ID it has with a 422 naming external_id, and an email it doesn't
+   * take as one with a 422 naming email. Needs customers:write.
    */
   async createCustomer(input: { externalId: string; email: string; name: string | null }): Promise<PolarCustomer> {
     assertCertificationRecipient("email", input.email);
-    return customerFrom(await this.request<PolarCustomerBody>("/v1/customers/", { method: "POST", body: JSON.stringify({ external_id: input.externalId, email: input.email, ...(input.name ? { name: input.name.slice(0, 256) } : {}) }) }));
+    return customerFrom(await this.request<PolarCustomerBody>("/v1/customers/", { method: "POST", body: JSON.stringify({ type: "team", external_id: input.externalId, ...(input.name ? { name: input.name.slice(0, 256) } : {}), owner: { email: input.email, external_id: input.externalId } }) }));
   }
 
   /**
@@ -157,8 +171,15 @@ export class PolarBillingProvider {
     await this.request("/v1/events/ingest", { method: "POST", body: JSON.stringify({ events: [{ name: input.eventName, external_customer_id: input.externalCustomerId, external_id: input.idempotencyKey, timestamp: input.timestamp, metadata: { quantity: input.quantity, businessId: input.businessId, usageKind: input.usageKind } }] }) });
   }
 
-  async createCustomerPortalSession(input: { externalCustomerId: string; returnUrl: string }): Promise<{ url: string }> {
-    const result = await this.request<{ customer_portal_url: string }>("/v1/customer-sessions/", { method: "POST", body: JSON.stringify({ external_customer_id: input.externalCustomerId, return_url: input.returnUrl }) });
+  /**
+   * A billing portal page for the customer with this external ID. A team
+   * customer's page is one of its members', named by its external ID; Polar
+   * refuses a team customer without one with a 422 naming member_id, and a
+   * member it doesn't have with one naming external_member_id. Without one an
+   * individual customer's page is its owner's. Needs customer_sessions:write.
+   */
+  async createCustomerPortalSession(input: { externalCustomerId: string; externalMemberId?: string; returnUrl: string }): Promise<{ url: string }> {
+    const result = await this.request<{ customer_portal_url: string }>("/v1/customer-sessions/", { method: "POST", body: JSON.stringify({ external_customer_id: input.externalCustomerId, ...(input.externalMemberId ? { external_member_id: input.externalMemberId } : {}), return_url: input.returnUrl }) });
     return { url: result.customer_portal_url };
   }
 }

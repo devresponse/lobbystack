@@ -14,10 +14,66 @@ import {
   contentRetentionDaysForPlan,
   getPolarMeteredUsagePayload,
   planChangeDirection,
+  billingProviderOf,
   planChangeRefusalOf,
+  planChangeRefusalSentence,
+  planChangeRefusalSentences,
   planChangeRefusals,
   perMonthCents,
+  meterEventTime,
+  priceUsage,
+  cloudBillingPlanSlugs,
+  isBillingPlanSlug,
+  packCapacitySeconds,
+  packEndsAt,
 } from "./billing";
+
+describe("usage as money (the Stripe plan's step 16)", () => {
+  it("prices each kind to four decimals of a cent: a call by the minute, a text segment or transfer each", () => {
+    expect(priceUsage("voice_seconds", 90, 20)).toBe(30);
+    expect(priceUsage("voice_seconds", 7, 18)).toBe(2.1);
+    expect(priceUsage("voice_seconds", 1, 13)).toBe(0.2167);
+    expect(priceUsage("alert_sms_segments", 3, 4)).toBe(12);
+    expect(priceUsage("outbound_call_attempts", -1, 25)).toBe(-25);
+  });
+
+  it("dates usage by its own time while its month's invoice can take it, else by now", () => {
+    const occurred = new Date("2026-11-30T23:00:00Z");
+    // The month ends 12-01 00:00; with an hour's grace the invoice takes usage sent before 00:30.
+    expect(meterEventTime(occurred, new Date("2026-12-01T00:29:00Z"), 1)).toEqual(occurred);
+    expect(meterEventTime(occurred, new Date("2026-12-01T00:31:00Z"), 1)).toEqual(new Date("2026-12-01T00:31:00Z"));
+    // Three days' grace keeps it on November's invoice longer.
+    expect(meterEventTime(occurred, new Date("2026-12-03T23:00:00Z"), 72)).toEqual(occurred);
+    expect(meterEventTime(new Date("2026-11-08T10:00:00Z"), new Date("2026-11-08T10:05:00Z"), 1)).toEqual(new Date("2026-11-08T10:00:00Z"));
+  });
+
+  it("dates usage by the plan period's renewal instead of the month's end when overage bills on the plan subscription", () => {
+    const period = { start: new Date("2026-11-08T11:00:00Z"), end: new Date("2026-12-08T11:00:00Z") };
+    // Usage just before the renewal at 11:00 belongs to the period it ended, whose invoice takes it until 11:30 with an hour's grace.
+    const late = new Date("2026-11-08T10:50:00Z");
+    expect(meterEventTime(late, new Date("2026-11-08T11:29:00Z"), 1, period)).toEqual(late);
+    expect(meterEventTime(late, new Date("2026-11-08T11:31:00Z"), 1, period)).toEqual(new Date("2026-11-08T11:31:00Z"));
+    // The month's end means nothing then.
+    const monthEnd = new Date("2026-11-30T23:00:00Z");
+    expect(meterEventTime(monthEnd, new Date("2026-12-01T00:31:00Z"), 1, period)).toEqual(monthEnd);
+    // Usage past the period's end, before the renewal is recorded, keeps its time on the next period.
+    const next = new Date("2026-12-08T11:10:00Z");
+    expect(meterEventTime(next, new Date("2026-12-08T11:45:00Z"), 1, period)).toEqual(next);
+  });
+
+  it("dates usage from before the period the renewal ended by now, since its invoice is final", () => {
+    // The period before this one ran from 10-08 11:00; the one before that was invoiced on 10-08.
+    const period = { start: new Date("2026-11-08T11:00:00Z"), end: new Date("2026-12-08T11:00:00Z") };
+    const justRenewed = new Date("2026-11-08T11:10:00Z");
+    // Within Stripe's 35 days and the renewal's grace, but from two periods back.
+    expect(meterEventTime(new Date("2026-10-06T12:00:00Z"), justRenewed, 1, period)).toEqual(justRenewed);
+    // Usage surely in the period the renewal ended keeps its time.
+    const previous = new Date("2026-10-20T12:00:00Z");
+    expect(meterEventTime(previous, justRenewed, 1, period)).toEqual(previous);
+    // Its first days could be the period before's when that one is shorter, so they go out with now, a period late.
+    expect(meterEventTime(new Date("2026-10-10T12:00:00Z"), justRenewed, 1, period)).toEqual(justRenewed);
+  });
+});
 
 describe("knowledge storage limits", () => {
   it("seed each plan's limit until a catalog apply", () => {
@@ -161,6 +217,24 @@ describe("plan changes", () => {
     expect(planChangeRefusalOf("Polar checkout creation failed.")).toBeNull();
     expect(planChangeRefusalOf(null)).toBeNull();
   });
+
+  it("reads back each provider's sentences, and one a Polar deployment stored before other providers", () => {
+    for (const provider of ["polar", "stripe"] as const) {
+      for (const refusal of Object.keys(planChangeRefusals) as Array<keyof typeof planChangeRefusals>) expect(planChangeRefusalOf(planChangeRefusalSentence(provider, refusal))).toBe(refusal);
+    }
+    expect(planChangeRefusalOf("Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.")).toBe("payment_failed");
+    // Polar's read as before; Stripe's never name Polar, and send a resumed plan to Settings > Plan.
+    expect(planChangeRefusalSentences.polar).toBe(planChangeRefusals);
+    expect(Object.values(planChangeRefusalSentences.stripe).some((sentence) => sentence.includes("Polar"))).toBe(false);
+    expect(planChangeRefusalSentence("stripe", "subscription_ending")).toContain("Settings > Plan");
+    expect(planChangeRefusalSentence("stripe", "token_scope")).toContain("STRIPE_API_KEY");
+  });
+
+  it("reads the deployment's billing provider, Polar when BILLING_PROVIDER is unset", () => {
+    expect(billingProviderOf({})).toBe("polar");
+    expect(billingProviderOf({ BILLING_PROVIDER: " Stripe " })).toBe("stripe");
+    expect(billingProviderOf({ BILLING_PROVIDER: "polar" })).toBe("polar");
+  });
 });
 
 describe("built-in plan list", () => {
@@ -169,7 +243,7 @@ describe("built-in plan list", () => {
     expect(list).toMatchObject({ currency: "usd", source: "built_in" });
     expect(list.plans.map((plan) => [plan.slug, plan.custom, plan.prices.length])).toEqual([["free_cloud", false, 0], ["starter", false, 2], ["pro", false, 2], ["enterprise", true, 0]]);
     const starter = list.plans[1]!;
-    expect(starter.included).toEqual({ voiceSeconds: 9_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 5 * 1024 * 1024, businessNumbers: 1 });
+    expect(starter.included).toEqual({ voiceSeconds: 9_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 5 * 1024 * 1024, businessNumbers: 1, receptionists: 1 });
     expect(starter.overageRates).toEqual({ voiceMinuteCents: 20, alertSmsSegmentCents: 2, outboundCallAttemptCents: 2 });
     expect(billingPlanPrice(starter, "annual")).toEqual({ interval: "annual", currency: "usd", amountCents: 28_800, monthlyAmountCents: 2_400, checkoutAvailable: false });
     expect(billingPlanPrice(list.plans[2], "annual")?.checkoutAvailable).toBe(true);
@@ -202,5 +276,28 @@ describe("built-in plan list", () => {
     expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000), price("annual", 30_000)] }, { prices: [price("monthly", 10_000), price("annual", 96_000)] }] as never })).toBe(16);
     expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000), price("annual", 36_000)] }] as never })).toBeNull();
     expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000)] }] as never })).toBeNull();
+  });
+});
+
+describe("prepaid packs", () => {
+  it("takes a partial refund's share of the seconds off a pack, and all of them for a full one", () => {
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 0 })).toBe(30_000);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 4950 })).toBe(15_000);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 1 })).toBe(29_996);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 9900 })).toBe(0);
+    expect(packCapacitySeconds({ secondsTotal: 30_000, amountCents: 9900, refundedCents: 12_000 })).toBe(0);
+  });
+
+  it("ends a pack its days of 24 hours after the payment, whatever the month or the clock change", () => {
+    expect(packEndsAt(new Date("2026-11-09T06:00:00Z"), 180)?.toISOString()).toBe("2027-05-08T06:00:00.000Z");
+    expect(packEndsAt(new Date("2027-01-31T23:30:00Z"), 1)?.toISOString()).toBe("2027-02-01T23:30:00.000Z");
+    expect(packEndsAt(new Date("2026-11-09T06:00:00Z"), null)).toBeNull();
+  });
+
+  it("is a plan in force but never one on sale", () => {
+    expect(isBillingPlanSlug("prepaid")).toBe(true);
+    expect((cloudBillingPlanSlugs as readonly string[]).includes("prepaid")).toBe(false);
+    expect(builtInBillingPlanLimits.prepaid).toMatchObject({ voiceSecondsIncluded: null, overagesBillable: false, includedBusinessNumbers: 1, includedReceptionists: 1, knowledgeStorageBytes: 20 * 1024 * 1024 });
+    expect(contentRetentionDaysForPlan("prepaid", "transcripts")).toBe(contentRetentionDaysForPlan("starter", "transcripts"));
   });
 });

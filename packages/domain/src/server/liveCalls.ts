@@ -64,7 +64,7 @@ const DISPOSITIONS: Record<LiveCallEnd, string> = {
  * Omit `from` when the caller withheld their number. `twilioCallSid` is
  * Twilio's ID for the same call, when its trunk sent one.
  */
-export async function startLivePhoneCall(context: DomainContext, input: { businessId: string; sessionId: string; from?: string | undefined; to: string; twilioCallSid?: string }) {
+export async function startLivePhoneCall(context: DomainContext, input: { businessId: string; sessionId: string; from?: string | undefined; to: string; twilioCallSid?: string; receptionistId?: string | null | undefined }) {
   const call = await startCall(context, {
     businessId: input.businessId,
     provider: LIVE_CALL_PROVIDER,
@@ -74,6 +74,7 @@ export async function startLivePhoneCall(context: DomainContext, input: { busine
     transport: "voice",
     gatewaySessionId: input.sessionId,
     ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}),
+    ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}),
   });
   const maxDurationMs = call.reservedSeconds === undefined ? undefined : Math.min(MAX_PHONE_CALL_MS, Math.floor(call.reservedSeconds * 1_000));
   return { callId: call.callId, conversationId: call.conversationId, blocked: call.blocked, duplicate: call.duplicate, maxDurationMs };
@@ -96,7 +97,7 @@ export async function extendLiveCallReservation(context: DomainContext, input: {
  */
 export async function startLiveWebCall(
   context: DomainContext,
-  input: { businessId: string; sessionId: string; widgetId: string; billable: boolean; maxDurationMs?: number; sessionPurpose?: string; prospectDemoId?: string; originUrl?: string; userAgent?: string },
+  input: { businessId: string; sessionId: string; widgetId: string; billable: boolean; maxDurationMs?: number; sessionPurpose?: string; prospectDemoId?: string; originUrl?: string; userAgent?: string; receptionistId?: string | null | undefined },
 ) {
   const call = await startCall(context, {
     businessId: input.businessId,
@@ -113,6 +114,7 @@ export async function startLiveWebCall(
     ...(input.prospectDemoId ? { prospectDemoId: input.prospectDemoId } : {}),
     ...(input.originUrl ? { originUrl: input.originUrl } : {}),
     ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+    ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}),
   });
   return { callId: call.callId, conversationId: call.conversationId, maxDurationMs: call.webCallMaxDurationMs };
 }
@@ -273,6 +275,8 @@ export type OpenLiveCall = {
   lastActivityAt: Date;
   /** The highest transcript sequence saved, so a new owner numbers its turns after it. */
   lastSequence: number;
+  /** The receptionist that answered, which every call names, so a new owner answers as it. */
+  receptionistId: string;
 };
 
 // No call runs longer than MAX_PHONE_CALL_MS, so an open call older than this
@@ -309,6 +313,7 @@ export async function listOpenLiveCalls(context: DomainContext, input: { busines
       reservedSeconds: sql<number | null>`(select ${billingUsageEvents.quantity} from ${billingUsageEvents} where ${billingUsageEvents.businessId} = ${calls.businessId} and ${billingUsageEvents.sourceKey} = 'voice:' || ${calls.id})`.mapWith(Number),
       lastActivityAt: sql<Date>`greatest(${calls.startedAt}, ${calls.mediaStartedAt}, (select max(${transcripts.updatedAt}) from ${transcripts} where ${transcripts.callId} = ${calls.id}))`.mapWith(calls.startedAt),
       lastSequence: lastSequenceOf(calls.id),
+      receptionistId: calls.receptionistId,
     }).from(calls).leftJoin(contacts, eq(contacts.id, calls.contactId)).where(and(
       eq(calls.businessId, input.businessId),
       eq(calls.provider, LIVE_CALL_PROVIDER),
@@ -332,6 +337,7 @@ export async function listOpenLiveCalls(context: DomainContext, input: { busines
         slicedReservation: channel === "voice" && row.reservedSeconds !== null,
         lastActivityAt: row.lastActivityAt,
         lastSequence: row.lastSequence,
+        receptionistId: row.receptionistId,
       };
     });
   });

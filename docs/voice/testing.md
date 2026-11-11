@@ -31,8 +31,9 @@ These options change what runs:
 - **`--runs <n>`**: runs each scenario this many times. The default is 3.
 - **`--concurrency <n>`**: how many sessions run at once. The default is 4. With 22 sessions at once, many runs lost their transcripts.
 - **`--snapshot <file>`**: uses a real business's snapshot instead of the demo business.
+- **`--receptionist <id>`**: with a stored snapshot of a business with several receptionists, plays a call to this one, in its view of the snapshot, as a real call gets it. Without it, the default receptionist takes the call. See [Check several receptionists](#check-several-receptionists).
 - **`--browser`**: plays a browser call, like one from the website widget, instead of a phone call. GPT-Live gets the browser call's instructions, the agent runs on the `web_voice` channel, and the caller's audio skips the phone-line filter. Use it after a change to what browser calls hear, such as how they handle a caller who asks for a person.
-- **`--recorded-greeting`**: with `--browser`, opens each call with a recording of the greeting, as `LIVE_RECORDED_GREETING=true` does (see [Open calls with a recording](runtime.md#open-calls-with-a-recording)). The script records the opening once, in a GPT-Live session as the worker does since fork PR #97. A run fails when the receptionist speaks again after the recording, before the caller does. OpenAI's reference sends the copy of the caller's audio only to sidebands, and the eval talks to GPT-Live over a WebSocket session instead, so its recording plays 3 seconds after the session starts rather than when the caller's audio arrives.
+- **`--recorded-greeting`**: opens each call with a recording of the greeting, as phone and browser calls do unless `LIVE_RECORDED_GREETING=false` (see [Open calls with a recording](runtime.md#open-calls-with-a-recording)). Without it, a run opens with the greeting command, which a real call falls back on when it has no recording. The script records the opening once, in a GPT-Live session as the worker does since fork PR #97. A run fails when the receptionist speaks again after the recording, before the caller does. OpenAI's reference sends the copy of the caller's audio only to sidebands, and the eval talks to GPT-Live over a WebSocket session instead, so its recording plays 3 seconds after the session starts rather than when the caller's audio arrives.
 
 Each run uses under a minute of GPT-Live audio, plus a delegation model call for each hand-over. The default 24 runs should take about 7 minutes.
 
@@ -54,12 +55,12 @@ Each field answers one question:
 - **`said what it mustn't: "…"`**: the first of the receptionist's lines that matched the scenario's `mustNotSay`, which fails the run
 - **`hand-overs`**: each request GPT-Live handed to the backend after the opening question, or from a scenario's own opening on, by the tools the agent used. `reply` means the agent answered without a tool.
 - **`checks`**: each answer from the caller check, which runs when the caller speaks after the agent ended the call
-- **`goodbyes`**: how many of the receptionist's lines said goodbye. More than 1 means the caller heard a double goodbye.
+- **`goodbyes`**: how many of the receptionist's lines said goodbye, as the worker recognizes one in any language calls open in (`saysGoodbye`). More than 1 means the caller heard a double goodbye.
 - **`receptionist`**: what the receptionist said after the opening question, or from a scenario's own opening on
 
 The script exits with code 1 when any run fails.
 
-Over the API, GPT-Live greeted on its own in 12 runs out of 12, while on real calls it often waited for the caller. Check greeting changes with real calls.
+Over the API, GPT-Live once greeted on its own in 12 runs out of 12, while on real calls it often waited for the caller. On 2026-11-07 the greeting command got a greeting in only 15 phone runs of 24 with a business of two receptionists, and 16 of 24 with the demo business, the others getting none within 15 seconds even after all 4 commands. A recording played in 48 runs of 48. Check greeting changes with real calls.
 
 ### Use a real business
 
@@ -88,9 +89,19 @@ OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --scenario spanish-switch --s
 - `pnpm voice:call` reads the Spanish lines in Amazon Polly's Mia voice, but can't check the language. Read the call's transcript on its page in the dashboard.
 - To check another language, copy the two scenarios with lines in that language, its code in `language`, and words that never appear in it in place of `ENGLISH_WORDS`, then give `VOICES` in `scripts/voice/test-call.ts` a Polly voice for it.
 
+### Check several receptionists
+
+A receptionist's prompt lists the business's other receptionists only in one receptionist's view of a business with several (`receptionistGuidance` in `packages/agent-core/src/instructions.ts`), so the demo business never tests it. Save the snapshot of a business with several receptionists, as under [Use a real business](#use-a-real-business), and name the one to call:
+
+```bash
+OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --snapshot snapshot.json --receptionist your_receptionist_id
+```
+
+The `other-receptionist` scenario runs only by name. Its caller asks for a referral, so use a snapshot where another receptionist handles referrals. The receptionist should say which one handles it and offer to take a message, since it can't transfer the call to another receptionist. The eval fails a run that announces a transfer, but can't check the name, so read the reply.
+
 ## Place real test calls
 
-`pnpm voice:call` calls a receptionist's number with Twilio and plays the same scenarios with Amazon Polly's voices: Joanna for English, Mia for Spanish. After the scripted lines, the caller stays silent for 40 seconds. If the call ends before the script's silences add up, the receptionist hung up.
+`pnpm voice:call` calls a receptionist's number with Twilio and plays the same scenarios with Amazon Polly's voices: Joanna for English, Mia for Spanish. The caller waits 15 seconds before its first line, longer than most openings, since OpenAI drops what a caller says over a recording. With a longer opening that line is lost, so read the transcript. After the scripted lines, the caller stays silent for 40 seconds. If the call ends before the script's silences add up, the receptionist hung up.
 
 You need a Twilio number to call from and the auth token of the account that owns it. To test staging, call the staging number from a number on another account, such as the production toll-free number:
 

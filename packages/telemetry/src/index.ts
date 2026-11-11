@@ -112,6 +112,7 @@ export const WORKFLOW_EVENT_NAMES = [
 
 export const BILLING_EVENT_NAMES = [
   "billing.subscription_started",
+  "billing.pack_purchased",
 ] as const;
 
 export const OPERATIONS_EVENT_NAMES = [
@@ -120,6 +121,12 @@ export const OPERATIONS_EVENT_NAMES = [
   "ops.billing.unit_economics_rollup_recorded",
   "ops.billing.profile_drift",
   "ops.billing.profile_drift_recovered",
+  "ops.billing.overage_missing",
+  "ops.billing.overage_unpaid",
+  "ops.billing.provider_mismatch",
+  "ops.billing.usage_totals_mismatch",
+  "ops.billing.usage_credit_unapplied",
+  "ops.billing.pack_gave_way",
   "ops.outbox.backlog_sample",
   "ops.outbox.flush_failed",
   "ops.service.health_check",
@@ -253,7 +260,8 @@ export type TelemetryRequirementKey =
   | "status"
   | "problemCodes"
   | "problemCount"
-  | "polarEnv";
+  | "polarEnv"
+  | "providerEnv";
 
 export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "web.auth.login_succeeded": ["deploymentMode", "pathname"],
@@ -359,6 +367,9 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "web.activation.upgrade_prompt_clicked": ["businessId", "deploymentMode", "trigger"],
   "web.activation.abandon_intent": ["businessId", "deploymentMode", "trigger"],
   "billing.subscription_started": ["businessId", "plan", "billingInterval", "previousPlan"],
+  // A prepaid pack bought, once per payment. days: its length, or never; previousPlan: the plan in
+  // force before it (prepaid for a top-up), or the subscription it replaced or waits beside.
+  "billing.pack_purchased": ["businessId", "pack", "days", "provider", "previousPlan"],
   "voice.call_started": [
     "businessId",
     "deploymentMode",
@@ -547,8 +558,21 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
     "monthKey",
   ],
   // The deployment's daily billing check: deployment-wide, so no business or deployment mode.
-  "ops.billing.profile_drift": ["status", "problemCodes", "problemCount", "polarEnv"],
-  "ops.billing.profile_drift_recovered": ["status", "problemCodes", "problemCount", "polarEnv"],
+  // polarEnv comes too on a Polar deployment, for the dashboards that read it.
+  "ops.billing.profile_drift": ["status", "problemCodes", "problemCount", "provider", "providerEnv"],
+  "ops.billing.profile_drift_recovered": ["status", "problemCodes", "problemCount", "provider", "providerEnv"],
+  // A live Stripe plan still without its overage subscription an hour on: usage past the allowance waits.
+  "ops.billing.overage_missing": ["businessId", "deploymentMode", "provider"],
+  // Stripe ended a live plan's overage subscription after failed payments: usage stops at the allowance.
+  "ops.billing.overage_unpaid": ["businessId", "deploymentMode", "provider"],
+  // The worker's startup check found a billing key of another account: deployment-wide, so no business.
+  "ops.billing.provider_mismatch": ["provider", "providerEnv", "expectedAccount", "foundAccount"],
+  // The daily totals check found Stripe's meters off what was sent, and corrected the open month.
+  "ops.billing.usage_totals_mismatch": ["businessId", "deploymentMode", "provider", "kind"],
+  // The totals check's balance credit is in the catalog's currency and the customer is billed in another, so it won't reach them.
+  "ops.billing.usage_credit_unapplied": ["businessId", "deploymentMode", "provider", "kind"],
+  // A prepaid pack paid after its business subscribed ended at once: the operator refunds the payment it names.
+  "ops.billing.pack_gave_way": ["businessId", "deploymentMode", "provider", "pack", "providerRef"],
   "ops.outbox.backlog_sample": ["deploymentMode", "backlogBucket"],
   "ops.outbox.flush_failed": ["deploymentMode"],
   "ops.service.health_check": [

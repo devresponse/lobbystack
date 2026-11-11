@@ -2,7 +2,8 @@
 // Every value has already passed the checks the matching environment variable
 // gets (branding.ts and brandLinks.ts), so code can use it as it stands.
 
-import type { BillingPlanTier, ResolvedBillingPlan } from "../billingProfile";
+import type { BillingDisplay } from "../billingDisplay";
+import type { BillingAccounts, BillingPlanTier, ResolvedBillingPlan } from "../billingProfile";
 
 /** Settings for hosts whose first label matches a pattern, such as dev01 for "dev*". */
 export type BrandEnvironment = {
@@ -45,7 +46,7 @@ export type BrandDefinition = {
  * apply writes for it, under the columns' own names, with its prices. A
  * deployment shows and enforces these until its first catalog apply.
  */
-export type BrandBillingPlan = Pick<ResolvedBillingPlan, "sold" | "custom" | "overage" | "voice_sec" | "sms_seg" | "calls_out" | "chat_units" | "kb_bytes" | "numbers" | "voice_rate" | "sms_rate" | "call_rate" | "sort" | "prices"> & { code: BillingPlanTier };
+export type BrandBillingPlan = Pick<ResolvedBillingPlan, "sold" | "custom" | "overage" | "voice_sec" | "sms_seg" | "calls_out" | "chat_units" | "kb_bytes" | "numbers" | "receptionists" | "voice_rate" | "sms_rate" | "call_rate" | "sort" | "prices"> & { code: BillingPlanTier };
 
 export type BrandIndex = {
   /**
@@ -56,3 +57,9 @@ export type BrandIndex = {
   /** Apex domain, such as alloplace.com, to brand id. */
   domains: Record<string, string>;
 };
+
+/** A brand's billing.json display section: the plan screens' words and layout, which sell nothing. */
+export type BrandPlanDisplay = BillingDisplay;
+
+/** A brand's billing.json accounts section: rules for each account, such as how many businesses one may own, which the hash leaves out. */
+export type BrandAccountLimits = BillingAccounts;

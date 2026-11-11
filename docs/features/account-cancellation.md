@@ -53,7 +53,7 @@ What it can't stop: webhook deliveries already queued for the business can still
 | This business is already canceled | The link was used |
 | A phone number is still being set up | Try again in a few minutes |
 | A call is in progress | Try again when it ends |
-| A plan purchase started less than an hour ago | Polar's checkout page stays payable for an hour |
+| A plan purchase started less than an hour ago | Polar's checkout page stays payable for an hour, and so does a prepaid pack's until the page expires, even once a plan's start closed the pack's checkout |
 | Too many tries | 5 requests an hour and 10 confirmations an hour per person |
 
 ## Bring a canceled business back

@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { personRequestsFor, toPublicBusinessProfile, type PublicProfileRows } from "./publicProfiles";
+import { pageNumber, personRequestsFor, toPublicBusinessProfile, type PublicProfileReceptionistRow, type PublicProfileRows } from "./publicProfiles";
 
 const now = new Date("2026-10-14T17:00:00Z");
+
+const receptionistRow = (overrides: Partial<PublicProfileReceptionistRow> & Pick<PublicProfileReceptionistRow, "id" | "name">): PublicProfileReceptionistRow => ({
+  description: "", handle: null, isDefault: false, status: "active", listed: true, bookingMode: "instant", transferMode: "on_request", transferNumber: "+16045550199", ...overrides,
+});
+const frontDesk = receptionistRow({ id: "r-front", name: "Front desk", description: "Everything about the clinic.", handle: "front-desk", isDefault: true });
+const kitsilano = receptionistRow({ id: "r-kits", name: "Kitsilano", description: "The Kitsilano office.", handle: "kitsilano" });
+const billing = receptionistRow({ id: "r-billing", name: "Billing", description: "Invoices and insurance.", handle: "billing", listed: false });
+const downtown = receptionistRow({ id: "r-down", name: "Downtown", description: "The downtown office.", handle: "downtown", status: "paused" });
 
 function rows(overrides: Partial<PublicProfileRows> = {}, profile: Partial<PublicProfileRows["profile"]> = {}): PublicProfileRows {
   return {
@@ -14,6 +22,8 @@ function rows(overrides: Partial<PublicProfileRows> = {}, profile: Partial<Publi
       createdAt: now, updatedAt: now, ...profile,
     },
     receptionist: { bookingMode: "instant", transferMode: "on_request", transferNumber: "+16045550199" },
+    receptionists: [frontDesk],
+    pageReceptionistId: null,
     hours: [{ dayOfWeek: 3, openMinutes: 480, closeMinutes: 1020 }],
     closures: [
       { startsAt: new Date("2026-11-11T08:00:00Z"), endsAt: new Date("2026-11-12T08:00:00Z"), reason: "Remembrance Day" },
@@ -33,7 +43,7 @@ describe("the public profile's shape", () => {
   it("has a fixed set of fields", () => {
     expect(Object.keys(toPublicBusinessProfile(rows(), { now })).sort()).toEqual([
       "address", "bookingMode", "category", "closures", "defaultLocale", "description", "email", "hours", "name", "nextOpening",
-      "personRequests", "phone", "published", "services", "showMap", "slug", "timezone", "websiteUrl", "widgetKey",
+      "personRequests", "phone", "published", "receptionist", "receptionists", "services", "showMap", "slug", "timezone", "websiteUrl", "widgetKey",
     ]);
   });
 
@@ -86,5 +96,51 @@ describe("the public profile's shape", () => {
     expect(personRequestsFor("on_urgent", "+16045550199")).toBe("never");
     expect(personRequestsFor("on_request", null)).toBe("never");
     expect(JSON.stringify(toPublicBusinessProfile(rows(), { now }))).not.toContain("6045550199");
+  });
+});
+
+describe("a page's receptionists", () => {
+  const several = { receptionists: [frontDesk, kitsilano, billing, downtown] };
+
+  it("names the default receptionist on the business page, without a handle of its own", () => {
+    const profile = toPublicBusinessProfile(rows(several), { now });
+    expect(profile.receptionist).toEqual({ name: "Front desk", description: "Everything about the clinic.", handle: null, isDefault: true });
+  });
+
+  it("offers the default receptionist first, then the listed, active ones: never an unlisted or paused one", () => {
+    const profile = toPublicBusinessProfile(rows({ receptionists: [kitsilano, billing, downtown, frontDesk] }), { now });
+    expect(profile.receptionists.map((entry) => entry.name)).toEqual(["Front desk", "Kitsilano"]);
+    expect(profile.receptionists[1]).toEqual({ name: "Kitsilano", description: "The Kitsilano office.", handle: "kitsilano", isDefault: false });
+  });
+
+  it("names the page's own receptionist on its page, listed or not", () => {
+    expect(toPublicBusinessProfile(rows({ ...several, pageReceptionistId: "r-kits" }), { now }).receptionist).toMatchObject({ name: "Kitsilano", handle: "kitsilano" });
+    const unlisted = toPublicBusinessProfile(rows({ ...several, pageReceptionistId: "r-billing" }), { now });
+    expect(unlisted.receptionist).toMatchObject({ name: "Billing", handle: "billing" });
+    expect(unlisted.receptionists.map((entry) => entry.name)).toEqual(["Front desk", "Kitsilano"]);
+  });
+
+  it("names nobody for a business without a default receptionist yet", () => {
+    const profile = toPublicBusinessProfile(rows({ receptionists: [] }), { now });
+    expect(profile.receptionist).toBeNull();
+    expect(profile.receptionists).toEqual([]);
+  });
+
+  it("shows the number that rings the page's receptionist, else the default one's, else the business's newest", () => {
+    const numbers = [{ e164: "+16045550101", receptionistId: "r-front" }, { e164: "+16045550102", receptionistId: "r-kits" }, { e164: "+16045550103", receptionistId: "r-down" }];
+    expect(pageNumber(numbers, several.receptionists, null)).toBe("+16045550101");
+    expect(pageNumber(numbers, several.receptionists, "r-kits")).toBe("+16045550102");
+    // Billing has no number of its own, so its page shows the default receptionist's,
+    // even when another receptionist's number is newer.
+    expect(pageNumber(numbers, several.receptionists, "r-billing")).toBe("+16045550101");
+    expect(pageNumber([numbers[1]!, numbers[0]!], several.receptionists, "r-billing")).toBe("+16045550101");
+    // With no number for the default either, the business's newest still reaches someone.
+    expect(pageNumber([numbers[1]!], several.receptionists, "r-billing")).toBe("+16045550102");
+    expect(pageNumber([numbers[1]!], several.receptionists, null)).toBe("+16045550102");
+    // A paused receptionist's number rings the default one, so it is the business page's number too.
+    expect(pageNumber([numbers[2]!, numbers[0]!], several.receptionists, null)).toBe("+16045550103");
+    // A number that names no receptionist rings the default one.
+    expect(pageNumber([{ e164: "+16045550104", receptionistId: null }], several.receptionists, null)).toBe("+16045550104");
+    expect(pageNumber([], several.receptionists, "r-kits")).toBeNull();
   });
 });

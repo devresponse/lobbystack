@@ -1,8 +1,16 @@
-import type { LegalDocument } from "./types"
+import { processorNames } from "./processor"
+import type { LegalDocument, LegalProcessor } from "./types"
+
+// 12.2 says who sells. Polar resells the plans as the merchant of record. With Stripe the operator sells
+// them and Stripe only processes the payment, which the operator's lawyer reviews before live payments.
+const payment: Record<LegalProcessor, string> = {
+  polar: `12.2 <strong>Payment.</strong> Our payment processor, currently Polar, handles checkout and charges. You authorize us and Polar to charge your payment method for subscription fees, usage charges, and taxes when due. Polar's own terms apply to your purchase.`,
+  stripe: `12.2 <strong>Payment.</strong> Our payment processor, currently Stripe, handles checkout and charges for us. We are the seller, and you authorize us to charge your payment method through Stripe for subscription fees, usage charges, and taxes when due. Stripe's own terms apply to how it processes your payment.`,
+}
 
 const support = `<a href="mailto:support@lobbystack.com">support@lobbystack.com</a>`
 
-export const termsEn: LegalDocument = {
+export const termsEn = (processor: LegalProcessor): LegalDocument => ({
   updated: "Last updated: September 26, 2026",
   h1: "Terms of Service",
   intro: `These Terms of Service ("Terms") govern your use of LobbyStack's hosted service, websites, and support. Please read them before you use LobbyStack. They limit our liability, make you responsible for call recording consent and text message compliance, and set out how we handle disputes.`,
@@ -145,7 +153,7 @@ export const termsEn: LegalDocument = {
       nav: "Third parties",
       title: "11. Third-Party Services",
       blocks: [
-        `11.1 The Service relies on Third-Party Services, including OpenAI for AI voice and text, Twilio for phone numbers, calls, and texts, Google Calendar when you connect it, Polar for billing, and Firecrawl when you import your website. The <a href="/privacy/">Privacy Policy</a> lists the providers that process personal information.`,
+        `11.1 The Service relies on Third-Party Services, including OpenAI for AI voice and text, Twilio for phone numbers, calls, and texts, Google Calendar when you connect it, ${processorNames[processor]} for billing, and Firecrawl when you import your website. The <a href="/privacy/">Privacy Policy</a> lists the providers that process personal information.`,
         `11.2 When you connect or use a Third-Party Service, its own terms and policies also apply to you. You are responsible for following them and for any account you hold with that provider.`,
         `11.3 We do not control Third-Party Services and are not responsible for their availability, accuracy, security, pricing, or changes. If a provider changes or stops a service we rely on, we may change or remove the related feature.`,
       ],
@@ -156,12 +164,12 @@ export const termsEn: LegalDocument = {
       title: "12. Plans, fees, and billing",
       blocks: [
         `12.1 <strong>Plans.</strong> We offer a Free plan, paid Starter and Pro plans, and Enterprise plans under an Order. The <a href="/pricing/">pricing page</a>, checkout, or your Order sets out current prices, included usage, and overage rates.`,
-        `12.2 <strong>Payment.</strong> Our payment processor, currently Polar, handles checkout and charges. You authorize us and Polar to charge your payment method for subscription fees, usage charges, and taxes when due. Polar's own terms apply to your purchase.`,
+        payment[processor],
         `12.3 <strong>Auto-renewal.</strong> Paid plans renew automatically at the end of each monthly or annual term at the then-current price, until you cancel. You can cancel from the dashboard or by contacting support. Cancellation takes effect at the end of the current term.`,
         `12.4 <strong>Usage charges.</strong> Paid plans include set amounts of usage, such as voice minutes and alert texts. Usage beyond those amounts is billed as overage at the rates shown on the pricing page or in your Order. Our usage records, and those of our providers, control unless they contain an obvious error.`,
         `12.5 <strong>Spending caps.</strong> On Starter and Pro, you can set an overage spending cap. When you reach it, the Service stops the features that would create more overage charges until the next billing period or until you raise the cap. <strong>This means the AI receptionist may stop answering calls.</strong> A cap limits overage charges only. It does not limit subscription fees or taxes. We are not liable for calls missed because of a cap or because you used up your included usage.`,
         `12.6 <strong>Taxes.</strong> Prices exclude taxes unless stated otherwise. You pay all sales, use, goods and services, value-added, and similar taxes, except taxes on our income.`,
-        `12.7 <strong>Late or failed payment.</strong> If a payment fails, we or Polar may retry it. We may suspend or downgrade your account, release your phone number, or close your account if the amount remains unpaid.`,
+        `12.7 <strong>Late or failed payment.</strong> If a payment fails, we or ${processorNames[processor]} may retry it. We may suspend or downgrade your account, release your phone number, or close your account if the amount remains unpaid.`,
         `12.8 <strong>Refunds.</strong> Fees are non-refundable, including for partial terms, unused usage, downgrades, and cancellations, except where the law requires otherwise or we agree in writing.`,
         `12.9 <strong>Price changes.</strong> We may change prices and included usage. For an active paid plan, we will give you at least 30 days' notice, and the change applies from your next renewal. If you do not agree, cancel before the renewal.`,
         `12.10 <strong>Billing disputes.</strong> You must tell us about a billing dispute within 60 days of the charge. Please contact us before starting a chargeback.`,
@@ -379,4 +387,4 @@ export const termsEn: LegalDocument = {
       ],
     },
   ],
-}
+})

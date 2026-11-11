@@ -25,12 +25,14 @@
     "@ai-sdk/openai-compatible": "^3.0.62",
     "@aws-sdk/client-s3": "^3.1146.0",
     "@aws-sdk/s3-request-presigner": "^3.1146.0",
+    "@lobbystack/contracts": "workspace:*",
     "@lobbystack/shared": "workspace:*",
     "@lobbystack/telemetry": "workspace:*",
     "ai": "^7.0.127",
     "luxon": "^3.7.2",
     "nodemailer": "^10.1.4",
     "standardwebhooks": "^1.1.1",
+    "stripe": "23.1.0",
     "twilio": "^6.1.2"
   },
   "devDependencies": {

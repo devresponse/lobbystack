@@ -5,7 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { widgetKeys as widgetKeysTable, withBusinessTransaction } from "@lobbystack/db";
 import { hashWidgetKey } from "@lobbystack/domain";
-import { defaultWidgetConfig, normalizeWidgetOrigin, widgetConfigSchema, type WidgetAppearance, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
+import { defaultWidgetConfig, isUuid, normalizeWidgetOrigin, widgetConfigSchema, type WidgetAppearance, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
 
 import { getWorkerDatabase } from "./api-helpers";
 import { trustedClientIp } from "./trusted-client-ip";
@@ -121,6 +121,8 @@ type WidgetSessionTokenPayload = {
   visitorId: string;
   origin: string;
   exp: number;
+  /** The receptionist a business or receptionist page named with its signed token; it answers instead of the key's. */
+  receptionistId?: string;
 };
 
 function widgetSessionSecret(): string {
@@ -135,33 +137,96 @@ function encodeTokenPart(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
-function signTokenParts(header: string, payload: string): string {
-  return createHmac("sha256", widgetSessionSecret()).update(`${header}.${payload}`).digest("base64url");
+// Each kind of token signs with its own key, so one can never pass for the other.
+type TokenPurpose = "session" | "receptionist";
+
+function signTokenParts(header: string, payload: string, purpose: TokenPurpose = "session"): string {
+  const key = purpose === "session" ? widgetSessionSecret() : createHmac("sha256", widgetSessionSecret()).update("lobbystack:receptionist-page-token").digest();
+  return createHmac("sha256", key).update(`${header}.${payload}`).digest("base64url");
 }
 
-export function createWidgetSessionToken(input: Omit<WidgetSessionTokenPayload, "v" | "exp"> & { ttlSeconds?: number }): { token: string; expiresAt: string } {
+function signToken(payload: object, purpose: TokenPurpose): string {
   const header = encodeTokenPart({ alg: "HS256", typ: "JWT" });
-  const payload: WidgetSessionTokenPayload = { v: 1, widgetKeyId: input.widgetKeyId, businessId: input.businessId, visitorId: input.visitorId, origin: normalizeOrigin(input.origin), exp: Math.floor(Date.now() / 1000) + (input.ttlSeconds ?? 3600) };
   const encodedPayload = encodeTokenPart(payload);
-  return { token: `${header}.${encodedPayload}.${signTokenParts(header, encodedPayload)}`, expiresAt: new Date(payload.exp * 1000).toISOString() };
+  return `${header}.${encodedPayload}.${signTokenParts(header, encodedPayload, purpose)}`;
 }
 
-export function verifyWidgetSessionToken(token: string): WidgetSessionTokenPayload | null {
+/** The payload of a token signed for the purpose, or null for one that isn't. */
+function verifiedPayload(token: string, purpose: TokenPurpose): Record<string, unknown> | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [header, payload, signature] = parts;
   if (!header || !payload || !signature) return null;
-  const expected = signTokenParts(header, payload);
+  const expected = signTokenParts(header, payload, purpose);
   const expectedBuffer = Buffer.from(expected);
   const signatureBuffer = Buffer.from(signature);
   if (expectedBuffer.length !== signatureBuffer.length || !timingSafeEqual(expectedBuffer, signatureBuffer)) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as WidgetSessionTokenPayload;
-    if (parsed.v !== 1 || typeof parsed.widgetKeyId !== "string" || typeof parsed.businessId !== "string" || typeof parsed.visitorId !== "string" || typeof parsed.origin !== "string" || typeof parsed.exp !== "number" || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
-    return { ...parsed, origin: normalizeOrigin(parsed.origin) };
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
   } catch {
     return null;
   }
+}
+
+export function createWidgetSessionToken(input: Omit<WidgetSessionTokenPayload, "v" | "exp"> & { ttlSeconds?: number }): { token: string; expiresAt: string } {
+  const payload: WidgetSessionTokenPayload = {
+    v: 1,
+    widgetKeyId: input.widgetKeyId,
+    businessId: input.businessId,
+    visitorId: input.visitorId,
+    origin: normalizeOrigin(input.origin),
+    exp: Math.floor(Date.now() / 1000) + (input.ttlSeconds ?? 3600),
+    ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}),
+  };
+  return { token: signToken(payload, "session"), expiresAt: new Date(payload.exp * 1000).toISOString() };
+}
+
+export function verifyWidgetSessionToken(token: string): WidgetSessionTokenPayload | null {
+  const parsed = verifiedPayload(token, "session");
+  if (!parsed) return null;
+  if (parsed.v !== 1 || typeof parsed.widgetKeyId !== "string" || typeof parsed.businessId !== "string" || typeof parsed.visitorId !== "string" || typeof parsed.origin !== "string" || typeof parsed.exp !== "number" || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
+  if (parsed.receptionistId !== undefined && !isUuid(parsed.receptionistId)) return null;
+  return {
+    v: 1,
+    widgetKeyId: parsed.widgetKeyId,
+    businessId: parsed.businessId,
+    visitorId: parsed.visitorId,
+    origin: normalizeOrigin(parsed.origin),
+    exp: parsed.exp,
+    ...(typeof parsed.receptionistId === "string" ? { receptionistId: parsed.receptionistId.toLowerCase() } : {}),
+  };
+}
+
+/**
+ * What a business or receptionist page signs when it renders, for its chat:
+ * the receptionist that answers it, through the page's widget key. The page
+ * hands it to the loader, and the session route checks it, so a visitor can't
+ * reach an unlisted receptionist by editing a request. It names no visitor,
+ * so any visitor of the page may use it.
+ */
+export type ReceptionistPageTokenPayload = { v: 1; purpose: "receptionist_page"; businessId: string; widgetKeyId: string; receptionistId: string; exp: number };
+
+// A page left open renews its chat's session every hour with the same token, so it lasts long past any visit.
+const RECEPTIONIST_PAGE_TOKEN_TTL_SECONDS = 30 * 86_400;
+
+export function createReceptionistPageToken(input: { businessId: string; widgetKeyId: string; receptionistId: string; ttlSeconds?: number }): string {
+  const payload: ReceptionistPageTokenPayload = {
+    v: 1,
+    purpose: "receptionist_page",
+    businessId: input.businessId,
+    widgetKeyId: input.widgetKeyId,
+    receptionistId: input.receptionistId.toLowerCase(),
+    exp: Math.floor(Date.now() / 1000) + (input.ttlSeconds ?? RECEPTIONIST_PAGE_TOKEN_TTL_SECONDS),
+  };
+  return signToken(payload, "receptionist");
+}
+
+export function verifyReceptionistPageToken(token: string): ReceptionistPageTokenPayload | null {
+  const parsed = verifiedPayload(token, "receptionist");
+  if (!parsed) return null;
+  if (parsed.v !== 1 || parsed.purpose !== "receptionist_page" || typeof parsed.businessId !== "string" || typeof parsed.widgetKeyId !== "string" || !isUuid(parsed.receptionistId) || typeof parsed.exp !== "number" || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
+  return { v: 1, purpose: "receptionist_page", businessId: parsed.businessId, widgetKeyId: parsed.widgetKeyId, receptionistId: parsed.receptionistId.toLowerCase(), exp: parsed.exp };
 }
 
 export function serializeWidgetKeyConfig(row: { id: string; status: string | null; label: string | null; allowedOrigins: unknown; config: unknown; lastUsedAt: Date | null; createdAt: Date }): WidgetKeyConfig {

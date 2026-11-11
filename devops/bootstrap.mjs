@@ -57,6 +57,7 @@ const URLS = {
   trunking: process.env.BOOTSTRAP_TRUNKING_URL ?? "https://trunking.twilio.com/v1",
   resend: process.env.BOOTSTRAP_RESEND_URL ?? "https://api.resend.com",
   cloudflare: process.env.BOOTSTRAP_CLOUDFLARE_URL ?? "https://api.cloudflare.com/client/v4",
+  stripe: process.env.BOOTSTRAP_STRIPE_URL ?? "https://api.stripe.com/v1",
 };
 // The BOOTSTRAP_*_URL variables, BOOTSTRAP_APP_URL and BOOTSTRAP_RAILWAY_CLI exist for tests against stand-ins.
 const RAILWAY_CLI = process.env.BOOTSTRAP_RAILWAY_CLI ?? "railway";
@@ -96,7 +97,8 @@ ENVIRONMENT=test
 # repository, or pushes won't redeploy (Railway can build a public repository it can't reach).
 REPO=
 BRANCH=main
-# self_hosted_standard (every business unlimited) or cloud (businesses buy plans through Polar).
+# self_hosted_standard (every business unlimited) or cloud (businesses buy plans, through the
+# provider BILLING_PROVIDER names below).
 DEPLOYMENT_MODE=self_hosted_standard
 # The operator's email: the platform key's owner, and DMARC reports.
 OPERATOR_EMAIL=
@@ -140,9 +142,14 @@ CLOUDFLARE_ACCOUNT_ID=
 # a number you already have in the subaccount (+18445550123), or empty for none.
 TWILIO_TOLLFREE=
 
-# Polar, only with DEPLOYMENT_MODE=cloud: the organization's ID, and sandbox or live.
+# Only with DEPLOYMENT_MODE=cloud: who sells the plans, polar or stripe.
+BILLING_PROVIDER=polar
+# Polar, only with BILLING_PROVIDER=polar: the organization's ID, and sandbox or live.
 POLAR_ORGANIZATION_ID=
 POLAR=sandbox
+# Stripe, only with BILLING_PROVIDER=stripe: sandbox or live. The account is the one the keys
+# belong to (STRIPE_ADMIN_KEY and STRIPE_WORKER_KEY, in the secrets file).
+STRIPE=sandbox
 
 # Turn steps off with no (each then takes its values from the secrets file, or asks you).
 STEP_GITHUB=yes
@@ -155,8 +162,8 @@ STEP_TURNSTILE=yes
 const SECRETS_TEMPLATE = `# Keys for node devops/bootstrap.mjs (see devops/bootstrap.md). It holds secrets:
 # Git ignores it (.env.*), never commit or send it, and delete what you no longer need.
 # Leave a line empty to be asked, or to let the script create that thing. Lines starting
-# with # are ignored. For the tokens in the first group, the Polar tokens and the webhook
-# secret, an environment variable of the same name wins over this file.
+# with # are ignored. For the tokens in the first group, the Polar tokens, the Stripe keys and
+# the webhook secret, an environment variable of the same name wins over this file.
 
 # Tokens the script uses to create things (it never puts them on Railway).
 RAILWAY_API_TOKEN=
@@ -183,6 +190,10 @@ TURNSTILE_SECRET_KEY=
 # Polar, only with DEPLOYMENT_MODE=cloud: the admin's and the worker's tokens (guide 3.7, Polar, step 3).
 POLAR_ADMIN_TOKEN=
 POLAR_WORKER_TOKEN=
+# Stripe, only with BILLING_PROVIDER=stripe: the admin's and the worker's restricted keys, both of
+# the deployment's account (rk_test_... in a sandbox; guide 3.7, "Selling plans (Stripe)", step 3).
+STRIPE_ADMIN_KEY=
+STRIPE_WORKER_KEY=
 # For connect: the incoming-call webhook's signing secret (whsec_...), once it exists.
 OPENAI_WEBHOOK_SECRET=
 
@@ -207,10 +218,10 @@ const REDIS_START = "sh -c 'exec redis-server --bind :: 0.0.0.0 --appendonly yes
 let logPath = null;
 let verbose = false;
 const hiddenValues = new Set();
-const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|whsec_[A-Za-z0-9+/=_-]{16,}|re_[A-Za-z0-9_]{16,}|lsp_[A-Za-z0-9_]{16,}|polar_[a-z]{2,4}_[A-Za-z0-9_]{16,})/g;
+const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9+/=_-]{16,}|re_[A-Za-z0-9_]{16,}|lsp_[A-Za-z0-9_]{16,}|polar_[a-z]{2,4}_[A-Za-z0-9_]{16,})/g;
 const SECRET_KEYS = new Set(["OPENAI_API_KEY", "TWILIO_AUTH_TOKEN", "SMTP_PASSWORD", "TURNSTILE_SECRET_KEY", "POLAR_ADMIN_TOKEN",
   "POLAR_WORKER_TOKEN", "OPENAI_WEBHOOK_SECRET", "RAILWAY_API_TOKEN", "OPENAI_ADMIN_KEY", "TWILIO_MAIN_AUTH_TOKEN", "RESEND_ADMIN_KEY",
-  "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY"]);
+  "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY", "STRIPE_ADMIN_KEY", "STRIPE_WORKER_KEY", "STRIPE_API_KEY"]);
 
 function hide(value) {
   if (typeof value === "string" && value.length >= 8) hiddenValues.add(value);
@@ -461,7 +472,7 @@ function loadRun(file, { log = true } = {}) {
     settings[key] = value;
   });
   // A setting left empty, such as BRANCH=, takes its default rather than an empty value.
-  const defaults = { ENVIRONMENT: "test", BRANCH: "main", DEPLOYMENT_MODE: "self_hosted_standard", BUCKET_REGION: "iad", RESEND_REGION: "us-east-1", POLAR: "sandbox" };
+  const defaults = { ENVIRONMENT: "test", BRANCH: "main", DEPLOYMENT_MODE: "self_hosted_standard", BUCKET_REGION: "iad", RESEND_REGION: "us-east-1", BILLING_PROVIDER: "polar", POLAR: "sandbox", STRIPE: "sandbox" };
   const s = { ...defaults, ...Object.fromEntries(Object.entries(settings).filter(([key, value]) => value !== "" || !(key in defaults))) };
   for (const step of ["GITHUB", "OPENAI", "TWILIO", "RESEND", "TURNSTILE"]) {
     const word = String(s[`STEP_${step}`] || "yes").toLowerCase();
@@ -475,7 +486,10 @@ function loadRun(file, { log = true } = {}) {
   if (!["test", "production"].includes(s.ENVIRONMENT)) problems.push("ENVIRONMENT is test or production");
   if (!["sjc", "iad", "ams", "sin"].includes(s.BUCKET_REGION)) problems.push("BUCKET_REGION is sjc, iad, ams or sin");
   if (!["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"].includes(s.RESEND_REGION)) problems.push("RESEND_REGION is us-east-1, eu-west-1, sa-east-1 or ap-northeast-1");
+  if (!["polar", "stripe"].includes(s.BILLING_PROVIDER)) problems.push("BILLING_PROVIDER is polar or stripe");
   if (!["sandbox", "live"].includes(s.POLAR)) problems.push("POLAR is sandbox or live");
+  if (!["sandbox", "live"].includes(s.STRIPE)) problems.push("STRIPE is sandbox or live");
+  if (s.BILLING_PROVIDER === "stripe" && s.DEPLOYMENT_MODE !== "cloud") problems.push("BILLING_PROVIDER=stripe is only for DEPLOYMENT_MODE=cloud");
   if (s.REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.REPO)) problems.push("REPO is owner/name");
   if (s.TEMPLATE_REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.TEMPLATE_REPO)) problems.push("TEMPLATE_REPO is owner/name");
   // APP_BASE_URL is the dashboard's own address, and CUSTOM_HOST its older name: both come down to the host name.
@@ -502,7 +516,7 @@ function loadRun(file, { log = true } = {}) {
   if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
   else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
   if (s.CLOUDFLARE_ACCOUNT_ID && !/^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ACCOUNT_ID)) problems.push("CLOUDFLARE_ACCOUNT_ID is the 32-character Account ID from the zone's Overview page");
-  if (s.DEPLOYMENT_MODE === "cloud" && !s.POLAR_ORGANIZATION_ID) problems.push("POLAR_ORGANIZATION_ID is empty, and DEPLOYMENT_MODE is cloud");
+  if (s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "polar" && !s.POLAR_ORGANIZATION_ID) problems.push("POLAR_ORGANIZATION_ID is empty, and DEPLOYMENT_MODE is cloud with BILLING_PROVIDER=polar");
   if (s.TWILIO_TOLLFREE && s.TWILIO_TOLLFREE !== "buy" && !/^\+\d{8,15}$/.test(s.TWILIO_TOLLFREE)) problems.push("TWILIO_TOLLFREE is buy, a number such as +18445550123, or empty");
   if (s.TWILIO_TOLLFREE && s.DEPLOYMENT_MODE !== "cloud") problems.push("TWILIO_TOLLFREE is only for DEPLOYMENT_MODE=cloud");
   if (problems.length) throw new Error(`${file} needs fixing:\n  ${problems.join("\n  ")}`);
@@ -591,6 +605,8 @@ const CONFIG_ALIASES = {
   TURNSTILE_SITE_KEY: [["", "NEXT_PUBLIC_TURNSTILE_SITE_KEY"]],
   POLAR_ADMIN_TOKEN: [["admin", "POLAR_ACCESS_TOKEN"]],
   POLAR_WORKER_TOKEN: [["worker", "POLAR_ACCESS_TOKEN"]],
+  STRIPE_ADMIN_KEY: [["admin", "STRIPE_API_KEY"]],
+  STRIPE_WORKER_KEY: [["worker", "STRIPE_API_KEY"]],
 };
 
 /** A value from the secrets file only, or undefined. */
@@ -721,7 +737,11 @@ let byHandSkipped = false;
 function openByHand(run, command) {
   const open = Object.entries(run.state.byHand ?? {}).filter(([id]) => !run.state.done[id]);
   if (!open.length) return "";
-  return `\n\nStill to do by hand (--yes didn't wait for these, so they aren't recorded as done):\n${open.map(([id, title]) => `  - ${id}: ${title}`).join("\n")}\nDo them, then run ${command} again without --yes and press Enter at each.`;
+  // Each step is finished by the command that runs it, which isn't always the one that just ended: up's steps,
+  // such as openai.limits, are still open when connect ends, and running connect again wouldn't close them.
+  const owner = (id) => (command === "template" ? "template" : id.startsWith("connect.") ? "connect" : "up");
+  const commands = ["up", "connect", "template"].filter((name) => open.some(([id]) => owner(id) === name));
+  return `\n\nStill to do by hand (--yes didn't wait for these, so they aren't recorded as done):\n${open.map(([id, title]) => `  - ${id}: ${title}`).join("\n")}\nDo them, then run ${commands.join(", then ")} again without --yes and press Enter at each.`;
 }
 
 let currentStep = null;
@@ -961,7 +981,10 @@ async function up(run) {
   await twilioSteps(run);
   console.log("\nEmail");
   await resendSteps(run);
-  if (s.DEPLOYMENT_MODE === "cloud") {
+  if (s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "stripe") {
+    console.log("\nStripe");
+    await stripeKeysStep(run);
+  } else if (s.DEPLOYMENT_MODE === "cloud") {
     console.log("\nPolar");
     await step(run, "polar.tokens", "Polar's two platform tokens (Polar makes tokens only in its dashboard)", async () => {
       if (!given("POLAR_ADMIN_TOKEN") || !given("POLAR_WORKER_TOKEN")) await byHand([
@@ -995,6 +1018,63 @@ async function up(run) {
     const first = railwayHost && railwayHost !== host ? ` (https://${railwayHost} answers first, while DNS spreads and Railway issues the certificate)` : "";
     console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}, run:\n  node devops/bootstrap.mjs connect ${run.file}${openByHand(run, "up")}`);
   }
+}
+
+// ---------------------------------------------------------------- Stripe
+
+/** Why a Stripe key can't serve a deployment of this mode (sandbox or live), or null when it can. */
+function stripeKeyProblem(name, key, mode) {
+  const match = /^([rs])k_(test|live)_[A-Za-z0-9]+$/.exec(key);
+  if (!match) return `${name} isn't a Stripe key: a restricted key starts with rk_test_ in a sandbox, or rk_live_`;
+  if ((match[2] === "live") !== (mode === "live")) return `${name} is a ${match[2] === "live" ? "live" : "test"} key, and STRIPE is ${mode}: make it in Stripe's ${mode === "live" ? "live mode" : "sandbox"}`;
+  return null;
+}
+
+/** The ID of the Stripe account a key belongs to, which Stripe tells the key's holder. */
+async function stripeAccountOf(key) {
+  const account = await http("Stripe", `${URLS.stripe}/account`, { headers: { Authorization: `Bearer ${key}` } });
+  if (!/^acct_\w+$/.test(account?.id ?? "")) throw Object.assign(new Error("Stripe didn't say which account the key belongs to"), { service: "Stripe" });
+  return account.id;
+}
+
+/** Whether brands/<brand>/billing.json has the stripe block that pnpm billing --stripe needs; undefined when the file can't be read. */
+function brandHasStripeBlock(brand) {
+  try {
+    const file = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "brands", brand, "billing.json"), "utf8"));
+    return Boolean(file?.stripe);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The admin's and the worker's restricted keys, as the Polar tokens are on a Polar deployment: each of the deployment's
+ * mode, and both of one account, which becomes STRIPE_ACCOUNT_ID. Stripe makes restricted keys only in its Dashboard.
+ */
+async function stripeKeysStep(run) {
+  const s = run.settings;
+  await step(run, "stripe.keys", "Stripe's two restricted keys, both of one account and of the deployment's mode (Stripe makes them only in its Dashboard)", async () => {
+    if (!given("STRIPE_ADMIN_KEY") || !given("STRIPE_WORKER_KEY")) await byHand([
+      `In the deployment's Stripe ${s.STRIPE === "live" ? "account, in live mode" : "sandbox"}, Developers > API keys > Create restricted key, make two keys (guide 3.7, "Selling plans (Stripe)", step 3):`,
+      `"${baseName(s)} admin", which opens the billing portal and reads customers and PaymentIntents (to find the business of a disputed`,
+      `prepaid pack payment), and "${baseName(s)} worker", which makes customers,`,
+      "Checkout Sessions, subscriptions, subscription schedules, invoices and meter events, and reads the catalog for its daily check.",
+      "docs/providers/stripe.md lists each key's permissions.",
+    ]);
+    const keys = {};
+    for (const [name, question] of [["STRIPE_ADMIN_KEY", "The admin's Stripe restricted key"], ["STRIPE_WORKER_KEY", "The worker's Stripe restricted key"]]) {
+      const key = await secret(name, question);
+      const problem = stripeKeyProblem(name, key, s.STRIPE);
+      if (problem) throw new Error(problem);
+      if (key.startsWith("sk_")) console.log(`  ${name} is a secret key, which can do anything in the account: a restricted key with only the permissions it needs is safer.`);
+      keys[name] = key;
+    }
+    const admin = await stripeAccountOf(keys.STRIPE_ADMIN_KEY);
+    const worker = await stripeAccountOf(keys.STRIPE_WORKER_KEY);
+    if (admin !== worker) throw new Error(`the admin's key belongs to Stripe account ${admin}, and the worker's to ${worker}: make both in the deployment's own account`);
+    console.log(`  both keys belong to Stripe account ${admin}, in its ${s.STRIPE === "live" ? "live mode" : "sandbox"}`);
+    return { ...keys, STRIPE_ACCOUNT_ID: admin };
+  });
 }
 
 // The workflows a deployment needs. CodeQL and the landing link check are optional on a fork.
@@ -1602,7 +1682,8 @@ async function railwaySteps(run) {
 // ---------------------------------------------------------------- template
 
 // Variables that differ for each deployment, or depend on its settings, stay out of the template.
-const NOT_IN_TEMPLATE = new Set(["DEPLOYMENT_MODE", "BRAND_PRESET", "EMAIL_FROM", "POLAR_ORGANIZATION_ID", "POLAR_API_BASE_URL", "TWILIO_ALERT_SMS_FROM", "REQUIRE_EMAIL_VERIFICATION"]);
+const NOT_IN_TEMPLATE = new Set(["DEPLOYMENT_MODE", "BRAND_PRESET", "EMAIL_FROM", "POLAR_ORGANIZATION_ID", "POLAR_API_BASE_URL", "TWILIO_ALERT_SMS_FROM", "REQUIRE_EMAIL_VERIFICATION",
+  "BILLING_PROVIDER", "STRIPE_ACCOUNT_ID"]);
 
 /**
  * Builds a Railway project that holds only the layout (services, volumes, bucket, settings,
@@ -1847,6 +1928,9 @@ function variableSections(run) {
   const s = run.settings;
   const x = (key) => v(run, key);
   const cloud = s.DEPLOYMENT_MODE === "cloud";
+  // A deployment that sells plans does so through one provider, and gets only that provider's variables.
+  const polar = cloud && s.BILLING_PROVIDER !== "stripe";
+  const stripe = cloud && s.BILLING_PROVIDER === "stripe";
   const production = s.ENVIRONMENT === "production";
   const role = (name, variable) => `postgresql://${name}:\${{Postgres.${variable}}}@\${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack`;
   return [
@@ -1870,7 +1954,8 @@ function variableSections(run) {
       STORAGE_PROVIDER: "s3", S3_BUCKET: "${{Bucket.BUCKET}}", S3_ENDPOINT: "${{Bucket.ENDPOINT}}", S3_REGION: "${{Bucket.REGION}}",
       S3_ACCESS_KEY_ID: "${{Bucket.ACCESS_KEY_ID}}", S3_SECRET_ACCESS_KEY: "${{Bucket.SECRET_ACCESS_KEY}}", S3_FORCE_PATH_STYLE: "false",
       ...(cloud && x("TWILIO_ALERT_SMS_FROM") ? { TWILIO_ALERT_SMS_FROM: x("TWILIO_ALERT_SMS_FROM") } : {}),
-      ...(cloud ? { POLAR_ORGANIZATION_ID: s.POLAR_ORGANIZATION_ID, ...(s.POLAR === "sandbox" ? { POLAR_API_BASE_URL: "https://sandbox-api.polar.sh" } : {}) } : {}),
+      ...(polar ? { POLAR_ORGANIZATION_ID: s.POLAR_ORGANIZATION_ID, ...(s.POLAR === "sandbox" ? { POLAR_API_BASE_URL: "https://sandbox-api.polar.sh" } : {}) } : {}),
+      ...(stripe ? { BILLING_PROVIDER: "stripe", STRIPE_ACCOUNT_ID: x("STRIPE_ACCOUNT_ID") } : {}),
     }],
     ["admin", {
       RAILWAY_DOCKERFILE_PATH: "Dockerfile.admin", PORT: "3000", HOSTNAME: "::",
@@ -1889,7 +1974,7 @@ function variableSections(run) {
       TWILIO_ACCOUNT_SID: x("TWILIO_ACCOUNT_SID"), TWILIO_AUTH_TOKEN: x("TWILIO_AUTH_TOKEN"),
       TWILIO_SMS_WEBHOOK_URL: "${{APP_BASE_URL}}/api/webhooks/twilio/sms", TWILIO_STATUS_CALLBACK_URL: "${{APP_BASE_URL}}/api/webhooks/twilio/status",
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: x("TURNSTILE_SITE_KEY"), TURNSTILE_SECRET_KEY: x("TURNSTILE_SECRET_KEY"),
-      ...(cloud ? { POLAR_ACCESS_TOKEN: x("POLAR_ADMIN_TOKEN") } : {}),
+      ...(polar ? { POLAR_ACCESS_TOKEN: x("POLAR_ADMIN_TOKEN") } : {}), ...(stripe ? { STRIPE_API_KEY: x("STRIPE_ADMIN_KEY") } : {}),
     }],
     ["worker", {
       RAILWAY_DOCKERFILE_PATH: "Dockerfile.worker", PORT: "3002", RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "1860",
@@ -1899,7 +1984,7 @@ function variableSections(run) {
       OPENAI_API_KEY: "${{admin.OPENAI_API_KEY}}", TWILIO_ACCOUNT_SID: "${{admin.TWILIO_ACCOUNT_SID}}", TWILIO_AUTH_TOKEN: "${{admin.TWILIO_AUTH_TOKEN}}",
       TWILIO_STATUS_CALLBACK_URL: "${{admin.TWILIO_STATUS_CALLBACK_URL}}", TWILIO_SIP_TRUNK_SID: x("TWILIO_SIP_TRUNK_SID"),
       SMTP_HOST: "smtp.resend.com", SMTP_PORT: "587", SMTP_SECURE: "false", SMTP_USERNAME: "resend", SMTP_PASSWORD: x("SMTP_PASSWORD"),
-      EMAIL_FROM: s.EMAIL_FROM, ...(cloud ? { POLAR_ACCESS_TOKEN: x("POLAR_WORKER_TOKEN") } : {}),
+      EMAIL_FROM: s.EMAIL_FROM, ...(polar ? { POLAR_ACCESS_TOKEN: x("POLAR_WORKER_TOKEN") } : {}), ...(stripe ? { STRIPE_API_KEY: x("STRIPE_WORKER_KEY") } : {}),
     }],
   ];
 }
@@ -1935,6 +2020,10 @@ async function secretsStep(run) {
 
 async function variableSteps(run) {
   await secretsStep(run);
+  // A dry run names each service's variables, never a value.
+  if (dryRun && !run.state.done.variables) {
+    for (const [service, variables] of Object.entries(perService(variableSections(run)))) console.log(`    ${service}: ${Object.keys(variables).join(", ")}`);
+  }
   await step(run, "variables", "Every service's variables (guide Appendix A)", async () => {
     const sections = variableSections(run);
     const missing = sections.flatMap(([section, variables]) => Object.entries(variables).filter(([, value]) => !value).map(([key]) => `${key} (${section})`));
@@ -2260,7 +2349,29 @@ async function connect(run) {
   const keyFile = v(run, "PLATFORM_KEY_FILE") && fs.existsSync(v(run, "PLATFORM_KEY_FILE")) ? v(run, "PLATFORM_KEY_FILE") : null;
   const login = `pnpm lobbystack login --url https://${host} --key-stdin --profile ${profile}`;
   const cloud = s.DEPLOYMENT_MODE === "cloud";
-  const billing = (command) => `pnpm billing ${command} --brand ${s.BRAND} --polar ${s.POLAR} --profile ${profile}`;
+  const stripe = s.BILLING_PROVIDER === "stripe";
+  const billing = (command) => `pnpm billing ${command} --brand ${s.BRAND} ${stripe ? `--stripe ${s.STRIPE}` : `--polar ${s.POLAR}`} --profile ${profile}`;
+  const billingFile = `.env.${stripe ? "stripe" : "polar"}-${profile}`;
+  const noStripeBlock = stripe && brandHasStripeBlock(s.BRAND) === false ? `
+     First, brands/${s.BRAND}/billing.json needs a stripe block, which it hasn't yet: add one in a pull request
+     (brands/README.md), and deploy it.` : "";
+  const billingSteps = stripe ? `
+  3. Stripe (guide 3.7, "Selling plans (Stripe)", steps 6 to 8), with a setup key (STRIPE_SETUP_KEY) made in
+     the same Stripe ${s.STRIPE === "live" ? "account's live mode" : "sandbox"} as the deployment's keys:${noStripeBlock}
+     ${billing("plan")}
+     ${billing("apply")} --railway-file ${billingFile}
+     In ${billingFile}, change lobbystack-admin to admin in the [...] lines, then run
+     node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token (the project's
+     Settings > Tokens). Delete the file once the admin has redeployed. Set what plan lists for Stripe's
+     Dashboard, which Stripe's API can't, then check:
+     ${billing("verify")}     (should end "Result: in sync (exit 0)")` : `
+  3. Polar (guide 3.7, "Selling plans (Polar)", steps 6 to 8), with a setup token made in Polar's ${s.POLAR} organization:
+     ${billing("plan")}
+     ${billing("apply")} --railway-file ${billingFile}
+     In ${billingFile}, change lobbystack-admin to admin in the [...] lines, then run
+     node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token (the project's
+     Settings > Tokens). Delete the file once the admin has redeployed, then check:
+     ${billing("verify")}     (should end "Result: in sync (exit 0)")`;
   console.log(`
 Done by the script. What's left needs you (guide 4.8, 4.9 and 6.1):
   1. Once the admin's new deployment is Active, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL},
@@ -2268,14 +2379,7 @@ Done by the script. What's left needs you (guide 4.8, 4.9 and 6.1):
   2. Sign the command line in with the operator key${keyFile ? ` (in ${keyFile})` : ""}:
      ${keyFile ? `PowerShell: (Get-Content "${keyFile}" -Raw | ConvertFrom-Json).key | ${login}` : login}
      ${keyFile ? `Or run ${login}, paste` : "Paste"} the key, press Enter, then Ctrl+D (in PowerShell or cmd: Ctrl+Z, then Enter).${keyFile ? `
-     Then move the key to the password manager and delete the file.` : ""}${cloud ? `
-  3. Polar (guide 3.7, "Selling plans (Polar)", steps 6 to 8), with a setup token made in Polar's ${s.POLAR} organization:
-     ${billing("plan")}
-     ${billing("apply")} --railway-file .env.polar-${profile}
-     In .env.polar-${profile}, change lobbystack-admin to admin in the [...] lines, then run
-     node devops/railway-vars.mjs .env.polar-${profile}, which asks for a Railway project token (the project's
-     Settings > Tokens). Delete the file once the admin has redeployed, then check:
-     ${billing("verify")}     (should end "Result: in sync (exit 0)")` : ""}
+     Then move the key to the password manager and delete the file.` : ""}${cloud ? billingSteps : ""}
   ${cloud ? 4 : 3}. Set up the first business and buy its number (guide 6.3 and 6.4), then call it: the receptionist answers.
      If it rings with no answer, check that the webhook is in the OpenAI project ${openaiProject}.
   ${cloud ? 5 : 4}. Optional, in Git Bash: pnpm smoke:production (guide 4.9) with this deployment's values on the same line,
@@ -2318,6 +2422,7 @@ const PASSED_ON = {
   "resend.manual": ["variables"],
   "turnstile": ["variables"],
   "polar.tokens": ["variables"],
+  "stripe.keys": ["variables"],
   "twilio.tollfree": ["variables"],
   "secrets": ["variables"],
   "connect.webhook": ["connect.variables"],
@@ -2370,6 +2475,8 @@ const PROVIDERS = {
     needs: "a Full access key (a Sending access key can't create domains or keys)" },
   Cloudflare: { token: "CLOUDFLARE_API_TOKEN", make: "https://dash.cloudflare.com/profile/api-tokens", status: "https://www.cloudflarestatus.com",
     needs: "Zone > DNS > Edit on the zone, and Account > Turnstile > Edit on the account" },
+  Stripe: { token: "STRIPE_ADMIN_KEY or STRIPE_WORKER_KEY", make: "https://dashboard.stripe.com/apikeys (Create restricted key)", status: "https://status.stripe.com",
+    needs: "a restricted key of the deployment's own account and mode, with the permissions docs/providers/stripe.md lists" },
 };
 
 /** Suggestions for an error, from what failed and how. */
@@ -2539,7 +2646,34 @@ async function doctor(run) {
       return results.join(", ");
     });
   }
-  if (s.DEPLOYMENT_MODE === "cloud") {
+  if (s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "stripe") {
+    // Each key's mode, then its account, which the two must share.
+    const accounts = {};
+    for (const name of ["STRIPE_ADMIN_KEY", "STRIPE_WORKER_KEY"]) {
+      const key = process.env[name]?.trim() || fromFile(name, { quiet: true }) || (run.state.done["stripe.keys"] ? v(run, name) : undefined);
+      if (!key) {
+        note(`Stripe: ${name} isn't set, so up will ask for it`);
+        continue;
+      }
+      hide(key);
+      const problem = stripeKeyProblem(name, key, s.STRIPE);
+      if (problem) {
+        fix(`Stripe: ${problem}`);
+        continue;
+      }
+      try {
+        accounts[name] = await stripeAccountOf(key);
+        ok(`Stripe: ${name} works (account ${accounts[name]}${key.startsWith("sk_") ? "; a secret key, where a restricted key with only its permissions is safer" : ""})`);
+      } catch (error) {
+        fix(`Stripe: ${name} was refused: ${error.message}`);
+        for (const tip of hints(error)) console.log(`         ${tip}`);
+      }
+    }
+    if (accounts.STRIPE_ADMIN_KEY && accounts.STRIPE_WORKER_KEY && accounts.STRIPE_ADMIN_KEY !== accounts.STRIPE_WORKER_KEY) {
+      fix(`Stripe: the admin's key belongs to account ${accounts.STRIPE_ADMIN_KEY}, and the worker's to ${accounts.STRIPE_WORKER_KEY}: make both in the deployment's own account`);
+    }
+    if (brandHasStripeBlock(s.BRAND) === false) note(`Stripe: brands/${s.BRAND}/billing.json has no stripe block yet, which pnpm billing --stripe needs after the deploy: add one in a pull request (brands/README.md)`);
+  } else if (s.DEPLOYMENT_MODE === "cloud") {
     for (const name of ["POLAR_ADMIN_TOKEN", "POLAR_WORKER_TOKEN"]) {
       const set = process.env[name]?.trim() || fromFile(name, { quiet: true });
       (set ? ok : note)(`Polar: ${name} ${set ? "is set" : "isn't set, so up will ask for it"}`);

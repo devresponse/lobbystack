@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { attributeBusiness, createBusiness, deleteBusiness, ianaTimeZone, listUserBusinesses, updateBusiness, type BusinessDeletion } from "@lobbystack/domain";
+import { attributeBusiness, createBusiness, deleteBusiness, ianaTimeZone, listUserBusinessesWithAllowance, updateBusiness, type BusinessDeletion } from "@lobbystack/domain";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { asApiResponse, businessIdFromRequest, getAppDatabase, jsonError, readJson, requireApiSession, requireOperatorBusiness } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const session = await requireApiSession(request);
-    return NextResponse.json({ businesses: await listUserBusinesses(getAppDatabase().db, session.user.id) });
+    // Beside Create business, the sidebar shows how many businesses the account owns, counted as
+    // the limit counts them, the most it may own on its plans (billing.json's accounts section),
+    // and whether a higher plan on one of them would allow more.
+    return NextResponse.json(await listUserBusinessesWithAllowance(getAppDatabase().db, session.user.id));
   } catch (error) {
     return asApiResponse(error);
   }

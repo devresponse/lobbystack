@@ -3,8 +3,9 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { DomainContext } from "./context";
 import type { KnowledgePassage } from "../knowledgeRanking";
 
-const mocks = vi.hoisted(() => ({ transaction: vi.fn() }));
+const mocks = vi.hoisted(() => ({ transaction: vi.fn(), productEvent: vi.fn(async (..._args: unknown[]) => undefined) }));
 vi.mock("@lobbystack/db", async original => ({ ...(await original<typeof import("@lobbystack/db")>()), withBusinessTransaction: mocks.transaction }));
+vi.mock("./productEvents", async original => ({ ...(await original<typeof import("./productEvents")>()), recordProductEventBestEffort: mocks.productEvent }));
 import { chunkText, searchKnowledgeEvidence, traceKnowledgeSearch } from "./knowledge";
 import { searchKnowledgeForApi } from "./publicApi/knowledgeSearch";
 
@@ -16,10 +17,14 @@ let lexical: KnowledgePassage[];
 let semantic: KnowledgePassage[];
 let current: KnowledgePassage[];
 let failAll: boolean;
+// The keyword half's query runs out of its 2 seconds.
+let keywordTimesOut: boolean;
+const statementTimeout = () => Object.assign(new Error("Failed query: canceling statement due to statement timeout"), { cause: Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }) });
 
 beforeEach(() => {
   statements.length = 0;
-  lexical = [primary]; semantic = [primary]; current = [primary, adjacent]; failAll = false;
+  lexical = [primary]; semantic = [primary]; current = [primary, adjacent]; failAll = false; keywordTimesOut = false;
+  mocks.productEvent.mockClear();
   mocks.transaction.mockImplementation(async (_db, actor, callback) => {
     expect(actor.businessId).toBe("tenant-a");
     return callback({ execute: async (statement: Parameters<typeof dialect.sqlToQuery>[0]) => {
@@ -30,6 +35,7 @@ beforeEach(() => {
       expect(query.params).toContain("tenant-a");
       expect(query.sql).toContain("d.active = true AND d.status = 'indexed'");
       if (query.sql.includes("BETWEEN")) return { rows: current };
+      if (keywordTimesOut && query.sql.includes("search_words @@")) throw statementTimeout();
       return { rows: query.sql.includes("<=>") ? semantic : lexical };
     } });
   });
@@ -65,6 +71,8 @@ describe("knowledge evidence", () => {
     expect(match.content.slice(match.focusStart, match.focusEnd)).toBe(current.find(row => row.chunkId === match.chunkId)!.content);
     expect(result.matches[0]?.content).toContain("MNGT 10407");
     expect(statements.filter(value => value.includes("LIMIT 12"))).toHaveLength(2);
+    // Each read turns query compiling off: the audience filter's estimates would trigger it.
+    expect(statements.filter(value => value === "SET LOCAL jit = off").length).toBe(statements.filter(value => value.startsWith("SET LOCAL statement_timeout")).length);
   });
   it("marks where the ranked chunk sits between its neighbors", async () => {
     const before = { ...primary, chunkId: "before", sequence: 0, content: "Earlier section about mailboxes." };
@@ -87,6 +95,36 @@ describe("knowledge evidence", () => {
     failAll = true;
     expect(await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "management" })).toMatchObject({ matches: [], outcome: "unavailable", failure: "search_unavailable" });
   });
+  it("matches the stored words, and picks the closest passages before reading their text", async () => {
+    await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "management" });
+    const keyword = statements.find(value => value.includes("to_tsquery") && value.includes("LIMIT 12"))!;
+    // Migration 0145's words, checked instead of rebuilt for every passage.
+    expect(keyword).toContain("c.search_words @@ to_tsquery('simple', $");
+    expect(keyword).not.toContain("to_tsvector");
+    const meaning = statements.find(value => value.includes("<=>"))!;
+    // The 12 closest from ids and embeddings alone, then their text.
+    expect(meaning).toContain("nearest AS (SELECT c.id FROM knowledge_chunks c");
+    expect(meaning).not.toContain("MATERIALIZED");
+  });
+  it("records which half ran out of its 2 seconds", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    keywordTimesOut = true;
+    // The meaning half still answers, so the search finds something.
+    expect(await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "management" })).toMatchObject({ mode: "hybrid", outcome: "found" });
+    const lines = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(lines).toContainEqual(expect.objectContaining({ message: "knowledge.search_timed_out", businessId: "tenant-a", keyword: "timed_out", meaning: "ok" }));
+    expect(mocks.productEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "knowledge.search_executed", properties: expect.objectContaining({ keywordHalf: "timed_out", meaningHalf: "ok", outcome: "found" }) }));
+    // Neither half out of time: no line, and both halves answered.
+    warn.mockClear();
+    keywordTimesOut = false;
+    await searchKnowledgeEvidence(context(vi.fn().mockRejectedValue(new Error("provider down"))), { businessId: "tenant-a", query: "management" });
+    expect(warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes("knowledge.search_timed_out"))).toEqual([]);
+    expect(mocks.productEvent).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ properties: expect.objectContaining({ keywordHalf: "ok", meaningHalf: "failed" }) }));
+    // Only words a search leaves out: nothing to match.
+    await searchKnowledgeEvidence({ db: {} as never }, { businessId: "tenant-a", query: "are you on" });
+    expect(mocks.productEvent).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ properties: expect.objectContaining({ keywordHalf: "skipped", meaningHalf: "skipped" }) }));
+    warn.mockRestore();
+  });
   it("returns empty when both indexes have no matches", async () => {
     lexical = []; semantic = [];
     expect(await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "unknown" })).toMatchObject({ matches: [], outcome: "empty" });
@@ -99,10 +137,11 @@ describe("knowledge search trace", () => {
   let distances: Array<{ chunkId: string; distance: number }>;
   let failReads: boolean;
   let failCurrent: boolean;
+  let counted: { sql: string; params: unknown[] } | undefined;
   const traced = (embed = vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]])): DomainContext => ({ db: {} as never, embeddings: { fingerprint: "fp-1", embed } });
 
   beforeEach(() => {
-    scores = []; distances = []; failReads = false; failCurrent = false;
+    scores = []; distances = []; failReads = false; failCurrent = false; counted = undefined;
     mocks.transaction.mockImplementation(async (_db, actor, callback) => {
       expect(actor).toMatchObject({ businessId: "tenant-a", actorType: "worker" });
       return callback({ execute: async (statement: Parameters<typeof dialect.sqlToQuery>[0]) => {
@@ -113,7 +152,7 @@ describe("knowledge search trace", () => {
         // The reads the trace adds after the search.
         if (query.sql.includes('AS "allTerms"')) { if (failReads) throw new Error("database unavailable"); return { rows: scores }; }
         if (query.sql.includes("AS distance")) { if (failReads) throw new Error("database unavailable"); return { rows: distances }; }
-        if (query.sql.includes("count(DISTINCT")) { if (failReads) throw new Error("database unavailable"); return { rows: [{ sources: "2", chunks: "9", embeddedChunks: "7" }] }; }
+        if (query.sql.includes("count(DISTINCT")) { counted = { sql: query.sql, params: query.params }; if (failReads) throw new Error("database unavailable"); return { rows: [{ sources: "2", chunks: "9", embeddedChunks: "7" }] }; }
         // The search's own statements.
         if (query.sql.includes("BETWEEN")) { if (failCurrent) throw new Error("database unavailable"); return { rows: current }; }
         return { rows: query.sql.includes("<=>") ? semantic : lexical };
@@ -205,6 +244,18 @@ describe("knowledge search trace", () => {
     expect(trace.candidates.map(row => row.fate)).toEqual(["unverified"]);
   });
 
+  it("counts only the sources and chunks the receptionist answering may use", async () => {
+    const receptionistId = "6f1c2b9e-8a4d-4f3e-9b7a-2c5d8e1f0a3b";
+    const { trace } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "management", receptionistId });
+    expect(trace.index).toEqual({ sources: 2, chunks: 9, embeddedChunks: 7 });
+    // The search's own reader and audience filters, so the count matches what the search can find.
+    expect(counted?.sql).toContain("WITH reader AS (");
+    expect(counted?.sql).toContain("knowledge_document_receptionists");
+    expect(counted?.sql).toContain("d.active = true AND d.status = 'indexed'");
+    expect(counted?.params).toContain(receptionistId);
+    expect(statements.filter(value => value.includes("WITH reader AS (")).length).toBeGreaterThan(1);
+  });
+
   it("skips the keyword search for a query of only common words", async () => {
     const { trace } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "what is the" });
     expect(trace).toMatchObject({ terms: [], lexicalQuery: null, lexical: { status: "skipped", error: null, candidates: [] }, semantic: { status: "ok" } });
@@ -242,6 +293,46 @@ describe("v1 knowledge search", () => {
     expect(callAnswer).toHaveBeenCalledWith("management parking", result.receptionist_result);
     expect(result.trace.candidates).toEqual([expect.objectContaining({ chunk_id: "chunk", rank: 1, content: "Management parking", fate: "evidence" })]);
     expect(result.trace).toMatchObject({ terms: ["management", "parking"], revision_check: "ok", lexical: { status: "ok", candidates: [{ rank: 1, chunk_id: "chunk" }] }, semantic: { status: "ok", embedding_dimensions: 2, candidates: [{ rank: 1, chunk_id: "chunk" }] } });
+  });
+
+  it("answers as the default receptionist, with only the text entries it may use", async () => {
+    lexical = []; semantic = [];
+    const each = { status: "active", listed: true, description: null, locale: null, greeting: null, voiceInstructions: null, smsInstructions: null, chatInstructions: null, bookingPolicy: null, bookingMode: "request", transferPolicy: null };
+    const shared = {
+      ...snapshot,
+      knowledgeSnippets: [{ id: "parking", title: "Parking", content: "Parking is free after 6 pm.", priority: 0 }, { id: "hours", title: "Hours", content: "Parking lot hours: open daily.", priority: 0 }],
+      receptionists: [{ ...each, id: "front", name: "Front desk", isDefault: true, snippetIds: ["hours"] }, { ...each, id: "valet", name: "Valet", isDefault: false, snippetIds: ["parking", "hours"] }],
+    };
+    const withReceptionists: DomainContext = { ...context(), snapshotCache: { get: vi.fn(async () => shared as never), set: vi.fn(async () => undefined) } };
+    const result = await searchKnowledgeForApi(withReceptionists, caller, { query: "parking" }, { callAnswer: () => undefined });
+    // Only the valet may use the parking entry, so the default's result leaves it out.
+    expect(result.receptionist_result).toEqual({ outcome: "found", matches: [{ title: "Hours", text: "Parking lot hours: open daily." }] });
+    // The documents come from the same reader: the default, as no receptionist is named.
+    expect(statements.some(value => value.includes("WITH reader AS ("))).toBe(true);
+  });
+
+  it("answers as the receptionist named, with the text entries it may use, and says which one it ran as", async () => {
+    lexical = []; semantic = [];
+    const front = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e51";
+    const valet = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e52";
+    const each = { status: "active", listed: true, description: "", locale: null, greeting: null, voiceInstructions: null, smsInstructions: null, chatInstructions: null, bookingPolicy: null, bookingMode: "request", transferPolicy: null };
+    const shared = {
+      ...snapshot,
+      knowledgeSnippets: [{ id: "parking", title: "Parking", content: "Parking is free after 6 pm.", priority: 0 }, { id: "hours", title: "Hours", content: "Parking lot hours: open daily.", priority: 0 }],
+      receptionists: [{ ...each, id: front, name: "Front desk", isDefault: true, snippetIds: ["hours"] }, { ...each, id: valet, name: "Valet", isDefault: false, snippetIds: ["parking", "hours"] }],
+    };
+    const withReceptionists: DomainContext = { ...context(), snapshotCache: { get: vi.fn(async () => shared as never), set: vi.fn(async () => undefined) } };
+    const result = await searchKnowledgeForApi(withReceptionists, caller, { query: "parking", receptionist_id: valet }, { callAnswer: () => undefined });
+    expect(result.receptionist_id).toBe(valet);
+    // An id in capitals names the same receptionist.
+    expect((await searchKnowledgeForApi(withReceptionists, caller, { query: "parking", receptionist_id: valet.toUpperCase() }, { callAnswer: () => undefined })).receptionist_id).toBe(valet);
+    expect(result.receptionist_result.matches.map((match) => match.title)).toEqual(["Parking", "Hours"]);
+    // The documents come from the valet's reader.
+    expect(statements.some((value) => value.includes("WITH reader AS ("))).toBe(true);
+    // Without a name, the default answers, without the valet's entry.
+    const fallback = await searchKnowledgeForApi(withReceptionists, caller, { query: "parking" }, { callAnswer: () => undefined });
+    expect(fallback.receptionist_id).toBe(front);
+    expect(fallback.receptionist_result.matches.map((match) => match.title)).toEqual(["Hours"]);
   });
 
   it("keeps the business's entries when the search finds nothing, and says when a call would get nothing", async () => {

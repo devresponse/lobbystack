@@ -16,7 +16,8 @@ vi.mock("@/lib/api-helpers", () => ({
     return callback({ businessId: "business", session: { user: { id: "user" } }, tx: { select: () => ({ from: () => ({ where: () => ({ limit: async () => fixture.account ? [fixture.account] : [] }) }) }) } });
   },
 }));
-vi.mock("@lobbystack/providers", () => ({ PolarBillingProvider: class { createCustomerPortalSession = fixture.portal; } }));
+// The deployment's billing provider, as the factory builds it from POLAR_ACCESS_TOKEN and POLAR_ORGANIZATION_ID.
+vi.mock("@lobbystack/providers", () => ({ createBillingProvider: (env: Record<string, string | undefined>) => env.POLAR_ACCESS_TOKEN && env.POLAR_ORGANIZATION_ID ? { createPortalSession: fixture.portal } : undefined }));
 vi.mock("@/lib/billing-limit", () => ({ assertBillingCallAllowed: fixture.limit }));
 
 import { POST } from "./route";
@@ -37,7 +38,7 @@ describe("billing portal route", () => {
     const response = await POST(new Request("http://localhost:3000/api/billing/portal?businessId=business", { method: "POST" }));
     expect(response.status).toBe(200);
     expect(fixture.transaction).toHaveBeenCalledWith({ minimumRole: "business_admin" });
-    expect(fixture.portal).toHaveBeenCalledWith({ externalCustomerId: "tenant-billing-key", returnUrl: "http://localhost:3000/settings/plan" });
+    expect(fixture.portal).toHaveBeenCalledWith({ customer: { id: "customer", billingKey: "tenant-billing-key" }, returnUrl: "http://localhost:3000/settings/plan", locale: null });
     expect(fixture.limit).toHaveBeenCalledWith("portal", { businessId: "business", userId: "user" });
   });
   it("asks Polar for no session over the limit", async () => {

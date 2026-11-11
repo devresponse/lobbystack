@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getOrCreateWidgetConversation: vi.fn(),
   loadWidgetChatView: vi.fn(),
   registerWidgetVisitor: vi.fn(),
+  loadWidgetReceptionist: vi.fn(),
 }));
 
 vi.mock("@/lib/widget-access", () => ({
@@ -16,6 +17,7 @@ vi.mock("@/lib/widget-access", () => ({
 }));
 vi.mock("@/lib/widget-policy", () => ({ enforceWidgetRateLimits: async () => ({ allowed: true }) }));
 vi.mock("@/lib/widget-keys", () => ({ requestIpHash: () => "ip-hash" }));
+vi.mock("@/lib/widget-receptionist", () => ({ loadWidgetReceptionist: mocks.loadWidgetReceptionist }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
 vi.mock("@/lib/api-helpers", () => ({ asApiResponse: (error: unknown) => { throw error; } }));
 vi.mock("@lobbystack/domain", () => ({
@@ -34,6 +36,7 @@ beforeEach(() => {
   mocks.getOrCreateWidgetConversation.mockReset().mockResolvedValue({ conversationId, automationState: "ai_active" });
   mocks.loadWidgetChatView.mockReset();
   mocks.registerWidgetVisitor.mockReset();
+  mocks.loadWidgetReceptionist.mockReset().mockResolvedValue({ snapshot: null, receptionistId: undefined });
 });
 
 describe("GET /api/widget/history", () => {
@@ -121,5 +124,19 @@ describe("GET /api/widget/history", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.registerWidgetVisitor).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/widget/history with several receptionists", () => {
+  it("looks for the visitor's chat with the receptionist the widget answers as", async () => {
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    mocks.loadWidgetReceptionist.mockResolvedValue({ snapshot: {}, receptionistId: kitsilano });
+    mocks.findCurrentWidgetChat.mockResolvedValue(null);
+
+    const response = await GET(new Request("http://localhost/api/widget/history", { headers: { authorization: "Bearer token" } }));
+
+    expect(await response.json()).toEqual({ messages: [] });
+    expect(mocks.findCurrentWidgetChat).toHaveBeenCalledWith({}, { businessId, widgetVisitorId: visitorId, receptionistId: kitsilano });
+    expect(mocks.loadWidgetChatView).not.toHaveBeenCalled();
   });
 });

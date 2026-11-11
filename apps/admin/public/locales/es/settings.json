@@ -62,7 +62,9 @@
       "requirePhone": "Exigir teléfono",
       "showBeforeChat": "Pedir antes del chat",
       "liveChat": "Permitir que los visitantes chateen con su equipo",
-      "liveChatHint": "Durante el horario de atención, un visitante que pide hablar con una persona recibe a alguien de su equipo en el chat. Su equipo recibe una alerta y responde desde Mensajes. Si nadie responde en 3 minutos, la recepcionista ofrece tomar un mensaje."
+      "liveChatHint": "Durante el horario de atención, un visitante que pide hablar con una persona recibe a alguien de su equipo en el chat. Su equipo recibe una alerta y responde desde Mensajes. Si nadie responde en 3 minutos, la recepcionista ofrece tomar un mensaje.",
+      "receptionist": "Recepcionista",
+      "receptionistHint": "Los chats y llamadas de este widget van a la recepcionista que elija. Mientras esté en pausa, los atiende {{name}}."
     },
     "positions": {
       "bottomRight": "Abajo a la derecha",
@@ -115,6 +117,9 @@
       "title": "Su página",
       "description": "{{business}} tiene una página en esta dirección, con su horario, servicios, ubicación y chat.",
       "label": "Publicada",
+      "labelOff": "No publicada",
+      "publishAction": "Publicar página",
+      "unpublishAction": "Despublicar página",
       "on": "Cualquier persona con el enlace puede ver la página, y los buscadores pueden mostrarla.",
       "off": "Solo su equipo puede ver la página hasta que la publique.",
       "since": "Publicada el {{date}}",
@@ -181,9 +186,88 @@
     "title": "Código QR",
     "loading": "Cargando su código QR…",
     "unavailable": "Su código QR no se puede cargar en este momento.",
-    "card": {
-      "title": "Su código QR",
-      "description": "Póngalo en su puerta, mostrador o mesas. Quien lo escanee llegará a su perfil público."
+    "links": {
+      "title": "Sus códigos QR",
+      "description": "Póngalos en su puerta, mostrador o mesas. Cada código abre su página con la recepcionista que elija.",
+      "descriptionOne": "Póngalos en su puerta, mostrador o mesas. Cada código abre su página y cuenta sus propios escaneos.",
+      "new": "Nuevo enlace",
+      "searchLabel": "Buscar enlaces",
+      "search_one": "Buscar en {{total}} enlace",
+      "search_many": "Buscar en {{total}} enlaces",
+      "search_other": "Buscar en {{total}} enlaces",
+      "columns": {
+        "link": "Enlace",
+        "answeredBy": "Atendido por",
+        "opens": "Abre",
+        "scans": "Escaneos, 30 días",
+        "actions": "Acciones"
+      },
+      "businessPage": "Página del negocio",
+      "notCounted": "No se cuentan",
+      "untitled": "Enlace {{code}}",
+      "paused": "En pausa",
+      "answersNow": "Por ahora atiende {{name}}",
+      "archivedReceptionist": "Recepcionista archivada",
+      "loading": "Cargando sus enlaces QR…",
+      "unavailable": "Sus enlaces QR no se pueden cargar en este momento.",
+      "retry": "Reintentar",
+      "empty": "Aún no hay enlaces. Cree uno para cada cartel y así verá cuál se escanea.",
+      "emptyViewer": "Aún no hay enlaces. Un propietario o administrador puede crear uno para cada cartel.",
+      "noMatches": "Ningún enlace coincide.",
+      "range": "{{from}}–{{to}} de {{total}}",
+      "previous": "Página anterior",
+      "next": "Página siguiente",
+      "menuNote": "El menú de cada fila cambia su recepcionista, lo pausa o copia su dirección.",
+      "menuNoteOne": "El menú de cada fila le cambia el nombre, lo pausa o copia su dirección.",
+      "menuNoteViewer": "El menú de cada fila copia su dirección.",
+      "routingNote": "Un enlace en pausa abre la página de su negocio, y un enlace cuya recepcionista está en pausa o archivada lo atiende {{name}}.",
+      "routingNoteOne": "Un enlace en pausa abre la página de su negocio.",
+      "menu": {
+        "label": "Más opciones para {{name}}",
+        "edit": "Editar",
+        "copy": "Copiar dirección",
+        "pause": "Pausar",
+        "resume": "Reanudar"
+      },
+      "toast": {
+        "created": "El enlace «{{name}}» está listo. Su cartel está más abajo.",
+        "saved": "Enlace «{{name}}» guardado.",
+        "paused": "El enlace «{{name}}» está en pausa. Su cartel abre la página de su negocio hasta que lo reanude.",
+        "resumed": "El enlace «{{name}}» vuelve a estar activo.",
+        "copied": "Dirección copiada.",
+        "copyFailed": "No se pudo copiar la dirección. Es {{url}}"
+      },
+      "dialog": {
+        "newTitle": "Nuevo enlace",
+        "editTitle": "Editar enlace",
+        "newDescription": "Cree un código QR que abra su página, donde atiende una recepcionista.",
+        "newDescriptionOne": "Cree un código QR que abra su página.",
+        "editDescription": "Su código no cambia, así que los carteles que ya imprimió siguen funcionando.",
+        "label": "Etiqueta",
+        "labelPlaceholder": "Escaparate",
+        "labelHint": "Solo su equipo la ve, aquí y en el recuento de escaneos.",
+        "labelMissing": "Ponga una etiqueta al enlace, por ejemplo dónde está su cartel.",
+        "answeredBy": "Atendido por",
+        "answeredByHint": "Los escaneos abren la página de la recepcionista que elija. Mientras esté en pausa, atiende {{name}}.",
+        "address": "Dirección",
+        "addressNewHint": "Se crea para usted al crear el enlace.",
+        "addressHint": "El código nunca cambia.",
+        "cancel": "Cancelar",
+        "create": "Crear enlace",
+        "save": "Guardar"
+      },
+      "errors": {
+        "limit": "Su negocio tiene {{max}} enlaces QR, el máximo que puede tener. Cambie uno en pausa.",
+        "codeUnavailable": "No se pudo crear un código nuevo en este momento. Inténtelo de nuevo.",
+        "invalidLabel": "Las etiquetas pueden tener hasta {{max}} caracteres."
+      }
+    },
+    "signCard": {
+      "pageTitle": "Cartel de la página del negocio",
+      "linkTitle": "Cartel «{{name}}»",
+      "description": "Imprímalo o descargue el código para su propio diseño.",
+      "link": "Enlace",
+      "linkPaused": "Este enlace está en pausa: su cartel abre la página de su negocio hasta que lo reanude."
     },
     "opens": "Abre",
     "open": "Abrir página",
@@ -238,9 +322,28 @@
     "noCode": "Esta dirección no se puede convertir en un código QR.",
     "sign": {
       "defaultMessage": "¿Preguntas?\nPregúntenos cuando quiera.",
+      "defaultMessageFor": "¿Preguntas?\nPregunte a {{name}}.",
       "scanChat": "Escanee para chatear con nosotros",
+      "scanChatWith": "Escanee para chatear con {{name}}",
       "scanPage": "Escanee para ver nuestra página",
       "answeredBy": "Atendido por <brand>{{appName}}</brand>"
+    },
+    "chart": {
+      "title": "Escaneos por día",
+      "summary_one": "{{total}} escaneo, {{range}}.",
+      "summary_many": "{{total}} escaneos, {{range}}.",
+      "summary_other": "{{total}} escaneos, {{range}}.",
+      "busiest_one": "Día con más escaneos: {{day}}, {{scans}} escaneo.",
+      "busiest_many": "Día con más escaneos: {{day}}, {{scans}} escaneos.",
+      "busiest_other": "Día con más escaneos: {{day}}, {{scans}} escaneos.",
+      "none": "Sin escaneos, {{range}}.",
+      "day_one": "{{day}}: {{scans}} escaneo",
+      "day_many": "{{day}}: {{scans}} escaneos",
+      "day_other": "{{day}}: {{scans}} escaneos",
+      "tableCaption": "Escaneos por día, {{range}}",
+      "dayColumn": "Día",
+      "scansColumn": "Escaneos",
+      "notCounted": "Los escaneos del cartel de la página del negocio no se cuentan. Cree un enlace para un cartel y así contará sus escaneos."
     }
   },
   "billing": {
@@ -249,7 +352,12 @@
       "checkoutFailed": "No se pudo abrir el pago.",
       "portalFailed": "No se pudo abrir el portal del cliente.",
       "rateLimited": "Demasiados intentos. Inténtelo más tarde.",
-      "planChanged": "Su plan está cambiando. Aparecerá aquí en cuanto Polar lo confirme.",
+      "planChanged": "Su plan está cambiando. Aparecerá aquí en cuanto {{provider}} lo confirme.",
+      "planCanceled": "Su plan no se renovará. Sigue activo hasta el final del período pagado.",
+      "planResumed": "Su plan seguirá renovándose.",
+      "planKept": "Mantiene su plan actual.",
+      "planActionFailed": "No se pudo completar. Inténtelo de nuevo en un minuto.",
+      "resumeFirst": "Su suscripción está programada para terminar, así que su plan no puede cambiar. Reactive primero su plan en esta página.",
       "planChangeFailed": "No se pudo cambiar su plan.",
       "planChangeRefused": {
         "payment_failed": "No se pudo cobrar el nuevo plan a su método de pago guardado. Actualícelo en Gestionar suscripción y vuelva a intentarlo.",
@@ -277,7 +385,8 @@
       "pro": "Pro",
       "proCard": "Plan Pro",
       "enterprise": "Enterprise",
-      "enterpriseCard": "Plan Enterprise"
+      "enterpriseCard": "Plan Enterprise",
+      "prepaidCard": "Prepago"
     },
     "subscriptionStates": {
       "active": "Activa",
@@ -303,7 +412,16 @@
       "changingPlan": "Cambiando de plan...",
       "openingPortal": "Abriendo el portal...",
       "viewInvoice": "Ver factura",
+      "completePayment": "Completar el pago",
+      "cancelPlan": "Cancelar el plan",
+      "resume": "Reanudar",
+      "keepPlan": "Mantener mi plan",
       "retry": "Reintentar"
+    },
+    "cancelDialog": {
+      "title": "¿Cancelar su plan?",
+      "description": "Su plan sigue activo hasta el {{date}} y luego pasa a Free. El uso que supere lo incluido hasta entonces se sigue cobrando.",
+      "back": "Volver"
     },
     "currentPlan": {
       "title": "Su plan",
@@ -319,6 +437,10 @@
       "billingContactMissing": "Aún no hay un contacto de facturación registrado.",
       "subscriptionStateTitle": "Suscripción",
       "billingPeriod": "El período actual se reinicia el {{resetAt}}",
+      "planEndsOn": "Su plan termina el {{date}}.",
+      "planChangesOn": "Su plan cambia a {{plan}} el {{date}}.",
+      "overageNote": "El uso que supera lo incluido se cobra en una factura aparte el día 1 de cada mes.",
+      "completePaymentHint": "Su banco pide confirmar el pago del nuevo plan.",
       "selfHostNotice": "Los espacios de trabajo autoalojados usan sus propios proveedores. No se aplican límites de uso ni facturación.",
       "enterpriseNotice": "El uso y los límites se rigen por su acuerdo empresarial.",
       "proNotice": "El uso incluido se reinicia cada mes. El uso adicional se factura con la tarifa de excedente.",
@@ -330,6 +452,9 @@
       "includedVoice_one": "{{count}} minuto de voz",
       "includedVoice_many": "{{count}} minutos de voz",
       "includedVoice_other": "{{count}} minutos de voz",
+      "includedReceptionists_one": "{{count}} recepcionista",
+      "includedReceptionists_many": "{{count}} recepcionistas",
+      "includedReceptionists_other": "{{count}} recepcionistas",
       "includedSms_one": "{{count}} alerta por SMS",
       "includedSms_many": "{{count}} alertas por SMS",
       "includedSms_other": "{{count}} alertas por SMS",
@@ -338,15 +463,24 @@
       "includedOutbound_other": "{{count}} intentos de transferencia",
       "includedStorageCustom": "Almacenamiento personalizado",
       "includedVoiceCustom": "Minutos de voz personalizados",
+      "includedReceptionistsCustom": "Recepcionistas personalizadas",
       "includedSmsCustom": "SMS personalizados",
       "includedOutboundCustom": "Transferencias personalizadas",
-      "includedStorage": "{{amount}} {{unit}} de almacenamiento"
+      "includedStorage": "{{amount}} {{unit}} de almacenamiento",
+      "prepaidMinutesLeft_one": "minuto restante",
+      "prepaidMinutesLeft_many": "de minutos restantes",
+      "prepaidMinutesLeft_other": "minutos restantes",
+      "prepaidUntil": "Hasta el {{date}}",
+      "prepaidNeverEnds": "Sin fecha de fin"
     },
     "upgradeDialog": {
       "title": "Cambiar de plan",
       "description": "Elija el plan que mejor se adapte a su equipo.",
       "changesSubscription": "Ya tiene una suscripción, así que se modificará en lugar de abrir un pago. Cualquier diferencia se cobra a su método de pago guardado.",
       "leavesPromo": "Cambiar de plan pone fin a {{plan}} y a su descuento.",
+      "endsPacks_one": "Empezar un plan pone fin a sus paquetes de minutos y al {{minutes}} minuto que les queda.",
+      "endsPacks_many": "Empezar un plan pone fin a sus paquetes de minutos y a los {{minutes}} de minutos que les quedan.",
+      "endsPacks_other": "Empezar un plan pone fin a sus paquetes de minutos y a los {{minutes}} minutos que les quedan.",
       "enterpriseSubject": "Plan Enterprise",
       "billingIntervalLabel": "Periodicidad de facturación",
       "annualDiscount": "Ahorre un {{percent}} %",
@@ -376,6 +510,9 @@
             "voiceMinutes_one": "{{count}} minuto de voz en el navegador incluido",
             "voiceMinutes_many": "{{count}} minutos de voz en el navegador incluidos",
             "voiceMinutes_other": "{{count}} minutos de voz en el navegador incluidos",
+            "receptionists_one": "{{count}} recepcionista",
+            "receptionists_many": "{{count}} recepcionistas",
+            "receptionists_other": "{{count}} recepcionistas",
             "allFeatures": "Sin número de teléfono",
             "support": "Soporte de la comunidad"
           }
@@ -390,6 +527,9 @@
             "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "receptionists_one": "{{count}} recepcionista",
+            "receptionists_many": "{{count}} recepcionistas",
+            "receptionists_other": "{{count}} recepcionistas",
             "dedicatedNumber_one": "{{count}} número del negocio dedicado",
             "dedicatedNumber_many": "{{count}} números del negocio dedicados",
             "dedicatedNumber_other": "{{count}} números del negocio dedicados",
@@ -409,6 +549,9 @@
             "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "receptionists_one": "{{count}} recepcionista",
+            "receptionists_many": "{{count}} recepcionistas",
+            "receptionists_other": "{{count}} recepcionistas",
             "dedicatedNumber_one": "{{count}} número del negocio dedicado",
             "dedicatedNumber_many": "{{count}} números del negocio dedicados",
             "dedicatedNumber_other": "{{count}} números del negocio dedicados",
@@ -426,6 +569,7 @@
           },
           "highlights": {
             "phoneNumbers": "Varios números dedicados",
+            "customReceptionists": "Número de recepcionistas a medida",
             "selfHosted": "Opción de implementación autoalojada",
             "support": "Soporte dedicado para la implementación"
           }
@@ -457,6 +601,8 @@
       "unlimited": "Ilimitado",
       "blocked": "Límite alcanzado",
       "blockedDescription": "Límite alcanzado: el uso queda en pausa hasta el próximo período.",
+      "packDescription": "Sus minutos vienen de sus paquetes de minutos y duran hasta que termina cada paquete.",
+      "packBlockedDescription": "No quedan minutos. Las llamadas dan tono de ocupado hasta que compre otro paquete de minutos.",
       "overageCount": "{{count}} por encima del límite",
       "overageCost": "≈ {{amount}} en excedentes",
       "noOverages": "Sin excedentes: el uso tiene un tope fijo en el volumen incluido.",
@@ -492,9 +638,61 @@
       "saveFailed": "No se pudo guardar el límite mensual de excedentes.",
       "removeFailed": "No se pudo quitar el límite mensual de excedentes."
     },
+    "packs": {
+      "title": "Minutos prepagados",
+      "description": "Compre minutos por adelantado, sin factura mensual. Las llamadas los usan hasta que se agotan o termina el paquete.",
+      "minutesLabel": "Minutos",
+      "lengthLabel": "Duración",
+      "minutesOption_one": "{{minutes}} minuto",
+      "minutesOption_many": "{{minutes}} de minutos",
+      "minutesOption_other": "{{minutes}} minutos",
+      "daysOption_one": "{{count}} día",
+      "daysOption_many": "{{count}} de días",
+      "daysOption_other": "{{count}} días",
+      "neverEndsOption": "Sin fecha de fin",
+      "priceSuffix": "pago único",
+      "left_one": "{{left}} minuto restante de {{total}}",
+      "left_many": "{{left}} de minutos restantes de {{total}}",
+      "left_other": "{{left}} minutos restantes de {{total}}",
+      "endsOn": "Termina el {{date}}",
+      "neverEnds": "Sin fecha de fin",
+      "frozen": "En espera mientras haya una disputa de pago abierta",
+      "buy": "Comprar paquete de minutos",
+      "buyMore": "Comprar más",
+      "unavailable": "Los paquetes de minutos no se pueden comprar aquí por ahora.",
+      "refusals": {
+        "managed_plan": "Su plan se gestiona en su nombre, así que aquí no se pueden comprar paquetes de minutos.",
+        "pack_not_sold_on_plan": "Los paquetes de minutos no se venden con su plan.",
+        "pack_yearly_plan": "Tiene un plan anual. Prográmelo para que termine en la renovación y compre un paquete de minutos cuando termine.",
+        "pack_past_due": "Hay un pago vencido de su plan. Páguelo en Gestionar suscripción y luego compre un paquete de minutos.",
+        "plan_change_payment_waiting": "Su banco aún espera que confirme un pago de su plan. Complételo primero.",
+        "pack_not_on_sale": "Este paquete de minutos no está a la venta por ahora.",
+        "plan_change_pending": "Otra compra para este negocio sigue en curso. Inténtelo de nuevo en un minuto."
+      },
+      "endsPlanDialog": {
+        "title": "¿Terminar su plan {{plan}}?",
+        "planEnds": "Pagar este paquete de minutos termina su plan {{plan}} de inmediato.",
+        "noRefund": "El resto de su mes, hasta el {{date}}, no se reembolsa. El uso hasta ahora se sigue cobrando.",
+        "noRefundUndated": "El resto de su mes no se reembolsa. El uso hasta ahora se sigue cobrando.",
+        "promoLost": "Su código promocional se pierde para siempre. No se puede volver a usar.",
+        "receptionistsPaused": "Todas sus recepcionistas menos una quedan en pausa.",
+        "packStarts": "Los minutos y las asignaciones del paquete empiezan de inmediato.",
+        "confirm": "Terminar y comprar"
+      },
+      "toast": {
+        "added": "Se agregó su paquete de minutos.",
+        "failed": "Su pago no se completó, así que no se agregó ningún paquete de minutos.",
+        "processing": "Su pago se está procesando. Su paquete de minutos aparecerá aquí en cuanto llegue.",
+        "checkoutFailed": "No se pudo abrir la página de pago. Inténtelo de nuevo.",
+        "checkoutExpired": "La página de pago caducó. Inténtelo de nuevo.",
+        "gaveWay": "Un plan comenzó antes de que llegara este pago, así que no se agregó ningún paquete de minutos. Se le reembolsará el pago.",
+        "refundedFirst": "Este pago se reembolsó o se anuló por un contracargo, así que no se agregó ningún paquete de minutos.",
+        "closedForPlan": "Comenzó un plan para este negocio, así que se cerró el pago de este paquete de minutos."
+      }
+    },
     "transactions": {
       "title": "Historial de transacciones",
-      "description": "Pedidos, reembolsos y cargos de configuración sincronizados desde Polar.",
+      "description": "Pedidos, reembolsos y cargos de configuración sincronizados desde {{provider}}.",
       "empty": "Aún no hay transacciones.",
       "columns": {
         "date": "Fecha",
@@ -512,7 +710,9 @@
         "partially_refunded": "Reembolso parcial",
         "succeeded": "Completado",
         "failed": "Fallido",
-        "canceled": "Cancelado"
+        "canceled": "Cancelado",
+        "void": "Anulado",
+        "uncollectible": "Impagado"
       },
       "kindLabels": {
         "order": "Pedido",
@@ -584,7 +784,10 @@
     "reclaim": {
       "title": "Este número se liberará el {{date}}",
       "description": "Los planes gratuitos no incluyen un número del negocio dedicado. Cambie a Starter o Pro antes de esa fecha para conservar {{number}}.",
-      "upgradeCta": "Mejorar el plan para conservar este número"
+      "upgradeCta": "Mejorar el plan para conservar este número",
+      "packDescription": "Su último paquete de minutos terminó. Compre un paquete de minutos o elija un plan antes de esa fecha para conservar {{number}}.",
+      "buyPackCta": "Comprar un paquete de minutos",
+      "choosePlanCta": "Elegir un plan"
     },
     "requiresPaidPlan": {
       "title": "Los números dedicados están en los planes de pago",
@@ -639,6 +842,13 @@
     "toast": {
       "changed": "Número de teléfono cambiado. Su número anterior seguirá activo durante 30 días.",
       "added": "Número de teléfono agregado."
+    },
+    "answeredBy": {
+      "label": "Atendido por",
+      "hint": "Las llamadas y los mensajes de texto a este número van a la recepcionista que elija. Mientras esté en pausa, los atiende {{name}}.",
+      "saved": "Las llamadas y los mensajes de texto a {{number}} ahora van a {{name}}.",
+      "otherNumbers": "Otros números",
+      "otherNumbersDescription": "Las llamadas y los mensajes de texto de cada número van a la recepcionista que elija."
     }
   },
   "appearance": {
@@ -1434,6 +1644,7 @@
       "appointments_read": "Leer citas y horarios disponibles",
       "appointments_write": "Reservar, cancelar y reprogramar citas",
       "messages_read": "Leer los mensajes que tomó la recepcionista",
+      "knowledge_read": "Leer las preguntas que la recepcionista no supo responder",
       "knowledge_write": "Agregar entradas de conocimiento y preguntas frecuentes"
     }
   }

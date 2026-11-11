@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { polarProductLinks, type BillingCatalogSnapshot } from "@lobbystack/domain";
-import { normalizePolarEvent } from "./polar-event";
+import { PolarWebhook } from "@lobbystack/providers/polar/events";
+
+// The Polar webhook's normalizer with the domain's price links, as the route runs it.
+const webhook = new PolarWebhook("unused");
+function normalizePolarEvent(type: string, data: Record<string, unknown>, links = polarProductLinks({ plans: [], prices: [] }, process.env)) {
+  return webhook.normalize({ id: "delivery-1", type, createdAt: new Date(), livemode: null, object: data }, links);
+}
 
 const variables = (env: Record<string, string>) => polarProductLinks({ plans: [], prices: [] }, env);
 
@@ -14,7 +20,7 @@ describe("Polar payload normalization", () => {
   });
   it("preserves prefixed legacy references without treating them as UUIDs", () => {
     const result = normalizePolarEvent("subscription.active", { customer: { external_id: "business:legacy-customer" } });
-    expect(result.businessId).toBeUndefined();
+    expect(result.businessId).toBeNull();
     expect(result.businessReference).toBe("legacy-customer");
   });
   it("resolves a migrated customer from its metadata rather than its stale external id", () => {
@@ -54,11 +60,11 @@ describe("Polar payload normalization", () => {
   it("names no other business when the checkout's and the customer's agree, and skips metadata that isn't an ID", () => {
     const agreeing = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", metadata: { lobbystack_business: businessId }, customer: { external_id: `business:${businessId}` } });
     expect(agreeing.businessId).toBe(businessId);
-    expect(agreeing).not.toHaveProperty("customerBusinessId");
+    expect(agreeing.customerBusinessId).toBeNull();
 
     const garbled = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", metadata: { lobbystack_business: "not-an-id" }, customer: { external_id: `business:${businessId}` } });
     expect(garbled.businessId).toBe(businessId);
-    expect(garbled).not.toHaveProperty("customerBusinessId");
+    expect(garbled.customerBusinessId).toBeNull();
   });
 
   it("still reports a legacy reference when no field carries a usable id", () => {
@@ -69,8 +75,17 @@ describe("Polar payload normalization", () => {
       },
     });
 
-    expect(result.businessId).toBeUndefined();
+    expect(result.businessId).toBeNull();
     expect(result.businessReference).toBe("kh797h57jgpq83314s4fj8ptmn866hbk");
+  });
+
+  it("adds what the event is about and its product as the price beside today's fields, which stay as they were", () => {
+    const subscription = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", product_id: "pro_month", customer: { id: "cust_1", external_id: `business:${businessId}` } }, variables({ POLAR_PRO_MONTHLY_PRODUCT_ID: "pro_month" }));
+    expect(subscription.kind).toBe("subscription");
+    expect(subscription.payload).toMatchObject({ productId: "pro_month", priceRef: "pro_month", kind: "subscription", plan: "pro" });
+    expect(subscription.fields).toMatchObject({ priceRef: "pro_month", billingKey: `business:${businessId}`, customerId: "cust_1", subscriptionId: "sub_1", plan: "pro" });
+    expect(normalizePolarEvent("order.paid", { id: "order_1", customer: { external_id: `business:${businessId}` } }).kind).toBe("payment");
+    expect(normalizePolarEvent("customer.updated", { id: "cust_1", external_id: `business:${businessId}` }).kind).toBe("other");
   });
 
   it("uses subscription status rather than a paid order's status", () => {
@@ -79,7 +94,7 @@ describe("Polar payload normalization", () => {
   });
 
   it("names the plan of a product the catalog links, a retired price's too, before the product variables", () => {
-    const price = (plan: string, tier: string, period: "monthly" | "annual", polarId: string, retired = false) => ({ plan, tier, status: "active", period, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired });
+    const price = (plan: string, tier: string, period: "monthly" | "annual", polarId: string, retired = false) => ({ plan, tier, status: "active", period, currency: "cad", cents: 1, per_month: 1, provider_ref: polarId, retired });
     const catalog: BillingCatalogSnapshot = { plans: [], prices: [price("pro", "pro", "annual", "prod_pro_year"), price("starter", "starter", "monthly", "prod_old", true), price("free_cloud", "free_cloud", "monthly", "prod_free")] };
     const links = polarProductLinks(catalog, { POLAR_STARTER_MONTHLY_PRODUCT_ID: "prod_pro_year", POLAR_PRO_MONTHLY_PRODUCT_ID: "prod_var" });
     const event = (productId: string) => normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", product_id: productId, customer: { external_id: `business:${businessId}` } }, links).payload;
@@ -93,11 +108,29 @@ describe("Polar payload normalization", () => {
   });
 
   it("names a promo plan's own code beside the tier it behaves as", () => {
-    const price = (plan: string, tier: string, polarId: string) => ({ plan, tier, status: "active", period: "monthly" as const, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired: false });
+    const price = (plan: string, tier: string, polarId: string) => ({ plan, tier, status: "active", period: "monthly" as const, currency: "cad", cents: 1, per_month: 1, provider_ref: polarId, retired: false });
     const links = polarProductLinks({ plans: [], prices: [price("salons-half-off", "starter", "prod_promo"), price("starter", "starter", "prod_starter")] }, {});
     const event = (productId: string) => normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", product_id: productId, customer: { external_id: `business:${businessId}` } }, links).payload;
     expect(event("prod_promo")).toMatchObject({ plan: "starter", planCode: "salons-half-off", billingInterval: "monthly" });
     expect(event("prod_starter")).toMatchObject({ plan: "starter", planCode: "starter" });
+  });
+
+  it("says when a subscription ends unless resumed, and a change waiting for its renewal, and when there are none", () => {
+    const price = (plan: string, tier: string, period: "monthly" | "annual", ref: string) => ({ plan, tier, status: "active", period, currency: "cad", cents: 1, per_month: 1, provider_ref: ref, retired: false });
+    const links = polarProductLinks({ plans: [], prices: [price("pro", "pro", "monthly", "prod_pro"), price("starter", "starter", "annual", "prod_starter_year")] }, {});
+    const customer = { external_id: `business:${businessId}` };
+    const event = (data: Record<string, unknown>) => normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", product_id: "prod_pro", current_period_end: "2026-12-01T00:00:00Z", customer, ...data }, links);
+    const ending = event({ cancel_at_period_end: true });
+    expect(ending.payload).toMatchObject({ cancelAt: "2026-12-01T00:00:00.000Z", nextChange: null });
+    expect(ending.fields).toMatchObject({ cancelAt: "2026-12-01T00:00:00.000Z", nextChange: null });
+    // A downgrade Polar applies at the renewal.
+    expect(event({ pending_update: { product_id: "prod_starter_year" } }).payload).toMatchObject({ cancelAt: null, nextChange: { planCode: "starter", billingInterval: "annual", at: "2026-12-01T00:00:00.000Z" } });
+    // A product no plan maps to is no change the screen can name.
+    expect(event({ pending_update: { product_id: "prod_unknown" } }).payload).toMatchObject({ cancelAt: null, nextChange: null });
+    // An order says nothing about either, so reconcile leaves them as they are.
+    const order = normalizePolarEvent("order.paid", { id: "order_1", customer, subscription: { id: "sub_1", status: "active", cancel_at_period_end: true, current_period_end: "2026-12-01T00:00:00Z" } }, links);
+    expect(order.payload).not.toHaveProperty("cancelAt");
+    expect(order.payload).not.toHaveProperty("nextChange");
   });
 
   it("names the subscription's discount, from a subscription or an order's", () => {

@@ -156,9 +156,17 @@ for (const removed of ["otel-collector", "otel-certifier", "prometheus", "Docker
     errors.push(`Removed bundled observability infrastructure is still referenced: ${removed}`);
   }
 }
-for (const variable of ["POLAR_WEBHOOK_SECRET", "RESEND_WEBHOOK_SECRET", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_WEBHOOK_URL", "TWILIO_STATUS_CALLBACK_URL"]) {
-  if (!compose.includes(`${variable}:`)) {
+for (const variable of ["POLAR_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET", "STRIPE_METER_WEBHOOK_SECRET", "RESEND_WEBHOOK_SECRET", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_WEBHOOK_URL", "TWILIO_STATUS_CALLBACK_URL"]) {
+  if (!composeServiceBlock("admin").includes(`${variable}:`)) {
     errors.push(`Admin webhook configuration is missing ${variable}`);
+  }
+}
+// Both services read the deployment's billing provider, and on Stripe each its own key.
+for (const service of ["admin", "worker"]) {
+  for (const variable of ["BILLING_PROVIDER", "STRIPE_API_KEY", "STRIPE_ACCOUNT_ID"]) {
+    if (!composeServiceBlock(service).includes(`${variable}: \${${variable}:-}`)) {
+      errors.push(`Compose service ${service} does not pass ${variable}`);
+    }
   }
 }
 for (const file of ["scripts/replacement-backup.sh", "scripts/replacement-restore.sh", "scripts/replacement-restore-drill.sh", "scripts/replacement-privacy-check.ts"]) {

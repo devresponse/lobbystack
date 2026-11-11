@@ -1,0 +1,230 @@
+{
+  "picker": {
+    "choose": "Elija una recepcionista",
+    "search": "Buscar recepcionistas",
+    "noMatches": "Ninguna recepcionista coincide.",
+    "default": "Predeterminada",
+    "paused": "En pausa",
+    "unknown": "Una recepcionista que ya no aparece",
+    "add": "Agregar recepcionista",
+    "manage": "Administrar recepcionistas"
+  },
+  "filter": {
+    "label": "Recepcionista",
+    "all": "Todas las recepcionistas"
+  },
+  "multi": {
+    "summary_one": "{{chosen}} de {{count}} recepcionista",
+    "summary_other": "{{chosen}} de {{count}} recepcionistas",
+    "summary_many": "{{chosen}} de {{count}} recepcionistas",
+    "none": "Elegir",
+    "change": "Cambiar",
+    "search": "Buscar recepcionistas",
+    "selectShown": "Seleccionar las mostradas",
+    "clear": "Borrar",
+    "remove": "Quitar a {{name}}",
+    "more": "+{{count}} más"
+  },
+  "names": {
+    "everyone": "Todas",
+    "more": "+{{count}}",
+    "defaultOnly": "Solo la recepcionista predeterminada"
+  },
+  "record": {
+    "receptionist": "Recepcionista",
+    "line": "Recepcionista: {{name}}",
+    "archived": "{{name}} (archivada)"
+  },
+  "page": {
+    "unavailable": "No se pudieron cargar las recepcionistas. Inténtelo de nuevo en un momento."
+  },
+  "allowance": {
+    "used_one": "{{active}} de {{count}} recepcionista activa de su plan",
+    "used_many": "{{active}} de {{count}} recepcionistas activas de su plan",
+    "used_other": "{{active}} de {{count}} recepcionistas activas de su plan",
+    "cap_one": "Un negocio puede tener hasta {{count}} recepcionista.",
+    "cap_many": "Un negocio puede tener hasta {{count}} recepcionistas. Archive una para agregar otra.",
+    "cap_other": "Un negocio puede tener hasta {{count}} recepcionistas. Archive una para agregar otra.",
+    "upgradeTitle": "Una recepcionista para cada sede, equipo o idioma",
+    "upgradeDescription": "Su plan incluye una recepcionista. Mejore su plan para agregar más, cada una con su propio nombre, saludo, conocimiento y página.",
+    "salesDescription": "Su plan incluye una recepcionista. El plan Enterprise incluye más, cada una con su propio nombre, saludo, conocimiento y página. Contacte a ventas para configurarlo.",
+    "upgrade": "Ver planes",
+    "contactSales": "Contactar a ventas",
+    "upgradeAsk": "Un propietario o administrador del negocio puede mejorar el plan."
+  },
+  "toolbar": {
+    "search": "Buscar por nombre o por tema",
+    "status": "Estado",
+    "all": "Todas ({{number}})",
+    "active": "Activas ({{number}})",
+    "paused": "En pausa ({{number}})",
+    "archived": "Archivadas ({{number}})",
+    "sort": "Ordenar de la A a la Z",
+    "add": "Agregar recepcionista"
+  },
+  "table": {
+    "receptionist": "Recepcionista",
+    "page": "Página",
+    "status": "Estado",
+    "answers": "Responde en",
+    "language": "Idioma",
+    "order": "Orden",
+    "actions": "Acciones",
+    "default": "Predeterminada",
+    "notListed": "No aparece en la página del negocio",
+    "businessLanguage": "Idioma del negocio",
+    "numbers_one": "{{count}} número de teléfono",
+    "numbers_many": "{{count}} números de teléfono",
+    "numbers_other": "{{count}} números de teléfono",
+    "widgets_one": "{{count}} widget del sitio web",
+    "widgets_many": "{{count}} widgets del sitio web",
+    "widgets_other": "{{count}} widgets del sitio web",
+    "links_one": "{{count}} enlace QR",
+    "links_many": "{{count}} enlaces QR",
+    "links_other": "{{count}} enlaces QR",
+    "pageOnly": "Solo su página",
+    "archivedOn": "Archivada el {{date}}",
+    "empty": "Ninguna recepcionista coincide.",
+    "emptyArchived": "No hay recepcionistas archivadas.",
+    "moveUp": "Subir a {{name}}",
+    "moveDown": "Bajar a {{name}}",
+    "moreOptions": "Más opciones para {{name}}"
+  },
+  "status": {
+    "active": "Activa",
+    "paused": "En pausa",
+    "archived": "Archivada"
+  },
+  "actions": {
+    "edit": "Editar detalles",
+    "aiSettings": "Ajustes de IA",
+    "pause": "Pausar",
+    "resume": "Reanudar",
+    "makeDefault": "Hacer predeterminada",
+    "archive": "Archivar",
+    "restore": "Restaurar",
+    "cancel": "Cancelar"
+  },
+  "archive": {
+    "title": "¿Archivar a {{name}}?",
+    "description": "Deja de aparecer en todas las listas, y sus números de teléfono, widgets y enlaces QR responden como la recepcionista predeterminada. Sus llamadas, chats y preguntas se conservan, y puede restaurarla desde Archivadas.",
+    "confirm": "Archivar"
+  },
+  "makeDefault": {
+    "title": "¿Hacer de {{name}} la recepcionista predeterminada?",
+    "description": "Responderá en la página del negocio y en todo lo que no nombre a ninguna recepcionista, en el idioma del negocio y con todos los artículos. {{current}} conserva sus números de teléfono, widgets y enlaces QR, y recibe su propia página.",
+    "confirm": "Hacer predeterminada"
+  },
+  "sort": {
+    "title": "¿Ordenar las recepcionistas de la A a la Z?",
+    "description": "Las listas desplegables y la página del negocio las mostrarán por nombre, después de la predeterminada. Esto reemplaza el orden que usted definió.",
+    "confirm": "Ordenar de la A a la Z"
+  },
+  "toast": {
+    "added": "{{name}} agregada.",
+    "saved": "{{name}} guardada.",
+    "paused": "{{name}} en pausa. Sus números de teléfono, widgets y enlaces QR responden como la recepcionista predeterminada.",
+    "resumed": "{{name}} vuelve a responder.",
+    "archived": "{{name}} archivada.",
+    "restored": "{{name}} restaurada.",
+    "restoredPaused": "{{name}} restaurada, en pausa: todas las recepcionistas activas que incluye su plan están en uso.",
+    "madeDefault": "{{name}} es ahora la recepcionista predeterminada.",
+    "sorted": "Recepcionistas ordenadas de la A a la Z."
+  },
+  "errors": {
+    "handleTaken": "Otra recepcionista ya usa esta dirección de página.",
+    "limit": "Todas las recepcionistas activas que incluye su plan están en uso. Pause una o mejore su plan para agregar otra.",
+    "limitOne": "Su plan incluye una recepcionista. Mejore su plan para agregar más.",
+    "limitSales": "Todas las recepcionistas activas que incluye su plan están en uso. Pause una o contacte a ventas por el plan Enterprise para agregar otra.",
+    "limitOneSales": "Su plan incluye una recepcionista. Contacte a ventas por el plan Enterprise para agregar más.",
+    "limitNone": "Todas las recepcionistas activas que puede tener este negocio están en uso. Pause una para agregar otra.",
+    "cap": "Este negocio ya tiene todas las recepcionistas que puede tener. Archive una para agregar otra.",
+    "defaultPaused": "La recepcionista predeterminada siempre responde. Primero haga predeterminada a otra.",
+    "defaultArchived": "La recepcionista predeterminada no se puede archivar. Primero haga predeterminada a otra.",
+    "defaultListed": "La recepcionista predeterminada responde en la página del negocio, así que sigue apareciendo en ella.",
+    "resumeFirst": "Reanude la recepcionista antes de hacerla predeterminada.",
+    "notFound": "Esa recepcionista ya no existe. Actualice la página.",
+    "invalid": "Revise los campos e inténtelo de nuevo.",
+    "generic": "No funcionó. Inténtelo de nuevo en un momento.",
+    "withErrorId": "{{message}} ID del error: {{errorId}}"
+  },
+  "editor": {
+    "editTitle": "Editar {{name}}",
+    "addTitle": "Agregar una recepcionista",
+    "editDescription": "Su nombre, página, idioma y conocimiento. El saludo, las reservas y las instrucciones están en Ajustes de IA.",
+    "addDescription": "Una recepcionista nueva empieza con el saludo, las reservas, la transferencia y las instrucciones de otra. Puede cambiarlos en Ajustes de IA.",
+    "name": "Nombre",
+    "nameHint": "Los visitantes lo ven al elegir con quién hablar, por ejemplo Clínica Kitsilano o Facturación.",
+    "nameRequired": "Póngale un nombre a la recepcionista.",
+    "description": "En qué ayuda",
+    "descriptionHint": "Una línea bajo su nombre, por ejemplo Citas en nuestra clínica de West 4th.",
+    "handle": "Dirección de la página",
+    "handleDefault": "La recepcionista predeterminada responde en la propia página del negocio.",
+    "handleHint": "Letras minúsculas y números, unidos con guiones. Si la deja vacía, se crea a partir del nombre.",
+    "handleInvalid": "Use letras minúsculas y números, unidos con un solo guion.",
+    "language": "Idioma",
+    "languageDefault": "La recepcionista predeterminada habla el idioma del negocio, que se define en Ajustes de IA.",
+    "languageHint": "Sus llamadas empiezan en este idioma y cambian al de la persona que llama si habla otro.",
+    "businessLanguage": "Idioma del negocio ({{language}})",
+    "knowledge": "Conocimiento",
+    "knowledgeAll": "Todos los artículos",
+    "knowledgeAudience": "Los artículos para todas y los elegidos para ella",
+    "listed": "Aparece en la página del negocio",
+    "listedDefault": "La recepcionista predeterminada siempre aparece.",
+    "listedHint": "Los visitantes de la página del negocio pueden elegirla. Su propia página, sus números de teléfono y sus enlaces QR funcionan en cualquier caso.",
+    "copyFrom": "Copiar los ajustes de",
+    "copyFromHint": "Su saludo, reservas, transferencia e instrucciones.",
+    "saving": "Guardando…",
+    "save": "Guardar cambios",
+    "adding": "Agregando…",
+    "add": "Agregar recepcionista"
+  },
+  "audience": {
+    "label": "Disponible para",
+    "everyone": "Todas",
+    "chosen": "Recepcionistas elegidas",
+    "receptionists": "Recepcionistas para las que está disponible",
+    "chosenOf_one": "{{count}} de {{total}} elegida",
+    "chosenOf_many": "{{count}} de {{total}} elegidas",
+    "chosenOf_other": "{{count}} de {{total}} elegidas",
+    "required": "Elija al menos una recepcionista, o déjelo disponible para todas.",
+    "hint": "Los artículos para recepcionistas elegidas quedan fuera del resumen del negocio.",
+    "hintAll": "{{name}} responde con todo. Los artículos para recepcionistas elegidas quedan fuera del resumen del negocio.",
+    "byRule": "por regla",
+    "ruleNote": "Una regla del sitio web eligió esta página. Lo que guarde aquí se mantiene si se elimina la regla, y la regla vuelve a añadir a su recepcionista cada vez que se rastrea el sitio.",
+    "errors": {
+      "archived": "Una de las recepcionistas elegidas se archivó. Actualice la página y vuelva a elegir.",
+      "articleGone": "Ese artículo ya no existe. Actualice la página.",
+      "articles": "Seleccione entre 1 y {{max}} artículos.",
+      "ruleExists": "Este sitio ya da esa ruta a esa recepcionista.",
+      "rulePath": "Escriba una ruta del sitio, como /stores/kitsilano/.",
+      "ruleGone": "Esa regla ya no existe. Actualice la página."
+    }
+  },
+  "entry": {
+    "paused": "{{name}} está en pausa, así que por ahora atiende {{default}}.",
+    "archived": "La recepcionista elegida aquí se archivó, así que atiende {{default}}. Elija otra.",
+    "errors": {
+      "archived": "Esa recepcionista se archivó. Actualice la página y elija otra.",
+      "gone": "Eso ya no existe. Actualice la página."
+    }
+  },
+  "pageList": {
+    "title": "Recepcionistas en su página",
+    "description": "Los visitantes eligen entre ellas en “Estás hablando con”. Las demás solo se abren desde sus propios enlaces, claves de widget y direcciones de página. Los cambios que haga aquí se guardan al momento.",
+    "listed": "En la página",
+    "chosen_one": "{{count}} elegida",
+    "chosen_many": "{{count}} elegidas",
+    "chosen_other": "{{count}} elegidas",
+    "listedHint": "Una recepcionista en pausa no aparece en la página hasta que se reanude.",
+    "order": "Orden",
+    "alphabetical": "Alfabético",
+    "custom": "Personalizado",
+    "alphabeticalHint": "Por nombre, después de {{name}}. Una recepcionista que agregue toma su lugar por nombre.",
+    "customHint": "En el orden que usted elija. Una recepcionista que agregue va al final.",
+    "onPage": "Recepcionistas que los visitantes pueden elegir, en orden",
+    "alwaysFirst": "Siempre primero",
+    "paused": "En pausa, por eso no aparece en la página hasta que se reanude",
+    "noneListed": "Solo {{name}} está en la página, así que los visitantes no eligen."
+  }
+}

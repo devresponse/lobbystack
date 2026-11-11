@@ -9,6 +9,10 @@
       "title": "AI settings",
       "description": "Greeting and transfer settings for your receptionist."
     },
+    "receptionists": {
+      "title": "AI agents",
+      "description": "Who answers your calls, chats and pages. Add one for each location, team or language."
+    },
     "knowledge": {
       "title": "Knowledge",
       "description": "Information and guidelines your receptionist uses to answer questions.",
@@ -90,6 +94,78 @@
           "label": "Tags (optional)",
           "placeholder": "Hours, location",
           "hint": "Comma-separated keywords to help categorize this knowledge."
+        }
+      },
+      "receptionists": {
+        "availableTo": "Available to",
+        "rowAction": "Available to",
+        "select": "Select {{title}}",
+        "selectPage": "Select the articles on this page",
+        "selected_one": "{{count}} selected",
+        "selected_other": "{{count}} selected",
+        "clear": "Clear",
+        "showingAll": "Showing every article. Pick a receptionist to see exactly what it can use.",
+        "showingEverything": "{{name}} answers from every article.",
+        "showingOne": "Showing what {{name}} can use: articles for everyone and the ones chosen for it.",
+        "bulk": {
+          "open": "Available to",
+          "mode": "Change",
+          "add": "Add",
+          "remove": "Remove",
+          "replace": "Replace",
+          "addNote": "Articles for everyone already include every receptionist, so they stay as they are.",
+          "removeNote": "Articles for everyone become available to every other receptionist. An article left with no receptionist is used only by the default receptionist.",
+          "summary": {
+            "everyone_one": "Makes {{count}} article available to everyone.",
+            "everyone_other": "Makes {{count}} articles available to everyone.",
+            "add_one": "Adds {{names}} to {{count}} article.",
+            "add_other": "Adds {{names}} to {{count}} articles.",
+            "remove_one": "Removes {{names}} from {{count}} article.",
+            "remove_other": "Removes {{names}} from {{count}} articles.",
+            "replace_one": "Makes {{count}} article available to {{names}} only.",
+            "replace_other": "Makes {{count}} articles available to {{names}} only."
+          },
+          "tooMany": "Select up to {{max}} articles to change them at once.",
+          "apply_one": "Apply to {{count}} article",
+          "apply_other": "Apply to {{count}} articles",
+          "done_one": "Available to changed for {{count}} article.",
+          "done_other": "Available to changed for {{count}} articles."
+        },
+        "dialog": {
+          "description": "Who can use “{{title}}”.",
+          "done": "Available to saved."
+        },
+        "rules": {
+          "open": "Website rules",
+          "rowAction": "Page rules",
+          "title": "Website rules",
+          "description": "Pages whose address starts with a rule's path go to its receptionist, on this crawl and every later one.",
+          "importLabel": "Page rules",
+          "listTitle": "Rules",
+          "empty": "No rules yet.",
+          "noSites": "Import a website first. A rule gives a section of its pages to one receptionist.",
+          "site": "Website",
+          "path": "Path",
+          "pathPlaceholder": "/stores/kitsilano/",
+          "pathOf": "Path of rule {{number}}",
+          "goesTo": "Goes to",
+          "goesToOf": "Who rule {{number}} goes to",
+          "goesToName": "Goes to {{name}}",
+          "removeDraft": "Remove rule {{number}}",
+          "invalidDraft": "Give the rule a path, such as /bikes/, and a receptionist, or remove it.",
+          "chooseReceptionist": "Choose who the pages go to.",
+          "add": "Add rule",
+          "added_one": "Rule added. {{count}} page goes to {{name}}.",
+          "added_other": "Rule added. {{count}} pages go to {{name}}.",
+          "removed": "Rule deleted.",
+          "pages_one": "{{count}} page",
+          "pages_other": "{{count}} pages",
+          "showAll_one": "Show all {{count}} rules",
+          "showAll_other": "Show all {{count}} rules",
+          "delete": "Delete the rule for {{path}}",
+          "deleteTitle": "Delete the rule for {{path}}?",
+          "deleteDescription": "The pages it gave to its receptionist go back to everyone, unless another rule or your own choice also gives them to someone.",
+          "deleteConfirm": "Delete rule"
         }
       }
     },
@@ -406,5 +482,26 @@
     "edit": "Edit",
     "cancel": "Cancel",
     "notSet": "Not set"
+  },
+  "receptionists": {
+    "shared": {
+      "title": "Shared by every receptionist",
+      "description": "The business summary, what callers hear about AI and recording, the business's language and time zone, opening hours and appointment rules."
+    },
+    "own": {
+      "title": "Each receptionist's own",
+      "description": "Its greeting, language, transfer number and booking. Choose the receptionist to change."
+    },
+    "picker": "Receptionist",
+    "businessLanguage": {
+      "label": "Business language",
+      "hint": "The default receptionist speaks it, and so does each receptionist without a language of its own. Calls switch when a caller speaks another one, and call summaries are written in it."
+    },
+    "language": {
+      "label": "Language",
+      "hint": "Its calls start in this language, and switch when a caller speaks another one.",
+      "defaultHint": "The default receptionist speaks the business's language, which the shared settings above set.",
+      "business": "Business language ({{language}})"
+    }
   }
 }

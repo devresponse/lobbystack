@@ -7,11 +7,11 @@ import { billingPlanLimitBook, billingPlanLimits, billingPlanList, brandBillingC
 
 const plan = (code: CatalogStandardPlan["code"], status: CatalogStandardPlan["status"], extra: Partial<CatalogStandardPlan> = {}): CatalogStandardPlan => ({
   code, status, sold: code === "starter" || code === "pro", custom: code === "enterprise", overage: code !== "free_cloud",
-  voice_sec: 9_000, sms_seg: 50, calls_out: 20, chat_units: 50, kb_bytes: 5_242_880, numbers: 1, voice_rate: 20, sms_rate: 2, call_rate: 2,
+  voice_sec: 9_000, sms_seg: 50, calls_out: 20, chat_units: 50, kb_bytes: 5_242_880, numbers: 1, receptionists: code === "enterprise" ? null : code === "pro" ? 5 : 1, voice_rate: 20, sms_rate: 2, call_rate: 2,
   sort: { free_cloud: 0, starter: 10, pro: 20, enterprise: 30 }[code], ...extra,
 });
 const price = (planCode: string, period: CatalogPrice["period"], cents: number, polarId: string | null, extra: Partial<CatalogPrice> = {}): CatalogPrice => ({
-  plan: planCode, tier: planCode, status: "active", period, currency: "cad", cents, per_month: perMonthCents(period, cents), polar_id: polarId, retired: false, ...extra,
+  plan: planCode, tier: planCode, status: "active", period, currency: "cad", cents, per_month: perMonthCents(period, cents), provider_ref: polarId, retired: false, ...extra,
 });
 const variables = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "var_starter_month", POLAR_STARTER_ANNUAL_PRODUCT_ID: "var_starter_year", POLAR_PRO_MONTHLY_PRODUCT_ID: " var_pro_month ", POLAR_PRO_ANNUAL_PRODUCT_ID: "" };
 const empty: BillingCatalogSnapshot = { plans: [], prices: [] };
@@ -146,7 +146,7 @@ describe("plan list", () => {
     // Starter isn't linked yet, so the variables sell it, at the catalog's price.
     expect(starter!.prices.map((entry) => [entry.interval, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", 3500, 3500, true], ["annual", 33_600, 2800, true]]);
     // Once a link reached it, as the retired price's product shows, a draft Starter waits for the next link.
-    const relinking: BillingCatalogSnapshot = { ...catalog, prices: catalog.prices.map((entry) => (entry.retired ? { ...entry, polar_id: "old" } : entry)) };
+    const relinking: BillingCatalogSnapshot = { ...catalog, prices: catalog.prices.map((entry) => (entry.retired ? { ...entry, provider_ref: "old" } : entry)) };
     const waiting = billingPlanList(relinking, { checkout: true, links: polarProductLinks(relinking, variables) }).plans.find((entry) => entry.slug === "starter")!;
     expect(waiting.prices.map((entry) => [entry.interval, entry.amountCents, entry.checkoutAvailable])).toEqual([["monthly", 3500, false], ["annual", 33_600, false]]);
     // Enterprise is hidden from the app's role, so it keeps its built-in custom terms, unpriced.
@@ -180,12 +180,39 @@ describe("plan limits", () => {
       plan("starter", "draft", { voice_sec: 12_000, voice_rate: 25 }),
       plan("pro", "active"),
     ]);
-    expect(limits.free_cloud).toEqual({ knowledgeStorageBytes: 524_288, voiceSecondsIncluded: 600, alertSmsSegmentsIncluded: 5, outboundCallAttemptsIncluded: 1, chatAiTokensIncluded: 3, includedBusinessNumbers: 1, overagesBillable: false, voiceOverageRatePerMinuteCents: null, alertSmsOverageRatePerSegmentCents: null, outboundCallAttemptOverageRateCents: null });
+    expect(limits.free_cloud).toEqual({ knowledgeStorageBytes: 524_288, voiceSecondsIncluded: 600, alertSmsSegmentsIncluded: 5, outboundCallAttemptsIncluded: 1, chatAiTokensIncluded: 3, includedBusinessNumbers: 1, includedReceptionists: 1, overagesBillable: false, voiceOverageRatePerMinuteCents: null, alertSmsOverageRatePerSegmentCents: null, outboundCallAttemptOverageRateCents: null });
     // A draft plan's terms apply, as the plan screens already show them.
     expect(limits.starter).toMatchObject({ voiceSecondsIncluded: 12_000, voiceOverageRatePerMinuteCents: 25, overagesBillable: true });
     // Hidden Enterprise, which the app can't read, and self-hosting keep this build's terms.
     expect(limits.enterprise).toBe(builtInBillingPlanLimits.enterprise);
     expect(limits.self_host).toBe(builtInBillingPlanLimits.self_host);
+  });
+
+  it("enforces each plan's receptionists, its tier's number on a row from before the column, and none on a custom plan", () => {
+    const limits = billingPlanLimits([
+      plan("free_cloud", "active", { receptionists: null }),
+      plan("starter", "active", { receptionists: 2 }),
+      plan("pro", "active", { receptionists: null }),
+      plan("enterprise", "active", { receptionists: null }),
+    ]);
+    expect(limits.free_cloud.includedReceptionists).toBe(1);
+    expect(limits.starter.includedReceptionists).toBe(2);
+    expect(limits.pro.includedReceptionists).toBe(5);
+    // A custom plan gets the deployment's cap, which null stands for.
+    expect(limits.enterprise.includedReceptionists).toBeNull();
+    expect(builtInBillingPlanLimits.self_host.includedReceptionists).toBeNull();
+    // A promo plan keeps its own number, and its tier's when its row has none.
+    const book = billingPlanLimitBook(
+      [plan("free_cloud", "active"), plan("starter", "active"), plan("pro", "active")],
+      [{ ...plan("pro", "active", { receptionists: 8 }), code: "pro-chain", tier: "pro" }, { ...plan("starter", "active", { receptionists: null }), code: "starter-promo", tier: "starter" }],
+    );
+    expect(book.plans["pro-chain"]?.limits.includedReceptionists).toBe(8);
+    expect(book.plans["starter-promo"]?.limits.includedReceptionists).toBe(1);
+  });
+
+  it("shows each plan's receptionists on the plan list", () => {
+    const list = billingPlanList({ plans: [plan("free_cloud", "active"), plan("starter", "active"), plan("pro", "active"), plan("enterprise", "active")], prices: [] }, { checkout: false, links: polarProductLinks(empty, {}) });
+    expect(Object.fromEntries(list.plans.map((entry) => [entry.slug, entry.included.receptionists]))).toEqual({ free_cloud: 1, starter: 1, pro: 5, enterprise: null });
   });
 });
 
@@ -194,10 +221,12 @@ describe("brand catalog", () => {
     const profile = billingProfileSchema.parse(JSON.parse(readFileSync(new URL("../../../../brands/alloplace/billing.json", import.meta.url), "utf8")));
     const standard = resolveBillingPlans(profile).filter((entry) => entry.code === entry.tier);
     const catalog = brandBillingCatalog("alloplace")!;
-    expect(catalog.plans.map((entry) => [entry.code, entry.status, entry.voice_sec, entry.numbers, entry.voice_rate, entry.sort])).toEqual(standard.map((entry) => [entry.code, entry.sold ? "draft" : "active", entry.voice_sec, entry.numbers, entry.voice_rate, entry.sort]));
+    expect(catalog.plans.map((entry) => [entry.code, entry.status, entry.voice_sec, entry.numbers, entry.receptionists, entry.voice_rate, entry.sort])).toEqual(standard.map((entry) => [entry.code, entry.sold ? "draft" : "active", entry.voice_sec, entry.numbers, entry.receptionists, entry.voice_rate, entry.sort]));
+    // Yuri's plans: Free and Starter include one receptionist, Pro five, and Enterprise the deployment's cap.
+    expect(catalog.plans.map((entry) => [entry.code, entry.receptionists])).toEqual([["free_cloud", 1], ["starter", 1], ["pro", 5], ["enterprise", null]]);
     expect(catalog.prices).toEqual(standard.flatMap((entry) => entry.prices.map((value) => ({
       plan: entry.code, tier: entry.code, status: entry.sold ? "draft" : "active", period: value.period, currency: profile.currency, cents: value.cents,
-      per_month: perMonthCents(value.period, value.cents), polar_id: null, retired: false,
+      per_month: perMonthCents(value.period, value.cents), provider_ref: null, retired: false,
     }))));
     // A brand without a billing.json keeps the built-in plans.
     expect(brandBillingCatalog("lobbystack")).toBeNull();

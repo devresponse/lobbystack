@@ -30,10 +30,13 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 
 function DialogContent({ className, children, overlayClassName, showCloseButton = true, ...props }: DialogPrimitive.Popup.Props & { showCloseButton?: boolean; overlayClassName?: string }) {
   const { t } = useTranslation("common")
+  // Chromium doesn't clip an element's own scrollbar to its rounded corners, so a dialog that scrolls
+  // (overflow-y-auto) is clipped to them with clip-path, its ring kept. Only those: the receptionist
+  // pickers open their lists inline, and in a dialog that doesn't scroll a list may reach past its edge.
   return (
     <DialogPortal>
       <DialogOverlay className={overlayClassName} />
-      <DialogPrimitive.Popup data-slot="dialog-content" className={cn("fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-6 rounded-4xl bg-popover p-6 text-sm text-popover-foreground ring-1 ring-foreground/5 duration-100 outline-none sm:max-w-md data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className)} {...props}>
+      <DialogPrimitive.Popup data-slot="dialog-content" className={cn("fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-6 rounded-xl bg-popover p-6 text-sm text-popover-foreground ring-1 ring-foreground/5 [&.overflow-y-auto]:[clip-path:inset(-1px_round_calc(var(--radius-xl)_+_1px))] duration-100 outline-none sm:max-w-md data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className)} {...props}>
         {children}
         {showCloseButton ? <DialogPrimitive.Close data-slot="dialog-close" render={<Button className="absolute top-4 right-4" size="icon-sm" variant="ghost" />}><XIcon /><span className="sr-only">{t("accessibility.close")}</span></DialogPrimitive.Close> : null}
       </DialogPrimitive.Popup>

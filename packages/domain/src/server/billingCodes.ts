@@ -8,8 +8,10 @@ import {
   BILLING_CODE_ALPHABET,
   billingCodePrefix,
   billingPlanIncluded,
+  builtInBillingPlanLimits,
   discountedCents,
   isBillingCode,
+  isReplacedSubscription,
   isUuid,
   liveSubscriptionStates,
   normalizeBillingCode,
@@ -85,9 +87,9 @@ export async function findBillingCodeOffer(tx: DatabaseTransaction, code: string
     tier: first.tier,
     names: (first.names ?? {}) as Record<string, string>,
     discount: (first.discount ?? null) as ResolvedBillingDiscount | null,
-    polarDiscountId: textOrNull(first.polar_disc),
+    polarDiscountId: textOrNull(first.provider_disc),
     currency: String(first.currency),
-    prices: rows.map((row) => ({ interval: row.period as BillingInterval, cents: Number(row.cents), perMonth: Number(row.per_month), polarId: textOrNull(row.polar_id) })),
+    prices: rows.map((row) => ({ interval: row.period as BillingInterval, cents: Number(row.cents), perMonth: Number(row.per_month), polarId: textOrNull(row.provider_ref) })),
     included: {
       voiceSeconds: numberOrNull(first.voice_sec),
       alertSmsSegments: numberOrNull(first.sms_seg),
@@ -96,6 +98,8 @@ export async function findBillingCodeOffer(tx: DatabaseTransaction, code: string
       // bigint arrives as text.
       knowledgeStorageBytes: numberOrNull(first.kb_bytes),
       businessNumbers: numberOrNull(first.numbers),
+      // Null on a row from before migration 0134 filled it: the tier's number then.
+      receptionists: numberOrNull(first.receptionists) ?? builtInBillingPlanLimits[first.tier].includedReceptionists,
     },
   };
 }
@@ -121,7 +125,10 @@ export async function billingCodeCheckout(tx: DatabaseTransaction, input: { busi
 }
 
 async function paysForPlan(tx: DatabaseTransaction, businessId: string, plan: string): Promise<boolean> {
-  const [account] = (await tx.execute<Row>(sql`select plan_code, subscription_state from public.billing_accounts where business_id = ${businessId}::uuid`)).rows;
+  const [account] = (await tx.execute<Row>(sql`select plan_code, subscription_state, subscription_id, replaced_subscription_id from public.billing_accounts where business_id = ${businessId}::uuid`)).rows;
+  // A subscription a pack's payment replaced is over for the business, though the provider may still call it live
+  // until its end lands, as app.billing_code_offers counts it (migration 0149).
+  if (isReplacedSubscription({ subscriptionId: textOrNull(account?.subscription_id), replacedSubscriptionId: textOrNull(account?.replaced_subscription_id) })) return false;
   return account?.plan_code === plan && (liveSubscriptionStates as readonly string[]).includes(String(account.subscription_state));
 }
 

@@ -1,5 +1,5 @@
-import { expect, it } from "vitest";
-import { assertCertificationBillingSandbox, assertCertificationCalendar, assertCertificationOperationAllowed, assertCertificationRecipient } from "./certification";
+import { describe, expect, it } from "vitest";
+import { assertCertificationStripeKey, assertCertificationBillingSandbox, assertCertificationCalendar, assertCertificationOperationAllowed, assertCertificationRecipient } from "./certification";
 
 const enabled = { LOBBYSTACK_CERTIFICATION_MODE: "true", LOBBYSTACK_CERTIFICATION_EMAILS: "tester@example.invalid", LOBBYSTACK_CERTIFICATION_PHONES: "+14165550123", LOBBYSTACK_CERTIFICATION_CALENDARS: "dedicated-calendar" };
 
@@ -24,4 +24,15 @@ it("leaves normal operation unchanged but refuses a mistyped safety flag", () =>
   expect(() => assertCertificationRecipient("phone", "+14165550999", {})).not.toThrow();
   expect(() => assertCertificationOperationAllowed({ LOBBYSTACK_CERTIFICATION_MODE: "false" })).not.toThrow();
   expect(() => assertCertificationRecipient("email", "tester@example.invalid", { LOBBYSTACK_CERTIFICATION_MODE: "tru" })).toThrow("INVALID_CERTIFICATION_MODE");
+});
+
+describe("Stripe keys in a certification run", () => {
+  it("takes test keys only, and any key outside a run", () => {
+    const run = { LOBBYSTACK_CERTIFICATION_MODE: "true" };
+    expect(() => assertCertificationStripeKey("rk_test_abc123", run)).not.toThrow();
+    expect(() => assertCertificationStripeKey("sk_test_abc123", run)).not.toThrow();
+    expect(() => assertCertificationStripeKey("rk_live_abc123", run)).toThrow("CERTIFICATION_REQUIRES_STRIPE_TEST_KEY");
+    expect(() => assertCertificationStripeKey("sk_live_abc123", run)).toThrow("CERTIFICATION_REQUIRES_STRIPE_TEST_KEY");
+    expect(() => assertCertificationStripeKey("rk_live_abc123", {})).not.toThrow();
+  });
 });

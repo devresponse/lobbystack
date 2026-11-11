@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, ExternalLink, Globe, LayoutList, MapPin, MessageSquareMore } from "lucide-react";
+import { Check, Copy, ExternalLink, EyeOff, Globe, LayoutList, MapPin, MessageSquareMore } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,10 +15,11 @@ import { requestJson } from "@/lib/request-json";
 import { cn } from "@/lib/utils";
 
 import { PageSurface } from "./page-surface";
+import { BusinessPageReceptionists } from "./receptionists/business-page-receptionists";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button, buttonVariants } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from "./ui/field";
+import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet, FieldTitle } from "./ui/field";
 import { Input } from "./ui/input";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 import { Switch } from "./ui/switch";
@@ -122,7 +123,13 @@ export function LivePublicProfileSettingsSurface() {
     <PageSurface title={t("publicPage.title")}>
       {businesses.isLoading || profile.isLoading ? <p className="py-12 text-center text-sm text-muted-foreground">{t("publicPage.loading")}</p> : null}
       {businesses.isError || profile.isError ? <p className="py-12 text-center text-sm text-destructive">{t("publicPage.unavailable")}</p> : null}
-      {businessId && profile.data ? <PublicProfileForm businessId={businessId} key={businessId} view={profile.data} /> : null}
+      {businessId && profile.data ? (
+        <div className="flex flex-col gap-6 pb-12">
+          <PublicProfileForm businessId={businessId} key={businessId} view={profile.data} />
+          {/* Saves as it changes, so it sits apart from the form's Save. */}
+          <BusinessPageReceptionists businessId={businessId} businessLocale={business?.defaultLocale} canEdit={profile.data.canEdit} key={`receptionists-${businessId}`} />
+        </div>
+      ) : null}
     </PageSurface>
   );
 }
@@ -155,6 +162,7 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
     },
   });
 
+
   function update<K extends keyof Form>(key: K, value: Form[K]) {
     setForm((current) => ({ ...current, [key]: value }));
     setSaved(false);
@@ -163,7 +171,16 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    const parsed = publicProfileSettingsSchema.safeParse(settingsFromForm(form));
+    saveForm(form);
+  }
+
+  // Publish page and Unpublish page switch the page's state and save the form's edits with it, as Save does.
+  function switchPublished() {
+    saveForm({ ...form, published: !view.settings.published });
+  }
+
+  function saveForm(next: Form) {
+    const parsed = publicProfileSettingsSchema.safeParse(settingsFromForm(next));
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const field = issueField(issue?.path);
@@ -203,7 +220,7 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
   ];
 
   return (
-    <form className="flex flex-col gap-6 pb-12" noValidate onSubmit={submit}>
+    <form className="flex flex-col gap-6" noValidate onSubmit={submit}>
       {readOnly ? <Alert><AlertDescription>{t("publicPage.readOnly")}</AlertDescription></Alert> : null}
 
       <Card>
@@ -219,13 +236,16 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
           </div>
           <Field orientation="horizontal">
             <FieldContent className="min-w-0">
-              <FieldLabel htmlFor="public-profile-published">{t("publicPage.publish.label")}</FieldLabel>
+              <FieldTitle>{view.settings.published ? t("publicPage.publish.label") : t("publicPage.publish.labelOff")}</FieldTitle>
               <FieldDescription>
-                {form.published ? t("publicPage.publish.on") : t("publicPage.publish.off")}
-                {form.published && view.settings.published && view.publishedAt ? <> {t("publicPage.publish.since", { date: formatDateTime(view.publishedAt, locale, { dateStyle: "medium" }) })}</> : null}
+                {view.settings.published ? t("publicPage.publish.on") : t("publicPage.publish.off")}
+                {view.settings.published && view.publishedAt ? <> {t("publicPage.publish.since", { date: formatDateTime(view.publishedAt, locale, { dateStyle: "medium" }) })}</> : null}
               </FieldDescription>
             </FieldContent>
-            <Switch checked={form.published} disabled={readOnly} id="public-profile-published" onCheckedChange={(checked) => update("published", checked)} />
+            <Button className="shrink-0" disabled={readOnly || save.isPending} onClick={switchPublished} size="lg" type="button">
+              {view.settings.published ? <EyeOff /> : <Globe />}
+              {view.settings.published ? t("publicPage.publish.unpublishAction") : t("publicPage.publish.publishAction")}
+            </Button>
           </Field>
         </CardContent>
       </Card>

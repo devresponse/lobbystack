@@ -14,13 +14,17 @@ export type FixedWindowResult =
   | { allowed: true }
   | { allowed: false; status: 429 | 503; reason: string };
 
-/** One counter in `namespace`, keyed by a digest of `key` and the current window. */
+/**
+ * One counter in `namespace`, named by `key` and the current window. The key
+ * goes into Redis as it is: ids (a user's, a business's, an API key's) name
+ * their counters directly, as the public API's per-key limit does, and an IP
+ * address goes in as its `clientIpDigest`, so Redis never holds an address.
+ */
 export function fixedWindowLimit(namespace: string, name: string, key: string, maximum: number, windowSeconds: number, reason: string): FixedWindowLimit {
   const bucket = Math.floor(Date.now() / (windowSeconds * 1_000));
-  const digest = createHash("sha256").update(key).digest("hex");
   return {
     name,
-    key: `${process.env.REDIS_PREFIX ?? "lobbystack"}:${namespace}:${name}:${digest}:${bucket}`,
+    key: `${process.env.REDIS_PREFIX ?? "lobbystack"}:${namespace}:${name}:${key}:${bucket}`,
     limit: maximum,
     windowSeconds,
     reason,
@@ -59,4 +63,9 @@ export async function enforceFixedWindow(limits: FixedWindowLimit[]): Promise<Fi
     if (process.env.NODE_ENV !== "production" && !process.env.REDIS_URL) return { allowed: true };
     return { allowed: false, status: 503, reason: "rate_limit_unavailable" };
   }
+}
+
+/** The SHA-256 digest that stands in for a client's IP address in a counter's key. */
+export function clientIpDigest(ip: string): string {
+  return createHash("sha256").update(ip).digest("hex");
 }

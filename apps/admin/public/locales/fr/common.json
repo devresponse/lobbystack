@@ -112,7 +112,8 @@
       "rateLimited": "Trop d’appels test ont été lancés. Veuillez réessayer bientôt.",
       "unavailable": "Votre réceptionniste IA est indisponible pour le moment.",
       "generic": "Une erreur est survenue au démarrage de l’appel."
-    }
+    },
+    "receptionist": "Réceptionniste des appels test"
   },
   "appointments": {
     "title": "Rendez-vous",
@@ -187,5 +188,51 @@
     "doneHint_other": "{{count}} pages sont prêtes à répondre.",
     "failedTitle": "Nous n'avons pas pu lire {{host}}",
     "failedHint": "Ajoutez vos informations à la main, ou relancez l'import depuis votre tableau de bord."
+  },
+  "planDisplay": {
+    "custom": "sur mesure",
+    "storage": {
+      "megabytes": "{{amount}} Mo",
+      "gigabytes": "{{amount}} Go"
+    },
+    "bullets": {
+      "voiceMinutes_one": "{{amount}} minute vocale incluse",
+      "voiceMinutes_many": "{{amount}} minutes vocales incluses",
+      "voiceMinutes_other": "{{amount}} minutes vocales incluses",
+      "voiceMinutesThen_one": "{{amount}} minute vocale incluse\nPuis {{rate}}/min",
+      "voiceMinutesThen_many": "{{amount}} minutes vocales incluses\nPuis {{rate}}/min",
+      "voiceMinutesThen_other": "{{amount}} minutes vocales incluses\nPuis {{rate}}/min",
+      "browserVoiceMinutes_one": "{{amount}} minute vocale dans le navigateur",
+      "browserVoiceMinutes_many": "{{amount}} minutes vocales dans le navigateur",
+      "browserVoiceMinutes_other": "{{amount}} minutes vocales dans le navigateur",
+      "browserVoiceMinutesThen_one": "{{amount}} minute vocale dans le navigateur\nPuis {{rate}}/min",
+      "browserVoiceMinutesThen_many": "{{amount}} minutes vocales dans le navigateur\nPuis {{rate}}/min",
+      "browserVoiceMinutesThen_other": "{{amount}} minutes vocales dans le navigateur\nPuis {{rate}}/min",
+      "voiceMinutesCustom": "Minutes vocales sur mesure",
+      "receptionists_one": "{{amount}} réceptionniste",
+      "receptionists_many": "{{amount}} réceptionnistes",
+      "receptionists_other": "{{amount}} réceptionnistes",
+      "receptionistsCustom": "Nombre de réceptionnistes sur mesure",
+      "businessNumbers_one": "{{amount}} numéro d'entreprise dédié",
+      "businessNumbers_many": "{{amount}} numéros d'entreprise dédiés",
+      "businessNumbers_other": "{{amount}} numéros d'entreprise dédiés",
+      "businessNumbersNone": "Aucun numéro de téléphone",
+      "businessNumbersCustom": "Plusieurs numéros dédiés",
+      "alertSmsSegments_one": "{{amount}} segment SMS d'alerte",
+      "alertSmsSegments_many": "{{amount}} segments SMS d'alerte",
+      "alertSmsSegments_other": "{{amount}} segments SMS d'alerte",
+      "alertSmsSegmentsCustom": "Segments SMS d'alerte sur mesure",
+      "outboundCallAttempts_one": "{{amount}} tentative de transfert",
+      "outboundCallAttempts_many": "{{amount}} tentatives de transfert",
+      "outboundCallAttempts_other": "{{amount}} tentatives de transfert",
+      "outboundCallAttemptsCustom": "Tentatives de transfert sur mesure",
+      "chatAiUnits_one": "{{amount}} conversation de clavardage du site",
+      "chatAiUnits_many": "{{amount}} conversations de clavardage du site",
+      "chatAiUnits_other": "{{amount}} conversations de clavardage du site",
+      "chatAiUnitsCustom": "Clavardage du site sur mesure",
+      "knowledgeStorageMegabytes": "{{amount}} Mo de stockage des connaissances",
+      "knowledgeStorageGigabytes": "{{amount}} Go de stockage des connaissances",
+      "knowledgeStorageCustom": "Stockage des connaissances sur mesure"
+    }
   }
 }

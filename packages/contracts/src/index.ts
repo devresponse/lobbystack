@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./stripeEvents";
+
 export const traceContextSchema = z.object({
   traceparent: z.string().min(1).max(255).optional(),
   tracestate: z.string().max(4096).optional(),
@@ -115,6 +117,25 @@ export const realtimeEventSchema = z.object({
 
 export type RealtimeEvent = z.infer<typeof realtimeEventSchema>;
 
+const runtimeLocaleSchema = z.enum(["en", "es", "fr", "de", "hi", "ja", "ko", "pt", "zh", "it", "uk", "ru", "ar"]);
+const bookingModeSchema = z.enum(["off", "request", "instant"]);
+const transferPolicySchema = z.object({
+  mode: z.enum(["never", "always", "on_request", "on_urgent", "during_business_hours"]),
+  transferNumber: z.string().optional(),
+});
+// Who may use an entry or document: "chosen" ones name the receptionists, not archived, they are for.
+const audienceFields = {
+  audience: z.enum(["everyone", "chosen"]).optional(),
+  receptionistIds: z.array(z.string()).optional(),
+};
+const knowledgeSnippetSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  content: z.string(),
+  tags: z.array(z.string()),
+  priority: z.number(),
+});
+
 export const snapshotSchema = z.object({
   businessId: z.guid(),
   version: z.string().min(1),
@@ -123,7 +144,7 @@ export const snapshotSchema = z.object({
   legalName: z.string().optional(),
   timezone: z.string().min(1),
   // runtimeLocales in @lobbystack/shared: the languages a call can open in.
-  defaultLocale: z.enum(["en", "es", "fr", "de", "hi", "ja", "ko", "pt", "zh", "it", "uk", "ru", "ar"]),
+  defaultLocale: runtimeLocaleSchema,
   businessType: z.string().min(1),
   telemetryEnabled: z.boolean().optional(),
   greeting: z.string(),
@@ -133,15 +154,9 @@ export const snapshotSchema = z.object({
   chatInstructions: z.string(),
   summary: z.string(),
   bookingPolicy: z.string(),
-  bookingMode: z.enum(["off", "request", "instant"]).optional(),
+  bookingMode: bookingModeSchema.optional(),
   knowledgeDigest: z.string(),
-  knowledgeSnippets: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    content: z.string(),
-    tags: z.array(z.string()),
-    priority: z.number(),
-  })).optional(),
+  knowledgeSnippets: z.array(knowledgeSnippetSchema).optional(),
   rules: z.array(z.object({
     id: z.string(),
     title: z.string(),
@@ -154,10 +169,7 @@ export const snapshotSchema = z.object({
     allowReschedule: z.boolean(),
     verificationMode: z.enum(["phone_match_and_facts", "otp_required", "passcode_required", "operator_only"]),
   }).optional(),
-  transferPolicy: z.object({
-    mode: z.enum(["never", "always", "on_request", "on_urgent", "during_business_hours"]),
-    transferNumber: z.string().optional(),
-  }),
+  transferPolicy: transferPolicySchema,
   hours: z.array(z.object({
     dayOfWeek: z.number().int().min(0).max(6),
     openMinutes: z.number().int().min(0).max(1440),
@@ -180,6 +192,41 @@ export const snapshotSchema = z.object({
     smsNumber: z.string().optional(),
     email: z.email().optional(),
   }),
+  // Several receptionists (BusinessContextSnapshot in @lobbystack/shared). A
+  // stored snapshot carries every receptionist that isn't archived;
+  // snapshotForReceptionist cuts one receptionist's view from it.
+  receptionists: z.array(z.object({
+    id: z.guid(),
+    name: z.string(),
+    description: z.string(),
+    pageUrl: z.string().optional(),
+    isDefault: z.boolean(),
+    status: z.enum(["active", "paused"]),
+    listed: z.boolean(),
+    order: z.number().int(),
+    locale: runtimeLocaleSchema.optional(),
+    knowledgeScope: z.enum(["all", "audience"]),
+    greeting: z.string(),
+    voiceInstructions: z.string(),
+    smsInstructions: z.string(),
+    chatInstructions: z.string(),
+    bookingPolicy: z.string(),
+    bookingMode: bookingModeSchema,
+    transferPolicy: transferPolicySchema,
+    snippetIds: z.array(z.string()),
+  })).optional(),
+  extraKnowledgeSnippets: z.array(knowledgeSnippetSchema).optional(),
+  knowledgeDocuments: z.array(z.object({
+    title: z.string(),
+    sourceUrl: z.string().nullable(),
+    tags: z.array(z.string()),
+    revision: z.number().int(),
+    ...audienceFields,
+  })).optional(),
+  publicPageUrl: z.string().optional(),
+  receptionist: z.object({ id: z.guid(), name: z.string(), description: z.string(), isDefault: z.boolean() }).optional(),
+  otherReceptionists: z.array(z.object({ name: z.string(), description: z.string(), pageUrl: z.string().optional() })).optional(),
+  moreReceptionists: z.number().int().nonnegative().optional(),
 });
 
 export const outboxMessageSchema = z.object({
@@ -212,8 +259,15 @@ export const queueForJobType = {
   "billing.reconcile": "default",
   "billing.refreshUnitEconomics": "maintenance",
   "billing.createCheckout": "critical",
+  "billing.createPackCheckout": "critical",
+  "billing.closePackCheckout": "critical",
   "billing.endPromoPlan": "default",
+  "billing.expirePacks": "default",
   "billing.revokeSubscription": "critical",
+  "billing.endPlanForPack": "critical",
+  "billing.ensureOverage": "critical",
+  "billing.changeSubscription": "critical",
+  "billing.checkUsageTotals": "maintenance",
   "calendar.syncAppointment": "default",
   "calendar.reconcileBusiness": "default",
   "knowledge.extractDocument": "bulk",
@@ -222,6 +276,7 @@ export const queueForJobType = {
   "business.generateSummary": "bulk",
   "business.extractHours": "bulk",
   "snapshot.refresh": "default",
+  "receptionists.enforceAllowance": "default",
   "notification.dispatch": "default",
   "notification.dailySummary": "maintenance",
   "conversation.finalizeSession": "default",

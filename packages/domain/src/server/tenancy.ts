@@ -4,11 +4,12 @@ import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiKeys, auditLogs, businessInvitations, businessMemberships, businesses, calendarConnections, receptionistProfiles, staff, users, webhookEndpoints } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
+import { accountBusinessCap, brandAccountLimits, currentBrand, defaultAppointmentChangePolicy, defaultReceptionistName, highestBusinessCap, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type BillingAccounts, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { disconnectCalendarInTransaction } from "./calendar";
 import type { DomainContext } from "./context";
+import { loadBillingContext, planInForce, type PlanInForce } from "./usage";
 
 export type BusinessRole = "business_owner" | "business_admin" | "scheduler" | "viewer";
 
@@ -19,6 +20,8 @@ export type CreateBusinessInput = {
   timezone: string;
   businessType: string;
   deploymentMode?: string;
+  /** How many businesses one account may own, and on each plan; this deployment's (deploymentBusinessCaps) when left out. */
+  businessCaps?: BillingAccounts;
 };
 
 function cleanSlug(slug: string): string {
@@ -29,8 +32,84 @@ function cleanSlug(slug: string): string {
   return result;
 }
 
-// Each business adds recurring worker jobs, so one account cannot create them without bound.
-const maxOwnedBusinesses = 10;
+/**
+ * How many businesses one account may own on this deployment, and on each
+ * plan: its brand's billing.json accounts section, as the build carries it.
+ * It is empty when the file leaves the section out, and every account may
+ * then own 10. Each business adds recurring worker jobs, so the file can't
+ * allow more than 100.
+ */
+export function deploymentBusinessCaps(): BillingAccounts {
+  return brandAccountLimits(currentBrand().id);
+}
+
+/** The deployment mode a new business gets: self-hosted on a self-hosted server, cloud otherwise. */
+function newBusinessDeploymentMode(deploymentMode: string | undefined): string {
+  return deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud");
+}
+
+/** The plan a new business starts on, until it buys a plan or a pack: Free on a cloud deployment, self-host on a self-hosted one. */
+function newBusinessPlan(deploymentMode: string | undefined): PlanInForce {
+  return planInForce(newBusinessDeploymentMode(deploymentMode), null, false);
+}
+
+/**
+ * The refusal when the account already owns as many businesses as it may.
+ * upgrade: a higher plan on one of its businesses would let it own more.
+ */
+export function businessLimitReached(limit: number, upgrade = false): Error {
+  const owned = `This account already owns ${limit} ${limit === 1 ? "business" : "businesses"}`;
+  const message = upgrade ? `${owned}, the most its plans allow. A higher plan on one of its businesses allows more.` : `${owned}, the most one account can own.`;
+  return Object.assign(new Error(message), { status: 409, code: "business_limit", limit, upgrade });
+}
+
+/** How many businesses an account owns, as the limit counts them, and the most it may own. */
+export type BusinessAllowance = {
+  /** The open businesses the account owns. */
+  owned: number;
+  /** The most it may own: what the best plan among its businesses, and the one it would own next, allows. */
+  max: number;
+  /** Whether a plan none of those businesses is on allows more, so a higher plan on one of them lets the account own more. */
+  upgrade: boolean;
+};
+
+type OwnedBusinessPlan = { businessId: string; deploymentMode: string; plan: string | null; planCode: string | null; subscriptionState: string | null; subscriptionId: string | null; replacedSubscriptionId: string | null; livePack: boolean };
+
+/**
+ * The account's allowance once it owns target too: the open businesses it
+ * owns, not counting exceptBusinessId (one it is taking over, which it may
+ * own already), and what the best plan among theirs and target's allows
+ * (accountBusinessCap). The transaction must act for userId:
+ * app.list_user_business_plans answers only for the signed-in account.
+ */
+async function businessAllowanceInTransaction(tx: DatabaseTransaction, input: { userId: string; target: PlanInForce; exceptBusinessId?: string | undefined; caps?: BillingAccounts | undefined }): Promise<BusinessAllowance> {
+  const rows = await tx.execute<OwnedBusinessPlan>(sql`select business_id as "businessId", deployment_mode as "deploymentMode", plan, plan_code as "planCode", subscription_state as "subscriptionState", subscription_id as "subscriptionId", replaced_subscription_id as "replacedSubscriptionId", live_pack as "livePack" from app.list_user_business_plans(${input.userId})`);
+  const owned = rows.rows.filter((row) => row.businessId !== input.exceptBusinessId);
+  const caps = input.caps ?? deploymentBusinessCaps();
+  const max = accountBusinessCap(caps, [...owned.map((row) => planInForce(row.deploymentMode, row, row.livePack)), input.target]);
+  // A self-hosted business has no plan to move to.
+  return { owned: owned.length, max, upgrade: input.target.plan !== "self_host" && highestBusinessCap(caps) > max };
+}
+
+/**
+ * Refuses with business_limit when the account already owns as many
+ * businesses as it may own once it owns this one too: as many as the best
+ * plan among them allows. businessId names a business it is taking over,
+ * whose plan counts and which isn't counted, since it may own it already; the
+ * transaction must be bound to it. Without businessId the business is a new
+ * one, on the plan a new business starts on. It counts what the workspace list
+ * shows as the account's: open businesses it is an owner of. It locks the
+ * account's row first, so two creates or claims at once count each other.
+ * Every way an account comes to own a business checks it, except a platform
+ * key's POST /businesses, whose businesses wait for their customer to claim
+ * them, which this checks.
+ */
+export async function assertBusinessAllowanceInTransaction(tx: DatabaseTransaction, input: { userId: string; businessId?: string; deploymentMode?: string | undefined; caps?: BillingAccounts | undefined }): Promise<void> {
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId)).for("update");
+  const target = input.businessId ? await loadBillingContext(tx, input.businessId) : newBusinessPlan(input.deploymentMode);
+  const allowance = await businessAllowanceInTransaction(tx, { userId: input.userId, target: { plan: target.plan, planCode: target.planCode }, exceptBusinessId: input.businessId, caps: input.caps });
+  if (allowance.owned >= allowance.max) throw businessLimitReached(allowance.max, allowance.upgrade);
+}
 
 /**
  * The IANA time zone a value names, spelled the way Intl lists it, such as
@@ -76,12 +155,7 @@ export async function createBusiness(
     businessId,
     actorType: "system",
   }, async (tx) => {
-    // Lock the user row so concurrent creates by the same account count each other.
-    await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId)).for("update");
-    const owned = await tx.execute<{ count: number }>(sql`select count(*)::int as count from app.list_user_businesses(${input.userId}) where role = 'business_owner'`);
-    if ((owned.rows[0]?.count ?? 0) >= maxOwnedBusinesses) {
-      throw Object.assign(new Error(`Too many workspaces. One account can own up to ${maxOwnedBusinesses}.`), { status: 403 });
-    }
+    await assertBusinessAllowanceInTransaction(tx, { userId: input.userId, deploymentMode: input.deploymentMode, caps: input.businessCaps });
     const created = await insertBusinessInTransaction(tx, { businessId, userId: input.userId, name: input.name, slug: input.slug, timezone, businessType: input.businessType, deploymentMode: input.deploymentMode });
     await tx.update(users).set({ activeBusinessId: businessId, updatedAt: new Date() }).where(eq(users.id, input.userId));
     return created;
@@ -90,7 +164,8 @@ export async function createBusiness(
 
 /**
  * Inserts a business with what every new business needs: its owner, the staff
- * member that stands for it, a receptionist profile, and its first snapshot.
+ * member that stands for it, its default receptionist's settings, and its
+ * first snapshot.
  * The transaction must be scoped to businessId, and timezone must already be
  * an IANA name. A generated slug gets a random suffix when taken; a taken slug
  * the caller chose fails with a unique violation.
@@ -117,8 +192,13 @@ export async function insertBusinessInTransaction(
       businessType: input.businessType,
       // A self-hosted server's businesses get its unlimited plan, not the cloud's free one. Any other mode, development included, keeps them cloud, as before:
       // every mode but cloud skips billing and the paid-plan check on numbers.
-      deploymentMode: input.deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud"),
+      deploymentMode: newBusinessDeploymentMode(input.deploymentMode),
       onboardingStage: "website",
+      // Settings every receptionist shares. The summary starts as the business
+      // name; summarySource marks it as the placeholder.
+      summary: name,
+      summarySource: "placeholder",
+      appointmentChangePolicy: defaultAppointmentChangePolicy,
       ...(defaultLocale !== undefined ? { defaultLocale } : {}),
       ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}),
     });
@@ -142,18 +222,19 @@ export async function insertBusinessInTransaction(
   // Booking assigns every appointment to a staff member. Businesses that don't
   // manage a team get one hidden member that stands for the business itself.
   await tx.insert(staff).values({ businessId, name, timezone });
-  await tx.insert(receptionistProfiles).values({
-    businessId,
+  // The database made the business's default receptionist with it, "Front
+  // desk" in its language (migration 0143); sign-up gives it these settings.
+  const [receptionist] = await tx.update(receptionistProfiles).set({
     greeting: `Thanks for calling ${name}.`,
     tone: "warm and direct",
-    // The business name, like defaultReceptionistProfile; summarySource marks it as the placeholder.
-    summary: name,
     bookingPolicy: "Only confirm a booking after availability is checked.",
     voiceInstructions: "Sound calm, confident, and concise. Escalate urgent requests to a human when policy requires it.",
     smsInstructions: "Keep replies concise and friendly. Ask one follow-up question at a time.",
     transferMode: "on_request",
-    appointmentChangePolicy: defaultAppointmentChangePolicy,
-  });
+  }).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).returning({ id: receptionistProfiles.id });
+  if (!receptionist) {
+    throw new Error("The business's default receptionist could not be set up.");
+  }
   await enqueueOutbox(tx, {
     topic: "snapshot.refresh",
     businessId,
@@ -166,18 +247,33 @@ export async function insertBusinessInTransaction(
 }
 
 /**
- * The businesses the person belongs to. isRoot marks a business that is any
- * owner's root business, the one they've owned longest, which can't be
- * deleted; isAccountRoot marks the person's own (migration 0129).
+ * One of the businesses the person belongs to, as the workspace list shows
+ * it. isRoot marks a business that is any owner's root business, the one
+ * they've owned longest, which can't be deleted; isAccountRoot marks the
+ * person's own (migration 0129).
  */
-export async function listUserBusinesses(
-  db: Database,
-  userId: string,
-): Promise<Array<{ businessId: string; name: string; slug: string; role: string; active: boolean; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: string; isRoot: boolean; isAccountRoot: boolean }>> {
+export type UserBusiness = { businessId: string; name: string; slug: string; role: string; active: boolean; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: string; isRoot: boolean; isAccountRoot: boolean };
+
+async function userBusinessesInTransaction(tx: DatabaseTransaction, userId: string): Promise<UserBusiness[]> {
+  const [user] = await tx.select({ activeBusinessId: users.activeBusinessId }).from(users).where(eq(users.id, userId)).limit(1);
+  const rows = await tx.execute<{ businessId: string; name: string; slug: string; role: string; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: Date; isRoot: boolean; isAccountRoot: boolean }>(sql`select business_id as "businessId", name, slug, role, timezone, business_type as "businessType", default_locale as "defaultLocale", website_url as "websiteUrl", onboarding_stage as "onboardingStage", created_at as "createdAt", is_root as "isRoot", is_account_root as "isAccountRoot" from app.list_user_businesses(${userId})`);
+  return rows.rows.map((row) => ({ ...row, active: row.businessId === user?.activeBusinessId, createdAt: new Date(row.createdAt).toISOString() }));
+}
+
+/** The businesses the person belongs to. */
+export async function listUserBusinesses(db: Database, userId: string): Promise<UserBusiness[]> {
+  return await withBusinessTransaction(db, { userId, actorType: "operator" }, async (tx) => await userBusinessesInTransaction(tx, userId));
+}
+
+/**
+ * The account's workspaces, with its allowance as the sidebar shows it: how
+ * many open businesses it owns, and the most it may own, counting the plan a
+ * new business starts on, as creating one would (assertBusinessAllowanceInTransaction).
+ */
+export async function listUserBusinessesWithAllowance(db: Database, userId: string, caps?: BillingAccounts): Promise<{ businesses: UserBusiness[]; businessLimit: BusinessAllowance }> {
   return await withBusinessTransaction(db, { userId, actorType: "operator" }, async (tx) => {
-    const [user] = await tx.select({ activeBusinessId: users.activeBusinessId }).from(users).where(eq(users.id, userId)).limit(1);
-    const rows = await tx.execute<{ businessId: string; name: string; slug: string; role: string; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: Date; isRoot: boolean; isAccountRoot: boolean }>(sql`select business_id as "businessId", name, slug, role, timezone, business_type as "businessType", default_locale as "defaultLocale", website_url as "websiteUrl", onboarding_stage as "onboardingStage", created_at as "createdAt", is_root as "isRoot", is_account_root as "isAccountRoot" from app.list_user_businesses(${userId})`);
-    return rows.rows.map((row) => ({ ...row, active: row.businessId === user?.activeBusinessId, createdAt: new Date(row.createdAt).toISOString() }));
+    const list = await userBusinessesInTransaction(tx, userId);
+    return { businesses: list, businessLimit: await businessAllowanceInTransaction(tx, { userId, target: newBusinessPlan(undefined), caps }) };
   });
 }
 
@@ -187,24 +283,55 @@ export async function updateBusiness(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    await updateBusinessInTransaction(tx, input);
+    await updateBusinessInTransaction(tx, { ...input, audit: { actorUserId: input.userId } });
   });
 }
+
+/** Who changed the business, for the audit log: the account, and the API key or grant that acted for it. */
+export type BusinessChangeAudit = { actorUserId: string | null; payload?: Record<string, unknown> };
 
 /** Updates basic business fields and refreshes the receptionist's snapshot. Callers authorize first. */
 export async function updateBusinessInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; name?: string; timezone?: string; businessType?: string; defaultLocale?: string; websiteUrl?: string | null },
+  input: { businessId: string; name?: string; timezone?: string; businessType?: string; defaultLocale?: string; websiteUrl?: string | null; audit?: BusinessChangeAudit },
 ): Promise<void> {
   const timezone = input.timezone === undefined ? undefined : requireIanaTimeZone(input.timezone);
   const defaultLocale = input.defaultLocale === undefined ? undefined : requireRuntimeLocale(input.defaultLocale);
   const values = { ...(input.name !== undefined ? { name: input.name.trim() } : {}), ...(timezone !== undefined ? { timezone } : {}), ...(input.businessType !== undefined ? { businessType: input.businessType.trim() } : {}), ...(defaultLocale !== undefined ? { defaultLocale } : {}), ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}), updatedAt: new Date() };
   if (Object.keys(values).length === 1) throw new Error("At least one business field is required.");
+  // The language before this change, read under the row's lock, so a change made at the same time reads this one's.
+  const before = defaultLocale === undefined ? undefined : (await tx.select({ defaultLocale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0];
   const [business] = await tx.update(businesses).set(values).where(eq(businesses.id, input.businessId)).returning({ id: businesses.id });
   if (!business) throw new Error("Business not found.");
   // shortcut: every staff row today is the default member that stands for the business; once staff set their own zones, update only that member.
   if (timezone !== undefined) await tx.update(staff).set({ timezone, updatedAt: new Date() }).where(eq(staff.businessId, input.businessId));
+  if (before && defaultLocale !== undefined) await renameDefaultReceptionistForLanguage(tx, { businessId: input.businessId, from: before.defaultLocale, to: defaultLocale, audit: input.audit });
   await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "business", aggregateId: input.businessId, dedupeKey: `business:${input.businessId}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "business_updated" } });
+}
+
+/**
+ * The default receptionist takes the new language's "Front desk" while it has
+ * the old language's, the name the code gave it, and keeps any other name:
+ * one someone wrote, or another language's "Front desk", which someone chose.
+ * The rename is in the audit log, as a rename on the Receptionists page is.
+ */
+async function renameDefaultReceptionistForLanguage(tx: DatabaseTransaction, input: { businessId: string; from: string; to: string; audit?: BusinessChangeAudit | undefined }): Promise<void> {
+  const from = defaultReceptionistName(input.from);
+  const to = defaultReceptionistName(input.to);
+  if (from === to) return;
+  const renamed = await tx.update(receptionistProfiles).set({ name: to, updatedAt: new Date() })
+    .where(and(eq(receptionistProfiles.businessId, input.businessId), eq(receptionistProfiles.isDefault, true), eq(receptionistProfiles.name, from)))
+    .returning({ id: receptionistProfiles.id });
+  if (!renamed.length) return;
+  const actorUserId = input.audit?.actorUserId;
+  await tx.insert(auditLogs).values(renamed.map((row) => ({
+    businessId: input.businessId,
+    ...(actorUserId ? { actorUserId } : {}),
+    eventType: "receptionist.updated",
+    entityType: "receptionist",
+    entityId: row.id,
+    payload: { ...input.audit?.payload, fields: ["name"], from, to, reason: "business_language" },
+  })));
 }
 
 export async function switchWorkspace(
@@ -350,7 +477,7 @@ async function turnOffSenderConnections(tx: DatabaseTransaction, input: { busine
 
 export async function acceptInvitation(
   context: DomainContext,
-  input: { userId: string; tokenHash: string; email: string | null | undefined; emailVerified: boolean | null | undefined },
+  input: { userId: string; tokenHash: string; email: string | null | undefined; emailVerified: boolean | null | undefined; businessCaps?: BillingAccounts },
 ): Promise<{ businessId: string; role: string; turnedOff?: HandoverTurnedOff }> {
   const resolved = await context.db.execute<{ business_id: string }>(sql`select app.resolve_business_by_invitation(${input.tokenHash}) as business_id`);
   const businessId = resolved.rows[0]?.business_id;
@@ -379,6 +506,8 @@ export async function acceptInvitation(
       throw new Error("Invitation is invalid or expired.");
     }
     if (invitation.transfersOwnership) {
+      // Taking a business over counts against the account's limit like creating one.
+      await assertBusinessAllowanceInTransaction(tx, { userId: input.userId, businessId: invitation.businessId, caps: input.businessCaps });
       // A claim link makes the claimant an owner even if they were already on the team.
       await tx.insert(businessMemberships).values({ businessId: invitation.businessId, userId: input.userId, role: "business_owner", status: "active" }).onConflictDoUpdate({
         target: [businessMemberships.businessId, businessMemberships.userId],

@@ -70,7 +70,8 @@ async function auth(path: string, init: RequestInit = {}): Promise<Response> {
 async function seedBusiness(name: string, userId: string, role: string): Promise<string> {
   const businessId = randomUUID();
   await admin!.db.insert(businesses).values({ id: businessId, slug: `oauth-it-${businessId}`, name, timezone: "UTC", businessType: "test" });
-  await admin!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: name, bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+  await admin!.db.update(businesses).set({ summary: name }).where(eq(businesses.id, businessId));
+  await admin!.db.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   await admin!.db.insert(businessMemberships).values({ businessId, userId, role });
   cleanup.businesses.push(businessId);
   return businessId;
@@ -224,7 +225,7 @@ describe.skipIf(!setup.testUrl)("OAuth for MCP against PostgreSQL with RLS", () 
     expect(stored!.resources).toEqual([resource]);
 
     const client = await mcp(access);
-    expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(["add_knowledge", "get_business", "list_services", "list_staff"]);
+    expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(["add_knowledge", "answer_question", "get_business", "list_receptionists", "list_services", "list_staff"]);
     expect((await client.callTool({ name: "get_business", arguments: {} })).structuredContent).toMatchObject({ id: businessA });
     const added = await client.callTool({ name: "add_knowledge", arguments: { type: "faq", question: "Parking?", answer: "Behind the building." } });
     expect(added.isError ?? false).toBe(false);

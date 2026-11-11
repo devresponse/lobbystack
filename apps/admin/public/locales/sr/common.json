@@ -112,7 +112,8 @@
       "rateLimited": "Započeto je previše probnih poziva. Pokušajte ponovo malo kasnije.",
       "unavailable": "Vaš AI recepcioner trenutno nije dostupan.",
       "generic": "Došlo je do greške pri pokretanju poziva."
-    }
+    },
+    "receptionist": "Recepcioner za probne pozive"
   },
   "appointments": {
     "title": "Termini",
@@ -187,5 +188,51 @@
     "doneHint_other": "{{count}} stranica je spremno za pitanja.",
     "failedTitle": "Nismo uspeli da pročitamo sajt {{host}}",
     "failedHint": "Unesite podatke o firmi ručno ili ponovo pokrenite uvoz sa kontrolne table."
+  },
+  "planDisplay": {
+    "custom": "po dogovoru",
+    "storage": {
+      "megabytes": "{{amount}} MB",
+      "gigabytes": "{{amount}} GB"
+    },
+    "bullets": {
+      "voiceMinutes_one": "{{amount}} minut razgovora uključen",
+      "voiceMinutes_few": "{{amount}} minuta razgovora uključena",
+      "voiceMinutes_other": "{{amount}} minuta razgovora uključeno",
+      "voiceMinutesThen_one": "{{amount}} minut razgovora uključen\nZatim {{rate}}/min",
+      "voiceMinutesThen_few": "{{amount}} minuta razgovora uključena\nZatim {{rate}}/min",
+      "voiceMinutesThen_other": "{{amount}} minuta razgovora uključeno\nZatim {{rate}}/min",
+      "browserVoiceMinutes_one": "{{amount}} minut razgovora u pregledaču",
+      "browserVoiceMinutes_few": "{{amount}} minuta razgovora u pregledaču",
+      "browserVoiceMinutes_other": "{{amount}} minuta razgovora u pregledaču",
+      "browserVoiceMinutesThen_one": "{{amount}} minut razgovora u pregledaču\nZatim {{rate}}/min",
+      "browserVoiceMinutesThen_few": "{{amount}} minuta razgovora u pregledaču\nZatim {{rate}}/min",
+      "browserVoiceMinutesThen_other": "{{amount}} minuta razgovora u pregledaču\nZatim {{rate}}/min",
+      "voiceMinutesCustom": "Minuti razgovora po dogovoru",
+      "receptionists_one": "{{amount}} recepcioner",
+      "receptionists_few": "{{amount}} recepcionera",
+      "receptionists_other": "{{amount}} recepcionera",
+      "receptionistsCustom": "Broj recepcionera po dogovoru",
+      "businessNumbers_one": "{{amount}} namenski poslovni broj",
+      "businessNumbers_few": "{{amount}} namenska poslovna broja",
+      "businessNumbers_other": "{{amount}} namenskih poslovnih brojeva",
+      "businessNumbersNone": "Bez broja telefona",
+      "businessNumbersCustom": "Više namenskih brojeva",
+      "alertSmsSegments_one": "{{amount}} SMS segment za obaveštenja",
+      "alertSmsSegments_few": "{{amount}} SMS segmenta za obaveštenja",
+      "alertSmsSegments_other": "{{amount}} SMS segmenata za obaveštenja",
+      "alertSmsSegmentsCustom": "SMS segmenti za obaveštenja po dogovoru",
+      "outboundCallAttempts_one": "{{amount}} pokušaj preusmeravanja",
+      "outboundCallAttempts_few": "{{amount}} pokušaja preusmeravanja",
+      "outboundCallAttempts_other": "{{amount}} pokušaja preusmeravanja",
+      "outboundCallAttemptsCustom": "Pokušaji preusmeravanja po dogovoru",
+      "chatAiUnits_one": "{{amount}} razgovor u četu na sajtu",
+      "chatAiUnits_few": "{{amount}} razgovora u četu na sajtu",
+      "chatAiUnits_other": "{{amount}} razgovora u četu na sajtu",
+      "chatAiUnitsCustom": "Čet na sajtu po dogovoru",
+      "knowledgeStorageMegabytes": "{{amount}} MB baze znanja",
+      "knowledgeStorageGigabytes": "{{amount}} GB baze znanja",
+      "knowledgeStorageCustom": "Baza znanja po dogovoru"
+    }
   }
 }

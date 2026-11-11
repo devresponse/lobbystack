@@ -112,17 +112,22 @@ export type BusinessHoursInput = {
   sources: BusinessHoursSourceText[];
 };
 
-/** The knowledge passages most likely to state the opening hours: text entries and indexed documents, in any language. */
+/**
+ * The knowledge passages most likely to state the opening hours: text entries
+ * and indexed documents, in any language. Opening hours are the business's,
+ * so only articles for everyone count: a store's own hours belong in an
+ * article chosen for its receptionist.
+ */
 export async function loadBusinessHoursInput(context: DomainContext, input: { businessId: string }): Promise<BusinessHoursInput | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const [business] = await tx.select({ name: businesses.name, hoursSource: businesses.hoursSource, hoursFingerprint: businesses.hoursFingerprint }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
     if (!business) return null;
     const [windows] = await tx.select({ count: sql<number>`count(*)::int` }).from(businessHours).where(eq(businessHours.businessId, input.businessId));
     const snippets = await tx.select({ title: knowledgeSnippets.title, content: knowledgeSnippets.content }).from(knowledgeSnippets)
-      .where(and(eq(knowledgeSnippets.businessId, input.businessId), eq(knowledgeSnippets.active, true)))
+      .where(and(eq(knowledgeSnippets.businessId, input.businessId), eq(knowledgeSnippets.active, true), eq(knowledgeSnippets.audience, "everyone")))
       .orderBy(asc(knowledgeSnippets.createdAt)).limit(HOURS_MAX_SNIPPETS);
     const documents = await tx.select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title }).from(knowledgeDocuments)
-      .where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.active, true), eq(knowledgeDocuments.status, "indexed")))
+      .where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.active, true), eq(knowledgeDocuments.status, "indexed"), eq(knowledgeDocuments.audience, "everyone")))
       .orderBy(sql`case when ${knowledgeDocuments.sourceType} = 'upload' then 0 else 1 end`, asc(knowledgeDocuments.createdAt));
     const titles = new Map(documents.map((document) => [document.id, document.title]));
     const chunks = documents.length

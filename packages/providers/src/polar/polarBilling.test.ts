@@ -59,8 +59,8 @@ describe("PolarBillingProvider", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, "https://polar.example/v1/customers/external/business%3A1", expect.not.objectContaining({ method: expect.anything() }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "https://polar.example/v1/customers/external/business%3A2", expect.anything());
   });
-  it("makes a customer with its external ID, email and a name Polar accepts", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "customer-1", external_id: "business:1", email: "owner@example.com" }) });
+  it("makes a team customer with its external ID and a name Polar accepts, owned by the email, with no email of its own", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "customer-1", external_id: "business:1", email: null, type: "team" }) });
     vi.stubGlobal("fetch", fetchMock);
     const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
 
@@ -69,13 +69,26 @@ describe("PolarBillingProvider", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/customers/", expect.objectContaining({ method: "POST" }));
     const body = (index: number) => JSON.parse(String((fetchMock.mock.calls[index]?.[1] as RequestInit).body)) as unknown;
-    expect(body(0)).toEqual({ external_id: "business:1", email: "owner@example.com", name: "x".repeat(256) });
-    expect(body(1)).toEqual({ external_id: "business:2", email: "billing@example.com" });
+    expect(body(0)).toEqual({ type: "team", external_id: "business:1", name: "x".repeat(256), owner: { email: "owner@example.com", external_id: "business:1" } });
+    expect(body(1)).toEqual({ type: "team", external_id: "business:2", owner: { email: "billing@example.com", external_id: "business:2" } });
+  });
+  it("opens a portal page for a member only when one is named", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ customer_portal_url: "https://polar.example/portal/1" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await expect(provider.createCustomerPortalSession({ externalCustomerId: "business:1", externalMemberId: "business:1", returnUrl: "https://app.example/settings/plan" })).resolves.toEqual({ url: "https://polar.example/portal/1" });
+    await provider.createCustomerPortalSession({ externalCustomerId: "business:1", returnUrl: "https://app.example/settings/plan" });
+
+    expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/customer-sessions/", expect.objectContaining({ method: "POST" }));
+    const body = (index: number) => JSON.parse(String((fetchMock.mock.calls[index]?.[1] as RequestInit).body)) as unknown;
+    expect(body(0)).toEqual({ external_customer_id: "business:1", external_member_id: "business:1", return_url: "https://app.example/settings/plan" });
+    expect(body(1)).toEqual({ external_customer_id: "business:1", return_url: "https://app.example/settings/plan" });
   });
   it("names the fields a refused body points at", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ error: "PolarRequestValidationError", detail: [{ type: "value_error", loc: ["body", "email"], msg: "A customer with this email address already exists.", input: "owner@example.com" }, { type: "value_error", loc: ["body", "external_id"], msg: "A customer with this external ID already exists.", input: "business:1" }] }) })
-      .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ error: "RequestValidationError", detail: [{ type: "value_error", loc: ["body", "individual", "email"], msg: "value is not a valid email address" }] }) }));
+      .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ error: "RequestValidationError", detail: [{ type: "value_error", loc: ["body", "team", "owner", "email"], msg: "value is not a valid email address" }] }) }));
     const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
     const create = async () => await provider.createCustomer({ externalId: "business:1", email: "owner@example.com", name: null }).catch((error: unknown) => error);
 

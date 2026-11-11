@@ -12,6 +12,7 @@ import { ReplacementOnboardingShell } from "./replacement-onboarding-shell";
 import { Button } from "./ui/button";
 import { useSignOut } from "@/hooks/use-sign-out";
 import { buildAuthPathWithReturnTo } from "@/lib/auth-return-to";
+import { readBusinessLimit } from "@/lib/business-limit";
 import { resolveLocale } from "@/lib/locale";
 import { localizePublicPath } from "@/lib/locale-path";
 
@@ -59,6 +60,13 @@ export function AcceptInviteSurface() {
     setErrorMessage(null);
     try {
       const response = await fetch("/api/team/accept", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }) });
+      if (response.status === 409 && (await response.clone().json().catch(() => null) as { code?: unknown } | null)?.code === "business_limit") {
+        // A claim link makes the account an owner, and it already owns as many businesses as it may.
+        const limit = await readBusinessLimit();
+        setErrorMessage(t(limit?.upgrade ? "acceptInvite.businessLimitUpgrade" : "acceptInvite.businessLimit"));
+        setIsSubmitting(false);
+        return;
+      }
       if (response.status === 403) {
         // The signed-in account is not the invited address, or that address is not verified yet.
         setWrongAccount(true);

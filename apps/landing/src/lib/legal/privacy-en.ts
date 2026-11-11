@@ -1,8 +1,15 @@
-import type { LegalDocument } from "./types"
+import { processorNames } from "./processor"
+import type { LegalDocument, LegalProcessor } from "./types"
+
+// The payment processor among the providers. Stripe Tax also works out the taxes, from the billing address.
+const paymentProvider: Record<LegalProcessor, string> = {
+  polar: `<strong>Polar:</strong> checkout, subscriptions, usage billing, and payment processing;`,
+  stripe: `<strong>Stripe:</strong> checkout, subscriptions, usage billing, tax calculation, and payment processing;`,
+}
 
 const support = `<a href="mailto:support@lobbystack.com">support@lobbystack.com</a>`
 
-export const privacyEn: LegalDocument = {
+export const privacyEn = (processor: LegalProcessor): LegalDocument => ({
   updated: "Last updated: October 8, 2026",
   h1: "Privacy Policy",
   intro: `This Privacy Policy explains how Lobbystack Inc. ("LobbyStack," "we," "our," or "us") collects, uses, shares, and protects personal information when you visit our websites, use the hosted LobbyStack service, call or chat with a business that uses LobbyStack, receive a text sent through LobbyStack, or contact us.`,
@@ -49,7 +56,7 @@ export const privacyEn: LegalDocument = {
           ],
         },
         { h3: "3.4 Billing information" },
-        `Plan, billing interval, usage, invoices, tax details, payment status, and spending cap settings. Our payment processor, Polar, collects payment card details directly. We do not receive or store full card numbers.`,
+        `Plan, billing interval, usage, invoices, tax details, payment status, and spending cap settings. Our payment processor, ${processorNames[processor]}, collects payment card details directly. We do not receive or store full card numbers.`,
         { h3: "3.5 Website, device, and usage information" },
         `IP address, browser and device type, pages viewed, referring pages, clicks, approximate location derived from IP address, error logs, and how you use the dashboard. With your consent, we also collect session recordings of our website, with form inputs masked. See section 10 and our <a href="/cookie-policy/">Cookie Policy</a>.`,
         { h3: "3.6 Communications and support" },
@@ -57,7 +64,7 @@ export const privacyEn: LegalDocument = {
         { h3: "3.7 Affiliate and referral information" },
         `Referral codes, click times, referring pages, signup attribution, commission records, and the PayPal email used for payouts.`,
         { h3: "3.8 Sources" },
-        `We collect information directly from you, from Callers through a business's use of the Service, from your connected Google Calendar, from your website when you import it, from our providers (for example, payment status from Polar and call status from Twilio), and automatically from your device.`,
+        `We collect information directly from you, from Callers through a business's use of the Service, from your connected Google Calendar, from your website when you import it, from our providers (for example, payment status from ${processorNames[processor]} and call status from Twilio), and automatically from your device.`,
       ],
     },
     {
@@ -155,7 +162,7 @@ export const privacyEn: LegalDocument = {
             `<strong>Railway:</strong> application hosting, databases, and file storage, including recordings;`,
             `<strong>Cloudflare:</strong> website hosting, content delivery, security, and bot protection at signup;`,
             `<strong>PostHog:</strong> website and product analytics and, with consent, website session recordings;`,
-            `<strong>Polar:</strong> checkout, subscriptions, usage billing, and payment processing;`,
+            paymentProvider[processor],
             `<strong>Google:</strong> calendar access, only when you connect Google Calendar;`,
             `<strong>Firecrawl:</strong> reading your public website, only when you import it into your business knowledge;`,
             `<strong>Resend:</strong> account and notification emails;`,
@@ -316,4 +323,4 @@ export const privacyEn: LegalDocument = {
       ],
     },
   ],
-}
+})

@@ -74,7 +74,7 @@ curl https://app.lobbystack.com/api/v1/appointments \
   -d '{"service_id":"df8a2c34-d306-4292-a055-1b739ef74991","starts_at":"2026-09-29T09:30:00-04:00","contact_phone":"+14165550134"}'
 ```
 
-LobbyStack mémorise chaque clé pendant 24 heures, par clé API et par opération. Le [serveur MCP](/fr/ai/mcp) partage ces clés : `book_appointment`, `create_contact` et `add_knowledge` comptent comme `POST /appointments`, `POST /contacts` et `POST /knowledge`.
+LobbyStack mémorise chaque clé pendant 24 heures, par clé API et par opération. Le [serveur MCP](/fr/ai/mcp) partage ces clés : `book_appointment`, `create_contact`, `add_knowledge` et `answer_question` comptent comme `POST /appointments`, `POST /contacts`, `POST /knowledge` et `POST /knowledge/questions/{question_id}/answer`.
 
 - Une nouvelle tentative avec le même corps reçoit de nouveau la première réponse, avec l'en-tête `Idempotent-Replayed: true`. L'API ne crée pas de deuxième rendez-vous. LobbyStack compare les valeurs JSON, donc l'ordre des clés et les espaces n'ont pas d'importance.
 - La même clé avec un corps différent renvoie `422` avec le code `idempotency_key_reused`.

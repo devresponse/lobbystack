@@ -5,22 +5,25 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { billingCatalogWriteOrder, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, type StoredBillingPlan, type StoredBillingPrice } from "../packages/domain/src/server/billingCatalog";
+import { billingCatalogPacks, billingCatalogPlans, billingCatalogWriteOrder, desiredBillingPacks, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, diffBillingPackCatalog, diffBillingPackLinks, type StoredBillingPack, type StoredBillingPackPrice, type StoredBillingPlan, type StoredBillingPrice } from "../packages/domain/src/server/billingCatalog";
 import { createFakePolar, seedPolarSetup, type FakePolar } from "../packages/domain/src/server/billingPolar.testing";
-import { billingProfileSchema, canonicalBillingProfileJson, perMonthCents, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "../packages/shared/src/index";
+import { apiBillingCatalogLinkSchema, billingCatalogLinkRequest, billingProfileSchema, canonicalBillingProfileJson, perMonthCents, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "../packages/shared/src/index";
 import { runBilling } from "./billing";
 
 // pnpm billing end to end, against the Polar stand-in and a stand-in instance
 // that keeps its tables in memory with the API's own diff and link rules.
 
-const repositoryFile = new URL("../brands/alloplace/billing.json", import.meta.url);
+const brandFile = (brand: string) => new URL(`../brands/${brand}/billing.json`, import.meta.url);
 const instanceUrl = "https://demo.alloplace.com";
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const hashOf = (profile: BillingProfile) => sha256(canonicalBillingProfileJson(profile));
 
 type Instance = {
+  brand: string;
   plans: StoredBillingPlan[];
   prices: StoredBillingPrice[];
+  packs: StoredBillingPack[];
+  packPrices: StoredBillingPackPrice[];
   catalogRuns: ApiBillingCatalogRun[];
   linkRuns: ApiBillingCatalogRun[];
   /** What the instance's environment holds: its code's file hash and its Polar variables. */
@@ -31,37 +34,54 @@ type Instance = {
 
 function run(kind: ApiBillingCatalogRun["kind"], fields: Partial<ApiBillingCatalogRun>): ApiBillingCatalogRun {
   const now = new Date().toISOString();
-  return { id: crypto.randomUUID(), kind, status: "applied", brand: "alloplace", ver: 1, hash: "0".repeat(64), prev_hash: null, code_hash: null, changes: [], problems: [], blocked_by: [], polar_env: null, polar_org: null, key_id: "key", partner: "lobbystack", started_at: now, ended_at: now, ...fields };
+  return { id: crypto.randomUUID(), kind, status: "applied", brand: "alloplace", ver: 1, hash: "0".repeat(64), prev_hash: null, code_hash: null, changes: [], problems: [], blocked_by: [], polar_env: null, polar_org: null, provider: null, provider_env: null, provider_account: null, key_id: "key", partner: "lobbystack", started_at: now, ended_at: now, ...fields };
 }
 
 /** Writes an apply's or a link's rows as Postgres would. */
 function write(instance: Instance, writes: ReturnType<typeof diffBillingCatalog>["writes"]) {
   const now = new Date().toISOString();
   for (const entry of billingCatalogWriteOrder(writes)) {
-    if (entry.change.table === "billing_plans") {
-      if (entry.change.action === "insert") instance.plans.push({ polar_disc: null, frozen_at: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPlan);
+    if (entry.change.table === "billing_pack_plans") {
+      if (entry.change.action === "insert") instance.packs.push({ frozen_at: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPack);
+      else Object.assign(instance.packs.find((pack) => pack.code === entry.change.key)!, entry.set, { updated_at: now });
+    } else if (entry.change.table === "billing_pack_prices") {
+      if (entry.change.action === "insert") instance.packPrices.push({ id: crypto.randomUUID(), provider_ref: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPackPrice);
+      else Object.assign(instance.packPrices.find((price) => price.id === entry.id)!, entry.set, { updated_at: now });
+    } else if (entry.change.table === "billing_plans") {
+      if (entry.change.action === "insert") instance.plans.push({ provider_disc: null, frozen_at: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPlan);
       else Object.assign(instance.plans.find((plan) => plan.code === entry.change.key)!, entry.set, { updated_at: now });
     } else if (entry.change.action === "insert") {
       const set = entry.set as { period: "monthly" | "annual"; cents: number };
-      instance.prices.push({ id: crypto.randomUUID(), polar_id: null, run_id: null, retired_at: null, created_at: now, updated_at: now, per_month: perMonthCents(set.period, set.cents), ...entry.set } as StoredBillingPrice);
+      instance.prices.push({ id: crypto.randomUUID(), provider_ref: null, run_id: null, retired_at: null, created_at: now, updated_at: now, per_month: perMonthCents(set.period, set.cents), ...entry.set } as StoredBillingPrice);
     } else {
       Object.assign(instance.prices.find((price) => price.id === entry.id)!, entry.set, { updated_at: now });
     }
   }
 }
 
+/** What an apply writes for a file, its plans' rows and then its packs', as the API diffs them. */
+function applyDiff(instance: Instance, profile: BillingProfile, now: string) {
+  const diff = diffBillingCatalog({ plans: desiredBillingPlans(profile), currency: profile.currency, current: instance, now });
+  const packDiff = diffBillingPackCatalog({ packs: desiredBillingPacks(profile), currency: profile.currency, current: instance, now });
+  return { writes: [...diff.writes, ...packDiff.writes], refusals: [...diff.refusals, ...packDiff.refusals] };
+}
+
 function catalogOf(instance: Instance): ApiBillingCatalog {
   const latest = instance.catalogRuns.at(-1) ?? null;
+  // By sort then code, as the API reads them.
+  const packs = [...instance.packs].sort((a, b) => a.sort - b.sort || (a.code < b.code ? -1 : 1));
   return {
-    brand: "alloplace",
+    brand: instance.brand,
     code_hash: instance.codeHash,
     hash: latest?.hash ?? null,
     matches_code: latest?.hash === instance.codeHash,
     last_run: latest,
     profile: null,
     currency: instance.prices.find((price) => price.retired_at === null)?.currency ?? null,
-    plans: instance.plans.map(({ run_id: _runId, ...plan }) => ({ ...plan, discount: plan.discount as Record<string, unknown> | null, prices: instance.prices.filter((price) => price.plan === plan.code).map(({ plan: _plan, run_id: _run, ...price }) => price) })),
+    plans: billingCatalogPlans(instance, "polar"),
+    packs: billingCatalogPacks({ packs, packPrices: instance.packPrices }),
     polar: { env: instance.polar.env, org: instance.polar.org, secret_sha256: instance.polar.secret ? sha256(instance.polar.secret) : null, product_vars: instance.polar.productVars, last_link: instance.linkRuns.at(-1) ?? null },
+    provider: { id: "polar", env: instance.polar.env === "production" ? "live" : "sandbox", account: instance.polar.org, secret_sha256: instance.polar.secret ? sha256(instance.polar.secret) : null, objects: null, product_vars: instance.polar.productVars, last_link: instance.linkRuns.at(-1) ?? null },
   };
 }
 
@@ -78,7 +98,7 @@ async function instanceFetch(instance: Instance, url: URL, init: RequestInit): P
   if (url.pathname === "/api/v1/billing/catalog/runs" && init.method === "POST") {
     const profile = billingProfileSchema.parse(body!.billing_file);
     const hash = hashOf(profile);
-    const diff = diffBillingCatalog({ plans: desiredBillingPlans(profile), currency: profile.currency, current: instance, now });
+    const diff = applyDiff(instance, profile, now);
     const refusals = [...diff.refusals];
     if (body!.replaces_hash !== undefined && body!.replaces_hash !== latestHash) refusals.push({ code: "catalog_changed", path: "replaces_hash", message: "Someone applied in between." });
     if (!body!.allow_undeployed && hash !== instance.codeHash) refusals.push({ code: "file_not_deployed", path: "billing_file", message: "Not deployed." });
@@ -90,15 +110,19 @@ async function instanceFetch(instance: Instance, url: URL, init: RequestInit): P
     instance.catalogRuns.push(stored);
     return json(201, { data: stored });
   }
-  if (url.pathname === "/api/v1/billing/catalog/polar-links") {
-    const diff = diffBillingLinks({ body: body as never, current: instance, now });
-    const refusals = [...diff.refusals];
-    if (body!.hash !== latestHash) refusals.push({ code: "catalog_changed", path: "hash", message: "Another file." });
-    if (body!.polar_env !== instance.polar.env || body!.polar_org !== instance.polar.org) refusals.push({ code: "polar_org_mismatch", path: "polar_org", message: "Another organization." });
+  if (url.pathname === "/api/v1/billing/catalog/links") {
+    const link = billingCatalogLinkRequest(apiBillingCatalogLinkSchema.parse(body));
+    const diff = diffBillingLinks({ body: link, current: instance, now });
+    const packDiff = diffBillingPackLinks({ body: link, current: instance, now });
+    const refusals = [...diff.refusals, ...packDiff.refusals];
+    const polarEnv = link.provider_env === "live" ? "production" : "sandbox";
+    if (link.hash !== latestHash) refusals.push({ code: "catalog_changed", path: "hash", message: "Another file." });
+    if (link.provider !== "polar" || polarEnv !== instance.polar.env || link.provider_account !== instance.polar.org) refusals.push({ code: "polar_org_mismatch", path: "provider_account", message: "Another organization." });
     if (refusals.length) return conflict(refusals);
-    write(instance, diff.writes);
-    const changes = diff.writes.map((entry) => entry.change);
-    const stored = run("polar", { status: changes.length ? "applied" : "unchanged", hash: body!.hash, prev_hash: instance.linkRuns.at(-1)?.hash ?? null, changes, polar_env: body!.polar_env, polar_org: body!.polar_org });
+    const writes = [...diff.writes, ...packDiff.writes];
+    write(instance, writes);
+    const changes = writes.map((entry) => entry.change);
+    const stored = run("polar", { status: changes.length ? "applied" : "unchanged", hash: link.hash, prev_hash: instance.linkRuns.at(-1)?.hash ?? null, changes, polar_env: polarEnv, polar_org: link.provider_account, provider: "polar", provider_env: link.provider_env, provider_account: link.provider_account });
     instance.linkRuns.push(stored);
     return json(201, { data: stored });
   }
@@ -112,20 +136,24 @@ afterEach(async () => {
 });
 
 /** A checkout with the brand's file, changed as a test needs, and an instance whose code was built with the repository's file. */
-async function setUp(options: { change?: (file: Record<string, any>) => void; seeded?: boolean } = {}) {
+async function setUp(options: { brand?: string; change?: (file: Record<string, any>) => void; seeded?: boolean } = {}) {
+  const brand = options.brand ?? "alloplace";
   root = await mkdtemp(join(tmpdir(), "billing-"));
-  const text = await readFile(repositoryFile, "utf8");
+  const text = await readFile(brandFile(brand), "utf8");
   const file = JSON.parse(text) as Record<string, any>;
   options.change?.(file);
-  await mkdir(join(root, "brands", "alloplace"), { recursive: true });
-  await writeFile(join(root, "brands", "alloplace", "billing.json"), JSON.stringify(file, null, 2));
+  await mkdir(join(root, "brands", brand), { recursive: true });
+  await writeFile(join(root, "brands", brand, "billing.json"), JSON.stringify(file, null, 2));
   const deployed = billingProfileSchema.parse(JSON.parse(text));
   const fake = createFakePolar();
   if (options.seeded !== false) await seedPolarSetup(fake);
   const productId = (name: string) => fake.state.products.find((product) => product.name === name)?.id ?? null;
   const instance: Instance = {
+    brand,
     plans: [],
     prices: [],
+    packs: [],
+    packPrices: [],
     catalogRuns: [],
     linkRuns: [],
     codeHash: hashOf(deployed),
@@ -139,7 +167,7 @@ async function setUp(options: { change?: (file: Record<string, any>) => void; se
     requests: [],
   };
   // Step 1's catalog apply already ran on the deployed file.
-  const seeded = diffBillingCatalog({ plans: desiredBillingPlans(deployed), currency: deployed.currency, current: instance, now: new Date().toISOString() });
+  const seeded = applyDiff(instance, deployed, new Date().toISOString());
   write(instance, seeded.writes);
   instance.catalogRuns.push(run("catalog", { hash: instance.codeHash, code_hash: instance.codeHash, changes: seeded.writes.map((entry) => entry.change) }));
   instance.requests.length = 0;
@@ -211,19 +239,25 @@ describe("pnpm billing", () => {
     expect(applied.code).toBe(0);
     // Tags, the Credits taken off the monthly products, and two annual products that invoice overage each month.
     const made = context.fake.writes.filter((entry) => entry.method === "POST" && !entry.path.endsWith("/benefits"));
-    expect(made.map((entry) => [entry.path, (entry.body as { name: string; meter_interval?: string }).name, (entry.body as { meter_interval?: string }).meter_interval])).toEqual([["/v1/products/", "Starter annual", "month"], ["/v1/products/", "Pro annual", "month"]]);
+    const forPack = (entry: { body: unknown }) => (entry.body as { metadata: Record<string, string> }).metadata.lobbystack_pack !== undefined;
+    expect(made.filter((entry) => !forPack(entry)).map((entry) => [entry.path, (entry.body as { name: string; meter_interval?: string }).name, (entry.body as { meter_interval?: string }).meter_interval])).toEqual([["/v1/products/", "Starter annual", "month"], ["/v1/products/", "Pro annual", "month"]]);
+    // Then the brand file's nine packs, each a private product paid once.
+    expect(made.filter(forPack).map((entry) => [(entry.body as { visibility: string }).visibility, (entry.body as { recurring_interval: string | null }).recurring_interval])).toEqual(Array.from({ length: 9 }, () => ["private", null]));
     expect(applied.out).toContain('detach Product "Starter monthly"');
     expect(context.fake.state.products.slice(0, 4).map((product) => product.id)).toEqual(ids);
     const live = context.fake.state.products.filter((product) => !product.is_archived);
     expect(live.map((product) => product.id)).toEqual(expect.arrayContaining(ids.filter((_id, index) => context.fake.state.products[index]!.recurring_interval === "month")));
-    expect(applied.out).toContain("Links: recorded 6 changes in run");
+    // The 2 sold plans and their 4 prices, then the 9 packs and their 9 prices.
+    expect(applied.out).toContain("Links: recorded 24 changes in run");
     // The annual variables polar-setup.mjs left on Railway name the archived products, which checkout ignores.
     expect(applied.out).toContain("warn   product_vars: POLAR_STARTER_ANNUAL_PRODUCT_ID is");
     expect(applied.out).toContain("Result: in sync (exit 0).");
     // Postgres wasn't asked to apply again, only for dry runs: the file was applied in step 1.
     expect(context.instance.requests.filter((request) => request.path === "POST /api/v1/billing/catalog/runs").map((request) => (request.body as { dry_run?: boolean }).dry_run)).toEqual([true, true, true, true]);
     expect(context.instance.plans.filter((entry) => entry.sold).map((entry) => entry.status)).toEqual(["active", "active"]);
-    expect(context.instance.prices.map((price) => price.polar_id).sort()).toEqual(live.map((product) => product.id).sort());
+    expect(context.instance.packs.map((entry) => entry.status)).toEqual(Array.from({ length: 9 }, () => "active"));
+    // Every live product sells one linked row: a plan's price or a pack's.
+    expect([...context.instance.prices, ...context.instance.packPrices].map((price) => price.provider_ref).sort()).toEqual(live.map((product) => product.id).sort());
 
     // The Railway values, readable only by this user, without a webhook secret: Polar already had the webhook.
     const railway = await readFile(railwayFile, "utf8");
@@ -310,7 +344,8 @@ describe("pnpm billing", () => {
     expect(plan.code).toBe(0);
     const shown = JSON.parse(plan.out) as { catalog: Array<{ key: string; action: string }>; steps: Array<{ action: string; object: string }>; refusals: string[] };
     expect(shown.catalog.map((change) => `${change.action} ${change.key}`)).toEqual(["update pro", "update pro/monthly/cad"]);
-    expect(shown.steps.filter((step) => step.object === "product").map((step) => step.action)).toEqual(["create", "create", "create", "create"]);
+    // The 4 plans' products, then the 9 packs'.
+    expect(shown.steps.filter((step) => step.object === "product").map((step) => step.action)).toEqual(Array.from({ length: 13 }, () => "create"));
     expect(shown.refusals).toEqual([]);
 
     context.instance.requests.length = 0;
@@ -322,12 +357,22 @@ describe("pnpm billing", () => {
       "GET /api/v1/billing/catalog",
       "POST /api/v1/billing/catalog/runs",
       "POST /api/v1/billing/catalog/runs",
-      "POST /api/v1/billing/catalog/polar-links",
+      "POST /api/v1/billing/catalog/links",
       "GET /api/v1/billing/catalog",
     ]);
     expect(context.instance.requests[1]!.body).toMatchObject({ dry_run: true });
     expect(context.instance.requests[2]!.body).toEqual({ brand: "alloplace", billing_file: expect.objectContaining({ version: 1 }), replaces_hash: context.instance.catalogRuns[0]!.hash, allow_undeployed: true });
     expect(context.fake.state.products.find((product) => product.name === "Pro monthly")!.prices.find((price) => price.amount_type === "fixed" && !price.is_archived)!.price_amount).toBe(12000);
+  });
+
+  it("leaves billing.json's display section out of what it sends, so a deployment built before the section still takes the file", async () => {
+    const context = await setUp({ brand: "realinfobot" });
+    expect(JSON.parse(await readFile(join(root, "brands", "realinfobot", "billing.json"), "utf8"))).toHaveProperty("display");
+    const result = await billing(["plan", "--brand", "realinfobot", "--polar", "sandbox", "--json", "--adopt", "--allow-replace"], context);
+    expect(result.code).toBe(0);
+    const sent = context.instance.requests.flatMap((request) => (request.body && typeof request.body === "object" && "billing_file" in request.body ? [(request.body as { billing_file: object }).billing_file] : []));
+    expect(sent.length).toBeGreaterThan(0);
+    for (const file of sent) expect(file).not.toHaveProperty("display");
   });
 
   it("asks before changing anything, and changes nothing on another answer", async () => {
@@ -365,5 +410,28 @@ describe("pnpm billing", () => {
     const unreadable = await billing(["verify", ...sandbox], context);
     expect(unreadable.code).toBe(2);
     expect(unreadable.out).toContain("Result: failed (exit 2).");
+  });
+});
+
+// What pnpm billing printed before its calls went through the catalog seam
+// (Stripe plan, step 4), for both brands: that step must leave it unchanged.
+describe("pnpm billing's output", () => {
+  const stable = (output: string) => output.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>").replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, "<time>");
+  for (const brand of ["alloplace", "realinfobot"]) {
+    const flags = ["--brand", brand, "--polar", "sandbox"];
+    it(`plans ${brand} on an empty organization`, async () => {
+      const result = await billing(["plan", ...flags, "--json"], await setUp({ brand, seeded: false }));
+      expect({ code: result.code, out: JSON.parse(result.out), err: stable(result.err) }).toMatchSnapshot();
+    });
+    it(`plans ${brand} on the objects polar-setup.mjs made`, async () => {
+      const result = await billing(["plan", ...flags, "--json", "--adopt", "--allow-replace"], await setUp({ brand }));
+      expect({ code: result.code, out: JSON.parse(result.out), err: stable(result.err) }).toMatchSnapshot();
+    });
+  }
+  it("applies alloplace, then verifies it", async () => {
+    const context = await setUp();
+    const applied = await billing(["apply", ...sandbox, "--adopt", "--allow-replace", "--yes"], context);
+    const verified = await billing(["verify", ...sandbox, "--json"], context);
+    expect({ applied: { code: applied.code, out: stable(applied.out), err: stable(applied.err) }, verified: { code: verified.code, out: JSON.parse(verified.out) } }).toMatchSnapshot();
   });
 });

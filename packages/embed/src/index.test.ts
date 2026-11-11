@@ -404,3 +404,25 @@ it("gives the chat a bubble when the page has no element for it", () => {
   mountTag({ "data-widget-key": "fixture-key", "data-inline-target": "[not a selector" });
   expect(bubble()).not.toBeNull();
 });
+
+it("sends the receptionist token the business's own page signed, and nothing on other websites", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ token: "fixture-session", expiresAt: "2099-01-01T00:00:00Z" }));
+  vi.stubGlobal("fetch", fetchMock);
+  vi.useFakeTimers();
+  const script = document.createElement("script");
+  script.setAttribute("data-widget-key", "fixture-key");
+  script.setAttribute("data-base-url", "https://admin.example.test");
+  script.setAttribute("data-receptionist-token", " signed.page.token ");
+  vi.spyOn(document, "currentScript", "get").mockReturnValue(script);
+  expect(initWidget()).toBe(true);
+  window.LobbyStack!.open();
+  await flush();
+  const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+  expect(JSON.parse(String(init.body))).toEqual({ widgetKey: "fixture-key", visitorId: expect.any(String), receptionistToken: "signed.page.token" });
+});
+
+it("leaves the receptionist to the key when the snippet carries no token", async () => {
+  const { fetchMock } = await start(Response.json({ token: "fixture-session", expiresAt: "2099-01-01T00:00:00Z" }));
+  const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+  expect(JSON.parse(String(init.body))).not.toHaveProperty("receptionistToken");
+});

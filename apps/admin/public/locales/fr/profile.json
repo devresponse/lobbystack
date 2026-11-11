@@ -3,7 +3,8 @@
     "title": "{{name}} · {{category}} à {{city}}",
     "titleNoCity": "{{name}} · {{category}}",
     "titleNoCategory": "{{name}} · {{city}}",
-    "description": "Heures d'ouverture, services et coordonnées de {{name}}."
+    "description": "Heures d'ouverture, services et coordonnées de {{name}}.",
+    "receptionistTitle": "{{receptionist}} · {{title}}"
   },
   "preview": {
     "banner": "Cette page n'est pas publiée. Seule votre équipe peut la voir.",
@@ -77,6 +78,19 @@
     "personDuringHours": "Vous pouvez demander à parler à une personne pendant les heures d'ouverture.",
     "answeredBy": "Réponses par",
     "languages": "Langues"
+  },
+  "receptionists": {
+    "label": "Vous parlez avec",
+    "choose": "Choisir avec qui parler",
+    "search": "Chercher par nom ou par sujet",
+    "noMatches": "Aucun résultat.",
+    "current": "En cours"
+  },
+  "entryLink": {
+    "notFound": {
+      "title": "Ce code QR n'ouvre aucune page",
+      "body": "L'entreprise a peut-être retiré sa page. Demandez-lui un nouveau code."
+    }
   },
   "notFound": {
     "title": "Cette page n'existe pas",

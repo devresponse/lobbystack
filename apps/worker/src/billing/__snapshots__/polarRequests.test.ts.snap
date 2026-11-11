@@ -1,0 +1,410 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the requests Polar receives > a checkout > for a customer Polar has 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/customers/external/business%3A00000000-0000-4000-8000-0000000000b1",
+  },
+  {
+    "body": {
+      "allow_discount_codes": false,
+      "customer_id": "cus-known",
+      "metadata": {
+        "lobbystack_business": "00000000-0000-4000-8000-0000000000b1",
+      },
+      "products": [
+        "product-pro-annual",
+      ],
+      "return_url": "https://app.example/settings/plan",
+      "success_url": "https://app.example/settings/plan?checkout=success&requestId=00000000-0000-4000-8000-0000000000c1",
+    },
+    "method": "POST",
+    "path": "/v1/checkouts/",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a checkout > for a new customer 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/customers/external/business%3A00000000-0000-4000-8000-0000000000b1",
+  },
+  {
+    "body": {
+      "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      "name": "Allo Salon",
+      "owner": {
+        "email": "owner@example.com",
+        "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      },
+      "type": "team",
+    },
+    "method": "POST",
+    "path": "/v1/customers/",
+  },
+  {
+    "body": {
+      "allow_discount_codes": false,
+      "customer_id": "cus-new",
+      "metadata": {
+        "lobbystack_business": "00000000-0000-4000-8000-0000000000b1",
+      },
+      "products": [
+        "product-starter-monthly",
+      ],
+      "return_url": "https://app.example/settings/plan",
+      "success_url": "https://app.example/settings/plan?checkout=success&requestId=00000000-0000-4000-8000-0000000000c1",
+    },
+    "method": "POST",
+    "path": "/v1/checkouts/",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a checkout > with a billing email 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/customers/external/business%3A00000000-0000-4000-8000-0000000000b1",
+  },
+  {
+    "body": {
+      "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      "name": "Allo Salon",
+      "owner": {
+        "email": "billing@example.com",
+        "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      },
+      "type": "team",
+    },
+    "method": "POST",
+    "path": "/v1/customers/",
+  },
+  {
+    "body": {
+      "allow_discount_codes": false,
+      "customer_id": "cus-billing",
+      "metadata": {
+        "lobbystack_business": "00000000-0000-4000-8000-0000000000b1",
+      },
+      "products": [
+        "product-starter-monthly",
+      ],
+      "return_url": "https://app.example/onboarding/plan",
+      "success_url": "https://app.example/onboarding/plan?checkout=success&requestId=00000000-0000-4000-8000-0000000000c1",
+    },
+    "method": "POST",
+    "path": "/v1/checkouts/",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a pack's checkout > for a customer Polar has, from onboarding 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/customers/external/business%3A00000000-0000-4000-8000-0000000000b1",
+  },
+  {
+    "body": {
+      "allow_discount_codes": false,
+      "customer_id": "cus-known",
+      "metadata": {
+        "lobbystack_business": "00000000-0000-4000-8000-0000000000b1",
+        "lobbystack_pack": "minutes_500_90",
+        "lobbystack_pack_checkout": "00000000-0000-4000-8000-0000000000d1",
+        "lobbystack_pack_price": "00000000-0000-4000-8000-0000000000e1",
+        "lobbystack_role": "pack",
+      },
+      "products": [
+        "product-pack-500-90",
+      ],
+      "return_url": "https://app.example/onboarding/plan",
+      "success_url": "https://app.example/onboarding/plan?pack=success&packCheckoutId=00000000-0000-4000-8000-0000000000d1",
+    },
+    "method": "POST",
+    "path": "/v1/checkouts/",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a pack's checkout > for a new customer 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/customers/external/business%3A00000000-0000-4000-8000-0000000000b1",
+  },
+  {
+    "body": {
+      "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      "name": "Allo Salon",
+      "owner": {
+        "email": "owner@example.com",
+        "external_id": "business:00000000-0000-4000-8000-0000000000b1",
+      },
+      "type": "team",
+    },
+    "method": "POST",
+    "path": "/v1/customers/",
+  },
+  {
+    "body": {
+      "allow_discount_codes": false,
+      "customer_id": "cus-new",
+      "metadata": {
+        "lobbystack_business": "00000000-0000-4000-8000-0000000000b1",
+        "lobbystack_pack": "minutes_500_90",
+        "lobbystack_pack_checkout": "00000000-0000-4000-8000-0000000000d1",
+        "lobbystack_pack_price": "00000000-0000-4000-8000-0000000000e1",
+        "lobbystack_role": "pack",
+      },
+      "products": [
+        "product-pack-500-90",
+      ],
+      "return_url": "https://app.example/settings/plan",
+      "success_url": "https://app.example/settings/plan?pack=success&packCheckoutId=00000000-0000-4000-8000-0000000000d1",
+    },
+    "method": "POST",
+    "path": "/v1/checkouts/",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a plan change > a downgrade from the next period 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "product_id": "product-starter-monthly",
+      "proration_behavior": "next_period",
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a plan change > an upgrade invoiced now 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "product_id": "product-pro-annual",
+      "proration_behavior": "invoice",
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a plan change > an upgrade prorated on the next invoice 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "product_id": "product-pro-monthly",
+      "proration_behavior": "prorate",
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a promo plan > ending on its tier's standard product 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "discount_id": null,
+      "product_id": "product-starter-monthly",
+      "proration_behavior": "next_period",
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a promo plan > ending with a cancellation 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "cancel_at_period_end": true,
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > a promo plan > its discount dropped from a standard product 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "discount_id": null,
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > ending a deleted business's plan 1`] = `
+[
+  {
+    "body": null,
+    "method": "DELETE",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > ending a plan a prepaid pack replaced, after its pending usage 1`] = `
+[
+  {
+    "body": {
+      "events": [
+        {
+          "external_customer_id": "business-key",
+          "external_id": "voice:call-1",
+          "metadata": {
+            "businessId": "00000000-0000-4000-8000-0000000000b1",
+            "quantity": 1.5833333333333333,
+            "usageKind": "voice_seconds",
+          },
+          "name": "billing.voice_minutes",
+          "timestamp": "2099-11-08T10:30:00.000Z",
+        },
+      ],
+    },
+    "method": "POST",
+    "path": "/v1/events/ingest",
+  },
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "cancel_at_period_end": true,
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+  {
+    "body": {
+      "current_billing_period_end": "2099-11-08T12:05:00.000Z",
+    },
+    "method": "PATCH",
+    "path": "/v1/subscriptions/sub-1",
+  },
+]
+`;
+
+exports[`the requests Polar receives > usage > a call's seconds 1`] = `
+[
+  {
+    "body": {
+      "events": [
+        {
+          "external_customer_id": "business-key",
+          "external_id": "voice:call-1",
+          "metadata": {
+            "businessId": "00000000-0000-4000-8000-0000000000b1",
+            "quantity": 1.5833333333333333,
+            "usageKind": "voice_seconds",
+          },
+          "name": "billing.voice_minutes",
+          "timestamp": "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    },
+    "method": "POST",
+    "path": "/v1/events/ingest",
+  },
+]
+`;
+
+exports[`the requests Polar receives > usage > a row, then a correction as its difference 1`] = `
+[
+  {
+    "body": {
+      "events": [
+        {
+          "external_customer_id": "business-key",
+          "external_id": "alert_sms:operator_notification:delivery-1",
+          "metadata": {
+            "businessId": "00000000-0000-4000-8000-0000000000b1",
+            "quantity": 2,
+            "usageKind": "alert_sms_segments",
+          },
+          "name": "billing.alert_sms_segments",
+          "timestamp": "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    },
+    "method": "POST",
+    "path": "/v1/events/ingest",
+  },
+  {
+    "body": {
+      "events": [
+        {
+          "external_customer_id": "business-key",
+          "external_id": "alert_sms:operator_notification:delivery-1:2",
+          "metadata": {
+            "businessId": "00000000-0000-4000-8000-0000000000b1",
+            "quantity": -1,
+            "usageKind": "alert_sms_segments",
+          },
+          "name": "billing.alert_sms_segments",
+          "timestamp": "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    },
+    "method": "POST",
+    "path": "/v1/events/ingest",
+  },
+]
+`;

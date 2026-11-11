@@ -9,7 +9,7 @@ vi.mock("@lobbystack/db", async (original) => ({
 }));
 vi.mock("./notifications", () => ({ queueOperatorAlertInTransaction: vi.fn() }));
 
-import { aiTraceContexts, aiTraces, conversations, conversationSessions, inboxItems, messages, transcripts, unansweredQuestions } from "@lobbystack/db";
+import { aiTraceContexts, aiTraces, conversations, conversationSessions, entryLinkDailyScans, inboxItems, messages, transcripts, unansweredQuestions } from "@lobbystack/db";
 import { appendMessage } from "./conversations";
 import { receiveInboundSms } from "./sms";
 import { upsertTranscript } from "./voice";
@@ -110,13 +110,14 @@ describe("approved content retention", () => {
     expect(query.sql).toContain('"messages"."business_id"');
     expect(query.sql).toContain('"messages"."content_expires_at" <');
   });
-  it("keeps automatic content deletion disabled while follow-up and notification sweeps still run", async () => {
+  it("keeps automatic content deletion disabled while follow-up, notification and QR scan sweeps still run", async () => {
     vi.stubEnv("CONTENT_RETENTION_ENABLED", "false");
     const result = await runPrivacyRetentionSweep(context, { businessId: "business", now });
-    expect(result).toMatchObject({ scrubbedMessages: 0, deletedTranscripts: 0, queuedRecordings: 0, scrubbedFollowUps: 0, scrubbedOperatorDeliveries: 1 });
+    expect(result).toMatchObject({ scrubbedMessages: 0, deletedTranscripts: 0, queuedRecordings: 0, scrubbedFollowUps: 0, scrubbedOperatorDeliveries: 1, deletedEntryLinkScanDays: 1 });
     expect(updates.some((entry) => entry.table === messages)).toBe(false);
     expect(updates.some((entry) => entry.table === inboxItems)).toBe(false);
-    expect(deletes).toHaveLength(0);
+    // Only QR link scan counts, which carry nothing about the visitor, are deleted.
+    expect(deletes.map((entry) => entry.table)).toEqual([entryLinkDailyScans]);
     expect(selectCalls).toBe(0);
     expect(mocks.enqueue).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ topic: "privacy.deleteRecording" }));
   });
@@ -160,6 +161,16 @@ describe("approved content retention", () => {
     expect(query.sql).toContain('"unanswered_questions"."business_id"');
     expect(query.sql).toContain('"unanswered_questions"."content_expires_at" <');
   });
+  it("deletes QR link scan counts older than the 13 months they are kept", async () => {
+    const result = await runPrivacyRetentionSweep(context, { businessId: "business", now });
+    expect(result.deletedEntryLinkScanDays).toBe(1);
+    const query = new PgDialect().sqlToQuery(deletes.find((entry) => entry.table === entryLinkDailyScans)!.where!);
+    expect(query.sql).toContain('"entry_link_daily_scans"."business_id"');
+    expect(query.sql).toContain('"entry_link_daily_scans"."day" < (');
+    expect(query.sql).toContain("make_interval(months => ");
+    expect(query.params).toEqual(["business", "2030-01-01", 13]);
+  });
+
   it("uses the same media scrub in the scheduled sweep", async () => {
     const result = await runPrivacyRetentionSweep(context, { businessId: "business", now });
     expect(result).toMatchObject({ scrubbedMessages: 1, deletedTranscripts: 1 });

@@ -42,6 +42,10 @@
     "errorDescription": "Une erreur s'est produite lors de la réclamation de cette démo. Veuillez réessayer.",
     "unavailableTitle": "Ce lien de démo est indisponible",
     "unavailableDescription": "Le lien de démo est manquant ou n'est plus valide.",
+    "businessLimitTitle": "Votre compte possède le nombre maximal d'entreprises",
+    "businessLimitDescription": "Supprimez l'une de vos entreprises, ou connectez-vous avec un autre compte, pour réclamer cette démo.",
+    "businessLimitUpgradeTitle": "Votre compte possède le nombre maximal d'entreprises que permettent ses forfaits",
+    "businessLimitUpgradeDescription": "Passez l'une de vos entreprises à un forfait supérieur, supprimez-en une, ou connectez-vous avec un autre compte, pour réclamer cette démo.",
     "retry": "Réessayer"
   },
   "operator": {

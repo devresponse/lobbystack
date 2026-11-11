@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { compileBrands, type BrandSources } from "./schema";
+import { brandsModuleSource, compileBrands, type BrandSources } from "./schema";
 
 const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>');
 
@@ -131,12 +131,56 @@ describe("compileBrands", () => {
     expect(plans[1]).toEqual({
       code: "starter", sold: true, custom: false, overage: true,
       voice_sec: 12_000, sms_seg: billing.plans.starter.included.alertSmsSegments, calls_out: billing.plans.starter.included.outboundCallAttempts, chat_units: billing.plans.starter.included.chatAiUnits,
-      kb_bytes: billing.plans.starter.limits.knowledgeStorageMb * 1_048_576, numbers: billing.plans.starter.limits.businessNumbers,
+      kb_bytes: billing.plans.starter.limits.knowledgeStorageMb * 1_048_576, numbers: billing.plans.starter.limits.businessNumbers, receptionists: 1,
       voice_rate: billing.plans.starter.overageCents.voiceMinute, sms_rate: billing.plans.starter.overageCents.alertSmsSegment, call_rate: billing.plans.starter.overageCents.outboundCallAttempt,
       sort: 20,
       prices: [{ period: "annual", currency: billing.currency, cents: 37_000 }, { period: "monthly", currency: billing.currency, cents: 3700 }],
     });
-    expect(plans[3]).toMatchObject({ code: "enterprise", sold: false, custom: true, voice_sec: null, prices: [] });
+    expect(plans[3]).toMatchObject({ code: "enterprise", sold: false, custom: true, voice_sec: null, receptionists: null, prices: [] });
+  });
+
+  it("carries a billing.json's display section to the plan screens, apart from the hash", () => {
+    // The example file of plans and packs, whose section has a card for each of the four plans.
+    const billing = JSON.parse(readFileSync(new URL("./testing/plans-and-packs.billing.json", import.meta.url), "utf8"));
+    const { display, ...sold } = billing;
+    const withBilling = sources();
+    withBilling.brands.alloplace!.billing = billing;
+    const compiled = compileBrands(withBilling);
+    expect(compiled.planDisplays).toEqual({ alloplace: display });
+    withBilling.brands.alloplace!.billing = sold;
+    const without = compileBrands(withBilling);
+    expect(without.planDisplays).toEqual({});
+    expect(without.billingHashes).toEqual(compiled.billingHashes);
+    expect(without.billingPlans).toEqual(compiled.billingPlans);
+    expect(brandsModuleSource(compiled)).toContain(`export const BRAND_PLAN_DISPLAYS: Record<string, BrandPlanDisplay> = ${JSON.stringify({ alloplace: display }, null, 2)};`);
+    // A section the screens can't show stops the build, naming the file.
+    withBilling.brands.alloplace!.billing = { ...billing, display: { ...display, plans: display.plans.map((card: Record<string, unknown>) => ({ ...card, popular: true })) } };
+    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json display.plans: only one plan can be popular");
+  });
+
+  it("carries a billing.json's accounts section to the admin, apart from the hash", () => {
+    const billing = JSON.parse(readFileSync(new URL("./testing/plans-and-packs.billing.json", import.meta.url), "utf8"));
+    const withBilling = sources();
+    withBilling.brands.alloplace!.billing = billing;
+    const without = compileBrands(withBilling);
+    expect(without.accountLimits).toEqual({});
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: { maxBusinesses: 3 } };
+    const compiled = compileBrands(withBilling);
+    expect(compiled.accountLimits).toEqual({ alloplace: { maxBusinesses: 3 } });
+    expect(compiled.billingHashes).toEqual(without.billingHashes);
+    expect(compiled.billingPlans).toEqual(without.billingPlans);
+    expect(brandsModuleSource(compiled)).toContain(`export const BRAND_ACCOUNT_LIMITS: Record<string, BrandAccountLimits> = ${JSON.stringify({ alloplace: { maxBusinesses: 3 } }, null, 2)};`);
+    // A number outside 1 to 100 stops the build, naming the file.
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: { maxBusinesses: 101 } };
+    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json accounts.maxBusinesses");
+    // A number for each plan comes along, and a code no plan of the file has stops the build.
+    const byPlan = { maxBusinesses: 3, maxBusinessesByPlan: { free_cloud: 1, starter: 5, prepaid: 2 } };
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: byPlan };
+    const perPlan = compileBrands(withBilling);
+    expect(perPlan.accountLimits).toEqual({ alloplace: byPlan });
+    expect(perPlan.billingHashes).toEqual(without.billingHashes);
+    withBilling.brands.alloplace!.billing = { ...billing, accounts: { maxBusinessesByPlan: { starterr: 5 } } };
+    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json accounts.maxBusinessesByPlan.starterr");
   });
 
   it("keeps a name with its environment suffix within the length limit", () => {

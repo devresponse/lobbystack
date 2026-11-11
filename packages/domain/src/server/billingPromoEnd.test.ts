@@ -50,4 +50,11 @@ describe("promo plan endings", () => {
     expect(promoEndStep(facts({ subscriptionState: "canceled" }), now)).toEqual({ due: false });
     expect(promoEndStep(facts({ source: "managed" }), now)).toEqual({ due: false });
   });
+
+  it("never end a subscription a prepaid pack replaced, which ends at the provider instead", () => {
+    // The provider still reports it active until the end lands, so the state alone would make it due.
+    expect(promoEndStep(facts({ replaced: true }), now)).toEqual({ due: false });
+    expect(promoEndStep(facts({ replaced: true, endWith: "tier" }), now)).toEqual({ due: false });
+    expect(promoEndStep(facts({ replaced: false }), now)).toMatchObject({ due: true });
+  });
 });

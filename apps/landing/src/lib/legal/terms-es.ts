@@ -1,8 +1,16 @@
-import type { LegalDocument } from "./types"
+import { processorNames } from "./processor"
+import type { LegalDocument, LegalProcessor } from "./types"
+
+// 12.2 says who sells. Polar resells the plans as the merchant of record. With Stripe the operator sells
+// them and Stripe only processes the payment, which the operator's lawyer reviews before live payments.
+const payment: Record<LegalProcessor, string> = {
+  polar: `12.2 <strong>Pago.</strong> Nuestro procesador de pagos, actualmente Polar, gestiona el proceso de pago en línea y los cargos. Usted nos autoriza a nosotros y a Polar a cargar en su método de pago las cuotas de suscripción, los cargos por uso y los impuestos a su vencimiento. Los términos propios de Polar se aplican a su compra.`,
+  stripe: `12.2 <strong>Pago.</strong> Nuestro procesador de pagos, actualmente Stripe, gestiona por nosotros el proceso de pago en línea y los cargos. Nosotros somos el vendedor, y usted nos autoriza a cargar en su método de pago, a través de Stripe, las cuotas de suscripción, los cargos por uso y los impuestos a su vencimiento. Los términos propios de Stripe se aplican al procesamiento de su pago.`,
+}
 
 const support = `<a href="mailto:support@lobbystack.com">support@lobbystack.com</a>`
 
-export const termsEs: LegalDocument = {
+export const termsEs = (processor: LegalProcessor): LegalDocument => ({
   updated: "Última actualización: 26 de septiembre de 2026",
   h1: "Términos del servicio",
   intro: `Estos Términos del servicio (los “Términos”) rigen el uso que usted hace del servicio alojado, los sitios web y el soporte de LobbyStack. Le rogamos que los lea antes de utilizar LobbyStack. Limitan nuestra responsabilidad, le atribuyen a usted la responsabilidad por el consentimiento para la grabación de llamadas y por el cumplimiento normativo de los mensajes de texto, y establecen cómo resolvemos las controversias.`,
@@ -145,7 +153,7 @@ export const termsEs: LegalDocument = {
       nav: "Terceros",
       title: "11. Servicios de Terceros",
       blocks: [
-        `11.1 El Servicio depende de Servicios de Terceros, incluidos OpenAI para la voz y el texto con IA, Twilio para los números de teléfono, las llamadas y los mensajes de texto, Google Calendar cuando usted lo conecta, Polar para la facturación y Firecrawl cuando usted importa su sitio web. La <a href="/es/privacy/">Política de privacidad</a> enumera los proveedores que tratan datos personales.`,
+        `11.1 El Servicio depende de Servicios de Terceros, incluidos OpenAI para la voz y el texto con IA, Twilio para los números de teléfono, las llamadas y los mensajes de texto, Google Calendar cuando usted lo conecta, ${processorNames[processor]} para la facturación y Firecrawl cuando usted importa su sitio web. La <a href="/es/privacy/">Política de privacidad</a> enumera los proveedores que tratan datos personales.`,
         `11.2 Cuando usted conecta o utiliza un Servicio de Terceros, también se le aplican los términos y las políticas propios de ese servicio. Usted es responsable de cumplirlos y de cualquier cuenta que tenga con ese proveedor.`,
         `11.3 No controlamos los Servicios de Terceros y no somos responsables de su disponibilidad, exactitud, seguridad, precios o cambios. Si un proveedor modifica o interrumpe un servicio del que dependemos, podemos modificar o eliminar la función relacionada.`,
       ],
@@ -156,12 +164,12 @@ export const termsEs: LegalDocument = {
       title: "12. Planes, tarifas y facturación",
       blocks: [
         `12.1 <strong>Planes.</strong> Ofrecemos un plan Free, los planes de pago Starter y Pro, y planes Enterprise en virtud de un Pedido. La <a href="/es/pricing/">página de precios</a>, el proceso de pago en línea o su Pedido establecen los precios vigentes, el uso incluido y las tarifas por excedente.`,
-        `12.2 <strong>Pago.</strong> Nuestro procesador de pagos, actualmente Polar, gestiona el proceso de pago en línea y los cargos. Usted nos autoriza a nosotros y a Polar a cargar en su método de pago las cuotas de suscripción, los cargos por uso y los impuestos a su vencimiento. Los términos propios de Polar se aplican a su compra.`,
+        payment[processor],
         `12.3 <strong>Renovación automática.</strong> Los planes de pago se renuevan automáticamente al final de cada periodo mensual o anual al precio vigente en ese momento, hasta que usted los cancele. Puede cancelar desde el panel o comunicándose con el soporte. La cancelación surte efecto al final del periodo en curso.`,
         `12.4 <strong>Cargos por uso.</strong> Los planes de pago incluyen cantidades determinadas de uso, como minutos de voz y mensajes de texto de alerta. El uso que supere esas cantidades se factura como excedente a las tarifas indicadas en la página de precios o en su Pedido. Nuestros registros de uso, y los de nuestros proveedores, prevalecen salvo que contengan un error evidente.`,
         `12.5 <strong>Límites de gasto.</strong> En los planes Starter y Pro, usted puede establecer un límite de gasto por excedentes. Cuando lo alcanza, el Servicio detiene las funciones que generarían más cargos por excedente hasta el siguiente periodo de facturación o hasta que usted aumente el límite. <strong>Esto significa que la recepcionista con IA puede dejar de responder llamadas.</strong> Un límite solo restringe los cargos por excedente. No restringe las cuotas de suscripción ni los impuestos. No somos responsables de las llamadas perdidas a causa de un límite o porque usted haya agotado el uso incluido.`,
         `12.6 <strong>Impuestos.</strong> Los precios no incluyen impuestos, salvo que se indique lo contrario. Usted paga todos los impuestos sobre las ventas, sobre el uso, sobre bienes y servicios, sobre el valor añadido y otros impuestos similares, salvo los impuestos sobre nuestros ingresos.`,
-        `12.7 <strong>Pagos atrasados o fallidos.</strong> Si un pago falla, nosotros o Polar podemos volver a intentarlo. Podemos suspender su cuenta o cambiarla a un plan inferior, liberar su número de teléfono o cerrar su cuenta si el importe sigue impago.`,
+        `12.7 <strong>Pagos atrasados o fallidos.</strong> Si un pago falla, nosotros o ${processorNames[processor]} podemos volver a intentarlo. Podemos suspender su cuenta o cambiarla a un plan inferior, liberar su número de teléfono o cerrar su cuenta si el importe sigue impago.`,
         `12.8 <strong>Reembolsos.</strong> Las tarifas no son reembolsables, incluso en el caso de periodos parciales, uso no consumido, cambios a un plan inferior y cancelaciones, salvo que la ley disponga otra cosa o que lo aceptemos por escrito.`,
         `12.9 <strong>Cambios de precio.</strong> Podemos modificar los precios y el uso incluido. En el caso de un plan de pago activo, le daremos un aviso previo de al menos 30 días, y el cambio se aplicará a partir de su próxima renovación. Si no está de acuerdo, cancele antes de la renovación.`,
         `12.10 <strong>Controversias sobre la facturación.</strong> Usted debe informarnos de cualquier controversia sobre la facturación dentro de los 60 días siguientes al cargo. Le rogamos que se comunique con nosotros antes de iniciar un contracargo.`,
@@ -379,4 +387,4 @@ export const termsEs: LegalDocument = {
       ],
     },
   ],
-}
+})

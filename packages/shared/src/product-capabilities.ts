@@ -4,7 +4,7 @@ import {
   type CloudBillingPlanSlug,
 } from "./billing";
 
-export { FREE_CONTENT_RETENTION_MAX_DAYS, contentRetentionDaysForPlan } from "./billing";
+export { FREE_CONTENT_RETENTION_MAX_DAYS, MIN_BILLABLE_VOICE_DURATION_SECONDS, contentRetentionDaysForPlan } from "./billing";
 
 /**
  * Factual status for a product capability. These describe what the product does

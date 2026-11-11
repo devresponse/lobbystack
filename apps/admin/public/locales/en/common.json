@@ -106,7 +106,8 @@
       "rateLimited": "Too many test calls have been started. Please try again shortly.",
       "unavailable": "Your AI receptionist is unavailable right now.",
       "generic": "Something went wrong while starting the call."
-    }
+    },
+    "receptionist": "Receptionist for test calls"
   },
   "appointments": {
     "title": "Appointments",
@@ -179,5 +180,42 @@
     "doneHint_other": "{{count}} pages are ready for questions.",
     "failedTitle": "We couldn't read {{host}}",
     "failedHint": "Add your business details by hand, or try the import again from your dashboard."
+  },
+  "planDisplay": {
+    "custom": "custom",
+    "storage": {
+      "megabytes": "{{amount}} MB",
+      "gigabytes": "{{amount}} GB"
+    },
+    "bullets": {
+      "voiceMinutes_one": "{{amount}} voice minute included",
+      "voiceMinutes_other": "{{amount}} voice minutes included",
+      "voiceMinutesThen_one": "{{amount}} voice minute included\nThen {{rate}}/min",
+      "voiceMinutesThen_other": "{{amount}} voice minutes included\nThen {{rate}}/min",
+      "browserVoiceMinutes_one": "{{amount}} browser voice minute included",
+      "browserVoiceMinutes_other": "{{amount}} browser voice minutes included",
+      "browserVoiceMinutesThen_one": "{{amount}} browser voice minute included\nThen {{rate}}/min",
+      "browserVoiceMinutesThen_other": "{{amount}} browser voice minutes included\nThen {{rate}}/min",
+      "voiceMinutesCustom": "Custom voice minutes",
+      "receptionists_one": "{{amount}} receptionist",
+      "receptionists_other": "{{amount}} receptionists",
+      "receptionistsCustom": "Custom number of receptionists",
+      "businessNumbers_one": "{{amount}} dedicated business number",
+      "businessNumbers_other": "{{amount}} dedicated business numbers",
+      "businessNumbersNone": "No telephone number",
+      "businessNumbersCustom": "Multiple dedicated numbers",
+      "alertSmsSegments_one": "{{amount}} alert SMS segment",
+      "alertSmsSegments_other": "{{amount}} alert SMS segments",
+      "alertSmsSegmentsCustom": "Custom alert SMS segments",
+      "outboundCallAttempts_one": "{{amount}} transfer attempt",
+      "outboundCallAttempts_other": "{{amount}} transfer attempts",
+      "outboundCallAttemptsCustom": "Custom transfer attempts",
+      "chatAiUnits_one": "{{amount}} website chat",
+      "chatAiUnits_other": "{{amount}} website chats",
+      "chatAiUnitsCustom": "Custom website chats",
+      "knowledgeStorageMegabytes": "{{amount}} MB knowledge base",
+      "knowledgeStorageGigabytes": "{{amount}} GB knowledge base",
+      "knowledgeStorageCustom": "Custom knowledge base"
+    }
   }
 }

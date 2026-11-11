@@ -1,0 +1,230 @@
+{
+  "picker": {
+    "choose": "Izaberite recepcionera",
+    "search": "Pretražite recepcionere",
+    "noMatches": "Nijedan recepcioner ne odgovara pretrazi.",
+    "default": "Podrazumevani",
+    "paused": "Pauziran",
+    "unknown": "Recepcioner koji više nije na listi",
+    "add": "Dodaj recepcionera",
+    "manage": "Upravljaj recepcionerima"
+  },
+  "filter": {
+    "label": "Recepcioner",
+    "all": "Svi recepcioneri"
+  },
+  "multi": {
+    "summary_one": "{{chosen}} od {{count}} recepcionera",
+    "summary_few": "{{chosen}} od {{count}} recepcionera",
+    "summary_other": "{{chosen}} od {{count}} recepcionera",
+    "none": "Izaberite",
+    "change": "Izmeni",
+    "search": "Pretražite recepcionere",
+    "selectShown": "Izaberi sve prikazane",
+    "clear": "Obriši",
+    "remove": "Ukloni: {{name}}",
+    "more": "+{{count}} još"
+  },
+  "names": {
+    "everyone": "Svi",
+    "more": "+{{count}}",
+    "defaultOnly": "Samo podrazumevani recepcioner"
+  },
+  "record": {
+    "receptionist": "Recepcioner",
+    "line": "Recepcioner: {{name}}",
+    "archived": "{{name}} (arhiviran)"
+  },
+  "page": {
+    "unavailable": "Recepcioneri trenutno ne mogu da se učitaju. Pokušajte ponovo za trenutak."
+  },
+  "allowance": {
+    "used_one": "{{active}} od {{count}} aktivnog recepcionera u Vašem paketu",
+    "used_few": "{{active}} od {{count}} aktivna recepcionera u Vašem paketu",
+    "used_other": "{{active}} od {{count}} aktivnih recepcionera u Vašem paketu",
+    "cap_one": "Firma može da ima najviše {{count}} recepcionera.",
+    "cap_few": "Firma može da ima najviše {{count}} recepcionera. Arhivirajte jednog da biste dodali novog.",
+    "cap_other": "Firma može da ima najviše {{count}} recepcionera. Arhivirajte jednog da biste dodali novog.",
+    "upgradeTitle": "Po jedan recepcioner za svaku lokaciju, tim ili jezik",
+    "upgradeDescription": "Vaš paket uključuje jednog recepcionera. Pređite na veći paket da biste dodali još, svakog sa svojim imenom, pozdravom, znanjem i stranicom.",
+    "salesDescription": "Vaš paket uključuje jednog recepcionera. Enterprise paket uključuje više, svakog sa svojim imenom, pozdravom, znanjem i stranicom. Kontaktirajte prodaju da biste ga podesili.",
+    "upgrade": "Pogledajte pakete",
+    "contactSales": "Kontaktirajte prodaju",
+    "upgradeAsk": "Vlasnik ili administrator firme može da promeni paket."
+  },
+  "toolbar": {
+    "search": "Pretražite po imenu ili temi",
+    "status": "Status",
+    "all": "Svi ({{number}})",
+    "active": "Aktivni ({{number}})",
+    "paused": "Pauzirani ({{number}})",
+    "archived": "Arhivirani ({{number}})",
+    "sort": "Poređaj od A do Z",
+    "add": "Dodaj recepcionera"
+  },
+  "table": {
+    "receptionist": "Recepcioner",
+    "page": "Stranica",
+    "status": "Status",
+    "answers": "Odgovara na",
+    "language": "Jezik",
+    "order": "Redosled",
+    "actions": "Radnje",
+    "default": "Podrazumevani",
+    "notListed": "Nije naveden na stranici firme",
+    "businessLanguage": "Jezik firme",
+    "numbers_one": "{{count}} broj telefona",
+    "numbers_few": "{{count}} broja telefona",
+    "numbers_other": "{{count}} brojeva telefona",
+    "widgets_one": "{{count}} vidžet za sajt",
+    "widgets_few": "{{count}} vidžeta za sajt",
+    "widgets_other": "{{count}} vidžeta za sajt",
+    "links_one": "{{count}} QR link",
+    "links_few": "{{count}} QR linka",
+    "links_other": "{{count}} QR linkova",
+    "pageOnly": "Samo njegova stranica",
+    "archivedOn": "Arhiviran {{date}}",
+    "empty": "Nijedan recepcioner ne odgovara pretrazi.",
+    "emptyArchived": "Nema arhiviranih recepcionera.",
+    "moveUp": "Pomeri gore: {{name}}",
+    "moveDown": "Pomeri dole: {{name}}",
+    "moreOptions": "Još opcija: {{name}}"
+  },
+  "status": {
+    "active": "Aktivan",
+    "paused": "Pauziran",
+    "archived": "Arhiviran"
+  },
+  "actions": {
+    "edit": "Izmeni podatke",
+    "aiSettings": "AI podešavanja",
+    "pause": "Pauziraj",
+    "resume": "Nastavi",
+    "makeDefault": "Postavi kao podrazumevanog",
+    "archive": "Arhiviraj",
+    "restore": "Vrati",
+    "cancel": "Otkaži"
+  },
+  "archive": {
+    "title": "Arhivirati recepcionera {{name}}?",
+    "description": "Nestaje sa svih lista, a na njegove brojeve telefona, vidžete i QR linkove odgovara podrazumevani recepcioner. Njegovi pozivi, četovi i pitanja ostaju, a možete ga vratiti iz arhiviranih.",
+    "confirm": "Arhiviraj"
+  },
+  "makeDefault": {
+    "title": "Postaviti recepcionera {{name}} kao podrazumevanog?",
+    "description": "Odgovaraće na stranici firme i na sve što ne navodi nijednog recepcionera, na jeziku firme i iz svih članaka. {{current}} zadržava svoje brojeve telefona, vidžete i QR linkove i dobija svoju stranicu.",
+    "confirm": "Postavi kao podrazumevanog"
+  },
+  "sort": {
+    "title": "Poređati recepcionere od A do Z?",
+    "description": "Padajuće liste i stranica firme prikazivaće ih po imenu, posle podrazumevanog. Ovo zamenjuje redosled koji ste postavili.",
+    "confirm": "Poređaj od A do Z"
+  },
+  "toast": {
+    "added": "Recepcioner {{name}} je dodat.",
+    "saved": "Recepcioner {{name}} je sačuvan.",
+    "paused": "Recepcioner {{name}} je pauziran. Na njegove brojeve telefona, vidžete i QR linkove odgovara podrazumevani recepcioner.",
+    "resumed": "Recepcioner {{name}} ponovo odgovara.",
+    "archived": "Recepcioner {{name}} je arhiviran.",
+    "restored": "Recepcioner {{name}} je vraćen.",
+    "restoredPaused": "Recepcioner {{name}} je vraćen i pauziran: svi aktivni recepcioneri koje Vaš paket uključuje su u upotrebi.",
+    "madeDefault": "Recepcioner {{name}} je sada podrazumevani.",
+    "sorted": "Recepcioneri su poređani od A do Z."
+  },
+  "errors": {
+    "handleTaken": "Drugi recepcioner već koristi ovu adresu stranice.",
+    "limit": "Svi aktivni recepcioneri koje Vaš paket uključuje su u upotrebi. Pauzirajte jednog ili pređite na veći paket da biste dodali još jednog.",
+    "limitOne": "Vaš paket uključuje jednog recepcionera. Pređite na veći paket da biste dodali još.",
+    "limitSales": "Svi aktivni recepcioneri koje Vaš paket uključuje su u upotrebi. Pauzirajte jednog ili kontaktirajte prodaju u vezi sa Enterprise paketom da biste dodali još jednog.",
+    "limitOneSales": "Vaš paket uključuje jednog recepcionera. Kontaktirajte prodaju u vezi sa Enterprise paketom da biste dodali još.",
+    "limitNone": "Svi aktivni recepcioneri koje ova firma može da ima su u upotrebi. Pauzirajte jednog da biste dodali još jednog.",
+    "cap": "Ova firma već ima najviše recepcionera koliko može da ima. Arhivirajte jednog da biste dodali novog.",
+    "defaultPaused": "Podrazumevani recepcioner uvek odgovara. Najpre postavite drugog kao podrazumevanog.",
+    "defaultArchived": "Podrazumevani recepcioner ne može da se arhivira. Najpre postavite drugog kao podrazumevanog.",
+    "defaultListed": "Podrazumevani recepcioner odgovara na stranici firme, pa ostaje naveden na njoj.",
+    "resumeFirst": "Nastavite rad recepcionera pre nego što ga postavite kao podrazumevanog.",
+    "notFound": "Taj recepcioner više ne postoji. Osvežite stranicu.",
+    "invalid": "Proverite polja i pokušajte ponovo.",
+    "generic": "Nije uspelo. Pokušajte ponovo za trenutak.",
+    "withErrorId": "{{message}} ID greške: {{errorId}}"
+  },
+  "editor": {
+    "editTitle": "Izmena: {{name}}",
+    "addTitle": "Dodajte recepcionera",
+    "editDescription": "Njegovo ime, stranica, jezik i znanje. Pozdrav, zakazivanje i uputstva su u AI podešavanjima.",
+    "addDescription": "Novi recepcioner preuzima pozdrav, zakazivanje, preusmeravanje i uputstva drugog recepcionera. Možete ih promeniti u AI podešavanjima.",
+    "name": "Ime",
+    "nameHint": "Posetioci ga vide kada biraju s kim će razgovarati, na primer Klinika Kitsilano ili Naplata.",
+    "nameRequired": "Dajte recepcioneru ime.",
+    "description": "U čemu pomaže",
+    "descriptionHint": "Jedan red ispod imena, na primer Zakazivanje u našoj klinici u West 4th.",
+    "handle": "Adresa stranice",
+    "handleDefault": "Podrazumevani recepcioner odgovara na samoj stranici firme.",
+    "handleHint": "Mala slova i cifre, spojeni crticama. Ako ostane prazno, adresa se pravi od imena.",
+    "handleInvalid": "Koristite mala slova i cifre, spojene jednom crticom.",
+    "language": "Jezik",
+    "languageDefault": "Podrazumevani recepcioner govori jezikom firme, koji se postavlja u AI podešavanjima.",
+    "languageHint": "Njegovi pozivi počinju na ovom jeziku i prelaze na jezik pozivaoca ako govori neki drugi.",
+    "businessLanguage": "Jezik firme ({{language}})",
+    "knowledge": "Znanje",
+    "knowledgeAll": "Svi članci",
+    "knowledgeAudience": "Članci za sve i oni izabrani za njega",
+    "listed": "Naveden na stranici firme",
+    "listedDefault": "Podrazumevani recepcioner je uvek naveden.",
+    "listedHint": "Posetioci stranice firme mogu da ga izaberu. Njegova stranica, brojevi telefona i QR linkovi rade u svakom slučaju.",
+    "copyFrom": "Kopiraj podešavanja od",
+    "copyFromHint": "Njegov pozdrav, zakazivanje, preusmeravanje i uputstva.",
+    "saving": "Čuva se…",
+    "save": "Sačuvaj izmene",
+    "adding": "Dodaje se…",
+    "add": "Dodaj recepcionera"
+  },
+  "audience": {
+    "label": "Dostupno za",
+    "everyone": "Svi",
+    "chosen": "Izabrani recepcioneri",
+    "receptionists": "Recepcioneri kojima je dostupno",
+    "chosenOf_one": "Izabrano: {{count}} od {{total}}",
+    "chosenOf_few": "Izabrano: {{count}} od {{total}}",
+    "chosenOf_other": "Izabrano: {{count}} od {{total}}",
+    "required": "Izaberite bar jednog recepcionera ili ga učinite dostupnim svima.",
+    "hint": "Članci za izabrane recepcionere ne ulaze u opis firme.",
+    "hintAll": "{{name}} odgovara na osnovu svega. Članci za izabrane recepcionere ne ulaze u opis firme.",
+    "byRule": "po pravilu",
+    "ruleNote": "Ovu stranicu je izabralo pravilo sajta. Ono što ovde sačuvate ostaje i ako se pravilo obriše, a pravilo ponovo dodaje svog recepcionera svaki put kada se sajt učita.",
+    "errors": {
+      "archived": "Jedan od izabranih recepcionera je arhiviran. Osvežite stranicu i izaberite ponovo.",
+      "articleGone": "Taj članak više ne postoji. Osvežite stranicu.",
+      "articles": "Izaberite od 1 do {{max}} članaka.",
+      "ruleExists": "Ovaj sajt već daje tu putanju tom recepcioneru.",
+      "rulePath": "Unesite putanju na sajtu, na primer /stores/kitsilano/.",
+      "ruleGone": "To pravilo više ne postoji. Osvežite stranicu."
+    }
+  },
+  "entry": {
+    "paused": "{{name}} je pauziran, pa za sada odgovara {{default}}.",
+    "archived": "Recepcioner izabran ovde je arhiviran, pa odgovara {{default}}. Izaberite drugog.",
+    "errors": {
+      "archived": "Taj recepcioner je arhiviran. Osvežite stranicu i izaberite drugog.",
+      "gone": "To više ne postoji. Osvežite stranicu."
+    }
+  },
+  "pageList": {
+    "title": "Recepcioneri na Vašoj stranici",
+    "description": "Posetioci biraju među njima pod „Razgovarate sa“. Ostali se otvaraju samo preko svojih linkova, ključeva vidžeta i adresa stranica. Izmene koje ovde napravite čuvaju se odmah.",
+    "listed": "Na stranici",
+    "chosen_one": "{{count}} izabran",
+    "chosen_few": "{{count}} izabrana",
+    "chosen_other": "{{count}} izabranih",
+    "listedHint": "Pauziran recepcioner nije na stranici dok ne nastavi sa radom.",
+    "order": "Redosled",
+    "alphabetical": "Abecedni",
+    "custom": "Prilagođeni",
+    "alphabeticalHint": "Po imenu, posle recepcionera {{name}}. Recepcioner koga dodate dobija mesto po imenu.",
+    "customHint": "Redosledom koji Vi odredite. Recepcioner koga dodate ide na kraj.",
+    "onPage": "Recepcioneri koje posetioci mogu da izaberu, po redu",
+    "alwaysFirst": "Uvek prvi",
+    "paused": "Pauziran, pa nije na stranici dok ne nastavi sa radom",
+    "noneListed": "Na stranici je samo {{name}}, pa posetioci ne biraju."
+  }
+}

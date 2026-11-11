@@ -64,6 +64,8 @@ A chat whose last message is a day old closes, and the visitor's next message st
 
 Limits are fixed windows in Redis, checked before the request does its work. A refused request uses no quota. When Redis is down, every widget route answers 503.
 
+Each count's Redis key names what it counts by its id, such as the business, the key or the visitor, and an IP address only by its SHA-256 digest, so Redis never holds an address. Before fork PR #152 every key was a digest, so the counts named by ids started again from zero once after that deploy.
+
 **Chat and the other widget requests** (`apps/admin/src/lib/widget-policy.ts`):
 
 | Count | Chat messages | Other requests (session, history, config, lead) |

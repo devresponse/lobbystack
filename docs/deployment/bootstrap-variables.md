@@ -1,6 +1,6 @@
 # Bootstrap script variables: a data dictionary
 
-**Status:** checked on 10 November 2026 against `devops/bootstrap.mjs` on `feature/receptionists` at `55213b4`. The copy on `main` (last changed 2 November) has no Stripe support and no `BILLING_PROVIDER` or `STRIPE` settings.
+**Status:** checked on 11 November 2026 against `devops/bootstrap.mjs` on `feature/receptionists` at `c0107a3`. The copy on `main` (last changed 2 November) has no Stripe support and no `BILLING_PROVIDER` or `STRIPE` settings.
 
 ## How to read this
 
@@ -129,19 +129,77 @@ The state file holds each finished step's result, so a later run reuses it inste
 | `OTP_HASH_SECRET` | admin | The worker | Email codes and callers' keypad PINs |
 | `WIDGET_SESSION_SECRET` | admin | Nothing else | Website chat sessions |
 
-**IDs, names and provider keys.**
+**Where each kept value comes from.** Each value below is kept by one step, the first time it runs, and later runs take it from the state file until you `redo` that step. Most steps look first for what an earlier run kept, by its ID, and check that it still exists; then for a thing with the expected name (see Names, below), where two with that name stop the run; and make one only when there is neither. A value given in the secrets file wins over all of these, and then no name is kept. In the tables, `<name>` is the name from Names, and `<address>` the admin's address: `APP_BASE_URL`'s host, else its Railway address. `node devops/bootstrap.mjs status <settings>` lists the names in use and the steps done, and never prints a value.
 
-| From | Values kept |
-| --- | --- |
-| Railway | `RAILWAY_PROJECT_ID`, `RAILWAY_PROJECT_NAME`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_SERVICE_IDS` (the five services), `RAILWAY_HOST` (the admin's Railway address), `APP_HOST`, `POST_DNS_HOST` |
-| OpenAI | `OPENAI_PROJECT_ID`, `OPENAI_PROJECT_NAME`, `OPENAI_API_KEY`, `OPENAI_ACCOUNT_NAME` (the service account that owns the key) |
-| Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SUBACCOUNT_NAME`, `TWILIO_SIP_TRUNK_SID`, `TWILIO_TRUNK_NAME`; with a toll-free number, `TWILIO_ALERT_SMS_FROM` and `TWILIO_TOLLFREE_NAME` |
-| Resend and Cloudflare | `RESEND_DOMAIN_ID`, `RESEND_RECORDS`, `RESEND_KEY_NAME`, `SMTP_PASSWORD`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ZONE_NAME` |
-| Turnstile | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_WIDGET_NAME` |
-| Billing | `POLAR_ADMIN_TOKEN` and `POLAR_WORKER_TOKEN`, or `STRIPE_ADMIN_KEY`, `STRIPE_WORKER_KEY` and `STRIPE_ACCOUNT_ID` |
-| `connect` | `OPENAI_WEBHOOK_SECRET`, `WEBHOOK_URL`, `PLATFORM_API_KEYS`, `PLATFORM_KEY_FILE` (the key file's path, never the key) |
+**Railway.** The `railway.*` steps keep these, through Railway's API with `RAILWAY_API_TOKEN`. Railway's dashboard shows the IDs in its address bar: `railway.com/project/<project ID>/service/<service ID>?environmentId=<environment ID>`. `redo … railway.project` forgets all of them but the name, so the next `up` finds or makes the project again.
 
-**Names.** What the script makes is named after `APP_BASE_URL`'s host when it has 50 characters or fewer, else after `NAME`. The Railway project, OpenAI project, Twilio subaccount, Resend key and Turnstile widget take that name. The OpenAI service account is named `<name> platform`, the trunk `<name> to OpenAI` and the toll-free number `<name> shared texts`. Each name is recorded the first time and kept, so changing `APP_BASE_URL` or `NAME` later renames nothing. With `APP_BASE_URL=test.example.com`, every name starts with `test.example.com`.
+| Value | Kept by | Where it comes from | What uses it |
+| --- | --- | --- | --- |
+| `RAILWAY_PROJECT_ID` | `railway.project` | The project named `RAILWAY_PROJECT_NAME` in the workspace, never one being deleted. With none, Railway makes one in `RAILWAY_WORKSPACE_ID`, with the environment `ENVIRONMENT`. Kept as soon as it is known, so a run that stops halfway never makes a second | Every later Railway call |
+| `RAILWAY_PROJECT_NAME` | `railway.project` | The name it was found or made with (see Names), then the name Railway shows, in case someone renamed it there | Finding the project when no ID is kept, as after `redo … railway.project` |
+| `RAILWAY_ENVIRONMENT_ID` | `railway.project` | The project's environment named `ENVIRONMENT` (`test` or `production`), else its first environment | Every volume, setting, address, variable and deploy, which Railway keeps per environment |
+| `RAILWAY_SERVICE_IDS` | `railway.services` | Five IDs, one per service, each found by its name in the project: `Postgres`, `Redis`, `migrate`, `admin` and `worker`, which the template made when `RAILWAY_TEMPLATE` is set. Else the step makes the service: Postgres from the image `pgvector/pgvector:pg16`, Redis from `redis:7-alpine`, and the other three empty until the `deploy.*` steps connect them to `REPO` and `BRANCH` | Each service's volume, settings, variables, address and deploy |
+| `RAILWAY_HOST` | `railway.domain` | The admin's Railway address, ending `.up.railway.app`: the one it has, else one Railway makes on port 3000. `connect` asks Railway again and keeps the current one if it changed. Railway shows it under admin > Settings > Networking | `AUTH_TRUSTED_ORIGINS` beside `APP_BASE_URL`, the Turnstile widget's addresses, and `connect`'s health check while the custom address waits for DNS |
+| `APP_HOST` | `railway.domain` | `APP_BASE_URL`'s host when set, else `RAILWAY_HOST`: the address `up` set the admin up on | The admin's address whenever the settings name no `APP_BASE_URL`: for the toll-free number's texts, the Turnstile widget, the webhook's URL and `connect` |
+| `POST_DNS_HOST` | `post.dns`, only with `APP_BASE_URL` | The `APP_BASE_URL` host that step pointed at the deployment: its CNAME in Cloudflare, and Railway's check | `connect` compares it with `APP_BASE_URL`, and stops with the `redo` to run when the address changed after `up` |
+
+**OpenAI.** The `openai.*` steps keep these, through OpenAI's Administration API with `OPENAI_ADMIN_KEY`. With `STEP_OPENAI=no`, `openai.manual` asks for the project ID and the key instead.
+
+| Value | Kept by | Where it comes from | What uses it |
+| --- | --- | --- | --- |
+| `OPENAI_PROJECT_ID` | `openai.project` | The secrets file's `OPENAI_PROJECT_ID`, when it gives one. Else the project an earlier run kept, while it isn't archived; else the active project named `OPENAI_PROJECT_NAME`; else a new project. It starts `proj_`, and OpenAI shows it in the project's settings | The trunk's origination URI, `sip:<project ID>@sip.api.openai.com`, which sends calls to this project; the service account; and the project `connect` names for the webhook. It never goes on Railway |
+| `OPENAI_PROJECT_NAME` | `openai.project` | The name of the project found or made. None when the project came from the secrets file | Finding the project when no ID is kept |
+| `OPENAI_API_KEY` | `openai.key` | The secrets file, when it gives one. Else the key of a new service account named `OPENAI_ACCOUNT_NAME` in the project, which OpenAI shows only once. When that account exists already, the key is read back from the admin's `OPENAI_API_KEY` on Railway; when it isn't there either, the step asks before replacing the account, which stops its old key | The admin's `OPENAI_API_KEY`, which the worker refers to |
+| `OPENAI_ACCOUNT_NAME` | `openai.key` | `<name> platform`: the service account that owns the key. None when the key came from the secrets file | Finding that account on a rerun |
+
+**Twilio.** The `twilio.*` steps keep these, through Twilio's API with `TWILIO_MAIN_ACCOUNT_SID` and `TWILIO_MAIN_AUTH_TOKEN`. Everything after the subaccount is made inside it. With `STEP_TWILIO=no`, `twilio.manual` asks for the account and the trunk instead.
+
+| Value | Kept by | Where it comes from | What uses it |
+| --- | --- | --- | --- |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | `twilio.subaccount` | The secrets file, when it gives them. Else the subaccount an earlier run kept, while it isn't closed; else the open subaccount named `TWILIO_SUBACCOUNT_NAME`; else a new subaccount of the main account. Twilio returns the subaccount's Auth Token with it. The SID starts `AC`, and Twilio's console lists it among the main account's subaccounts | The admin's `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`, which the worker refers to. The trunk, the toll-free number and the numbers businesses buy are all in this subaccount |
+| `TWILIO_SUBACCOUNT_NAME` | `twilio.subaccount` | The subaccount's name as Twilio has it. None when the account came from the secrets file | Finding it when no SID is kept |
+| `TWILIO_SIP_TRUNK_SID` | `twilio.trunk` | The secrets file, when it gives one. Else the trunk an earlier run kept; else the subaccount's trunk named `TWILIO_TRUNK_NAME`; else a new trunk. A found trunk gets the guide's settings back: Secure Trunking, transfers on, and the transferee's caller ID. It starts `TK`, and Twilio's console shows it under Elastic SIP Trunking, in the subaccount | The worker's `TWILIO_SIP_TRUNK_SID`. `twilio.origination` gives the trunk one origination URI, to the OpenAI project |
+| `TWILIO_TRUNK_NAME` | `twilio.trunk` | `<name> to OpenAI`, or a found trunk's own name. None when the trunk came from the secrets file | Finding it when no SID is kept |
+| `TWILIO_ALERT_SMS_FROM` | `twilio.tollfree`, only with `TWILIO_TOLLFREE` | With `buy`: the number an earlier run bought, found by its name, else the first US toll-free number Twilio offers that can text, bought once you confirm. With a number: that number, which must be in the subaccount. Either way, its incoming texts go to `https://<address>/api/webhooks/twilio/sms` | `TWILIO_ALERT_SMS_FROM` on the admin and the worker |
+| `TWILIO_TOLLFREE_NAME` | `twilio.tollfree` | `<name> shared texts`, only for a number the script bought | Finding that number on a rerun, so a second is never bought |
+
+**Resend and Cloudflare.** The `resend.*` steps keep the first four, through Resend's API with `RESEND_ADMIN_KEY`. The zone is kept by the first step that writes DNS, through Cloudflare's API with `CLOUDFLARE_API_TOKEN`. With `STEP_RESEND=no`, `resend.manual` asks for the sending key instead.
+
+| Value | Kept by | Where it comes from | What uses it |
+| --- | --- | --- | --- |
+| `RESEND_DOMAIN_ID` | `resend.domain` | The Resend domain named `EMAIL_DOMAIN`, else a new one in `RESEND_REGION`. Resend lists it under Domains | `resend.verify`, and the sending key, which can send from this domain only |
+| `RESEND_RECORDS` | `resend.domain` | The DNS records Resend asks for, as it lists them: its SPF, DKIM and MX records | `resend.dns`, which writes them in Cloudflare, with a DMARC record when the domain has none, or lists them for you to add |
+| `RESEND_KEY_NAME` | `resend.key` | The key's name, `<name>`. None when the key came from the secrets file | Finding the key on a rerun |
+| `SMTP_PASSWORD` | `resend.key` | The secrets file, when it gives one. Else a new key with sending access to that domain only, which Resend shows only once. When a key with the name exists already, it is read back from the worker's `SMTP_PASSWORD` on Railway; when it isn't there either, the step asks before replacing it | The worker's `SMTP_PASSWORD` |
+| `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ZONE_NAME` | The first step that writes DNS: `resend.dns`, `railway.custom` or `post.dns` | The zone named `CLOUDFLARE_ZONE`, looked up through Cloudflare's API and kept with that name, so a changed `CLOUDFLARE_ZONE` is looked up again. Only with `CLOUDFLARE_ZONE`. Cloudflare shows the ID on the zone's Overview page | Writing the email records, the custom address's CNAME and Railway's verification record |
+
+**Turnstile.** The `turnstile` step keeps these, through Cloudflare's API with `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+
+| Value | Kept by | Where it comes from | What uses it |
+| --- | --- | --- | --- |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | `turnstile` | The secrets file, when it gives both, or typed in when you make the widget by hand (`STEP_TURNSTILE=no`, or no `CLOUDFLARE_ACCOUNT_ID`). Else the widget an earlier run kept, by its site key; else the widget named `TURNSTILE_WIDGET_NAME`; else a new Managed widget for the deployment's addresses. A found widget gets the addresses it lacks. Cloudflare shows both keys on the widget's page, under Turnstile | The admin's `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`. `post.turnstile` finds the widget by its site key to add the addresses it lacks |
+| `TURNSTILE_WIDGET_NAME` | `turnstile` | The widget's name, `<name>`. None when the keys were given or typed in | Finding the widget when no site key is kept |
+
+**Billing, cloud mode only.** Neither Polar nor Stripe lets a script make these keys, so they come from you.
+
+| Value | Kept by | Where it comes from | What uses it |
+| --- | --- | --- | --- |
+| `POLAR_ADMIN_TOKEN`, `POLAR_WORKER_TOKEN` | `polar.tokens` | The environment variable, then the secrets file, then asked. You make them in Polar, in the `POLAR_ORGANIZATION_ID` organization: Settings > Developers > New Token | `POLAR_ACCESS_TOKEN` on the admin and on the worker |
+| `STRIPE_ADMIN_KEY`, `STRIPE_WORKER_KEY` | `stripe.keys` | The environment variable, then the secrets file, then asked. You make them in the deployment's Stripe account: Developers > API keys > Create restricted key | `STRIPE_API_KEY` on the admin and on the worker |
+| `STRIPE_ACCOUNT_ID` | `stripe.keys` | Asked of Stripe with each key. Both keys must belong to the same account, `acct_…` | `STRIPE_ACCOUNT_ID` on both services |
+
+**`connect`.** Its steps keep these, after `up`.
+
+| Value | Kept by | Where it comes from | What uses it |
+| --- | --- | --- | --- |
+| `OPENAI_WEBHOOK_SECRET` | `connect.webhook` | The environment variable or the secrets file, when either gives it. Else the admin's current value on Railway. Else asked, once you have made the webhook in the OpenAI project the trunk sends calls to, which shows its `whsec_` secret only once | The admin's `OPENAI_WEBHOOK_SECRET`, which `connect.variables` sets |
+| `WEBHOOK_URL` | `connect.webhook` | `https://<address>/api/webhooks/openai/live`, the URL the webhook was made for | A later `connect` compares it with the admin's address now, and asks you to change the webhook's URL when the address moved |
+| `PLATFORM_API_KEYS` | `connect.platformKey` | The admin's current value, read from Railway, plus a new operator entry from `pnpm platform-key:create`, unless one for `OPERATOR_EMAIL` is there already. Each entry holds a key's hash, never the key | The admin's `PLATFORM_API_KEYS`, which `connect.variables` sets |
+| `PLATFORM_KEY_FILE` | `connect.platformKey` | The path of `.platform-keys/<prefix>.json`, where that command wrote the new key | `connect`'s last message, which names the file to sign the command line in with |
+
+**The rest of the state file.** Beside `values`, it holds `done`, each finished step with the time it finished, which `redo` takes off, and `byHand`, the steps whose BY HAND part `--yes` didn't wait for, which run again next time. The `template` command keeps a state file of its own, `.env.bootstrap-<name>.template.state.json`, with the template project's Railway values and `TEMPLATE_CODE`, the code it prints for `RAILWAY_TEMPLATE`.
+
+**Names.** What the script makes is named after `APP_BASE_URL`'s host when it has 50 characters or fewer, else after `NAME`: that is `<name>`. The Railway project, OpenAI project, Twilio subaccount, Resend key and Turnstile widget are named `<name>`, the OpenAI service account `<name> platform`, the trunk `<name> to OpenAI` and the toll-free number `<name> shared texts`. Each name is recorded the first time and kept, so changing `APP_BASE_URL` or `NAME` later renames nothing. With `APP_BASE_URL=test.example.com`, `<name>` is `test.example.com`.
 
 ## Railway variables by service
 

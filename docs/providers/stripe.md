@@ -12,7 +12,7 @@ meta:
 
 Use this page to bill a new deployment's businesses through Stripe instead of Polar. A deployment bills through one provider, chosen with `BILLING_PROVIDER` when it's set up, and stays with it ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)). With Stripe the operator is the seller: Stripe runs the checkout page, the billing portal, the subscriptions and the invoices, and Stripe Tax works out the taxes, which the operator registers for and files.
 
-**Status:** built on `feature/receptionists` ([Stripe billing](../billing/stripe-history.md)), and switched on on 2026-11-08, once its sandbox scenarios had passed twice in a row with Stripe as the merchant of record. A deployment bills through Stripe with `BILLING_PROVIDER=stripe`: in a sandbox with test keys, and for real with live ones.
+**Status:** built on `releases/r2` ([Stripe billing](../billing/stripe-history.md)), and switched on on 2026-11-08, once its sandbox scenarios had passed twice in a row with Stripe as the merchant of record. A deployment bills through Stripe with `BILLING_PROVIDER=stripe`: in a sandbox with test keys, and for real with live ones.
 
 ## Know what Stripe does here
 

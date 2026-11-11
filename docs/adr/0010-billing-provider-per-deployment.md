@@ -4,7 +4,7 @@ Each deployment bills through one provider, Polar or Stripe, chosen with `BILLIN
 
 ## Status
 
-Accepted, 2026-11-08 (the fork's). Being built on `feature/receptionists`, one step at a time: [Stripe billing](../billing/stripe-history.md) lists the steps.
+Accepted, 2026-11-08 (the fork's). Being built on `releases/r2`, one step at a time: [Stripe billing](../billing/stripe-history.md) lists the steps.
 
 ## What was there before
 

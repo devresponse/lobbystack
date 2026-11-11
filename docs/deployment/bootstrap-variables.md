@@ -1,6 +1,6 @@
 # Bootstrap script variables: a data dictionary
 
-**Status:** checked on 11 November 2026 against `devops/bootstrap.mjs` on `feature/receptionists` at `c0107a3`. The copy on `main` (last changed 2 November) has no Stripe support and no `BILLING_PROVIDER` or `STRIPE` settings.
+**Status:** checked on 11 November 2026 against `devops/bootstrap.mjs` on `releases/r2` at `c0107a3`. The copy on `main` (last changed 2 November) has no Stripe support and no `BILLING_PROVIDER` or `STRIPE` settings.
 
 ## How to read this
 

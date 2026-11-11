@@ -1,6 +1,6 @@
 # Bill businesses for plans and usage
 
-A business on a cloud deployment pays a monthly or yearly price for Starter or Pro, plus a small charge for each minute, text or call transfer past what its plan includes. The deployment's payment provider, Polar or Stripe, collects the money; LobbyStack tells it what each business used. This page says who pays, what the plans are, how the money moves, how an operator runs billing, and what to watch. Checked against `main` at `da1f548`, and made provider-neutral on 2026-11-08 for step 17 of [Stripe billing](stripe-history.md), on `feature/receptionists`.
+A business on a cloud deployment pays a monthly or yearly price for Starter or Pro, plus a small charge for each minute, text or call transfer past what its plan includes. The deployment's payment provider, Polar or Stripe, collects the money; LobbyStack tells it what each business used. This page says who pays, what the plans are, how the money moves, how an operator runs billing, and what to watch. Checked against `main` at `da1f548`, and made provider-neutral on 2026-11-08 for step 17 of [Stripe billing](stripe-history.md), on `releases/r2`.
 
 The other billing pages:
 

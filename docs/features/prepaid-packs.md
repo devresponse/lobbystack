@@ -1,6 +1,6 @@
 # Sell prepaid minute packs
 
-A business on a cloud deployment can pay once for a pack of voice minutes that lasts a set number of days, instead of a monthly plan: 500 minutes for 180 days, for example. The deployment's billing provider, Stripe or Polar, only takes the payment. LobbyStack keeps the minutes, the end date and what each call drew from them, the same way on both providers and in both of Stripe's selling modes. Packs are an additional option: a business that never buys one keeps its plan, its allowances, its prices and its bills exactly as before. Built on `feature/receptionists` as migration `0148`, with `0149` from its review, from the design of 2026-11-09 and the maintainer's [decisions](../project/decisions.md#choose-what-to-build).
+A business on a cloud deployment can pay once for a pack of voice minutes that lasts a set number of days, instead of a monthly plan: 500 minutes for 180 days, for example. The deployment's billing provider, Stripe or Polar, only takes the payment. LobbyStack keeps the minutes, the end date and what each call drew from them, the same way on both providers and in both of Stripe's selling modes. Packs are an additional option: a business that never buys one keeps its plan, its allowances, its prices and its bills exactly as before. Built on `releases/r2` as migration `0148`, with `0149` from its review, from the design of 2026-11-09 and the maintainer's [decisions](../project/decisions.md#choose-what-to-build).
 
 ## Know what a pack is
 

@@ -33,6 +33,7 @@ To see which commit a deployment runs, read the line "version: &lt;commit&gt;" u
 | --- | --- |
 | `main` | The default branch. Every pull request merges here. |
 | `alloplace/r1` | Kept identical to `main`, fast-forward only. The demo deploys from one of the two, most likely this one, so both move together: push `alloplace/r1` first, then `main`. |
+| `releases/r2` | The receptionists release ([receptionists](../features/receptionists.md#deploy-it)), named `feature/receptionists` until 2026-11-11. The old name stays on GitHub for now at `d44e055`, with fork PR #129, and gets no new work. New deployments of the release and the RealInfoBot test deployments follow it, and `main` is merged in as it moves. It never merges into `main`. Pull requests for the release go into it and merge on the maintainer's word. |
 | Feature branches | One per pull request, such as `claude/<topic>-<id>` or `alloplace/<topic>`. |
 
 The old `production` branch was rewritten on 2026-10-09 and deleted on 2026-10-11, with every other branch but `main` ([history](history.md#the-forks-first-weeks)).

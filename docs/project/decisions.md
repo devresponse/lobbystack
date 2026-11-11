@@ -6,7 +6,7 @@ The maintainer's decisions about the fork, newest first, with where each is carr
 
 | Since | Decision | Where |
 | --- | --- | --- |
-| 2026-11-11 | The receptionists release's branch is `releases/r2`, renamed from `feature/receptionists` as the maintainer asked. Pull requests, commits and notes from before the rename name it `feature/receptionists`. | [Overview](overview.md#follow-the-branches) |
+| 2026-11-11 | The receptionists release's branch is `releases/r2`, renamed from `feature/receptionists` as the maintainer asked. `feature/receptionists` stays on GitHub for now at `d44e055`, with fork PR #129 open on it, and falls behind as work goes into `releases/r2`. Pull requests, commits and notes from before the rename name it `feature/receptionists`. | [Overview](overview.md#follow-the-branches) |
 | 2026-10-27 | Every feature the research proposed and nobody has built gets a page in `docs/roadmap/`, with its plan, effort and the decisions it waits on, while the study keeps its findings as of its date. | [Roadmap](../roadmap/README.md) |
 | 2026-10-24 | `docs/` is the project's source of truth. A change updates the docs in the same pull request, and the business research is published with the rest. | [This folder](../README.md#keep-this-folder-true), [research](../research/README.md) |
 | 2026-10-23 | The weekly check for new commits in the original stays paused. Bringing in its 14 newer commits would conflict in 286 files, so it would be a project of its own. | [Overview](overview.md#know-what-the-fork-is) |

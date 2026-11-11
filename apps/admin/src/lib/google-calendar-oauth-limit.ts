@@ -1,6 +1,6 @@
 import { normalizeIP } from "@better-auth/core/utils/ip";
 
-import { enforceFixedWindow, fixedWindowLimit, type FixedWindowLimit } from "./fixed-window-limit";
+import { clientIpDigest, enforceFixedWindow, fixedWindowLimit, type FixedWindowLimit } from "./fixed-window-limit";
 
 const hour = 60 * 60;
 
@@ -15,8 +15,9 @@ function limit(name: string, key: string, maximum: number, windowSeconds: number
 }
 
 /**
- * Bounded, hashed dimensions for the Google Calendar authorization flow:
- * the authenticated operator, the target business, and the trusted client IP.
+ * Bounded dimensions for the Google Calendar authorization flow: the
+ * authenticated operator and the target business by their ids, and the
+ * trusted client IP by its digest.
  * `start` is only ever called after authentication and membership, so the IP
  * dimension is skipped when no trusted header is configured and the identity
  * limits still apply. `callback` is unauthenticated at entry, so it always
@@ -37,7 +38,7 @@ export function buildCalendarOAuthRateLimits(input: {
   const unauthenticated = input.operation === "callback" && !input.userId && !input.businessId;
   if (input.ip) {
     // One host usually owns a whole IPv6 /64, so count the subnet as one client.
-    limits.push(limit("ip-hour", `${input.operation}:${normalizeIP(input.ip, { ipv6Subnet: 64 })}`, unauthenticated ? 120 : 30, hour, "rate_limit_ip_hour"));
+    limits.push(limit("ip-hour", `${input.operation}:${clientIpDigest(normalizeIP(input.ip, { ipv6Subnet: 64 }))}`, unauthenticated ? 120 : 30, hour, "rate_limit_ip_hour"));
   } else if (unauthenticated) {
     limits.push(limit("ip-unattributed-hour", "unattributed", 600, hour, "rate_limit_ip_unattributed"));
   }

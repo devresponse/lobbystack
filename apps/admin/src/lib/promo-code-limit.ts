@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { enforceFixedWindow, fixedWindowLimit, type FixedWindowResult } from "./fixed-window-limit";
+import { clientIpDigest, enforceFixedWindow, fixedWindowLimit, type FixedWindowResult } from "./fixed-window-limit";
 
 /**
  * Each promo code someone tries is a guess at a secret. A business can try 10
@@ -12,7 +12,7 @@ export async function checkPromoCodeLimit(input: { businessId: string; userId?: 
   return await enforceFixedWindow([
     fixedWindowLimit("promo-code", "business-hour", input.businessId, 10, 60 * 60, "rate_limit_business_hour"),
     ...(input.userId ? [fixedWindowLimit("promo-code", "user-hour", input.userId, 20, 60 * 60, "rate_limit_user_hour")] : []),
-    ...(input.ip ? [fixedWindowLimit("promo-code", "ip-hour", input.ip, 20, 60 * 60, "rate_limit_ip_hour")] : []),
+    ...(input.ip ? [fixedWindowLimit("promo-code", "ip-hour", clientIpDigest(input.ip), 20, 60 * 60, "rate_limit_ip_hour")] : []),
     ...(input.keyId ? [fixedWindowLimit("promo-code", "key-hour", input.keyId, 20, 60 * 60, "rate_limit_key_hour")] : []),
   ]);
 }

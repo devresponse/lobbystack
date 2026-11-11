@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ redis: { eval: vi.fn() } as { eval: ReturnType<typeof vi.fn> } | undefined }));
 vi.mock("./redis", () => ({ readyRedis: async () => mocks.redis, closeRedis: vi.fn() }));
 
-import { enforceFixedWindow, type FixedWindowLimit } from "./fixed-window-limit";
+import { clientIpDigest, enforceFixedWindow, fixedWindowLimit, type FixedWindowLimit } from "./fixed-window-limit";
 
 const limits: FixedWindowLimit[] = [
   { name: "minute", key: "k:minute", limit: 2, windowSeconds: 60, reason: "rate_limit_minute" },
@@ -30,7 +30,33 @@ function memoryEval(store: Map<string, number>, ttls: Map<string, number>) {
 beforeEach(() => {
   mocks.redis = { eval: vi.fn() };
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+});
+
+describe("fixedWindowLimit", () => {
+  it("names the counter by its namespace, name, key as it is and current window", () => {
+    const now = Date.UTC(2026, 10, 11, 5, 30);
+    vi.useFakeTimers({ now });
+    vi.stubEnv("REDIS_PREFIX", "test1");
+    const id = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f";
+    expect(fixedWindowLimit("promo-code", "user-hour", id, 20, 3_600, "rate_limit_user_hour")).toEqual({
+      name: "user-hour",
+      key: `test1:promo-code:user-hour:${id}:${Math.floor(now / 3_600_000)}`,
+      limit: 20,
+      windowSeconds: 3_600,
+      reason: "rate_limit_user_hour",
+    });
+  });
+
+  it("keeps an IP address out of Redis by its plain SHA-256 digest", () => {
+    // A plain SHA-256 of the address, so an address's counters made before still count.
+    expect(clientIpDigest("203.0.113.10")).toBe("631f08140b24b7274d12df3c37a1a80ce5876dafd7007d772e0114fddf88b682");
+    expect(clientIpDigest("203.0.113.11")).not.toBe(clientIpDigest("203.0.113.10"));
+    expect(fixedWindowLimit("promo-code", "ip-hour", clientIpDigest("203.0.113.10"), 20, 3_600, "rate_limit_ip_hour").key).not.toContain("203.0.113.10");
+  });
+});
 
 describe("enforceFixedWindow", () => {
   it("passes keys in order and a [limit, windowSeconds + 1] ARGV pair per key", async () => {

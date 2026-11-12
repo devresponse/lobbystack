@@ -4,7 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { auditLogs, billingAccounts, billingPackDraws, billingPackPlans, billingPacks, billingUsageEvents, businesses, calls, createDatabaseClient, outboxMessages, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
-import { correctAlertSmsUsage, getBillingUsageStatus, reserveAlertSmsUsage } from "./billing";
+import { correctAlertSmsUsage, getBillingUsageStatus, getWidgetChatAllowance, reserveAlertSmsUsage, reserveOutboundCallAttempt, reserveWidgetChatUsageInTransaction } from "./billing";
 import { applyPackRefundInTransaction, closePackDisputeInTransaction, expirePackInTransaction, freezePackInTransaction, listBusinessPacks, PACK_NOTICE_RUN_DELAY_MS, replaceLivePacksInTransaction } from "./billingPacks";
 import { extendLiveCallReservation, finishLiveCall, startLivePhoneCall } from "./liveCalls";
 import { correctUsageInTransaction, loadBusinessPlanLimits, periodKeyFor } from "./usage";
@@ -74,8 +74,14 @@ async function pack(tx: DatabaseTransaction, businessId: string, input: { second
 }
 
 async function packRow(tx: DatabaseTransaction, id: string) {
-  const [row] = await tx.select({ status: billingPacks.status, secondsUsed: billingPacks.secondsUsed, refundedCents: billingPacks.refundedCents, unusedSeconds: billingPacks.unusedSeconds, endedAt: billingPacks.endedAt }).from(billingPacks).where(eq(billingPacks.id, id));
+  const [row] = await tx.select({ status: billingPacks.status, secondsUsed: billingPacks.secondsUsed, smsUsed: billingPacks.smsUsed, callsUsed: billingPacks.callsUsed, chatUsed: billingPacks.chatUsed, refundedCents: billingPacks.refundedCents, unusedSeconds: billingPacks.unusedSeconds, endedAt: billingPacks.endedAt }).from(billingPacks).where(eq(billingPacks.id, id));
   return row!;
+}
+
+/** What a usage row drew from each pack, with the kind each draw records. */
+async function drawsOf(tx: DatabaseTransaction, sourceKey: string) {
+  const rows = await tx.select({ packId: billingPackDraws.packId, usageKind: billingPackDraws.usageKind, seconds: billingPackDraws.seconds }).from(billingPackDraws).where(eq(billingPackDraws.sourceKey, sourceKey));
+  return Object.fromEntries(rows.map((row) => [row.packId, { kind: row.usageKind, amount: row.seconds }]));
 }
 
 async function draws(tx: DatabaseTransaction, callId: string) {
@@ -99,7 +105,8 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
       expect(await includedNumbers(tx, businessId)).toBe(0);
       await pack(tx, businessId, { seconds: 3_000 });
       const status = await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }));
-      expect(status).toMatchObject({ plan: "prepaid", voiceSecondsIncluded: null, voiceSecondsLeft: 3_000, voiceBlocked: false, alertSmsSegmentsIncluded: 50, outboundCallAttemptsIncluded: 20, chatAiTokensIncluded: 50, overagesBillable: false, pack: { secondsTotal: 3_000, secondsUsed: 0, secondsLeft: 3_000 } });
+      // Nothing is monthly on a pack: every allowance is the pack's, for its whole length.
+      expect(status).toMatchObject({ plan: "prepaid", voiceSecondsIncluded: null, voiceSecondsLeft: 3_000, voiceBlocked: false, alertSmsSegmentsIncluded: null, outboundCallAttemptsIncluded: null, chatAiTokensIncluded: null, overagesBillable: false, pack: { secondsTotal: 3_000, secondsUsed: 0, secondsLeft: 3_000, alertSmsSegments: { total: 50, used: 0, left: 50 }, outboundCallAttempts: { total: 20, used: 0, left: 20 }, chatAiUnits: { total: 50, used: 0, left: 50 } } });
       const limits = await inBusiness(tx, businessId, (scoped) => loadBusinessPlanLimits(scoped, businessId));
       expect(limits.limits).toMatchObject({ knowledgeStorageBytes: 20 * 1_048_576, includedBusinessNumbers: 1, includedReceptionists: 1 });
       // The number claims count the pack's number as the limits do.
@@ -229,23 +236,63 @@ describe.skipIf(!testUrl)("prepaid packs against PostgreSQL", () => {
     });
   });
 
-  it("starts the month's texts, transfers and chats afresh at a switch to a pack and again when it ends", async () => {
+  it("draws texts from the packs for their whole length, whatever the month, and starts Free's month afresh when the last pack ends", async () => {
     await rollbackTest(async (tx) => {
       const businessId = await business(tx);
       // Free's 10 texts are used up before the pack.
       await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `alert_sms:seed:${businessId}`, usageKind: "alert_sms_segments", quantity: 10, planAtRecordTime: "free_cloud", isFinal: true, syncStatus: "skipped", createdAt: new Date(Date.now() - 60_000) });
-      const text = () => asWorker(tx, (context) => reserveAlertSmsUsage(context, { businessId, sourceKey: `alert_sms:test:${randomUUID()}`, estimatedSegments: 30 }));
-      expect((await text()).allowed).toBe(false);
-      const bought = await pack(tx, businessId, { seconds: 3_000 });
+      const text = (estimatedSegments: number, sourceKey = `alert_sms:test:${randomUUID()}`) => asWorker(tx, (context) => reserveAlertSmsUsage(context, { businessId, sourceKey, estimatedSegments }));
+      expect((await text(30)).allowed).toBe(false);
+      const soon = await pack(tx, businessId, { seconds: 3_000, days: 10 });
+      const later = await pack(tx, businessId, { seconds: 3_000, days: 60 });
       await tx.update(billingAccounts).set({ allowancesSince: new Date(Date.now() - 1_000) }).where(eq(billingAccounts.businessId, businessId));
-      // The pack gives 50 a month, counted from the switch.
-      expect((await text()).allowed).toBe(true);
-      expect((await text()).allowed).toBe(false);
-      expect((await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }))).alertSmsSegmentsUsed).toBe(30);
-      // Back on Free once the pack ends, the allowances start afresh again: neither the pack's
-      // texts nor those from before it count against Free's.
-      await tx.update(billingPacks).set({ endsAt: new Date(Date.now() - 500) }).where(eq(billingPacks.id, bought.id));
+      // Each pack gives 50 for its whole length: the first text takes 30 from the pack that ends first,
+      // the next 30 takes its last 20 and 10 from the other.
+      const first = `alert_sms:test:${randomUUID()}`;
+      expect((await text(30, first)).allowed).toBe(true);
+      const second = `alert_sms:test:${randomUUID()}`;
+      expect((await text(30, second)).allowed).toBe(true);
+      expect(await drawsOf(tx, second)).toEqual({ [soon.id]: { kind: "alert_sms_segments", amount: 20 }, [later.id]: { kind: "alert_sms_segments", amount: 10 } });
+      // More than the packs still hold is refused.
+      expect((await text(41)).allowed).toBe(false);
+      // Twilio settling the first text at fewer segments gives the rest back to its pack.
+      await asWorker(tx, (context) => correctAlertSmsUsage(context, { businessId, sourceKey: first, segments: 2 }));
+      expect(await packRow(tx, soon.id)).toMatchObject({ smsUsed: 22, secondsUsed: 0 });
+      const status = await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }));
+      expect(status).toMatchObject({ alertSmsSegmentsUsed: 32, alertSmsBlocked: false, pack: { alertSmsSegments: { total: 100, used: 32, left: 68 } } });
+      // The packs' texts don't start afresh with the month: next month they hold what this one left.
+      const next = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 2));
+      expect((await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId, periodKey: periodKeyFor(next) }))).pack).toMatchObject({ alertSmsSegments: { left: 68 } });
+      expect((await text(68)).allowed).toBe(true);
+      expect((await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }))).alertSmsBlocked).toBe(true);
+      // Back on Free once the packs end, the month starts afresh: neither the packs' texts nor
+      // those from before them count against Free's.
+      await tx.update(billingPacks).set({ endsAt: new Date(Date.now() - 500) }).where(eq(billingPacks.businessId, businessId));
       expect((await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }))).alertSmsSegmentsUsed).toBe(0);
+    });
+  });
+
+  it("draws transfers and website chats from the packs for their whole length, and stops each when the packs hold none", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      const bought = await pack(tx, businessId, { seconds: 3_000 });
+      await tx.update(billingPacks).set({ callsOut: 2, chatUnits: 1 }).where(eq(billingPacks.id, bought.id));
+      const transfer = () => asWorker(tx, (context) => reserveOutboundCallAttempt(context, { businessId, sourceKey: `outbound_call:test:${randomUUID()}` }));
+      expect((await transfer()).allowed).toBe(true);
+      expect((await transfer()).allowed).toBe(true);
+      expect((await transfer()).allowed).toBe(false);
+      // A website chat takes one of the pack's chats, and the next conversation finds none left.
+      expect((await asWorker(tx, (context) => getWidgetChatAllowance(context, { businessId }))).allowed).toBe(true);
+      const chat = (conversationId: string) => inBusiness(tx, businessId, (scoped) => reserveWidgetChatUsageInTransaction(scoped, { businessId, conversationId }));
+      const conversation = randomUUID();
+      expect((await chat(conversation)).allowed).toBe(true);
+      expect(await drawsOf(tx, `chat:${conversation}`)).toEqual({ [bought.id]: { kind: "chat_ai_tokens", amount: 1 } });
+      // The same conversation goes on; a new one is refused.
+      expect((await chat(conversation)).allowed).toBe(true);
+      expect((await chat(randomUUID())).allowed).toBe(false);
+      expect((await asWorker(tx, (context) => getWidgetChatAllowance(context, { businessId }))).allowed).toBe(false);
+      expect(await packRow(tx, bought.id)).toMatchObject({ callsUsed: 2, chatUsed: 1, secondsUsed: 0 });
+      expect(await asWorker(tx, (context) => getBillingUsageStatus(context, { businessId }))).toMatchObject({ outboundCallAttemptsBlocked: true, chatAiBlocked: true, voiceBlocked: false });
     });
   });
 

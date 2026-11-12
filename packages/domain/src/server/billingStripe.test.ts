@@ -436,7 +436,7 @@ describe("Stripe packs", () => {
     const { snapshot } = applyWithPacks(emptyStripeSnapshot(), profile());
     const old = livePackPrice(snapshot, "pack_250_90");
     const raised = profile("realinfobot", (value) => {
-      value.packs.pack_250_90.priceCents = 6000;
+      value.packs.pack_250_90.prices.onceCents = 6000;
     });
     const lookupKey = catalogWithPacks(raised).packs.find((pack) => pack.pack === "pack_250_90")!.lookupKey;
     expect(lookupKey).not.toBe(old.lookup_key);

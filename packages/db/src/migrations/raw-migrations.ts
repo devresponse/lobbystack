@@ -154,6 +154,7 @@ export const SCHEMA_MIGRATIONS = [
   "0148_billing_packs.sql",
   "0149_billing_pack_checkout_terms.sql",
   "0150_account_business_plans.sql",
+  "0151_billing_pack_allowances.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

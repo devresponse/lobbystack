@@ -51,7 +51,8 @@ describe("original dedicated billing usage page", () => {
 });
 
 describe("the usage page on prepaid packs", () => {
-  function setupPack(pack: { secondsTotal: number; secondsUsed: number; secondsLeft: number }) {
+  const allowance = (total: number, used: number) => ({ total, used, left: Math.max(0, total - used) });
+  function setupPack(pack: { secondsTotal: number; secondsUsed: number; secondsLeft: number }, allowances = { alertSmsSegments: allowance(300, 12), outboundCallAttempts: allowance(120, 3), chatAiUnits: allowance(300, 40) }) {
     language.value = "en";
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);
@@ -60,24 +61,34 @@ describe("the usage page on prepaid packs", () => {
       effectivePlan: "prepaid",
       limits: builtInBillingPlanLimits.prepaid,
       account: null,
-      usageStatus: { voiceSecondsUsed: 90, outboundCallAttemptsUsed: 1, alertSmsSegmentsUsed: 0, voiceBlocked: pack.secondsLeft <= 0, pack: { ...pack, nextEndsAt: "2027-01-30T00:00:00.000Z", lastEndsAt: "2027-03-30T00:00:00.000Z" } },
+      usageStatus: { voiceSecondsUsed: 90, outboundCallAttemptsUsed: 1, alertSmsSegmentsUsed: 0, voiceBlocked: pack.secondsLeft <= 0, pack: { ...pack, ...allowances, nextEndsAt: "2027-01-30T00:00:00.000Z", lastEndsAt: "2027-03-30T00:00:00.000Z" } },
       knowledgeStorageBytesUsed: 0,
     });
     render(<QueryClientProvider client={client}><LiveUsageSurface /></QueryClientProvider>);
   }
 
-  it("meters voice against the minutes the live packs hold, with no monthly reset", () => {
+  it("meters voice, transfers and texts against what the live packs hold for their whole length, with no monthly reset", () => {
     setupPack({ secondsTotal: 60_000, secondsUsed: 15_030, secondsLeft: 44_970 });
     expect(screen.getByText((text) => text.startsWith("250.5 /") && text.includes("1,000"))).toBeTruthy();
-    expect(screen.queryByText("billing.usage.customAllowance")).toBeNull();
+    // The packs' transfers and texts, not the month's.
+    expect(screen.getByText((text) => text.startsWith("3 /") && text.includes("120"))).toBeTruthy();
+    expect(screen.getByText((text) => text.startsWith("12 /") && text.includes("300"))).toBeTruthy();
+    expect(screen.queryByText((text) => text.startsWith("billing.usage.customAllowance"))).toBeNull();
     expect(screen.getByText("billing.usage.packDescription")).toBeTruthy();
     expect(screen.queryByText((text) => text.startsWith("billing.usage.description"))).toBeNull();
     expect(screen.queryByText("billing.usage.packBlockedDescription")).toBeNull();
+    expect(screen.queryByText("billing.usage.packAllowanceBlockedDescription")).toBeNull();
   });
 
   it("says calls get a busy signal once the packs have no minutes left", () => {
     setupPack({ secondsTotal: 30_000, secondsUsed: 30_000, secondsLeft: 0 });
     expect(screen.getByText("billing.usage.packBlockedDescription")).toBeTruthy();
+    expect(screen.queryByText("billing.usage.blockedDescription")).toBeNull();
+  });
+
+  it("says what stops once the packs have no texts or transfers left, rather than until next month", () => {
+    setupPack({ secondsTotal: 30_000, secondsUsed: 100, secondsLeft: 29_900 }, { alertSmsSegments: allowance(300, 300), outboundCallAttempts: allowance(120, 120), chatAiUnits: allowance(300, 0) });
+    expect(screen.getAllByText("billing.usage.packAllowanceBlockedDescription")).toHaveLength(2);
     expect(screen.queryByText("billing.usage.blockedDescription")).toBeNull();
   });
 });

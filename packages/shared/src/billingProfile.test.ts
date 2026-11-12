@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { hostedCheckoutPlanSlugs } from "./billing";
-import { accountBusinessCap, billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, canonicalBillingProfileJson, highestBusinessCap, normalizeBillingProfile, packTermsJson, planBusinessCap, planTermsJson, resolveBillingPacks, resolveBillingPlans, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
+import { accountBusinessCap, billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, canonicalBillingProfileJson, highestBusinessCap, normalizeBillingProfile, packTermsJson, planBusinessCap, planTermsJson, resolveBillingPacks, resolveBillingPlans, upgradeStoredBillingProfile, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
@@ -334,12 +334,20 @@ describe("the terms hash", () => {
 });
 
 describe("prepaid packs", () => {
-  const packEntry = (overrides: Record<string, unknown> = {}) => ({ names: name("500 minutes"), minutes: 500, days: 180, priceCents: 9900, ...overrides });
+  // A pack is a plan paid for once that lasts its days: a plan's fields, with its allowances for its whole length.
+  const packEntry = (overrides: Record<string, unknown> = {}) => ({
+    names: name("500 minutes"),
+    days: 180,
+    prices: { onceCents: 9900 },
+    included: { voiceMinutes: 500, alertSmsSegments: 300, outboundCallAttempts: 120, chatAiUnits: 300 },
+    limits: { knowledgeStorageMb: 20, businessNumbers: 1, receptionists: 1 },
+    ...overrides,
+  });
   const withPacks = (packs: Record<string, unknown>, change: (file: Record<string, any>) => void = () => undefined) => withPlans({}, (file) => { file.packs = packs; change(file); });
   const pack = (file: unknown, code: string): ResolvedBillingPack => resolveBillingPacks(parse(file)).find((row) => row.code === code)!;
   const packHash = (file: unknown, code: string) => createHash("sha256").update(packTermsJson(pack(file, code))).digest("hex");
 
-  it("sells nine packs in AlloPlace's file and the example file, smallest and shortest first, with Starter's allowances and 20 MB of knowledge", () => {
+  it("sells nine packs in AlloPlace's file and the example file, smallest and shortest first, each with Starter's month of allowances for every month it lasts and 20 MB of knowledge", () => {
     for (const file of [alloplace(), plansAndPacks()]) {
       const packs = resolveBillingPacks(parse(file));
       expect(packs.map((row) => row.code)).toEqual(["pack_250_90", "pack_250_180", "pack_250_365", "pack_500_90", "pack_500_180", "pack_500_365", "pack_1000_90", "pack_1000_180", "pack_1000_365"]);
@@ -349,70 +357,84 @@ describe("prepaid packs", () => {
         names: { en: "500 minutes, 180 days", fr: "500 minutes, 180 jours", es: "500 minutos, 180 días", sr: "500 minuta, 180 dana" },
         voice_sec: 30_000,
         days: 180,
-        sms_seg: 50,
-        calls_out: 20,
-        chat_units: 50,
+        sms_seg: 300,
+        calls_out: 120,
+        chat_units: 300,
         kb_bytes: 20 * 1_048_576,
         numbers: 1,
         receptionists: 1,
         sort: 50,
         price: { currency: "cad", cents: 9900 },
       });
+      expect(packs.map((row) => [row.days, row.sms_seg, row.calls_out, row.chat_units])).toEqual([
+        [90, 150, 60, 150], [180, 300, 120, 300], [365, 600, 240, 600],
+        [90, 150, 60, 150], [180, 300, 120, 300], [365, 600, 240, 600],
+        [90, 150, 60, 150], [180, 300, 120, 300], [365, 600, 240, 600],
+      ]);
     }
   });
 
   it("sells RealInfoBot's three listing packs, a receptionist per listing, and no plan but Free", () => {
     const profile = parse(JSON.parse(readFileSync(new URL("../../../brands/realinfobot/billing.json", import.meta.url), "utf8")));
     expect(Object.entries(profile.plans).filter(([, entry]) => entry.sold).map(([code]) => code)).toEqual([]);
-    expect(resolveBillingPacks(profile).map((row) => [row.code, row.voice_sec / 60, row.days, row.receptionists, row.numbers, row.price.cents])).toEqual([
-      ["listing_1_180", 250, 180, 1, 1, 9900],
-      ["listings_3_365", 750, 365, 3, 1, 24900],
-      ["listings_6_365", 1500, 365, 6, 1, 44900],
+    expect(resolveBillingPacks(profile).map((row) => [row.code, row.voice_sec / 60, row.days, row.sms_seg, row.calls_out, row.chat_units, row.receptionists, row.numbers, row.price.cents])).toEqual([
+      ["listing_1_180", 250, 180, 300, 120, 300, 1, 1, 9900],
+      ["listings_3_365", 750, 365, 1_800, 720, 1_800, 3, 1, 24900],
+      ["listings_6_365", 1500, 365, 3_600, 1_440, 3_600, 6, 1, 44900],
     ]);
-    // The plan screens show Free and a card for each pack, the middle one popular, with no comparison and no packs' box.
+    // The plan screens show Free and a card for each pack, the middle one popular, with no comparison and no packs' heading.
     expect(profile.display?.plans?.map((card) => [card.plan ?? card.pack, card.popular === true])).toEqual([["free_cloud", false], ["listing_1_180", false], ["listings_3_365", true], ["listings_6_365", false]]);
     expect(profile.display?.comparison).toEqual([]);
     expect(profile.display?.packs).toBeUndefined();
   });
 
-  it("takes what a pack leaves out from Starter, and keeps what it sets", () => {
-    const file = withPacks({ own: packEntry({ included: { alertSmsSegments: 7 }, limits: { knowledgeStorageMb: 3, businessNumbers: 0, receptionists: 2 } }), bare: packEntry({ days: undefined }) });
-    expect(pack(file, "own")).toMatchObject({ sms_seg: 7, calls_out: 20, chat_units: 50, kb_bytes: 3 * 1_048_576, numbers: 0, receptionists: 2 });
-    expect(pack(file, "bare")).toMatchObject({ days: null, sms_seg: 50, kb_bytes: 5 * 1_048_576, numbers: 1, receptionists: 1 });
+  it("takes a pack's allowances and limits as the file gives them, and only receptionists left out from Starter", () => {
+    const file = withPacks({
+      own: packEntry({ included: { voiceMinutes: 500, alertSmsSegments: 7, outboundCallAttempts: 0, chatAiUnits: 9 }, limits: { knowledgeStorageMb: 3, businessNumbers: 0, receptionists: 2 } }),
+      bare: packEntry({ days: undefined, limits: { knowledgeStorageMb: 5, businessNumbers: 1 } }),
+    });
+    expect(pack(file, "own")).toMatchObject({ sms_seg: 7, calls_out: 0, chat_units: 9, kb_bytes: 3 * 1_048_576, numbers: 0, receptionists: 2 });
+    expect(pack(file, "bare")).toMatchObject({ days: null, sms_seg: 300, kb_bytes: 5 * 1_048_576, numbers: 1, receptionists: 1 });
     // A pack that never ends sorts after every length of its size.
     expect(resolveBillingPacks(parse(file)).map((row) => row.code)).toEqual(["own", "bare"]);
   });
 
-  it("allows a file without packs, and checks each pack's code, length and price", () => {
+  it("allows a file without packs, and checks each pack's code, length, price, allowances and limits", () => {
     expect(resolveBillingPacks(parse(withPlans({}, (file) => { delete file.packs; })))).toEqual([]);
     expect(problems(withPacks({ "Big-Pack": packEntry() }))).toEqual([expect.stringMatching(/^packs\.Big-Pack: a pack code is/)]);
     expect(problems(withPacks({ starter: packEntry() }))).toEqual([expect.stringMatching(/^packs\.starter: a plan already has this code/)]);
     const many = Object.fromEntries(Array.from({ length: 31 }, (_, index) => [`pack-${String(index).padStart(2, "0")}`, packEntry()]));
     expect(problems(withPacks(many))).toEqual([expect.stringMatching(/^packs\.pack-30: a file holds at most 30 packs/)]);
     const refused = (file: unknown, path: RegExp) => expect(problems(file).some((problem) => path.test(problem)), `${path} in ${problems(file).join("; ")}`).toBe(true);
+    const included = (change: Record<string, unknown>) => ({ voiceMinutes: 500, alertSmsSegments: 300, outboundCallAttempts: 120, chatAiUnits: 300, ...change });
     refused(withPacks({ pk1: packEntry({ days: 0 }) }), /^packs\.pk1\.days: /);
     refused(withPacks({ pk1: packEntry({ days: 1_096 }) }), /^packs\.pk1\.days: /);
-    refused(withPacks({ pk1: packEntry({ minutes: 0 }) }), /^packs\.pk1\.minutes: /);
-    refused(withPacks({ pk1: packEntry({ priceCents: 0 }) }), /^packs\.pk1\.priceCents: /);
-    refused(withPacks({ pk1: packEntry({ included: { voiceMinutes: 10 } }) }), /^packs\.pk1\.included: Unrecognized key/);
-    refused(withPacks({ pk1: packEntry({ limits: { businessNumbers: 2 } }) }), /^packs\.pk1\.limits\.businessNumbers: /);
+    refused(withPacks({ pk1: packEntry({ included: included({ voiceMinutes: 0 }) }) }), /^packs\.pk1\.included\.voiceMinutes: /);
+    refused(withPacks({ pk1: packEntry({ prices: { onceCents: 0 } }) }), /^packs\.pk1\.prices\.onceCents: /);
+    refused(withPacks({ pk1: packEntry({ prices: { monthlyCents: 900 } }) }), /^packs\.pk1\.prices: Unrecognized key/);
+    refused(withPacks({ pk1: packEntry({ included: { voiceMinutes: 10 } }) }), /^packs\.pk1\.included\.alertSmsSegments: /);
+    refused(withPacks({ pk1: packEntry({ limits: { knowledgeStorageMb: 20, businessNumbers: 2 } }) }), /^packs\.pk1\.limits\.businessNumbers: /);
+    // The first shape, minutes and priceCents beside partial allowances, is refused for the plan's fields.
+    refused(withPacks({ pk1: { names: name("500 minutes"), minutes: 500, days: 180, priceCents: 9900 } }), /^packs\.pk1: Unrecognized keys/);
     expect(problems(withPacks({ pk1: packEntry({ days: 1_095 }) }))).toEqual([]);
   });
 
   it("hashes everything a buyer gets and the price, but not the names or the order", () => {
     const base = packHash(withPacks({ pk1: packEntry() }), "pk1");
-    expect(packHash(withPacks({ pk1: packEntry({ names: name("Another name") }), pk0: packEntry({ minutes: 100 }) }), "pk1")).toBe(base);
+    expect(packHash(withPacks({ pk1: packEntry({ names: name("Another name") }), pk0: packEntry({ included: { voiceMinutes: 100, alertSmsSegments: 1, outboundCallAttempts: 1, chatAiUnits: 1 } }) }), "pk1")).toBe(base);
+    const included = (change: Record<string, unknown>) => ({ included: { voiceMinutes: 500, alertSmsSegments: 300, outboundCallAttempts: 120, chatAiUnits: 300, ...change } });
+    const limits = (change: Record<string, unknown>) => ({ limits: { knowledgeStorageMb: 20, businessNumbers: 1, receptionists: 1, ...change } });
     const changed = [
-      packEntry({ minutes: 501 }),
+      packEntry(included({ voiceMinutes: 501 })),
       packEntry({ days: 181 }),
       packEntry({ days: undefined }),
-      packEntry({ priceCents: 9901 }),
-      packEntry({ included: { alertSmsSegments: 1 } }),
-      packEntry({ included: { outboundCallAttempts: 1 } }),
-      packEntry({ included: { chatAiUnits: 1 } }),
-      packEntry({ limits: { knowledgeStorageMb: 1 } }),
-      packEntry({ limits: { businessNumbers: 0 } }),
-      packEntry({ limits: { receptionists: 3 } }),
+      packEntry({ prices: { onceCents: 9901 } }),
+      packEntry(included({ alertSmsSegments: 1 })),
+      packEntry(included({ outboundCallAttempts: 1 })),
+      packEntry(included({ chatAiUnits: 1 })),
+      packEntry(limits({ knowledgeStorageMb: 1 })),
+      packEntry(limits({ businessNumbers: 0 })),
+      packEntry(limits({ receptionists: 3 })),
     ].map((entry) => packHash(withPacks({ pk1: entry }), "pk1"));
     expect(new Set([base, ...changed]).size).toBe(changed.length + 1);
     expect(packHash(withPacks({ pk1: packEntry() }, (file) => { file.currency = "usd"; }), "pk1")).not.toBe(base);
@@ -421,6 +443,28 @@ describe("prepaid packs", () => {
   it("leaves every plan's terms hash as it was", () => {
     const without = withPlans({}, (file) => { delete file.packs; });
     for (const code of ["free_cloud", "starter", "pro", "enterprise"]) expect(termsHash(alloplace(), code)).toBe(termsHash(without, code));
+  });
+
+  it("reads a profile stored with the first pack shape in today's, resolving to the rows it was applied with", () => {
+    // What a catalog run stored before packs took a plan's fields: minutes and priceCents, and what Starter gave left out.
+    const stored = normalizeBillingProfile(parse(withPlans({}, (file) => { delete file.packs; })));
+    const legacy = {
+      ...stored,
+      packs: {
+        bare: { names: name("250 minutes"), minutes: 250, days: 90, priceCents: 5500, limits: { knowledgeStorageMb: 20 } },
+        own: { names: name("Listing"), minutes: 750, days: 365, priceCents: 24900, included: { alertSmsSegments: 150, outboundCallAttempts: 60, chatAiUnits: 150 }, limits: { knowledgeStorageMb: 60, businessNumbers: 1, receptionists: 3 } },
+      },
+    };
+    expect(billingProfileSchema.safeParse(legacy).success).toBe(false);
+    const upgraded = billingProfileSchema.parse(upgradeStoredBillingProfile(legacy));
+    expect(resolveBillingPacks(upgraded).map((row) => [row.code, row.voice_sec, row.sms_seg, row.calls_out, row.chat_units, row.kb_bytes, row.numbers, row.receptionists, row.price.cents])).toEqual([
+      ["bare", 15_000, 50, 20, 50, 20 * 1_048_576, 1, 1, 5500],
+      ["own", 45_000, 150, 60, 150, 60 * 1_048_576, 1, 3, 24900],
+    ]);
+    // Today's shape, and anything that isn't a profile, comes back as it was.
+    const current = normalizeBillingProfile(parse(alloplace()));
+    expect(upgradeStoredBillingProfile(current)).toEqual(current);
+    expect(upgradeStoredBillingProfile(null)).toBeNull();
   });
 });
 

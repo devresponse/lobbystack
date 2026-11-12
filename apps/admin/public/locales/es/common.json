@@ -226,16 +226,15 @@
       "chatAiUnitsCustom": "Chat del sitio web a medida",
       "knowledgeStorageMegabytes": "{{amount}} MB de base de conocimiento",
       "knowledgeStorageGigabytes": "{{amount}} GB de base de conocimiento",
-      "knowledgeStorageCustom": "Base de conocimiento a medida",
-      "packVoiceMinutes_one": "{{amount}} minuto de voz durante {{days}}",
-      "packVoiceMinutes_many": "{{amount}} minutos de voz durante {{days}}",
-      "packVoiceMinutes_other": "{{amount}} minutos de voz durante {{days}}",
-      "packVoiceMinutesNoEnd_one": "{{amount}} minuto de voz, sin fecha de fin",
-      "packVoiceMinutesNoEnd_many": "{{amount}} minutos de voz, sin fecha de fin",
-      "packVoiceMinutesNoEnd_other": "{{amount}} minutos de voz, sin fecha de fin"
+      "knowledgeStorageCustom": "Base de conocimiento a medida"
     },
-    "days_one": "{{count}} día",
-    "days_many": "{{count}} de días",
-    "days_other": "{{count}} días"
+    "days_one": "{{amount}} día",
+    "days_many": "{{amount}} de días",
+    "days_other": "{{amount}} días",
+    "perDays_one": "/{{amount}} día",
+    "perDays_many": "/{{amount}} de días",
+    "perDays_other": "/{{amount}} días",
+    "paidOnce": "pago único",
+    "noEndDate": "Sin fecha de fin"
   }
 }

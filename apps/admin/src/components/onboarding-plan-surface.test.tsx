@@ -243,17 +243,29 @@ describe("prepaid packs during onboarding", () => {
   it("offers no pack when none is on sale, as before packs", () => {
     setup();
     expect(screen.queryByText("plan.packs.title")).toBeNull();
-    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "plan.packs.lengthLabel" })).toBeNull();
   });
 
-  it("offers the packs on sale beside the plans, and records the choice and its checkout as prepaid", async () => {
+  it("offers the packs on sale after the plans, in the plans' cards, a tab for each length, and records the choice and its checkout as prepaid", async () => {
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign });
     setup(false, false, "free_cloud", builtInBillingPlanList(), onSale);
     const fetchMock = servePacks({ status: "ready", checkoutUrl: "https://pay.example/pc-1" });
-    expect(screen.getByText("plan.packs.title")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "plan.packs.title" })).toBeTruthy();
+    expect(screen.getByText("plan.packs.description")).toBeTruthy();
+    // The plans' four cards, then the shortest length's pack in a card of the same kind, priced for its length.
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["plan.tiers.free_cloud.name", "plan.tiers.starter.name", "plan.tiers.pro.name", "plan.tiers.enterprise.name", "pack-500-180"]);
+    const pack = screen.getByRole("heading", { level: 3, name: "pack-500-180" }).closest("section")!;
+    expect(within(pack).getByText("CA$99")).toBeTruthy();
+    expect(within(pack).getByText("common:planDisplay.perDays")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("common:planDisplay.perDays", { count: 180, amount: "180" });
+    expect(within(pack).getByText("plan.packs.cardDescription")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("plan.packs.cardDescription", { minutes: "500", days: "common:planDisplay.days" });
+    expect(within(pack).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["common:planDisplay.bullets.voiceMinutes", "common:planDisplay.bullets.receptionists", "common:planDisplay.bullets.businessNumbers", "common:planDisplay.bullets.alertSmsSegments", "common:planDisplay.bullets.outboundCallAttempts"]);
     // The second length, 365 days, of the two the 500 minutes are sold for.
-    await userEvent.click(screen.getAllByRole("radio", { name: "billing.packs.daysOption" })[1]!);
+    const lengths = screen.getByRole("tablist", { name: "plan.packs.lengthLabel" });
+    await userEvent.click(within(lengths).getAllByRole("tab")[1]!);
+    expect(screen.getAllByRole("heading", { level: 3 }).at(-1)!.textContent).toBe("pack-500-365");
     await userEvent.click(screen.getByRole("button", { name: "plan.packs.cta" }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/pc-1"));
     const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/billing/packs/checkout")!;
@@ -280,24 +292,25 @@ describe("prepaid packs during onboarding", () => {
     const card = (name: string) => screen.getByRole("heading", { level: 3, name }).closest("section")!;
     const bullets = (name: string) => within(card(name)).getAllByRole("listitem").map((item) => item.textContent);
 
-    it("shows them beside the plans in the section's order, in place of the packs' box, priced and filled from the packs on sale", () => {
+    it("shows them among the plans in the section's order, with no Prepaid plans heading, each a plan's card priced for its length and filled from the pack", () => {
       setup(false, false, "free_cloud", builtInBillingPlanList(), { ...onSale, planDisplay });
       expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["plan.tiers.free_cloud.name", "pack-500-180", "pack-500-365"]);
       expect(screen.queryByText("plan.packs.title")).toBeNull();
-      expect(screen.queryByRole("radio")).toBeNull();
+      expect(screen.queryByRole("tablist", { name: "plan.packs.lengthLabel" })).toBeNull();
       expect(within(card("pack-500-365")).getByText("Best value")).toBeTruthy();
       expect(within(card("pack-500-180")).queryByText("plan.popular")).toBeNull();
       for (const name of ["pack-500-180", "pack-500-365"]) {
         expect(within(card(name)).getByText("CA$99")).toBeTruthy();
-        expect(within(card(name)).getByText("plan.packs.priceSuffix")).toBeTruthy();
+        expect(within(card(name)).getByText("common:planDisplay.perDays")).toBeTruthy();
       }
+      expect(translate).toHaveBeenCalledWith("common:planDisplay.perDays", { count: 365, amount: "365" });
       expect(within(card("pack-500-365")).getByText("500 minutes for LobbyStack")).toBeTruthy();
-      expect(bullets("pack-500-365")).toEqual(["common:planDisplay.bullets.packVoiceMinutes", "Lasts 365 days for CA$99"]);
-      expect(translate).toHaveBeenCalledWith("common:planDisplay.bullets.packVoiceMinutes", { count: 500, amount: "500", days: "common:planDisplay.days" });
-      expect(translate).toHaveBeenCalledWith("common:planDisplay.days", { count: 365 });
-      // A card the section gives no words takes the built-in ones.
-      expect(within(card("pack-500-180")).getByText("plan.packs.description")).toBeTruthy();
-      expect(bullets("pack-500-180")).toEqual(["common:planDisplay.bullets.packVoiceMinutes", "common:planDisplay.bullets.receptionists", "common:planDisplay.bullets.businessNumbers"]);
+      // Its minutes are said in a plan card's words, with no overage rate.
+      expect(bullets("pack-500-365")).toEqual(["common:planDisplay.bullets.voiceMinutes", "Lasts 365 days for CA$99"]);
+      expect(translate).toHaveBeenCalledWith("common:planDisplay.bullets.voiceMinutes", { count: 500, amount: "500" });
+      // A card the section gives no words takes the built-in ones: its length, and a plan's allowances.
+      expect(within(card("pack-500-180")).getByText("plan.packs.cardDescription")).toBeTruthy();
+      expect(bullets("pack-500-180")).toEqual(["common:planDisplay.bullets.voiceMinutes", "common:planDisplay.bullets.receptionists", "common:planDisplay.bullets.businessNumbers", "common:planDisplay.bullets.alertSmsSegments", "common:planDisplay.bullets.outboundCallAttempts"]);
       expect(screen.getByRole("button", { name: "plan.packs.cta" })).toBeTruthy();
     });
 

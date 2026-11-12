@@ -128,16 +128,22 @@ export type BillingUsageViewModel = {
     overageSpendingCapCents: number | null;
     overageSpendingCapReached: boolean;
     usageComplete: boolean;
-    /** The live prepaid packs' seconds on the prepaid tier, which calls draw instead of a monthly allowance; absent or null otherwise. */
+    /** The live prepaid packs' balances on the prepaid tier, which every use draws instead of a monthly allowance; absent or null otherwise. */
     pack?: PackUsageViewModel | null;
   } | null;
 };
 
+/** What a pack holds of one allowance for its whole length: its total after refunds, what was used, and what is left. */
+export type PackAllowanceViewModel = { total: number; used: number; left: number };
 /** What a business's live packs hold, as GET /api/billing's usage status reports it on the prepaid tier. */
 export type PackUsageViewModel = {
   secondsTotal: number;
   secondsUsed: number;
   secondsLeft: number;
+  /** The live packs' texts, transfers and chats, which last their whole length as their minutes do. */
+  alertSmsSegments: PackAllowanceViewModel;
+  outboundCallAttempts: PackAllowanceViewModel;
+  chatAiUnits: PackAllowanceViewModel;
   /** When the live pack that ends first ends; null when none ends. */
   nextEndsAt: string | null;
   /** When the last live pack ends; null when one never ends. */
@@ -156,7 +162,7 @@ export type BillingPackOfferViewModel = {
   days: number | null;
   amountCents: number;
   currency: string;
-  /** What it gives each UTC month while it lasts. */
+  /** What else it gives for its whole length, as its minutes are. */
   smsSegments: number;
   outboundCalls: number;
   chatUnits: number;
@@ -174,6 +180,11 @@ export type BillingPackViewModel = {
   code: string;
   names: Record<string, string>;
   status: "active" | "frozen";
+  /** Its length in days, as bought; null when it never ends. */
+  days: number | null;
+  /** What was paid for it, in currency. */
+  amountCents: number;
+  currency: string;
   /** The seconds it holds after refunds. */
   secondsTotal: number;
   secondsLeft: number;

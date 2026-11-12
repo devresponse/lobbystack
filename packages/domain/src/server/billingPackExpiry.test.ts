@@ -13,7 +13,7 @@ const at = (offsetDays: number) => new Date(now.getTime() + offsetDays * day);
 
 /** A 90-day pack of 250 minutes bought 60 days ago, so it ends in 30, with nothing used and no reminder sent. */
 function pack(overrides: Partial<NoticedLivePack> = {}): NoticedLivePack {
-  return { id: "pack", pack: "pack_250_90", secondsTotal: 15_000, secondsUsed: 0, amountCents: 5_500, refundedCents: 0, paidAt: at(-60), endsAt: at(30), smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, notices: [], ...overrides };
+  return { id: "pack", pack: "pack_250_90", secondsTotal: 15_000, secondsUsed: 0, amountCents: 5_500, refundedCents: 0, paidAt: at(-60), endsAt: at(30), smsSeg: 150, smsUsed: 0, callsOut: 60, callsUsed: 0, chatUnits: 150, chatUsed: 0, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, notices: [], ...overrides };
 }
 
 const remindersDue = (live: NoticedLivePack[], when = now) => packRemindersDue({ live, balance: packBalance(live), now: when });

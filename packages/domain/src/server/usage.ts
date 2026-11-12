@@ -3,7 +3,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, enqueueOutbox, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, isBillingPlanSlug, isReplacedSubscription, isUuid, liveSubscriptionStates, MAX_PHONE_CALL_MS, PHONE_RESERVATION_SLICE_SECONDS, type BillingPlanLimits, type BillingPlanLimitTable, type BillingPlanSlug } from "@lobbystack/shared";
 
-import { lockBusinessPacks, packBalance, readLivePacks, setPackDraw, type PackBalance } from "./billingPacks";
+import { lockBusinessPacks, packBalance, readLivePacks, setPackDraw, type PackAllowance, type PackBalance } from "./billingPacks";
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
 
 export type NonAiBillingUsageKind = "voice_seconds" | "alert_sms_segments" | "outbound_call_attempts" | "chat_ai_tokens";
@@ -44,15 +44,18 @@ export type UsageStatus = {
   /** The voice seconds phone and browser calls can still use this month; null when nothing limits them. */
   voiceSecondsLeft: number | null;
   usageComplete: boolean;
-  /** The business's live prepaid packs, on the prepaid tier: their seconds, which calls draw instead of a monthly allowance. */
+  /** The business's live prepaid packs, on the prepaid tier: their allowances for their whole length, which uses draw on instead of a monthly allowance. */
   pack: PackUsage | null;
 };
 
-/** What a business's live packs hold, as the usage status reports it. */
+/** What a business's live packs hold, as the usage status reports it: their voice seconds, and each other allowance for their whole length. */
 export type PackUsage = {
   secondsTotal: number;
   secondsUsed: number;
   secondsLeft: number;
+  alertSmsSegments: PackAllowance;
+  outboundCallAttempts: PackAllowance;
+  chatAiUnits: PackAllowance;
   /** When the live pack that ends first ends; null when none ends. */
   nextEndsAt: Date | null;
   /** When the last live pack ends; null when one never ends. */
@@ -350,18 +353,20 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
   const config = currentLimits(billing);
   const overageSpendCents = Math.max(0, Math.ceil(replay.rawSpendCents - 1e-9));
   const capReached = billing.capCents !== null && replay.rawSpendCents > 0 && overageSpendCents >= billing.capCents;
+  // On a pack every use draws on the live packs' allowance of its kind, which
+  // lasts their whole length rather than a month.
+  const pack = billing.plan === "prepaid" && billing.packs ? billing.packs : null;
   // A kind is blocked once its allowance is used up and it can't run past it:
   // Free never can, and a capped plan can't once one more unit would push
   // spend past the cap. A paid plan's chats cost nothing past their allowance,
-  // so the cap never blocks them.
+  // so the cap never blocks them. On a pack, once the packs hold none of it.
   const blocked = (kind: NonAiBillingUsageKind): boolean => {
+    if (billing.plan === "prepaid") return (pack?.allowances[kind].left ?? 0) <= 0;
     const included = includedQuantity(config, kind);
     if (included === null || replay.usage[kind] < included) return false;
     return !config.overagesBillable || pushesPastCap(billing.capCents, replay.rawSpendCents, replay.rawSpendCents + rateCents(config, kind));
   };
   const voiceSecondsLeft = hasUnlimitedVoice(billing) ? Number.POSITIVE_INFINITY : reservableVoiceSeconds(billing, replay);
-  // On a pack, calls stop when its seconds run out, not at a monthly allowance.
-  const pack = billing.plan === "prepaid" && billing.packs ? billing.packs : null;
   return {
     periodKey: input.periodKey,
     plan: billing.plan,
@@ -375,7 +380,7 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
     chatAiTokensIncluded: config.chatAiTokensIncluded,
     overagesBillable: config.overagesBillable,
     voiceOverageRatePerMinuteCents: config.voiceOverageRatePerMinuteCents,
-    voiceBlocked: billing.plan === "prepaid" ? (pack?.secondsLeft ?? 0) <= 0 : blocked("voice_seconds"),
+    voiceBlocked: blocked("voice_seconds"),
     alertSmsBlocked: blocked("alert_sms_segments"),
     outboundCallAttemptsBlocked: blocked("outbound_call_attempts"),
     chatAiBlocked: blocked("chat_ai_tokens"),
@@ -384,7 +389,7 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
     overageSpendingCapReached: capReached,
     voiceSecondsLeft: Number.isFinite(voiceSecondsLeft) ? voiceSecondsLeft : null,
     usageComplete: events.every((event) => event.isFinal),
-    pack: pack ? { secondsTotal: pack.secondsTotal, secondsUsed: pack.secondsUsed, secondsLeft: pack.secondsLeft, nextEndsAt: pack.nextEndsAt, lastEndsAt: pack.lastEndsAt } : null,
+    pack: pack ? { secondsTotal: pack.secondsTotal, secondsUsed: pack.secondsUsed, secondsLeft: pack.secondsLeft, alertSmsSegments: pack.allowances.alert_sms_segments, outboundCallAttempts: pack.allowances.outbound_call_attempts, chatAiUnits: pack.allowances.chat_ai_tokens, nextEndsAt: pack.nextEndsAt, lastEndsAt: pack.lastEndsAt } : null,
   };
 }
 
@@ -436,9 +441,9 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
   let billing = await loadUsageContext(tx, input.businessId);
   const existing = (await tx.select({ id: billingUsageEvents.id, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, syncStatus: billingUsageEvents.syncStatus, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1).for("update"))[0];
   if (existing && existing.quantity > 0) return { allowed: true, errorCode: null, usageEventId: existing.id, syncNeeded: existing.syncStatus === "pending", periodKey, plan: billing.plan, quantity: existing.quantity };
-  // On a pack a call's seconds come from the packs, which span months, so only
-  // their lock keeps two calls from drawing the same seconds.
-  const fromPacks = input.usageKind === "voice_seconds" && billing.plan === "prepaid";
+  // On a pack every use comes from the packs, which span months, so only their
+  // lock keeps two uses from drawing the same balance.
+  const fromPacks = billing.plan === "prepaid";
   if (fromPacks) {
     await lockBusinessPacks(tx, input.businessId);
     billing = { ...billing, packs: packBalance(await readLivePacks(tx, input.businessId)) };
@@ -455,8 +460,8 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
     if (input.usageKind === "voice_seconds" && hasUnlimitedVoice(billing)) return { allowed: true, errorCode: null, syncNeeded: false, periodKey, plan: billing.plan };
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
-  // A call never reserves more than the packs still hold.
-  if (fromPacks && quantity > reservableVoiceSeconds(billing, current)) {
+  // A use never reserves more than the packs still hold of its kind.
+  if (fromPacks && quantity > (billing.packs?.allowances[input.usageKind].left ?? 0)) {
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   const limits = currentLimits(billing);
@@ -476,7 +481,7 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
     ? await tx.update(billingUsageEvents).set({ quantity, billableQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, ...usageSyncFields(existing, billableQuantity, billing.plan), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id)).returning({ id: billingUsageEvents.id })
     : await tx.insert(billingUsageEvents).values({ businessId: input.businessId, periodKey, sourceKey: input.sourceKey, usageKind: input.usageKind, quantity, billableQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, syncStatus: syncNeeded ? "pending" : "skipped", createdAt: recordedAt, updatedAt: new Date() }).returning({ id: billingUsageEvents.id });
   if (!event) throw new Error("Billing usage event could not be recorded.");
-  if (fromPacks) billing = { ...billing, packs: (await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, seconds: quantity })).after };
+  if (fromPacks) billing = { ...billing, packs: (await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, seconds: quantity })).after };
   await refreshUsageMonth(tx, { businessId: input.businessId, periodKey, billing, events: [...others, eventPayload] });
   return { allowed: true, errorCode: null, usageEventId: event.id, syncNeeded, periodKey, plan: billing.plan, quantity };
 }
@@ -591,7 +596,7 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
     const billableQuantity = billableQuantityForEvent(others, replacement, billing, billing.limits, billed);
     await tx.update(billingUsageEvents).set({ quantity: Math.max(0, input.quantity), billableQuantity, isFinal: true, ...usageSyncFields(existing, billableQuantity, syncPlanFor(existing.planAtRecordTime, billing)), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id));
     eventId = existing.id;
-    draws = input.usageKind === "voice_seconds" && existing.planAtRecordTime === "prepaid";
+    draws = existing.planAtRecordTime === "prepaid";
   } else {
     const before = await recordingBeforePackSwitch(tx, { businessId: input.businessId, sourceKey: input.sourceKey, billing });
     if (before && periodKeyFor(before.createdAt) !== periodKey) {
@@ -607,14 +612,14 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
     const [event] = await tx.insert(billingUsageEvents).values({ businessId: input.businessId, periodKey, sourceKey: input.sourceKey, usageKind: input.usageKind, quantity: Math.max(0, input.quantity), billableQuantity, planAtRecordTime: row.plan, planCodeAtRecordTime: row.planCode, billingIntervalAtRecordTime: row.billingInterval, isFinal: true, syncStatus: row.plan === "starter" || row.plan === "pro" ? "pending" : "skipped", createdAt: row.createdAt, updatedAt: new Date() }).returning({ id: billingUsageEvents.id });
     if (!event) throw new Error("Billing usage correction could not be recorded.");
     eventId = event.id;
-    draws = input.usageKind === "voice_seconds" && row.plan === "prepaid";
+    draws = row.plan === "prepaid";
   }
-  // A call made on a pack settles what it drew: the seconds it didn't use go
-  // back to the packs, and more than it reserved comes from them as far as
-  // they hold it.
+  // A use made on a pack settles what it drew: what a call or a text didn't
+  // use goes back to the packs, and more than it reserved comes from them as
+  // far as they hold it.
   let packs = billing.packs ?? null;
   if (draws) {
-    const drawn = await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, seconds: Math.max(0, input.quantity) });
+    const drawn = await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, seconds: Math.max(0, input.quantity) });
     if (billing.plan === "prepaid") packs = drawn.after;
   }
   await refreshUsageMonth(tx, { businessId: input.businessId, periodKey, billing: { ...billing, packs } });

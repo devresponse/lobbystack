@@ -133,10 +133,11 @@ describe.skipIf(!testUrl)("what the plan screens read about prepaid packs", () =
 
       const packs = await asMember(tx, member, (scoped) => loadBusinessPacks(scoped, member.businessId));
       expect(packs.map((pack) => pack.id)).toEqual([soon, frozen, later, never]);
-      expect(packs[0]).toEqual({ id: soon, code, names, status: "active", secondsTotal: 1_500, secondsLeft: 500, paidAt: expect.any(Date), endsAt: expect.any(Date) });
-      expect(packs[1]).toMatchObject({ status: "frozen", secondsTotal: 6_000, secondsLeft: 6_000 });
-      expect(packs[2]).toMatchObject({ secondsTotal: 30_000, secondsLeft: 24_000 });
-      expect(packs[3]).toMatchObject({ secondsTotal: 15_000, secondsLeft: 15_000, endsAt: null });
+      // Each with its length and what was paid for it, so Settings > Plan can show it as a plan.
+      expect(packs[0]).toEqual({ id: soon, code, names, status: "active", days: 10, amountCents: 10_000, currency: "cad", secondsTotal: 1_500, secondsLeft: 500, paidAt: expect.any(Date), endsAt: expect.any(Date) });
+      expect(packs[1]).toMatchObject({ status: "frozen", days: 30, amountCents: 9_900, secondsTotal: 6_000, secondsLeft: 6_000 });
+      expect(packs[2]).toMatchObject({ days: 60, secondsTotal: 30_000, secondsLeft: 24_000 });
+      expect(packs[3]).toMatchObject({ days: null, secondsTotal: 15_000, secondsLeft: 15_000, endsAt: null });
       // A member of another business reads none of them.
       expect(await asMember(tx, other, (scoped) => loadBusinessPacks(scoped, member.businessId))).toEqual([]);
       expect(await asMember(tx, await business(tx), (scoped) => loadBusinessPacks(scoped, other.businessId))).toEqual([]);

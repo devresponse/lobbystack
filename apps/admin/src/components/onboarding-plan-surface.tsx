@@ -6,13 +6,13 @@ import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { brandLinks, contactEmailFor, type BillingDisplay, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, type BillingDisplay, type BillingPlanList, type PlanChangeRefusal, type PlanDisplayCard, type PlanDisplayPackCard } from "@lobbystack/shared";
 import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "@/components/billing-email-form";
-import { PackEndsPlanDialog, PackPicker } from "@/components/billing-packs";
+import { PackEndsPlanDialog } from "@/components/billing-packs";
 import { useBranding } from "@/components/branding-provider";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
@@ -21,7 +21,8 @@ import { PromoCodeEntry } from "@/components/promo-code-entry";
 import { useTelemetry } from "@/components/product-analytics";
 import { paidPackToastKey, usePackCheckout, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
-import { cardBullets, cardText, displayText, hasPackCards, openingInterval, packCardBullets, packName, packPrice, packTextValues, pageTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, screenCards, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
+import { intlLocale } from "@/lib/locale";
+import { cardBullets, cardText, displayText, hasPackCards, openingInterval, packCardBullets, packLengthKey, packLengthName, packLengths, packName, packPrice, packPriceSuffix, packSectionText, packTextValues, pageTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, screenCards, shownInterval, type PlanCardView, type PlanDisplayTranslate } from "@/lib/plan-display";
 import type { BillingPackOfferViewModel, PackCheckoutViewModel } from "@/lib/page-view-models";
 import { cn } from "@/lib/utils";
 
@@ -82,7 +83,8 @@ export function OnboardingPlanSurface() {
   const [emailPrompt, setEmailPrompt] = useState<{ refusal: BillingEmailRefusal; email: string | null; target: "starter" | "pro" } | null>(null);
   const returnAttempt = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
   const packReturnAttempt = useRef<{ key: string; promise: Promise<"attribution" | "phone_number"> } | null>(null);
-  const [chosenPack, setChosenPack] = useState<string | null>(null);
+  // The length of the prepaid plans the person picked, as the plans' interval, while the packs show under a heading of their own.
+  const [chosenLength, setChosenLength] = useState<string | null>(null);
   // The pack whose purchase, which ends the business's Starter or Pro plan, waits for the person to confirm.
   const [confirmingPack, setConfirmingPack] = useState<string | null>(null);
   // A pack's payment that came back failed, or refunded before it arrived: the plans to choose from again, with why.
@@ -229,9 +231,8 @@ export function OnboardingPlanSurface() {
   // The packs on sale, unless the business's plan sells none, such as an operator-managed one.
   const packRefusal = billing.data?.packCheckout?.refusal ?? null;
   const packOffers = packRefusal === "managed_plan" || packRefusal === "pack_not_sold_on_plan" ? [] : billing.data?.packOffers ?? [];
-  // billing.json can give packs cards of their own beside the plans', in place of the packs' box.
-  const packBox = !hasPackCards(display);
-  const selectedPack = packOffers.find((offer) => offer.code === chosenPack) ?? packOffers[0];
+  // billing.json can give packs cards of their own among the plans'; otherwise they follow the plans under a heading of their own.
+  const packSection = !hasPackCards(display) && packOffers.length > 0;
   const packEndsSubscription = billing.data?.packCheckout?.endsSubscription ?? null;
   const packPrompt = packCheckout.emailPrompt;
   const packUnavailable = packRefusal ? billingT(`billing.packs.refusals.${packRefusal}`) : billingT("billing.packs.unavailable");
@@ -280,12 +281,59 @@ export function OnboardingPlanSurface() {
   const annualBadgeText = annualBadge(plans, (key, options) => t(key, options), "plan.billingInterval.freeMonths", "plan.billingInterval.save");
   // The page's own words from billing.json print any plan's values, such as {{free_cloud.voiceMinutes}}.
   const pageValues = display ? pageTextValues(plans, locale, translate, appName) : {};
-  const packText = (field: "title" | "description" | "button", builtIn: string) => {
-    const value = display?.packs?.[field];
-    return value ? displayText(value, locale, pageValues) : t(builtIn);
-  };
   // The cards in billing.json's order: the plans', and the packs' that are on sale.
   const shownCards = screenCards(display, packOffers);
+  // Without cards of their own, the packs follow the plans under a heading, a tab for each length, as the plans' intervals.
+  const lengths = packLengths(packOffers);
+  // A pack that never ends has no days, so the tab picked is found by its place rather than by a value that may be null.
+  const chosenIndex = lengths.findIndex((days) => packLengthKey(days) === chosenLength);
+  const length = chosenIndex >= 0 ? lengths[chosenIndex] : lengths[0];
+  const sectionPacks = packSection ? packOffers.filter((offer) => offer.days === length) : [];
+
+  // A plan's card, from the plan list and billing.json's words for it, else the built-in ones.
+  const planCard = (slug: Plan, popular: boolean, card: PlanDisplayCard | null): PlanCardView => {
+    const paid = slug === "starter" || slug === "pro";
+    const busy = slug === "free_cloud" ? pendingPlan === "free_cloud" : paid && pendingPlan === "paid";
+    const offer = findPlan(plans, slug);
+    const values = planValues(offer, plans.currency, locale);
+    // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
+    const monthly = paid ? monthlyPriceCents(offer, interval) : undefined;
+    const price = slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : paid && !offer?.custom ? (monthly === undefined ? "—" : formatMoney(monthly, plans.currency, locale)) : t("plan.tiers.enterprise.price");
+    // billing.json's words for the card where it gives them, with this plan's values; the built-in words for the rest.
+    const textValues = card ? planTextValues(offer, plans.currency, locale, translate, appName) : {};
+    return {
+      key: slug,
+      name: t(`plan.tiers.${slug}.name`),
+      price,
+      priceSuffix: t(`plan.tiers.${slug}.period`),
+      description: card?.description ? cardText(card.description, interval, locale, textValues) : paid ? t(`plan.tiers.${slug}.description.${interval}`, { minutes: values.minutes }) : t(`plan.tiers.${slug}.description`),
+      bullets: card?.bullets ? cardBullets(card.bullets, offer, plans.currency, locale, translate, textValues) : builtInFeatures[slug].map((feature) => t(`plan.tiers.${slug}.highlights.${feature}`, planStringValues(feature, values))),
+      popular,
+      badge: popular ? (card?.badge ? displayText(card.badge, locale, textValues) : t("plan.popular")) : null,
+      action: { label: card?.button ? cardText(card.button, interval, locale, textValues) : paid ? t(`plan.tiers.${slug}.cta.${interval}`) : t(`plan.tiers.${slug}.cta`), disabled: !business || Boolean(pendingPlan) || (paid && (!billing.data?.checkoutAvailable || Boolean(configuredIntervals && !configuredIntervals[slug].includes(interval)))), busy, onClick: () => act(slug) },
+      note: null,
+    };
+  };
+  // A pack's card, a plan's card in every part: its price for its length, its words from billing.json where it gives
+  // them, else the built-in ones, and its allowances for that length.
+  const packCard = (offer: BillingPackOfferViewModel, popular: boolean, card: PlanDisplayPackCard | null): PlanCardView => {
+    const textValues = packTextValues(offer, locale, translate, appName);
+    const days = offer.days === null ? null : packLengthName(offer.days, locale, translate);
+    const minutes = offer.minutes.toLocaleString(intlLocale(locale));
+    const button = card?.button ? displayText(card.button, locale, textValues) : packSectionText(display, "button", locale, pageValues) ?? (days === null ? t("plan.packs.ctaNoEnd") : t("plan.packs.cta", { days }));
+    return {
+      key: `pack:${offer.code}`,
+      name: packName(offer, locale),
+      price: packPrice(offer, locale),
+      priceSuffix: packPriceSuffix(offer.days, locale, translate),
+      description: card?.description ? displayText(card.description, locale, textValues) : days === null ? t("plan.packs.cardDescriptionNoEnd", { minutes }) : t("plan.packs.cardDescription", { minutes, days }),
+      bullets: packCardBullets(card, offer, locale, translate, textValues),
+      popular,
+      badge: popular ? (card?.badge ? displayText(card.badge, locale, textValues) : t("plan.popular")) : null,
+      action: { label: button, disabled: !business || Boolean(pendingPlan) || !offer.checkoutAvailable, busy: pendingPlan === "pack" && packCheckout.pendingPack === offer.code, onClick: () => buyPack(offer.code) },
+      note: offer.checkoutAvailable ? null : packUnavailable,
+    };
+  };
 
   return (
     <div className="flex flex-col gap-12">
@@ -303,55 +351,39 @@ export function OnboardingPlanSurface() {
       {/* A promo link's code waits here from sign-up, filled in and checked. */}
       {business && billing.data?.checkoutAvailable ? <div className="-mt-6 flex justify-center"><PromoCodeEntry businessId={business.businessId} /></div> : null}
       <div className={cn("grid gap-6", planCardColumns(shownCards.length))}>
-        {shownCards.map((shown) => {
-          if (shown.kind === "pack") {
-            const offer = packOffers.find((entry) => entry.code === shown.pack)!;
-            const card = shown.display;
-            const textValues = packTextValues(offer, locale, translate, appName);
-            const busy = pendingPlan === "pack" && packCheckout.pendingPack === offer.code;
-            return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", shown.popular ? "border-foreground/30 shadow-sm" : "border-border/60")} key={`pack:${offer.code}`}>
-              {shown.popular ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{card.badge ? displayText(card.badge, locale, textValues) : t("plan.popular")}</div> : null}
-              <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{packName(offer, locale)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{packPrice(offer, locale)}</span><span className="text-sm text-muted-foreground">{t("plan.packs.priceSuffix")}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{card.description ? displayText(card.description, locale, textValues) : t("plan.packs.description")}</p></div>
-              <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || !offer.checkoutAvailable} onClick={() => buyPack(offer.code)} type="button" variant={shown.popular ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{card.button ? displayText(card.button, locale, textValues) : t("plan.packs.cta")}<ArrowRight className="ml-1 size-4" /></>}</Button>
-              {offer.checkoutAvailable ? null : <p className="-mt-3 mb-6 text-sm text-muted-foreground">{packUnavailable}</p>}
-              <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{packCardBullets(card, offer, locale, translate, textValues).map((bullet, index) => <li className="flex items-start gap-2.5 text-sm" key={index}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{bullet}</span></li>)}</ul></div>
-            </section>;
-          }
-          const { plan: slug, popular, display: card } = shown;
-          const paid = slug === "starter" || slug === "pro";
-          const busy = slug === "free_cloud" ? pendingPlan === "free_cloud" : paid && pendingPlan === "paid";
-          const offer = findPlan(plans, slug);
-          const values = planValues(offer, plans.currency, locale);
-          // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
-          const monthly = paid ? monthlyPriceCents(offer, interval) : undefined;
-          const price = slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : paid && !offer?.custom ? (monthly === undefined ? "—" : formatMoney(monthly, plans.currency, locale)) : t("plan.tiers.enterprise.price");
-          // billing.json's words for the card where it gives them, with this plan's values; the built-in words for the rest.
-          const textValues = card ? planTextValues(offer, plans.currency, locale, translate, appName) : {};
-          const description = card?.description ? cardText(card.description, interval, locale, textValues) : paid ? t(`plan.tiers.${slug}.description.${interval}`, { minutes: values.minutes }) : t(`plan.tiers.${slug}.description`);
-          const cta = card?.button ? cardText(card.button, interval, locale, textValues) : paid ? t(`plan.tiers.${slug}.cta.${interval}`) : t(`plan.tiers.${slug}.cta`);
-          const bullets = card?.bullets ? cardBullets(card.bullets, offer, plans.currency, locale, translate, textValues) : builtInFeatures[slug].map((feature) => t(`plan.tiers.${slug}.highlights.${feature}`, planStringValues(feature, values)));
-          return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", popular ? "border-foreground/30 shadow-sm" : "border-border/60")} key={slug}>
-            {popular ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{card?.badge ? displayText(card.badge, locale, textValues) : t("plan.popular")}</div> : null}
-            <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{t(`plan.tiers.${slug}.name`)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{price}</span><span className="text-sm text-muted-foreground">{t(`plan.tiers.${slug}.period`)}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{description}</p></div>
-            <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || (paid && (!billing.data?.checkoutAvailable || (configuredIntervals && !configuredIntervals[slug].includes(interval))))} onClick={() => act(slug)} type="button" variant={popular ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{cta}<ArrowRight className="ml-1 size-4" /></>}</Button>
-            <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{bullets.map((bullet, index) => <li className="flex items-start gap-2.5 text-sm" key={index}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{bullet}</span></li>)}</ul></div>
-          </section>;
-        })}
+        {shownCards.map((shown) => <PlanStepCard card={shown.kind === "pack" ? packCard(packOffers.find((entry) => entry.code === shown.pack)!, shown.popular, shown.display) : planCard(shown.plan, shown.popular, shown.display)} key={shown.kind === "pack" ? `pack:${shown.pack}` : shown.plan} />)}
       </div>
-      {packBox && selectedPack ? <section className="mx-auto flex w-full max-w-3xl flex-col gap-5 rounded-2xl border border-border/60 bg-background p-8">
-        <div><h3 className="font-heading text-lg font-semibold tracking-tight">{packText("title", "plan.packs.title")}</h3><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{packText("description", "plan.packs.description")}</p></div>
-        <PackPicker disabled={Boolean(pendingPlan)} offers={packOffers} onChange={setChosenPack} value={selectedPack.code} />
-        <div className="flex flex-col items-start gap-2">
-          <Button className="w-full rounded-full sm:w-auto" disabled={!business || Boolean(pendingPlan) || !selectedPack.checkoutAvailable} onClick={() => buyPack(selectedPack.code)} type="button" variant="outline">{pendingPlan === "pack" ? <LoaderCircle className="size-4 animate-spin" /> : <>{packText("button", "plan.packs.cta")}<ArrowRight className="ml-1 size-4" /></>}</Button>
-          {selectedPack.checkoutAvailable ? null : <p className="text-sm text-muted-foreground">{packUnavailable}</p>}
+      {packSection ? <section className="flex flex-col gap-6">
+        <div className="mx-auto flex max-w-2xl flex-col gap-2 text-center"><h2 className="font-heading text-xl font-semibold tracking-tight">{packSectionText(display, "title", locale, pageValues) ?? t("plan.packs.title")}</h2><p className="text-sm leading-relaxed text-muted-foreground">{packSectionText(display, "description", locale, pageValues) ?? t("plan.packs.description")}</p></div>
+        {lengths.length > 1 ? <div className="flex justify-center">
+          <div aria-label={t("plan.packs.lengthLabel")} className="inline-flex max-w-full flex-wrap justify-center rounded-full border border-border bg-input/30 p-1" role="tablist">
+            {lengths.map((days) => <Button aria-selected={days === length} className={cn("h-auto min-h-9 shrink whitespace-normal rounded-full px-3 py-1 sm:px-4", days === length ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan)} key={packLengthKey(days)} onClick={() => setChosenLength(packLengthKey(days))} role="tab" size="sm" type="button" variant="outline">{packLengthName(days, locale, translate)}</Button>)}
+          </div>
+        </div> : null}
+        <div className={cn("grid gap-6", planCardColumns(sectionPacks.length))}>
+          {sectionPacks.map((offer) => <PlanStepCard card={packCard(offer, false, null)} key={`pack:${offer.code}`} />)}
         </div>
-        {packPrompt ? <BillingEmailForm key={packPrompt.pack} onCancel={packCheckout.dismissEmailPrompt} onSubmit={(billingEmail) => packCheckout.start(packPrompt.pack, billingEmail)} pending={pendingPlan === "pack"} refusal={packPrompt.refusal} refusedEmail={packPrompt.email} /> : null}
       </section> : null}
-      {!packBox && packPrompt ? <div className="flex justify-center"><BillingEmailForm key={packPrompt.pack} onCancel={packCheckout.dismissEmailPrompt} onSubmit={(billingEmail) => packCheckout.start(packPrompt.pack, billingEmail)} pending={pendingPlan === "pack"} refusal={packPrompt.refusal} refusedEmail={packPrompt.email} /></div> : null}
+      {packPrompt ? <div className="flex justify-center"><BillingEmailForm key={packPrompt.pack} onCancel={packCheckout.dismissEmailPrompt} onSubmit={(billingEmail) => packCheckout.start(packPrompt.pack, billingEmail)} pending={pendingPlan === "pack"} refusal={packPrompt.refusal} refusedEmail={packPrompt.email} /></div> : null}
       {packEndsSubscription ? <PackEndsPlanDialog ends={packEndsSubscription} onConfirm={() => { if (confirmingPack) startPack(confirmingPack); }} onOpenChange={(open) => { if (!open) setConfirmingPack(null); }} open={confirmingPack !== null} pending={pendingPlan === "pack"} /> : null}
       {emailPrompt ? <div className="flex justify-center"><BillingEmailForm key={emailPrompt.target} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => startCheckout.mutate({ target: emailPrompt.target, billingEmail })} pending={pendingPlan === "paid"} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /></div> : null}
       {selectFree.isError || startCheckout.isError || checkoutError ? <FieldError>{selectFree.error?.message ?? startCheckout.error?.message ?? checkoutError ?? t("plan.continueFailed")}</FieldError> : null}
       <OnboardingPlanComparison display={display} locale={locale} plans={plans} t={t} />
     </div>
   );
+}
+
+/**
+ * A card on the plan step in its original design, the same for a plan and a
+ * pack: its name, its price and what follows it, its description, its button,
+ * why the button can't be used where it can't, and its bullets.
+ */
+function PlanStepCard({ card }: { card: PlanCardView }) {
+  return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", card.popular ? "border-foreground/30 shadow-sm" : "border-border/60")}>
+    {card.badge !== null ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{card.badge}</div> : null}
+    <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{card.name}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{card.price}</span>{card.priceSuffix !== null ? <span className="text-sm text-muted-foreground">{card.priceSuffix}</span> : null}</div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{card.description}</p></div>
+    <Button className="mb-6 w-full rounded-full" disabled={card.action.disabled} onClick={card.action.onClick} type="button" variant={card.popular ? "default" : "outline"}>{card.action.busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{card.action.label}<ArrowRight className="ml-1 size-4" /></>}</Button>
+    {card.note !== null ? <p className="-mt-3 mb-6 text-sm text-muted-foreground">{card.note}</p> : null}
+    <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{card.bullets.map((bullet, index) => <li className="flex items-start gap-2.5 text-sm" key={index}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{bullet}</span></li>)}</ul></div>
+  </section>;
 }

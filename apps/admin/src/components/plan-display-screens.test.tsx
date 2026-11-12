@@ -80,6 +80,11 @@ function renderDialog(locale: SupportedLocale, plans: BillingPlanList, display: 
   return render(<I18nextProvider i18n={i18n}><UpgradePlanDialog availableCheckoutIntervals={{ starter: [], pro: [] }} availableCheckoutPlans={[]} billingInterval={null} currentPlan="free_cloud" display={display} loading={null} loadingPlan={null} locale={locale} onBillingIntervalChange={vi.fn()} onContactEnterprise={vi.fn()} onOpenChange={vi.fn()} onStartCheckout={vi.fn()} open plans={plans} t={i18n.getFixedT(locale, "settings")} {...extra} /></I18nextProvider>);
 }
 
+/** The card named name. */
+function cardOfName(name: string): HTMLElement {
+  return screen.getByRole("heading", { level: 3, name }).closest("section")!;
+}
+
 /** Each card's name and bullets, in order. */
 function cardBullets(root: HTMLElement): Array<[string, string[]]> {
   return within(root).getAllByRole("list").map((list) => [list.closest("section")!.querySelector("h3")!.textContent!, within(list).getAllByRole("listitem").map((item) => item.textContent!)]);
@@ -164,6 +169,8 @@ describe("a display section of a brand's own", () => {
     expect(cardBullets(container)).toEqual([
       ["Pro", ["500 voice minutes included\nThen CA$0.18/min", "20 MB knowledge base", "100 transfer attempts", "200 website chats", "Up to 5 receptionists"]],
       ["Starter", ["1 receptionist", "1 dedicated business number"]],
+      // A pack the section gives no card follows the plans in a card of the same kind, with a plan's built-in bullets.
+      ["500 minutes", ["500 voice minutes included", "1 receptionist", "1 dedicated business number", "50 alert SMS segments", "20 transfer attempts"]],
     ]);
     // It opens on Monthly, and a card without words of its own keeps the built-in ones.
     expect(screen.getByRole("tab", { name: "Monthly" }).getAttribute("aria-selected")).toBe("true");
@@ -176,10 +183,12 @@ describe("a display section of a brand's own", () => {
     expect(within(proCard).getByText("Popular")).toBeTruthy();
     await userEvent.click(screen.getByRole("tab", { name: /^Annual/ }));
     expect(screen.getByRole("button", { name: "Pro by the year" })).toBeTruthy();
-    // The packs' box takes its words, with any plan's values.
-    expect(screen.getByText("Top up")).toBeTruthy();
+    // The prepaid plans take its words, with any plan's values: their heading, its line, and each pack card's button.
+    expect(screen.getByRole("heading", { level: 2, name: "Top up" })).toBeTruthy();
     expect(screen.getByText("Minutes once, from CA$0.20.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Buy minutes" })).toBeTruthy();
+    // The pack's price is followed by its length, as a plan's is by its month.
+    expect(cardOfName("500 minutes").textContent).toContain("CA$119/180 days");
     // The comparison: its title and intro, a column for each card, and its rows.
     expect(screen.getByRole("heading", { level: 2, name: "Pro or Starter" })).toBeTruthy();
     expect(screen.getByText("Free gives 30 minutes; Pro 500.")).toBeTruthy();
@@ -250,23 +259,26 @@ describe("RealInfoBot's listing packs", () => {
   const packOffers = resolveBillingPacks(billingProfileSchema.parse(realInfoBotFile)).map((pack) => ({ code: pack.code, names: pack.names, minutes: pack.voice_sec / 60, voiceSeconds: pack.voice_sec, days: pack.days, amountCents: pack.price.cents, currency: pack.price.currency, smsSegments: pack.sms_seg, outboundCalls: pack.calls_out, chatUnits: pack.chat_units, knowledgeStorageBytes: pack.kb_bytes, numbers: pack.numbers, receptionists: pack.receptionists, checkoutAvailable: true }));
   const onSale = { packOffers, packCheckout: { refusal: null, endsSubscription: null } };
   const packCards: Array<[string, string[]]> = [
-    ["Try it: 1 listing, 180 days", ["Your sign answers every inquiry, day or night", "250 voice minutes over 180 days", "1 dedicated business number", "Active 180 days, then it expires"]],
-    ["3 listings, 365 days", ["Everything in a single listing, times three", "Up to 3 listings at once", "750 voice minutes over 365 days"]],
-    ["Pro: 6 listings, 365 days", ["Everything in a single listing, times six", "Up to 6 listings at once", "1,500 voice minutes over 365 days", "For agents who always have a sign up"]],
+    ["Try it: 1 listing, 180 days", ["Your sign answers every inquiry, day or night", "250 voice minutes included", "1 dedicated business number", "Active 180 days, then it expires"]],
+    ["3 listings, 365 days", ["Everything in a single listing, times three", "Up to 3 listings at once", "750 voice minutes included"]],
+    ["Pro: 6 listings, 365 days", ["Everything in a single listing, times six", "Up to 6 listings at once", "1,500 voice minutes included", "For agents who always have a sign up"]],
   ];
   /** The card a text is on, by its name. */
   const cardOf = (text: string) => screen.getByText(text).closest("section")!.querySelector("h3")!.textContent;
 
-  it("shows Free and a card for each pack on the plan step, as on the brand's pricing table, with no tabs, comparison or packs' box", () => {
+  it("shows Free and a card for each pack on the plan step, as on the brand's pricing table, with no tabs, comparison or Prepaid plans section", () => {
     renderPlanStep("en", { plans, planDisplay: display, ...onSale });
     expect(cardBullets(document.body)).toEqual([["Free", ["30 browser voice minutes included", "1 receptionist", "No telephone number", "Community support"]], ...packCards]);
     expect(screen.queryAllByRole("tab")).toEqual([]);
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
     expect(screen.queryByText("Upgrade with a listing pack")).toBeNull();
-    // Each pack's price, paid once, and the middle pack the popular one under the brand's badge.
+    // Each pack's price for its length, as a plan's is for its month, and the middle pack the popular one under the brand's badge.
     expect(["CA$99", "CA$249", "CA$449"].map(cardOf)).toEqual(packCards.map(([name]) => name));
-    expect(screen.getAllByText("paid once")).toHaveLength(3);
+    expect(cardOf("/180 days")).toBe("Try it: 1 listing, 180 days");
+    expect(screen.getAllByText("/365 days").map((suffix) => suffix.closest("section")!.querySelector("h3")!.textContent)).toEqual(["3 listings, 365 days", "Pro: 6 listings, 365 days"]);
+    expect(screen.queryByText("paid once")).toBeNull();
     expect(cardOf("Best value")).toBe("3 listings, 365 days");
     expect(cardOf("One payment for one listing, with no subscription.")).toBe("Try it: 1 listing, 180 days");
     expect(cardOf("CA$83 per listing (save CA$48)")).toBe("3 listings, 365 days");
@@ -276,9 +288,10 @@ describe("RealInfoBot's listing packs", () => {
 
   it("speaks the visitor's language on the pack cards", () => {
     renderPlanStep("fr", { plans, planDisplay: display, ...onSale });
-    expect(cardBullets(document.body)[2]).toEqual(["3 inscriptions, 365 jours", ["Tout ce qu'offre une inscription, multiplié par trois", "Jusqu'à 3 inscriptions à la fois", "750 minutes vocales sur 365 jours"]]);
+    expect(cardBullets(document.body)[2]).toEqual(["3 inscriptions, 365 jours", ["Tout ce qu'offre une inscription, multiplié par trois", "Jusqu'à 3 inscriptions à la fois", "750 minutes vocales incluses"]]);
     expect(cardOf("Meilleure offre")).toBe("3 inscriptions, 365 jours");
-    expect(screen.getAllByText("payé une fois")).toHaveLength(3);
+    expect(screen.getAllByText("/365 jours")).toHaveLength(2);
+    expect(screen.getAllByText("/180 jours")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Obtenir 3 inscriptions" })).toBeTruthy();
   });
 
@@ -288,12 +301,26 @@ describe("RealInfoBot's listing packs", () => {
     expect(screen.queryByRole("radio")).toBeNull();
   });
 
+  it("draws a pack's card as a plan's, part for part, on the plan step and in the upgrade dialog", () => {
+    // Each element's tag and classes, children in order, without the words.
+    const skeleton = (element: Element): string => `${element.tagName.toLowerCase()}.${element.getAttribute("class") ?? ""}(${[...element.children].map(skeleton).join(",")})`;
+    const step = renderPlanStep("en", { plans, planDisplay: display, ...onSale });
+    expect(skeleton(cardOfName("Try it: 1 listing, 180 days"))).toBe(skeleton(cardOfName("Free")));
+    step.unmount();
+    renderDialog("en", plans, display, { onBuyPack: vi.fn(), packOffers, currentPlan: "prepaid" });
+    // The dialog writes no /mo after Free's price, where a paid plan's and a pack's say what the price is for.
+    const suffix = ",span.text-sm text-muted-foreground()";
+    expect(skeleton(cardOfName("Try it: 1 listing, 180 days"))).toContain(suffix);
+    expect(skeleton(cardOfName("Try it: 1 listing, 180 days")).replace(suffix, "")).toBe(skeleton(cardOfName("Free")));
+  });
+
   it("gives the upgrade dialog the same cards, each buying its pack", async () => {
     const onBuyPack = vi.fn();
     renderDialog("en", plans, display, { onBuyPack, packOffers });
     const dialog = screen.getByRole("dialog");
     expect(cardBullets(dialog)).toEqual([["Free", ["30 browser voice minutes included", "1 receptionist", "No telephone number", "Community support"]], ...packCards]);
-    expect(within(dialog).getAllByText("paid once")).toHaveLength(3);
+    expect(within(dialog).getAllByText("/365 days")).toHaveLength(2);
+    expect(within(dialog).getAllByText("/180 days")).toHaveLength(1);
     expect(cardOf("Best value")).toBe("3 listings, 365 days");
     await userEvent.click(within(dialog).getByRole("button", { name: "Get 3 listings" }));
     expect(onBuyPack).toHaveBeenCalledWith("listings_3_365");

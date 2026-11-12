@@ -382,7 +382,7 @@
       "proCard": "Pro Plan",
       "enterprise": "Enterprise",
       "enterpriseCard": "Enterprise Plan",
-      "prepaidCard": "Prepaid"
+      "prepaidCard": "Prepaid Plan"
     },
     "subscriptionStates": {
       "active": "Active",
@@ -394,6 +394,7 @@
     },
     "actions": {
       "upgradeToPro": "Upgrade to Pro",
+      "upgradePlan": "Upgrade plan",
       "starter": {
         "monthly": "Starter monthly",
         "annual": "Starter annual"
@@ -434,6 +435,7 @@
       "subscriptionStateTitle": "Subscription",
       "billingPeriod": "Current period resets {{resetAt}}",
       "planEndsOn": "Your plan ends on {{date}}.",
+      "planNeverEnds": "Your plan has no end date.",
       "planChangesOn": "Your plan changes to {{plan}} on {{date}}.",
       "overageNote": "Usage over your allowance is billed on its own invoice on the 1st of each month.",
       "completePaymentHint": "Your bank asks you to confirm the payment for the new plan.",
@@ -458,11 +460,7 @@
       "includedReceptionistsCustom": "Custom receptionist allowance",
       "includedSmsCustom": "Custom SMS allowance",
       "includedOutboundCustom": "Custom transfer allowance",
-      "includedStorage": "{{amount}} {{unit}} storage",
-      "prepaidMinutesLeft_one": "minute left",
-      "prepaidMinutesLeft_other": "minutes left",
-      "prepaidUntil": "Until {{date}}",
-      "prepaidNeverEnds": "Never ends"
+      "includedStorage": "{{amount}} {{unit}} storage"
     },
     "upgradeDialog": {
       "title": "Upgrade plan",
@@ -484,6 +482,7 @@
       },
       "actions": {
         "currentPlan": "Current plan",
+        "freeAfterPacks": "When your packs end",
         "starter": "Start Starter",
         "pro": "Upgrade to Pro",
         "enterprise": "Contact us"
@@ -580,8 +579,9 @@
       "unlimited": "Unlimited",
       "blocked": "Limit reached",
       "blockedDescription": "Limit reached — usage paused until next period.",
-      "packDescription": "Your minutes come from your packs and last until each one ends.",
+      "packDescription": "Your allowances come from your packs and last until each one ends, rather than reset each month.",
       "packBlockedDescription": "No minutes left. Calls get a busy signal until you buy another pack.",
+      "packAllowanceBlockedDescription": "None left. Buy another pack to get more.",
       "overageCount": "{{count}} over limit",
       "overageCost": "≈ {{amount}} in overages",
       "noOverages": "No overages — usage hard-capped at the included pool.",
@@ -618,23 +618,19 @@
       "removeFailed": "Unable to remove the monthly overage cap."
     },
     "packs": {
-      "title": "Prepaid minutes",
-      "description": "Buy minutes up front, with no monthly bill. Calls use them until they run out or the pack ends.",
-      "minutesLabel": "Minutes",
-      "lengthLabel": "Lasts",
-      "minutesOption_one": "{{minutes}} minute",
-      "minutesOption_other": "{{minutes}} minutes",
-      "daysOption_one": "{{count}} day",
-      "daysOption_other": "{{count}} days",
-      "neverEndsOption": "No end date",
-      "priceSuffix": "paid once",
+      "title": "Prepaid plans",
+      "description": "Pay once for a set number of days, with no monthly bill and no renewal. Everything included lasts the whole time.",
+      "lengthLabel": "Plan length",
+      "cardDescription": "For {{days}}, paid once",
+      "cardDescriptionNoEnd": "Paid once, with no end date",
+      "start": "Start for {{days}}",
+      "startNoEnd": "Start now",
+      "heldTitle": "Your packs",
       "left_one": "{{left}} minute left of {{total}}",
       "left_other": "{{left}} minutes left of {{total}}",
       "endsOn": "Ends on {{date}}",
       "neverEnds": "Never ends",
       "frozen": "On hold while a payment dispute is open",
-      "buy": "Buy pack",
-      "buyMore": "Buy more",
       "unavailable": "Packs can't be bought here right now.",
       "refusals": {
         "managed_plan": "Your plan is managed for you, so packs can't be bought here.",

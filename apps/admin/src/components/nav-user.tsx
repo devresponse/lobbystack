@@ -27,6 +27,8 @@ type NavUserProps = {
   onSignOut: () => void;
   onUpgradeToPro?: () => void;
   showUpgradeToPro?: boolean;
+  /** What the upgrade item says: Upgrade to Pro where a plan is on sale, else Upgrade plan, such as where only packs are. */
+  upgradeLabel?: "pro" | "plan";
   user: User;
 };
 
@@ -34,6 +36,7 @@ export function NavUser({
   onSignOut,
   onUpgradeToPro,
   showUpgradeToPro = false,
+  upgradeLabel = "pro",
   user,
 }: NavUserProps) {
   const { t } = useTranslation("nav");
@@ -83,7 +86,7 @@ export function NavUser({
                         })}
                   >
                     <Crown />
-                    {t("sidebar.upgradeToPro")}
+                    {t(upgradeLabel === "pro" ? "sidebar.upgradeToPro" : "sidebar.upgradePlan")}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />

@@ -386,7 +386,7 @@
       "proCard": "Plan Pro",
       "enterprise": "Enterprise",
       "enterpriseCard": "Plan Enterprise",
-      "prepaidCard": "Prepago"
+      "prepaidCard": "Plan prepagado"
     },
     "subscriptionStates": {
       "active": "Activa",
@@ -398,6 +398,7 @@
     },
     "actions": {
       "upgradeToPro": "Cambiar a Pro",
+      "upgradePlan": "Cambiar de plan",
       "starter": {
         "monthly": "Starter mensual",
         "annual": "Starter anual"
@@ -438,6 +439,7 @@
       "subscriptionStateTitle": "Suscripción",
       "billingPeriod": "El período actual se reinicia el {{resetAt}}",
       "planEndsOn": "Su plan termina el {{date}}.",
+      "planNeverEnds": "Su plan no tiene fecha de fin.",
       "planChangesOn": "Su plan cambia a {{plan}} el {{date}}.",
       "overageNote": "El uso que supera lo incluido se cobra en una factura aparte el día 1 de cada mes.",
       "completePaymentHint": "Su banco pide confirmar el pago del nuevo plan.",
@@ -466,12 +468,7 @@
       "includedReceptionistsCustom": "Recepcionistas personalizadas",
       "includedSmsCustom": "SMS personalizados",
       "includedOutboundCustom": "Transferencias personalizadas",
-      "includedStorage": "{{amount}} {{unit}} de almacenamiento",
-      "prepaidMinutesLeft_one": "minuto restante",
-      "prepaidMinutesLeft_many": "de minutos restantes",
-      "prepaidMinutesLeft_other": "minutos restantes",
-      "prepaidUntil": "Hasta el {{date}}",
-      "prepaidNeverEnds": "Sin fecha de fin"
+      "includedStorage": "{{amount}} {{unit}} de almacenamiento"
     },
     "upgradeDialog": {
       "title": "Cambiar de plan",
@@ -495,6 +492,7 @@
       },
       "actions": {
         "currentPlan": "Plan actual",
+        "freeAfterPacks": "Cuando terminen sus paquetes",
         "starter": "Elegir Starter",
         "pro": "Cambiar a Pro",
         "enterprise": "Contáctenos"
@@ -601,8 +599,9 @@
       "unlimited": "Ilimitado",
       "blocked": "Límite alcanzado",
       "blockedDescription": "Límite alcanzado: el uso queda en pausa hasta el próximo período.",
-      "packDescription": "Sus minutos vienen de sus paquetes de minutos y duran hasta que termina cada paquete.",
+      "packDescription": "Sus asignaciones vienen de sus paquetes de minutos y duran hasta que termina cada paquete, en lugar de reiniciarse cada mes.",
       "packBlockedDescription": "No quedan minutos. Las llamadas dan tono de ocupado hasta que compre otro paquete de minutos.",
+      "packAllowanceBlockedDescription": "No queda nada. Compre otro paquete de minutos para tener más.",
       "overageCount": "{{count}} por encima del límite",
       "overageCost": "≈ {{amount}} en excedentes",
       "noOverages": "Sin excedentes: el uso tiene un tope fijo en el volumen incluido.",
@@ -639,26 +638,20 @@
       "removeFailed": "No se pudo quitar el límite mensual de excedentes."
     },
     "packs": {
-      "title": "Minutos prepagados",
-      "description": "Compre minutos por adelantado, sin factura mensual. Las llamadas los usan hasta que se agotan o termina el paquete.",
-      "minutesLabel": "Minutos",
-      "lengthLabel": "Duración",
-      "minutesOption_one": "{{minutes}} minuto",
-      "minutesOption_many": "{{minutes}} de minutos",
-      "minutesOption_other": "{{minutes}} minutos",
-      "daysOption_one": "{{count}} día",
-      "daysOption_many": "{{count}} de días",
-      "daysOption_other": "{{count}} días",
-      "neverEndsOption": "Sin fecha de fin",
-      "priceSuffix": "pago único",
+      "title": "Planes prepagados",
+      "description": "Pague una sola vez por un número fijo de días, sin factura mensual ni renovación. Todo lo incluido dura todo el período.",
+      "lengthLabel": "Duración del plan",
+      "cardDescription": "Por {{days}}, pago único",
+      "cardDescriptionNoEnd": "Pago único, sin fecha de fin",
+      "start": "Empezar por {{days}}",
+      "startNoEnd": "Empezar ahora",
+      "heldTitle": "Sus paquetes de minutos",
       "left_one": "{{left}} minuto restante de {{total}}",
       "left_many": "{{left}} de minutos restantes de {{total}}",
       "left_other": "{{left}} minutos restantes de {{total}}",
       "endsOn": "Termina el {{date}}",
       "neverEnds": "Sin fecha de fin",
       "frozen": "En espera mientras haya una disputa de pago abierta",
-      "buy": "Comprar paquete de minutos",
-      "buyMore": "Comprar más",
       "unavailable": "Los paquetes de minutos no se pueden comprar aquí por ahora.",
       "refusals": {
         "managed_plan": "Su plan se gestiona en su nombre, así que aquí no se pueden comprar paquetes de minutos.",

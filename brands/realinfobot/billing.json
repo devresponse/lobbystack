@@ -44,26 +44,23 @@
   "packs": {
     "listing_1_180": {
       "names": { "en": "Try it: 1 listing, 180 days", "fr": "Essai : 1 inscription, 180 jours", "es": "Prueba: 1 propiedad, 180 días", "sr": "Proba: 1 oglas, 180 dana" },
-      "minutes": 250,
       "days": 180,
-      "priceCents": 9900,
-      "included": { "alertSmsSegments": 50, "outboundCallAttempts": 20, "chatAiUnits": 50 },
+      "prices": { "onceCents": 9900 },
+      "included": { "voiceMinutes": 250, "alertSmsSegments": 300, "outboundCallAttempts": 120, "chatAiUnits": 300 },
       "limits": { "knowledgeStorageMb": 20, "businessNumbers": 1, "receptionists": 1 }
     },
     "listings_3_365": {
       "names": { "en": "3 listings, 365 days", "fr": "3 inscriptions, 365 jours", "es": "3 propiedades, 365 días", "sr": "3 oglasa, 365 dana" },
-      "minutes": 750,
       "days": 365,
-      "priceCents": 24900,
-      "included": { "alertSmsSegments": 150, "outboundCallAttempts": 60, "chatAiUnits": 150 },
+      "prices": { "onceCents": 24900 },
+      "included": { "voiceMinutes": 750, "alertSmsSegments": 1800, "outboundCallAttempts": 720, "chatAiUnits": 1800 },
       "limits": { "knowledgeStorageMb": 60, "businessNumbers": 1, "receptionists": 3 }
     },
     "listings_6_365": {
       "names": { "en": "Pro: 6 listings, 365 days", "fr": "Pro : 6 inscriptions, 365 jours", "es": "Pro: 6 propiedades, 365 días", "sr": "Pro: 6 oglasa, 365 dana" },
-      "minutes": 1500,
       "days": 365,
-      "priceCents": 44900,
-      "included": { "alertSmsSegments": 300, "outboundCallAttempts": 120, "chatAiUnits": 300 },
+      "prices": { "onceCents": 44900 },
+      "included": { "voiceMinutes": 1500, "alertSmsSegments": 3600, "outboundCallAttempts": 1440, "chatAiUnits": 3600 },
       "limits": { "knowledgeStorageMb": 120, "businessNumbers": 1, "receptionists": 6 }
     }
   },

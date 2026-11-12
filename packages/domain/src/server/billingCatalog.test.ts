@@ -472,7 +472,7 @@ describe("billing pack diff", () => {
     expect(diff(profile(), { plans: [], prices: [] })).toEqual(diff(profile(withoutPacks), { plans: [], prices: [] }));
   });
 
-  it("resolves each pack to a complete row, what it leaves out taken from Starter, smallest and shortest first", () => {
+  it("resolves each pack to a complete row, its allowances for its whole length, smallest and shortest first", () => {
     const packs = desiredBillingPacks(profile());
     expect(packs.map((pack) => [pack.code, pack.voice_sec, pack.days, pack.sort, pack.price.cents])).toEqual([
       ["pack_250_90", 15000, 90, 10, 5500],
@@ -485,8 +485,8 @@ describe("billing pack diff", () => {
       ["pack_1000_180", 60000, 180, 80, 18900],
       ["pack_1000_365", 60000, 365, 90, 19900],
     ]);
-    // Starter's texts, transfers, chats, number and receptionist, and the pack's own storage.
-    expect(packs[0]).toMatchObject({ sms_seg: 50, calls_out: 20, chat_units: 50, kb_bytes: 20 * 1_048_576, numbers: 1, receptionists: 1, price: { currency: "cad", cents: 5500 } });
+    // Starter's month of texts, transfers and chats for each of its three months, its number and receptionist, and the pack's own storage.
+    expect(packs[0]).toMatchObject({ sms_seg: 150, calls_out: 60, chat_units: 150, kb_bytes: 20 * 1_048_576, numbers: 1, receptionists: 1, price: { currency: "cad", cents: 5500 } });
     expect(new Set(packs.map((pack) => pack.terms_hash)).size).toBe(9);
     expect(desiredBillingPacks(profile(withoutPacks))).toEqual([]);
   });
@@ -496,7 +496,7 @@ describe("billing pack diff", () => {
     expect(refusals).toEqual([]);
     expect(summary(writes)).toEqual([...packCodes.map((code) => `insert billing_pack_plans ${code}`), ...packCodes.map((code) => `insert billing_pack_prices ${code}/cad`)]);
     const pack = desiredBillingPacks(profile())[0]!;
-    expect(writes.find((write) => write.change.key === "pack_250_90")!.set).toEqual({ code: "pack_250_90", names: pack.names, voice_sec: 15000, days: 90, sms_seg: 50, calls_out: 20, chat_units: 50, kb_bytes: 20 * 1_048_576, numbers: 1, receptionists: 1, terms_hash: pack.terms_hash, sort: 10, status: "draft" });
+    expect(writes.find((write) => write.change.key === "pack_250_90")!.set).toEqual({ code: "pack_250_90", names: pack.names, voice_sec: 15000, days: 90, sms_seg: 150, calls_out: 60, chat_units: 150, kb_bytes: 20 * 1_048_576, numbers: 1, receptionists: 1, terms_hash: pack.terms_hash, sort: 10, status: "draft" });
     expect(writes.find((write) => write.change.key === "pack_250_90/cad")!.set).toEqual({ pack: "pack_250_90", currency: "cad", cents: 5500 });
     expect(writes.every((write) => Object.keys(write.change.fields).length === 0 && !write.change.lowers_allowance && !write.change.raises_price)).toBe(true);
   });
@@ -523,10 +523,10 @@ describe("billing pack diff", () => {
   it("flags fewer minutes, a shorter length and a higher price, and sends an active pack back to draft when its terms change", () => {
     const current = storedPacks(desiredBillingPacks(profile()), "active");
     const { writes, refusals } = packDiff(profile((file) => {
-      file.packs.pack_250_90.minutes = 200;
+      file.packs.pack_250_90.included.voiceMinutes = 200;
       file.packs.pack_500_180.days = 120;
       delete file.packs.pack_1000_365.days;
-      file.packs.pack_1000_90.priceCents = 18900;
+      file.packs.pack_1000_90.prices.onceCents = 18900;
       file.packs.pack_500_90.names.en = "500 minutes for 3 months";
     }), current);
     expect(refusals).toEqual([]);
@@ -544,13 +544,13 @@ describe("billing pack diff", () => {
   it("refuses to change a bought pack's minutes or length, and lets its names, price and allowances change", () => {
     const current = storedPacks(desiredBillingPacks(profile()), "active");
     current.packs.find((pack) => pack.code === "pack_250_90")!.frozen_at = earlier;
-    const minutes = packDiff(profile((file) => { file.packs.pack_250_90.minutes = 300; }), current);
+    const minutes = packDiff(profile((file) => { file.packs.pack_250_90.included.voiceMinutes = 300; }), current);
     expect(minutes.refusals).toEqual([{ code: "plan_frozen", path: "billing_file.packs.pack_250_90", message: `pack_250_90 has been bought since ${earlier}, so its minutes and length can't change. Put new minutes or a new length under a new code.` }]);
     expect(packDiff(profile((file) => { delete file.packs.pack_250_90.days; }), current).refusals.map((refusal) => refusal.code)).toEqual(["plan_frozen"]);
     const allowed = packDiff(profile((file) => {
-      file.packs.pack_250_90.priceCents = 6000;
+      file.packs.pack_250_90.prices.onceCents = 6000;
       file.packs.pack_250_90.names.fr = "250 minutes pendant 90 jours";
-      file.packs.pack_250_90.included = { alertSmsSegments: 80 };
+      file.packs.pack_250_90.included.alertSmsSegments = 80;
     }), current);
     expect(allowed.refusals).toEqual([]);
     expect(allowed.writes.map((write) => write.change.key)).toEqual(["pack_250_90", "pack_250_90/cad"]);

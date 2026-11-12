@@ -43,9 +43,9 @@ export type PlanDisplayValueName = (typeof planDisplayValueNames)[number];
 
 /**
  * The values a pack card's text can print as {{name}}: the pack's voice
- * minutes for its whole length, its length in days, its price, paid once, and
- * what it gives each month or allows while it lasts, formatted in the
- * visitor's language. A pack that never ends prints a dash for its days.
+ * minutes and other allowances for its whole length, its length in days, its
+ * price, paid once, and its limits while it lasts, formatted in the visitor's
+ * language. A pack that never ends prints a dash for its days.
  */
 export const packDisplayValueNames = ["voiceMinutes", "days", "price", "receptionists", "businessNumbers", "alertSmsSegments", "outboundCallAttempts", "chatAiUnits", "knowledgeStorage"] as const;
 export type PackDisplayValueName = (typeof packDisplayValueNames)[number];

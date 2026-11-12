@@ -76,19 +76,21 @@ const discount = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("percentage"), basisPoints: z.number().int().min(1).max(10_000), duration, durationInMonths: months.optional() }),
   z.strictObject({ type: z.literal("fixed"), amountCents: cents(10_000_000), duration, durationInMonths: months.optional() }),
 ]);
-// A prepaid pack (docs/features/prepaid-packs.md): voice minutes paid for
-// once, used within days of the payment, or at any time when days is left
-// out. Its monthly allowances and limits are the ones a business on it gets;
-// whatever it leaves out comes from the file's Starter. Each size and length
-// is a pack of its own, with its own price.
-const packIncluded = z.strictObject({ alertSmsSegments: count(100_000), outboundCallAttempts: count(100_000), chatAiUnits: count(1_000_000) });
+// A prepaid pack (docs/features/prepaid-packs.md) is a fixed-length plan: it
+// has a plan's fields, paid for once, and lasts days from its payment, or for
+// good when days is left out, without renewing. A monthly plan's included
+// holds what it gives each month; a pack's holds what it gives for its whole
+// length, its voice minutes and every other allowance alike. Its limits hold
+// while it lasts, as a plan's do; receptionists left out come from the file's
+// Starter. Each size and length is a pack of its own, with its own price.
+const packIncluded = z.strictObject({ voiceMinutes: z.number().int().min(1).max(100_000), alertSmsSegments: count(100_000), outboundCallAttempts: count(100_000), chatAiUnits: count(1_000_000) });
+const packPrices = z.strictObject({ onceCents: cents(10_000_000) });
 const pack = z.strictObject({
   names: z.strictObject({ en: name, fr: name, es: name, sr: name } satisfies Record<InterfaceLocale, typeof name>),
-  minutes: z.number().int().min(1).max(100_000),
   days: z.number().int().min(1).max(MAX_PACK_DAYS).optional(),
-  priceCents: cents(10_000_000),
-  included: packIncluded.partial().optional(),
-  limits: limits.partial().optional(),
+  prices: packPrices,
+  included: packIncluded,
+  limits,
 });
 
 // Rules for each account rather than each business. maxBusinesses: how many
@@ -277,6 +279,49 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
 }
 
 export const billingProfileSchema = billingProfileShape.superRefine(checkBillingProfile);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * A profile a catalog run stored before packs took a plan's fields, in
+ * today's shape, so the daily check still reads it until the next apply. A
+ * pack then had minutes and priceCents, and its included and limits left out
+ * whatever the file's Starter gave: here its minutes and price move under
+ * included and prices, and what it left out comes from the stored file's own
+ * Starter, which is what its row was made with, so it resolves to the same
+ * row. receptionists stays left out, as resolveBillingPacks still fills it
+ * from Starter. Any other value comes back as it is, for billingProfileSchema
+ * to check.
+ */
+export function upgradeStoredBillingProfile(stored: unknown): unknown {
+  if (!isRecord(stored) || !isRecord(stored.packs)) return stored;
+  const starter = isRecord(stored.plans) && isRecord(stored.plans.starter) ? stored.plans.starter : {};
+  const starterIncluded = isRecord(starter.included) ? starter.included : {};
+  const starterLimits = isRecord(starter.limits) ? starter.limits : {};
+  const packs = Object.fromEntries(Object.entries(stored.packs).map(([code, pack]) => {
+    if (!isRecord(pack) || !("minutes" in pack) || "prices" in pack) return [code, pack];
+    const { minutes, priceCents, included, limits, ...rest } = pack;
+    const ownIncluded = isRecord(included) ? included : {};
+    const ownLimits = isRecord(limits) ? limits : {};
+    const pick = (own: Record<string, unknown>, fallback: Record<string, unknown>, key: string) => own[key] ?? fallback[key];
+    return [code, {
+      ...rest,
+      prices: { onceCents: priceCents },
+      included: {
+        voiceMinutes: minutes,
+        alertSmsSegments: pick(ownIncluded, starterIncluded, "alertSmsSegments"),
+        outboundCallAttempts: pick(ownIncluded, starterIncluded, "outboundCallAttempts"),
+        chatAiUnits: pick(ownIncluded, starterIncluded, "chatAiUnits"),
+      },
+      limits: {
+        knowledgeStorageMb: pick(ownLimits, starterLimits, "knowledgeStorageMb"),
+        businessNumbers: pick(ownLimits, starterLimits, "businessNumbers"),
+        ...(ownLimits.receptionists !== undefined ? { receptionists: ownLimits.receptionists } : {}),
+      },
+    }];
+  }));
+  return { ...stored, packs };
+}
 
 /**
  * The file as a deployment on the provider sells it. With stripe.overage
@@ -497,28 +542,26 @@ export type ResolvedBillingPack = {
 
 /**
  * Every pack of a checked file as the complete row it becomes, smallest and
- * shortest first. What a pack leaves out of its allowances and limits comes
- * from the file's Starter, so no reader ever merges two rows.
+ * shortest first: its allowances for its whole length and its limits, as the
+ * file gives them, so no reader ever merges two rows. Only receptionists left
+ * out come from the file's Starter.
  */
 export function resolveBillingPacks(profile: Pick<BillingProfile, "currency" | "plans" | "packs">): ResolvedBillingPack[] {
   const starter = standardAllowances("starter", profile.plans.starter);
-  const packs = Object.entries(profile.packs ?? {}).map(([code, pack]): ResolvedBillingPack => {
-    const storage = pack.limits?.knowledgeStorageMb;
-    return {
-      code,
-      names: { en: pack.names.en, fr: pack.names.fr, es: pack.names.es, sr: pack.names.sr },
-      voice_sec: pack.minutes * 60,
-      days: pack.days ?? null,
-      sms_seg: pack.included?.alertSmsSegments ?? starter.sms_seg ?? 0,
-      calls_out: pack.included?.outboundCallAttempts ?? starter.calls_out ?? 0,
-      chat_units: pack.included?.chatAiUnits ?? starter.chat_units ?? 0,
-      kb_bytes: storage === undefined ? starter.kb_bytes ?? 0 : storage * BYTES_PER_MB,
-      numbers: pack.limits?.businessNumbers ?? starter.numbers ?? 0,
-      receptionists: pack.limits?.receptionists ?? starter.receptionists ?? DEFAULT_PLAN_RECEPTIONISTS.starter,
-      sort: 0,
-      price: { currency: profile.currency, cents: pack.priceCents },
-    };
-  });
+  const packs = Object.entries(profile.packs ?? {}).map(([code, pack]): ResolvedBillingPack => ({
+    code,
+    names: { en: pack.names.en, fr: pack.names.fr, es: pack.names.es, sr: pack.names.sr },
+    voice_sec: pack.included.voiceMinutes * 60,
+    days: pack.days ?? null,
+    sms_seg: pack.included.alertSmsSegments,
+    calls_out: pack.included.outboundCallAttempts,
+    chat_units: pack.included.chatAiUnits,
+    kb_bytes: pack.limits.knowledgeStorageMb * BYTES_PER_MB,
+    numbers: pack.limits.businessNumbers,
+    receptionists: pack.limits.receptionists ?? starter.receptionists ?? DEFAULT_PLAN_RECEPTIONISTS.starter,
+    sort: 0,
+    price: { currency: profile.currency, cents: pack.prices.onceCents },
+  }));
   // A pack that never ends sorts after every length.
   const length = (pack: ResolvedBillingPack) => pack.days ?? Number.POSITIVE_INFINITY;
   packs.sort((a, b) => a.voice_sec - b.voice_sec || length(a) - length(b) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));

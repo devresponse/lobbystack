@@ -95,6 +95,10 @@ export async function getWidgetChatAllowance(
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     // Decides whether to offer the chat without writing; each chat's reservation counts again.
     const status = await readUsageStatusInTransaction(tx, { businessId: input.businessId });
+    // On a pack, chats draw on the packs' chats for their whole length, which blocked says are used up.
+    if (status.plan === "prepaid") {
+      return status.chatAiBlocked ? { allowed: false, errorCode: billingErrorCodes.chatAiLimitReached, plan: status.plan } : { allowed: true, errorCode: null, plan: status.plan };
+    }
     if (status.chatAiTokensIncluded === null || status.overagesBillable) {
       return { allowed: true, errorCode: null, plan: status.plan };
     }
@@ -110,7 +114,8 @@ export async function reserveWidgetChatUsageInTransaction(
   input: { businessId: string; conversationId: string },
 ): Promise<WidgetChatBillingAllowance> {
   const { plan, limits } = await loadBusinessPlanLimits(tx, input.businessId);
-  if (limits.chatAiTokensIncluded !== null) {
+  // A pack has no monthly chats: each chat draws one of its chats, for its whole length.
+  if (plan === "prepaid" || limits.chatAiTokensIncluded !== null) {
     const reservation = await reserveUsageInTransaction(tx, { businessId: input.businessId, usageKind: "chat_ai_tokens", sourceKey: `chat:${input.conversationId}`, quantity: 1 });
     if (!reservation.allowed) return { allowed: false, errorCode: billingErrorCodes.chatAiLimitReached, plan };
   }

@@ -156,7 +156,7 @@ export type BillingPackOfferViewModel = {
   days: number | null;
   amountCents: number;
   currency: string;
-  /** What it gives each UTC month while it lasts. */
+  /** What else it gives for its whole length, as its minutes are. */
   smsSegments: number;
   outboundCalls: number;
   chatUnits: number;

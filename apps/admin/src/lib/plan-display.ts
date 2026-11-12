@@ -157,9 +157,9 @@ export function packPrice(offer: BillingPackOfferViewModel, locale: string): str
 }
 
 /**
- * The values a pack's text prints as {{name}}: its voice minutes for its
- * whole length, its length in days (a dash for a pack that never ends), its
- * price, and what it gives each month or allows while it lasts.
+ * The values a pack's text prints as {{name}}: its voice minutes and other
+ * allowances for its whole length, its length in days (a dash for a pack that
+ * never ends), its price, and its limits while it lasts.
  */
 export function packDisplayValues(offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate): Record<PackDisplayValueName, string> {
   const count = (value: number) => value.toLocaleString(intlLocale(locale));

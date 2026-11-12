@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { packBalance, packLimits, packSecondsLeft, type LivePack } from "./billingPacks";
+import { packBalance, packKindLeft, packLimits, packSecondsLeft, type LivePack } from "./billingPacks";
 
 // The pack ledger's arithmetic: what live packs add up to and the limits the
 // prepaid tier takes from them. The database side is in
@@ -10,7 +10,7 @@ const DAY = 86_400_000;
 const now = new Date("2026-11-09T12:00:00Z");
 
 function live(overrides: Partial<LivePack> = {}): LivePack {
-  return { id: "pack", pack: "pack_250_90", secondsTotal: 15_000, secondsUsed: 0, amountCents: 5_500, refundedCents: 0, paidAt: now, endsAt: new Date(now.getTime() + 90 * DAY), smsSeg: 50, callsOut: 20, chatUnits: 50, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, ...overrides };
+  return { id: "pack", pack: "pack_250_90", secondsTotal: 15_000, secondsUsed: 0, amountCents: 5_500, refundedCents: 0, paidAt: now, endsAt: new Date(now.getTime() + 90 * DAY), smsSeg: 150, smsUsed: 0, callsOut: 60, callsUsed: 0, chatUnits: 150, chatUsed: 0, kbBytes: 20 * 1_048_576, numbers: 1, receptionists: 1, ...overrides };
 }
 
 describe("prepaid pack balances", () => {
@@ -25,6 +25,18 @@ describe("prepaid pack balances", () => {
     expect(balance?.lastEndsAt).toEqual(new Date(now.getTime() + 180 * DAY));
   });
 
+  it("adds up every allowance the live packs hold for their whole length, after refunds, less what uses drew", () => {
+    const balance = packBalance([live({ smsUsed: 40, callsUsed: 60, chatUsed: 10 }), live({ id: "half", smsSeg: 300, callsOut: 120, chatUnits: 300, amountCents: 9_500, refundedCents: 4_750 })]);
+    expect(balance?.allowances).toEqual({
+      voice_seconds: { total: 22_500, used: 0, left: 22_500 },
+      // The refunded pack holds half of what it bought.
+      alert_sms_segments: { total: 300, used: 40, left: 260 },
+      outbound_call_attempts: { total: 120, used: 60, left: 60 },
+      chat_ai_tokens: { total: 300, used: 10, left: 290 },
+    });
+    expect(packKindLeft(live({ callsUsed: 60 }), "outbound_call_attempts")).toBe(0);
+  });
+
   it("counts no seconds left on a pack whose partial refund took off more than calls left", () => {
     expect(packSecondsLeft({ secondsTotal: 15_000, secondsUsed: 10_000, amountCents: 5_500, refundedCents: 2_750 })).toBe(0);
   });
@@ -34,13 +46,13 @@ describe("prepaid pack balances", () => {
     expect(packBalance([live({ endsAt: null })])).toMatchObject({ nextEndsAt: null, lastEndsAt: null });
   });
 
-  it("takes the most any live pack gives for each limit, with no monthly voice allowance and nothing billed past an allowance", () => {
+  it("takes the most any live pack gives for each limit, with no monthly allowance, since a pack's last its whole length, and nothing billed past one", () => {
     expect(packLimits([live(), live({ id: "big", smsSeg: 80, kbBytes: 50 * 1_048_576, receptionists: 2 })])).toEqual({
       knowledgeStorageBytes: 50 * 1_048_576,
       voiceSecondsIncluded: null,
-      alertSmsSegmentsIncluded: 80,
-      outboundCallAttemptsIncluded: 20,
-      chatAiTokensIncluded: 50,
+      alertSmsSegmentsIncluded: null,
+      outboundCallAttemptsIncluded: null,
+      chatAiTokensIncluded: null,
       includedBusinessNumbers: 1,
       includedReceptionists: 2,
       overagesBillable: false,

@@ -639,11 +639,11 @@ export const apiBillingCatalogPackSchema = z.object({
   code: z.string().describe("The pack's permanent code, its key in billing.json's packs."),
   status: z.enum(["draft", "active", "retired"]).describe("draft until the billing provider can sell it as defined, active, or retired."),
   names: z.record(z.string(), z.string()).describe("Display names by language."),
-  voice_sec: z.number().int().describe("Voice seconds the pack holds."),
+  voice_sec: z.number().int().describe("Voice seconds the pack holds for its whole length."),
   days: nullableCount.describe("How many days a bought pack lasts from its payment. Null means it never ends."),
-  sms_seg: z.number().int().describe("Alert SMS segments included a month."),
-  calls_out: z.number().int().describe("Outbound call attempts included a month."),
-  chat_units: z.number().int().describe("Website chat AI units included a month."),
+  sms_seg: z.number().int().describe("Alert SMS segments included for the pack's whole length."),
+  calls_out: z.number().int().describe("Outbound call attempts included for the pack's whole length."),
+  chat_units: z.number().int().describe("Website chat AI units included for the pack's whole length."),
   kb_bytes: z.number().int().describe("Knowledge storage limit in bytes."),
   numbers: z.number().int().describe("Business phone numbers included."),
   receptionists: z.number().int().describe("Receptionists active at once, the default included."),
@@ -654,7 +654,7 @@ export const apiBillingCatalogPackSchema = z.object({
   created_at: timestamp,
   updated_at: timestamp,
   prices: z.array(apiBillingCatalogPackPriceSchema).describe("Every price of the pack, the live one first."),
-}).describe("A prepaid pack: voice minutes paid for once, to use within its days of the payment.");
+}).describe("A prepaid pack: a plan paid for once that lasts its days from the payment without renewing, with its voice minutes and every other allowance for that whole length.");
 
 export const apiBillingCatalogPolarSchema = z.object({
   env: z.enum(billingPolarEnvs).describe("The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."),

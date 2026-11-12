@@ -408,9 +408,9 @@ export const billingPlanCatalog = {
     outboundCallAttemptOverageRateCents: null,
   },
   // Only a fallback: a business on a pack gets the limits copied onto its live
-  // packs, and its voice minutes are the packs' balance, never a monthly
-  // allowance, so voice has no monthly number here. Nothing past an allowance
-  // is billed: it stops, as on Free. Starter's allowances, with 20 MB of
+  // packs, and every allowance is the packs' balance for their whole length,
+  // never a monthly one, so none has a monthly number here. Nothing past an
+  // allowance is billed: it stops, as on Free. Starter's limits, with 20 MB of
   // knowledge, as both brands' packs give.
   prepaid: {
     hostedBilling: true,
@@ -418,9 +418,9 @@ export const billingPlanCatalog = {
     annualChargeCents: null,
     knowledgeStorageBytes: 20 * 1024 * 1024,
     voiceSecondsIncluded: null,
-    alertSmsSegmentsIncluded: 50,
-    outboundCallAttemptsIncluded: 20,
-    chatAiTokensIncluded: 50,
+    alertSmsSegmentsIncluded: null,
+    outboundCallAttemptsIncluded: null,
+    chatAiTokensIncluded: null,
     includedBusinessNumbers: 1,
     includedReceptionists: 1,
     overagesBillable: false,
@@ -665,7 +665,7 @@ export function isBillingPackStatus(value: string | null | undefined): value is 
  */
 export const PACK_CHECKOUT_CLOSED_FOR_PLAN = "A plan started for this business, so this pack's checkout closed.";
 
-/** What a pack gives a business each UTC month while it lasts, and its limits: everything but the minutes, which last the whole pack. */
+/** What a pack gives a business for its whole length, as its minutes are, and its limits while it lasts. */
 export type BillingPackIncluded = {
   alertSmsSegments: number;
   outboundCallAttempts: number;
@@ -713,13 +713,18 @@ export type BillingPackHolding = {
 };
 
 /**
- * The voice seconds a pack holds after refunds: a partial refund takes its
- * share of the seconds off the pack, rounded down, and a full one all of them.
+ * What a pack holds of one allowance after refunds: a partial refund takes its
+ * share of every allowance off the pack, rounded down, and a full one all of it.
  */
-export function packCapacitySeconds(pack: { secondsTotal: number; amountCents: number; refundedCents: number }): number {
-  if (pack.refundedCents <= 0) return pack.secondsTotal;
+export function packCapacity(total: number, pack: { amountCents: number; refundedCents: number }): number {
+  if (pack.refundedCents <= 0) return total;
   if (pack.amountCents <= 0 || pack.refundedCents >= pack.amountCents) return 0;
-  return Math.floor((pack.secondsTotal * (pack.amountCents - pack.refundedCents)) / pack.amountCents);
+  return Math.floor((total * (pack.amountCents - pack.refundedCents)) / pack.amountCents);
+}
+
+/** The voice seconds a pack holds after refunds (packCapacity). */
+export function packCapacitySeconds(pack: { secondsTotal: number; amountCents: number; refundedCents: number }): number {
+  return packCapacity(pack.secondsTotal, pack);
 }
 
 /** When a pack paid for at paidAt ends: its days counted as 24-hour days, so no month length or clock change moves it; null when it never ends. */

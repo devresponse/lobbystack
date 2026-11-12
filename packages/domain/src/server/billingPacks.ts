@@ -1,18 +1,20 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { auditLogs, billingPackDraws, billingPackPlans, billingPacks, enqueueOutbox, phoneNumbers, type BillingPackCheckoutTerms, type DatabaseTransaction } from "@lobbystack/db";
-import { isBillingPackStatus, MAX_PHONE_CALL_MS, packCapacitySeconds, packEndsAt, type BillingPackHolding, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
+import { isBillingPackStatus, MAX_PHONE_CALL_MS, packCapacity, packCapacitySeconds, packEndsAt, type BillingPackHolding, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
 
 import { isSharedSmsSender } from "./smsSender";
 
-// The prepaid pack ledger (migration 0148, docs/features/prepaid-packs.md). A
-// business pays its billing provider once for a pack; the provider's part ends
+// The prepaid pack ledger (migrations 0148 and 0151, docs/features/prepaid-packs.md).
+// A pack is a plan paid for once that lasts its days without renewing. A
+// business pays its billing provider once for it; the provider's part ends
 // there. LobbyStack keeps the rest: one billing_packs row per payment, with
 // everything the business gets copied onto it, the end date fixed at the
-// payment, and what each call drew from it in billing_pack_draws. While a pack
+// payment, and what each use drew from it in billing_pack_draws. While a pack
 // has time left the business is on the prepaid tier: the limits copied onto
-// its packs apply, and its calls draw voice seconds from them, earliest end
-// first, until none are left, when a call is refused as on Free.
+// its packs apply, and its calls, texts, transfers and website chats draw on
+// the packs' allowances for their whole length, earliest end first, until
+// none is left of a kind, when that use is refused as on Free.
 //
 // Every write to a business's packs takes the business's pack lock, after the
 // usage period's lock when a call holds that one too, so a balance that spans
@@ -29,20 +31,57 @@ export type LivePack = {
   paidAt: Date;
   endsAt: Date | null;
   smsSeg: number;
+  smsUsed: number;
   callsOut: number;
+  callsUsed: number;
   chatUnits: number;
+  chatUsed: number;
   kbBytes: number;
   numbers: number;
   receptionists: number;
 };
 
-/** What a business's live packs add up to: their seconds, and the limits the prepaid tier enforces. */
+/** The usage kinds a pack gives an allowance of for its whole length: a call's seconds, a text's segments, a transfer's attempts and a website chat's units. */
+export const packUsageKinds = ["voice_seconds", "alert_sms_segments", "outbound_call_attempts", "chat_ai_tokens"] as const;
+export type PackUsageKind = (typeof packUsageKinds)[number];
+
+/** One allowance of the live packs: what they hold after refunds, what uses drew, and what is left. */
+export type PackAllowance = { total: number; used: number; left: number };
+
+// Each kind's columns on a pack: what it bought and what uses drew.
+const kindFields = {
+  voice_seconds: { total: "secondsTotal", used: "secondsUsed" },
+  alert_sms_segments: { total: "smsSeg", used: "smsUsed" },
+  outbound_call_attempts: { total: "callsOut", used: "callsUsed" },
+  chat_ai_tokens: { total: "chatUnits", used: "chatUsed" },
+} as const satisfies Record<PackUsageKind, { total: keyof LivePack; used: keyof LivePack }>;
+
+const usedColumns = { voice_seconds: billingPacks.secondsUsed, alert_sms_segments: billingPacks.smsUsed, outbound_call_attempts: billingPacks.callsUsed, chat_ai_tokens: billingPacks.chatUsed } as const satisfies Record<PackUsageKind, unknown>;
+
+/** Whether a usage row's kind is one a pack gives. */
+export function isPackUsageKind(kind: string): kind is PackUsageKind {
+  return (packUsageKinds as readonly string[]).includes(kind);
+}
+
+/** What a pack holds of a kind after refunds (packCapacity). */
+export function packKindTotal(pack: Pick<LivePack, "secondsTotal" | "smsSeg" | "callsOut" | "chatUnits" | "amountCents" | "refundedCents">, kind: PackUsageKind): number {
+  return packCapacity(pack[kindFields[kind].total], pack);
+}
+
+/** What a pack still holds of a kind: what it holds after refunds, less what uses drew. */
+export function packKindLeft(pack: LivePack, kind: PackUsageKind): number {
+  return Math.max(0, packKindTotal(pack, kind) - pack[kindFields[kind].used]);
+}
+
+/** What a business's live packs add up to: each allowance, and the limits the prepaid tier enforces. */
 export type PackBalance = {
   packs: LivePack[];
   /** The seconds the live packs hold after refunds. */
   secondsTotal: number;
   secondsUsed: number;
   secondsLeft: number;
+  /** Every allowance the live packs hold for their whole length, by usage kind; voice_seconds repeats the seconds above. */
+  allowances: Record<PackUsageKind, PackAllowance>;
   /** When the live pack that ends first ends; null when one never ends and it is the only one. */
   nextEndsAt: Date | null;
   /** When the last live pack ends; null when one never ends. */
@@ -60,8 +99,11 @@ const livePackColumns = {
   paidAt: billingPacks.paidAt,
   endsAt: billingPacks.endsAt,
   smsSeg: billingPacks.smsSeg,
+  smsUsed: billingPacks.smsUsed,
   callsOut: billingPacks.callsOut,
+  callsUsed: billingPacks.callsUsed,
   chatUnits: billingPacks.chatUnits,
+  chatUsed: billingPacks.chatUsed,
   kbBytes: billingPacks.kbBytes,
   numbers: billingPacks.numbers,
   receptionists: billingPacks.receptionists,
@@ -155,17 +197,19 @@ export async function listBusinessPacks(tx: DatabaseTransaction, businessId: str
 
 /**
  * The prepaid tier's limits from the live packs: the most any of them gives,
- * which is every pack's own when, as usual, they give the same. Voice has no
- * monthly allowance on a pack, and nothing past an allowance is billed.
+ * which is every pack's own when, as usual, they give the same. A pack has no
+ * monthly allowance: its minutes, texts, transfers and chats last its whole
+ * length, as the balance counts them (PackBalance.allowances), so none has a
+ * monthly number here, and nothing past an allowance is billed.
  */
 export function packLimits(packs: readonly LivePack[]): BillingPlanLimits {
   const most = (pick: (pack: LivePack) => number) => Math.max(...packs.map(pick));
   return {
     knowledgeStorageBytes: most((pack) => Number(pack.kbBytes)),
     voiceSecondsIncluded: null,
-    alertSmsSegmentsIncluded: most((pack) => pack.smsSeg),
-    outboundCallAttemptsIncluded: most((pack) => pack.callsOut),
-    chatAiTokensIncluded: most((pack) => pack.chatUnits),
+    alertSmsSegmentsIncluded: null,
+    outboundCallAttemptsIncluded: null,
+    chatAiTokensIncluded: null,
     includedBusinessNumbers: most((pack) => pack.numbers),
     includedReceptionists: most((pack) => pack.receptionists),
     overagesBillable: false,
@@ -182,30 +226,36 @@ export function packBalance(packs: readonly LivePack[]): PackBalance | null {
   const secondsUsed = packs.reduce((sum, pack) => sum + Math.min(pack.secondsUsed, packCapacitySeconds(pack)), 0);
   const ends = packs.map((pack) => pack.endsAt);
   const dated = ends.filter((end): end is Date => end !== null).map((end) => end.getTime());
+  const allowance = (kind: PackUsageKind): PackAllowance => ({
+    total: packs.reduce((sum, pack) => sum + packKindTotal(pack, kind), 0),
+    used: packs.reduce((sum, pack) => sum + Math.min(pack[kindFields[kind].used], packKindTotal(pack, kind)), 0),
+    left: packs.reduce((sum, pack) => sum + packKindLeft(pack, kind), 0),
+  });
   return {
     packs: [...packs],
     secondsTotal,
     secondsUsed,
     secondsLeft: packs.reduce((sum, pack) => sum + packSecondsLeft(pack), 0),
+    allowances: Object.fromEntries(packUsageKinds.map((kind) => [kind, allowance(kind)])) as Record<PackUsageKind, PackAllowance>,
     nextEndsAt: dated.length ? new Date(Math.min(...dated)) : null,
     lastEndsAt: ends.includes(null) || !dated.length ? null : new Date(Math.max(...dated)),
     limits: packLimits(packs),
   };
 }
 
-/** The seconds the usage row sourceKey has drawn from the business's packs, by pack. */
+/** What the usage row sourceKey has drawn from the business's packs, by pack: seconds for a call, else its kind's units. */
 async function readDraws(tx: DatabaseTransaction, businessId: string, sourceKey: string): Promise<Array<{ packId: string; seconds: number }>> {
   return await tx.select({ packId: billingPackDraws.packId, seconds: billingPackDraws.seconds }).from(billingPackDraws)
     .where(and(eq(billingPackDraws.businessId, businessId), eq(billingPackDraws.sourceKey, sourceKey)));
 }
 
-/** The seconds the usage row sourceKey has drawn from the business's packs. */
+/** What the usage row sourceKey has drawn from the business's packs: seconds for a call, else its kind's units. */
 export async function drawnSeconds(tx: DatabaseTransaction, businessId: string, sourceKey: string): Promise<number> {
   return (await readDraws(tx, businessId, sourceKey)).reduce((sum, draw) => sum + draw.seconds, 0);
 }
 
 export type PackDrawResult = {
-  /** The seconds the row draws now, which is less than asked when the live packs hold less. */
+  /** What the row draws now, which is less than asked when the live packs hold less. */
   drawn: number;
   /** The business's live balance before and after, for the low-balance notices. */
   before: PackBalance | null;
@@ -213,16 +263,20 @@ export type PackDrawResult = {
 };
 
 /**
- * Makes the usage row sourceKey draw `seconds` from the business's packs, in
- * whole seconds. More than it draws now takes the difference from the live
- * packs, the one that ends first first, as far as they hold it. Less gives the
- * difference back, to the pack drawn on last first, ended or not: a pack that
- * has ended keeps the seconds given back among its unused ones. Runs under the
- * business's pack lock, which the caller may already hold.
+ * Makes the usage row sourceKey draw `seconds` from the business's packs: a
+ * call's whole seconds, or for another kind (usageKind) its segments,
+ * attempts or chat units. More than it draws now takes the difference from
+ * the live packs' allowance of that kind, the pack that ends first first, as
+ * far as they hold it. Less gives the difference back, to the pack drawn on
+ * last first, ended or not: a pack that has ended keeps the seconds given
+ * back among its unused ones. Only a call's draw sends the balance reminders,
+ * which are about minutes. Runs under the business's pack lock, which the
+ * caller may already hold.
  */
-export async function setPackDraw(tx: DatabaseTransaction, input: { businessId: string; sourceKey: string; seconds: number; now?: Date }): Promise<PackDrawResult> {
+export async function setPackDraw(tx: DatabaseTransaction, input: { businessId: string; sourceKey: string; seconds: number; usageKind?: PackUsageKind; now?: Date }): Promise<PackDrawResult> {
   await lockBusinessPacks(tx, input.businessId);
   const now = input.now ?? new Date();
+  const kind = input.usageKind ?? "voice_seconds";
   const target = Math.max(0, Math.ceil(input.seconds - 1e-9));
   const draws = await readDraws(tx, input.businessId, input.sourceKey);
   const current = draws.reduce((sum, draw) => sum + draw.seconds, 0);
@@ -230,22 +284,23 @@ export async function setPackDraw(tx: DatabaseTransaction, input: { businessId: 
   const before = packBalance(live);
   if (target === current) return { drawn: current, before, after: before };
   if (target < current) {
-    await giveBack(tx, input.businessId, input.sourceKey, draws, current - target);
+    await giveBack(tx, { businessId: input.businessId, sourceKey: input.sourceKey, kind, draws, amount: current - target });
     const after = packBalance(await readLivePacks(tx, input.businessId, { now }));
     return { drawn: target, before, after };
   }
   let need = target - current;
+  const used = usedColumns[kind];
   for (const pack of live) {
     if (need <= 0) break;
-    const take = Math.min(need, packSecondsLeft(pack));
+    const take = Math.min(need, packKindLeft(pack, kind));
     if (take <= 0) continue;
-    await tx.update(billingPacks).set({ secondsUsed: sql`${billingPacks.secondsUsed} + ${take}`, updatedAt: new Date() }).where(eq(billingPacks.id, pack.id));
-    await tx.insert(billingPackDraws).values({ packId: pack.id, businessId: input.businessId, sourceKey: input.sourceKey, seconds: take })
+    await tx.update(billingPacks).set({ [kindFields[kind].used]: sql`${used} + ${take}`, updatedAt: new Date() }).where(eq(billingPacks.id, pack.id));
+    await tx.insert(billingPackDraws).values({ packId: pack.id, businessId: input.businessId, sourceKey: input.sourceKey, usageKind: kind, seconds: take })
       .onConflictDoUpdate({ target: [billingPackDraws.packId, billingPackDraws.sourceKey], set: { seconds: sql`${billingPackDraws.seconds} + ${take}`, updatedAt: new Date() } });
     need -= take;
   }
   const after = packBalance(await readLivePacks(tx, input.businessId, { now }));
-  const crossed = packBalanceCrossing(before, after);
+  const crossed = kind === "voice_seconds" ? packBalanceCrossing(before, after) : null;
   if (crossed && after) await queuePackNoticeRun(tx, { businessId: input.businessId, sourceKey: input.sourceKey, balance: after, notice: crossed, now });
   return { drawn: target - need, before, after };
 }
@@ -297,22 +352,24 @@ async function queuePackNoticeRun(tx: DatabaseTransaction, input: { businessId: 
   });
 }
 
-async function giveBack(tx: DatabaseTransaction, businessId: string, sourceKey: string, draws: Array<{ packId: string; seconds: number }>, seconds: number): Promise<void> {
-  const packs = await tx.select({ id: billingPacks.id, status: billingPacks.status, endsAt: billingPacks.endsAt, paidAt: billingPacks.paidAt, secondsTotal: billingPacks.secondsTotal, secondsUsed: billingPacks.secondsUsed, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents })
+/** Gives `amount` of a kind back from the row's draws, to the pack drawn on last first; an ended pack's unused seconds follow a call's. */
+async function giveBack(tx: DatabaseTransaction, input: { businessId: string; sourceKey: string; kind: PackUsageKind; draws: Array<{ packId: string; seconds: number }>; amount: number }): Promise<void> {
+  const packs = await tx.select({ id: billingPacks.id, status: billingPacks.status, endsAt: billingPacks.endsAt, paidAt: billingPacks.paidAt, secondsTotal: billingPacks.secondsTotal, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents, used: usedColumns[input.kind] })
     .from(billingPacks)
-    .where(and(eq(billingPacks.businessId, businessId), inArray(billingPacks.id, draws.map((draw) => draw.packId))))
+    .where(and(eq(billingPacks.businessId, input.businessId), inArray(billingPacks.id, input.draws.map((draw) => draw.packId))))
     .orderBy(sql`${billingPacks.endsAt} desc nulls first`, desc(billingPacks.paidAt), desc(billingPacks.id))
     .for("update");
-  let release = seconds;
+  let release = input.amount;
   for (const pack of packs) {
     if (release <= 0) break;
-    const draw = draws.find((entry) => entry.packId === pack.id);
-    const take = Math.min(release, draw?.seconds ?? 0, pack.secondsUsed);
+    const draw = input.draws.find((entry) => entry.packId === pack.id);
+    const take = Math.min(release, draw?.seconds ?? 0, pack.used);
     if (take <= 0) continue;
-    const used = pack.secondsUsed - take;
+    const used = pack.used - take;
     const ended = (endedPackStatuses as readonly string[]).includes(pack.status);
-    await tx.update(billingPacks).set({ secondsUsed: used, ...(ended ? { unusedSeconds: Math.max(0, packCapacitySeconds(pack) - used) } : {}), updatedAt: new Date() }).where(eq(billingPacks.id, pack.id));
-    await tx.update(billingPackDraws).set({ seconds: sql`${billingPackDraws.seconds} - ${take}`, updatedAt: new Date() }).where(and(eq(billingPackDraws.packId, pack.id), eq(billingPackDraws.sourceKey, sourceKey)));
+    const unused = input.kind === "voice_seconds" && ended ? { unusedSeconds: Math.max(0, packCapacitySeconds(pack) - used) } : {};
+    await tx.update(billingPacks).set({ [kindFields[input.kind].used]: used, ...unused, updatedAt: new Date() }).where(eq(billingPacks.id, pack.id));
+    await tx.update(billingPackDraws).set({ seconds: sql`${billingPackDraws.seconds} - ${take}`, updatedAt: new Date() }).where(and(eq(billingPackDraws.packId, pack.id), eq(billingPackDraws.sourceKey, input.sourceKey)));
     release -= take;
   }
 }

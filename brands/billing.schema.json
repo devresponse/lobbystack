@@ -935,24 +935,33 @@
             ],
             "additionalProperties": false
           },
-          "minutes": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100000
-          },
           "days": {
             "type": "integer",
             "minimum": 1,
             "maximum": 1095
           },
-          "priceCents": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10000000
+          "prices": {
+            "type": "object",
+            "properties": {
+              "onceCents": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000000
+              }
+            },
+            "required": [
+              "onceCents"
+            ],
+            "additionalProperties": false
           },
           "included": {
             "type": "object",
             "properties": {
+              "voiceMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
               "alertSmsSegments": {
                 "type": "integer",
                 "minimum": 0,
@@ -969,6 +978,12 @@
                 "maximum": 1000000
               }
             },
+            "required": [
+              "voiceMinutes",
+              "alertSmsSegments",
+              "outboundCallAttempts",
+              "chatAiUnits"
+            ],
             "additionalProperties": false
           },
           "limits": {
@@ -990,13 +1005,18 @@
                 "maximum": 50
               }
             },
+            "required": [
+              "knowledgeStorageMb",
+              "businessNumbers"
+            ],
             "additionalProperties": false
           }
         },
         "required": [
           "names",
-          "minutes",
-          "priceCents"
+          "prices",
+          "included",
+          "limits"
         ],
         "additionalProperties": false
       }

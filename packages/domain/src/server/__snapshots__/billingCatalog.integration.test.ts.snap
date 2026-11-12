@@ -4,9 +4,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
 {
   "catalog": {
     "brand": "alloplace",
-    "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+    "code_hash": "11bba3cd1000a0f965210608b649775b5f46653aa7bc86129f377cfb085b75df",
     "currency": "cad",
-    "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
+    "hash": "19239dd5547eeb198004330d0cdd755caa4c373fca3035026594e8fd21794440",
     "last_run": {
       "blocked_by": [],
       "brand": "alloplace",
@@ -92,9 +92,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
           "table": "billing_prices",
         },
       ],
-      "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+      "code_hash": "11bba3cd1000a0f965210608b649775b5f46653aa7bc86129f377cfb085b75df",
       "ended_at": "<time>",
-      "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
+      "hash": "19239dd5547eeb198004330d0cdd755caa4c373fca3035026594e8fd21794440",
       "id": "<uuid>",
       "key_id": "<uuid>",
       "kind": "catalog",
@@ -458,9 +458,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
             "table": "billing_prices",
           },
         ],
-        "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+        "code_hash": "11bba3cd1000a0f965210608b649775b5f46653aa7bc86129f377cfb085b75df",
         "ended_at": "<time>",
-        "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
+        "hash": "19239dd5547eeb198004330d0cdd755caa4c373fca3035026594e8fd21794440",
         "id": "<uuid>",
         "key_id": "<uuid>",
         "kind": "polar",
@@ -487,129 +487,210 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
       "packs": {
         "pack_1000_180": {
           "days": 180,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 300,
+            "chatAiUnits": 300,
+            "outboundCallAttempts": 120,
+            "voiceMinutes": 1000,
           },
-          "minutes": 1000,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "1,000 minutes, 180 days",
             "es": "1.000 minutos, 180 días",
             "fr": "1 000 minutes, 180 jours",
             "sr": "1.000 minuta, 180 dana",
           },
-          "priceCents": 18900,
+          "prices": {
+            "onceCents": 18900,
+          },
         },
         "pack_1000_365": {
           "days": 365,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 600,
+            "chatAiUnits": 600,
+            "outboundCallAttempts": 240,
+            "voiceMinutes": 1000,
           },
-          "minutes": 1000,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "1,000 minutes, 365 days",
             "es": "1.000 minutos, 365 días",
             "fr": "1 000 minutes, 365 jours",
             "sr": "1.000 minuta, 365 dana",
           },
-          "priceCents": 19900,
+          "prices": {
+            "onceCents": 19900,
+          },
         },
         "pack_1000_90": {
           "days": 90,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 150,
+            "chatAiUnits": 150,
+            "outboundCallAttempts": 60,
+            "voiceMinutes": 1000,
           },
-          "minutes": 1000,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "1,000 minutes, 90 days",
             "es": "1.000 minutos, 90 días",
             "fr": "1 000 minutes, 90 jours",
             "sr": "1.000 minuta, 90 dana",
           },
-          "priceCents": 17900,
+          "prices": {
+            "onceCents": 17900,
+          },
         },
         "pack_250_180": {
           "days": 180,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 300,
+            "chatAiUnits": 300,
+            "outboundCallAttempts": 120,
+            "voiceMinutes": 250,
           },
-          "minutes": 250,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "250 minutes, 180 days",
             "es": "250 minutos, 180 días",
             "fr": "250 minutes, 180 jours",
             "sr": "250 minuta, 180 dana",
           },
-          "priceCents": 5900,
+          "prices": {
+            "onceCents": 5900,
+          },
         },
         "pack_250_365": {
           "days": 365,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 600,
+            "chatAiUnits": 600,
+            "outboundCallAttempts": 240,
+            "voiceMinutes": 250,
           },
-          "minutes": 250,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "250 minutes, 365 days",
             "es": "250 minutos, 365 días",
             "fr": "250 minutes, 365 jours",
             "sr": "250 minuta, 365 dana",
           },
-          "priceCents": 6500,
+          "prices": {
+            "onceCents": 6500,
+          },
         },
         "pack_250_90": {
           "days": 90,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 150,
+            "chatAiUnits": 150,
+            "outboundCallAttempts": 60,
+            "voiceMinutes": 250,
           },
-          "minutes": 250,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "250 minutes, 90 days",
             "es": "250 minutos, 90 días",
             "fr": "250 minutes, 90 jours",
             "sr": "250 minuta, 90 dana",
           },
-          "priceCents": 5500,
+          "prices": {
+            "onceCents": 5500,
+          },
         },
         "pack_500_180": {
           "days": 180,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 300,
+            "chatAiUnits": 300,
+            "outboundCallAttempts": 120,
+            "voiceMinutes": 500,
           },
-          "minutes": 500,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "500 minutes, 180 days",
             "es": "500 minutos, 180 días",
             "fr": "500 minutes, 180 jours",
             "sr": "500 minuta, 180 dana",
           },
-          "priceCents": 9900,
+          "prices": {
+            "onceCents": 9900,
+          },
         },
         "pack_500_365": {
           "days": 365,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 600,
+            "chatAiUnits": 600,
+            "outboundCallAttempts": 240,
+            "voiceMinutes": 500,
           },
-          "minutes": 500,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "500 minutes, 365 days",
             "es": "500 minutos, 365 días",
             "fr": "500 minutes, 365 jours",
             "sr": "500 minuta, 365 dana",
           },
-          "priceCents": 10900,
+          "prices": {
+            "onceCents": 10900,
+          },
         },
         "pack_500_90": {
           "days": 90,
-          "limits": {
-            "knowledgeStorageMb": 20,
+          "included": {
+            "alertSmsSegments": 150,
+            "chatAiUnits": 150,
+            "outboundCallAttempts": 60,
+            "voiceMinutes": 500,
           },
-          "minutes": 500,
+          "limits": {
+            "businessNumbers": 1,
+            "knowledgeStorageMb": 20,
+            "receptionists": 1,
+          },
           "names": {
             "en": "500 minutes, 90 days",
             "es": "500 minutos, 90 días",
             "fr": "500 minutes, 90 jours",
             "sr": "500 minuta, 90 dana",
           },
-          "priceCents": 9500,
+          "prices": {
+            "onceCents": 9500,
+          },
         },
       },
       "plans": {
@@ -833,9 +914,9 @@ exports[`billing catalog answers on a Polar deployment > answers GET /billing/ca
         "table": "billing_prices",
       },
     ],
-    "code_hash": "85fcec4a8eb33c38a021e2fb779c41c7f680ca49e95596241ddb9da0526030c0",
+    "code_hash": "11bba3cd1000a0f965210608b649775b5f46653aa7bc86129f377cfb085b75df",
     "ended_at": "<time>",
-    "hash": "af5575455bbd443a83bae3952de95e25e4683ed7bde2b4b12df00d0a330fefc6",
+    "hash": "19239dd5547eeb198004330d0cdd755caa4c373fca3035026594e8fd21794440",
     "id": "<uuid>",
     "key_id": "<uuid>",
     "kind": "polar",

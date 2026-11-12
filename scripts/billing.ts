@@ -242,7 +242,8 @@ function preflight(options: Options, file: BillingFile, catalog: ApiBillingCatal
 }
 
 // No product IDs: checkout sells the products the links name, so the four
-// POLAR_*_PRODUCT_ID variables aren't needed.
+// POLAR_*_PRODUCT_ID variables aren't needed. Nor POLAR_API_BASE_URL on live,
+// where an unset one already means Polar's live server.
 function railwayText(options: Options, organizationId: string, webhookSecret: string | null, today: string): string {
   const shown = /\s/.test(options.railwayFile!) ? `"${options.railwayFile}"` : options.railwayFile!;
   return [
@@ -252,7 +253,7 @@ function railwayText(options: Options, organizationId: string, webhookSecret: st
     ...(webhookSecret ? ["# It holds the webhook secret, so delete it once Railway has the values."] : []),
     "",
     `[${options.adminService}, worker]`,
-    `POLAR_API_BASE_URL=${polarBaseUrls[options.polar]}`,
+    ...(options.polar === "sandbox" ? [`POLAR_API_BASE_URL=${polarBaseUrls.sandbox}`] : []),
     `POLAR_ORGANIZATION_ID=${organizationId}`,
     ...(webhookSecret ? ["", `[${options.adminService}]`, `POLAR_WEBHOOK_SECRET=${webhookSecret}`] : []),
     "",

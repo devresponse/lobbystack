@@ -41,8 +41,10 @@
 //   TWILIO_MAIN_ACCOUNT_SID, TWILIO_MAIN_AUTH_TOKEN   the main Twilio account, which owns the subaccounts
 //   RESEND_ADMIN_KEY        a Resend key with full access, only to make the domain and the sending key
 //   CLOUDFLARE_API_TOKEN    Zone DNS edit on the zone, and Turnstile Sites write on the account
+// In cloud mode with Polar, connect also runs pnpm billing, with a short-lived Polar setup token
+// (POLAR_SETUP_TOKEN) that it asks for and keeps only in memory.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -58,20 +60,56 @@ const URLS = {
   resend: process.env.BOOTSTRAP_RESEND_URL ?? "https://api.resend.com",
   cloudflare: process.env.BOOTSTRAP_CLOUDFLARE_URL ?? "https://api.cloudflare.com/client/v4",
   stripe: process.env.BOOTSTRAP_STRIPE_URL ?? "https://api.stripe.com/v1",
+  // Polar's sandbox and live are separate servers (POLAR_SERVERS), so this one only replaces both in tests.
+  polar: process.env.BOOTSTRAP_POLAR_URL ?? null,
 };
 // The BOOTSTRAP_*_URL variables, BOOTSTRAP_APP_URL and BOOTSTRAP_RAILWAY_CLI exist for tests against stand-ins.
 const RAILWAY_CLI = process.env.BOOTSTRAP_RAILWAY_CLI ?? "railway";
+const POLAR_SERVERS = { sandbox: "https://sandbox-api.polar.sh", live: "https://api.polar.sh" };
+// The version pnpm billing asks Polar for (POLAR_API_VERSION in packages/shared/src/billing.ts), so lists come back alike.
+const POLAR_API_VERSION = "2026-10";
+const POLAR_WEBHOOK_PATH = "/api/webhooks/polar";
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * Runs a command-line tool and returns spawnSync's result. On Windows, pnpm and the Railway CLI are
- * .cmd files that only start through the shell, and the shell splits arguments on spaces, so each
- * argument is quoted and the whole line goes to the shell as one string (an argument list with
- * shell: true would also print Node's DEP0190 warning).
+ * On Windows, pnpm and the Railway CLI are .cmd files that only start through the shell, and the shell splits
+ * arguments on spaces, so each argument is quoted and the whole line goes to the shell as one string (an argument
+ * list with shell: true would also print Node's DEP0190 warning).
  */
+const shellLine = (command, args) => [command, ...args].map((arg) => (/^[\w@+=:,./\\-]+$/.test(String(arg)) ? String(arg) : `"${String(arg).replace(/"/g, '""')}"`)).join(" ");
+
+/** Runs a command-line tool and returns spawnSync's result. */
 function runTool(command, args, options = {}) {
   if (process.platform !== "win32") return spawnSync(command, args, { encoding: "utf8", ...options });
-  const quote = (arg) => (/^[\w@+=:,./\\-]+$/.test(String(arg)) ? String(arg) : `"${String(arg).replace(/"/g, '""')}"`);
-  return spawnSync([command, ...args].map(quote).join(" "), { encoding: "utf8", ...options, shell: true });
+  return spawnSync(shellLine(command, args), { encoding: "utf8", ...options, shell: true });
+}
+
+/**
+ * Runs a tool whose output the person reads as it comes, such as pnpm billing: each line it prints goes through
+ * console, so the log gets it too, with secrets hidden. It gets no input, so a question it would ask stops it instead
+ * of waiting. Resolves to { status, output }, status null when it couldn't start.
+ */
+function runToolLive(command, args, options = {}) {
+  const settings = { ...options, stdio: ["ignore", "pipe", "pipe"] };
+  const child = process.platform === "win32" ? spawn(shellLine(command, args), { ...settings, shell: true }) : spawn(command, args, settings);
+  let output = "";
+  const forward = (stream) => {
+    let rest = "";
+    stream.setEncoding("utf8");
+    stream.on("data", (chunk) => {
+      output += chunk;
+      const lines = `${rest}${chunk}`.split(/\r?\n/);
+      rest = lines.pop();
+      for (const line of lines) console.log(`    ${line}`);
+    });
+    stream.on("end", () => rest && console.log(`    ${rest}`));
+  };
+  forward(child.stdout);
+  forward(child.stderr);
+  return new Promise((resolve) => {
+    child.on("error", (error) => resolve({ status: null, error, output }));
+    child.on("close", (status) => resolve({ status, output }));
+  });
 }
 
 /** Whether a runTool result means the tool isn't installed. On Windows the shell always starts, and says so instead. */
@@ -144,7 +182,8 @@ TWILIO_TOLLFREE=
 
 # Only with DEPLOYMENT_MODE=cloud: who sells the plans, polar or stripe.
 BILLING_PROVIDER=polar
-# Polar, only with BILLING_PROVIDER=polar: the organization's ID, and sandbox or live.
+# Polar, only with BILLING_PROVIDER=polar: sandbox or live, and the organization's ID. Leave the ID empty
+# to take it from the worker's token; when it's set, up checks that the token belongs to it.
 POLAR_ORGANIZATION_ID=
 POLAR=sandbox
 # Stripe, only with BILLING_PROVIDER=stripe: sandbox or live. The account is the one the keys
@@ -190,6 +229,8 @@ TURNSTILE_SECRET_KEY=
 # Polar, only with DEPLOYMENT_MODE=cloud: the admin's and the worker's tokens (guide 3.7, Polar, step 3).
 POLAR_ADMIN_TOKEN=
 POLAR_WORKER_TOKEN=
+# connect then asks for a third Polar token, the short-lived setup token (POLAR_SETUP_TOKEN), and keeps it
+# in memory only: paste it when asked rather than putting it here.
 # Stripe, only with BILLING_PROVIDER=stripe: the admin's and the worker's restricted keys, both of
 # the deployment's account (rk_test_... in a sandbox; guide 3.7, "Selling plans (Stripe)", step 3).
 STRIPE_ADMIN_KEY=
@@ -221,7 +262,8 @@ const hiddenValues = new Set();
 const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9+/=_-]{16,}|re_[A-Za-z0-9_]{16,}|lsp_[A-Za-z0-9_]{16,}|polar_[a-z]{2,4}_[A-Za-z0-9_]{16,})/g;
 const SECRET_KEYS = new Set(["OPENAI_API_KEY", "TWILIO_AUTH_TOKEN", "SMTP_PASSWORD", "TURNSTILE_SECRET_KEY", "POLAR_ADMIN_TOKEN",
   "POLAR_WORKER_TOKEN", "OPENAI_WEBHOOK_SECRET", "RAILWAY_API_TOKEN", "OPENAI_ADMIN_KEY", "TWILIO_MAIN_AUTH_TOKEN", "RESEND_ADMIN_KEY",
-  "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY", "STRIPE_ADMIN_KEY", "STRIPE_WORKER_KEY", "STRIPE_API_KEY"]);
+  "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY", "STRIPE_ADMIN_KEY", "STRIPE_WORKER_KEY", "STRIPE_API_KEY",
+  "POLAR_SETUP_TOKEN", "POLAR_WEBHOOK_SECRET"]);
 
 function hide(value) {
   if (typeof value === "string" && value.length >= 8) hiddenValues.add(value);
@@ -516,7 +558,8 @@ function loadRun(file, { log = true } = {}) {
   if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
   else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
   if (s.CLOUDFLARE_ACCOUNT_ID && !/^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ACCOUNT_ID)) problems.push("CLOUDFLARE_ACCOUNT_ID is the 32-character Account ID from the zone's Overview page");
-  if (s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "polar" && !s.POLAR_ORGANIZATION_ID) problems.push("POLAR_ORGANIZATION_ID is empty, and DEPLOYMENT_MODE is cloud with BILLING_PROVIDER=polar");
+  // Empty, it comes from the worker's Polar token (polar.tokens).
+  if (s.POLAR_ORGANIZATION_ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.POLAR_ORGANIZATION_ID)) problems.push("POLAR_ORGANIZATION_ID is the Polar organization's ID, a UUID, or empty to take it from the worker's token");
   if (s.TWILIO_TOLLFREE && s.TWILIO_TOLLFREE !== "buy" && !/^\+\d{8,15}$/.test(s.TWILIO_TOLLFREE)) problems.push("TWILIO_TOLLFREE is buy, a number such as +18445550123, or empty");
   if (s.TWILIO_TOLLFREE && s.DEPLOYMENT_MODE !== "cloud") problems.push("TWILIO_TOLLFREE is only for DEPLOYMENT_MODE=cloud");
   if (problems.length) throw new Error(`${file} needs fixing:\n  ${problems.join("\n  ")}`);
@@ -832,7 +875,12 @@ async function secret(name, question, check = () => true, { envToo = true } = {}
     if (!check(found)) throw new Error(`${name} in ${envToo && process.env[name]?.trim() ? "the environment" : config.file} doesn't look right (${question})`);
     return found;
   }
-  if (!process.stdin.isTTY) console.log("  (This terminal can't hide typing, such as Git Bash's: put the value in the secrets file instead, or run in PowerShell.)");
+  return askSecret(name, question, check);
+}
+
+/** A secret asked for, with typing hidden where the terminal can hide it. */
+async function askSecret(name, question, check = () => true, instead = "put the value in the secrets file instead") {
+  if (!process.stdin.isTTY) console.log(`  (This terminal can't hide typing, such as Git Bash's: ${instead}, or run in PowerShell.)`);
   const answer = hide(await ask(`${question} (typing is hidden): `, { hidden: true }));
   if (!answer || !check(answer)) throw new Error(`no valid value given for ${name}`);
   return answer;
@@ -907,10 +955,12 @@ async function http(service, url, { method = "GET", headers = {}, body, form } =
     // Not JSON: reported below by status.
   }
   if (!response.ok) {
-    const message = json?.error?.message ?? json?.message ?? json?.errors?.[0]?.message ?? `HTTP ${response.status}`;
+    // Polar's answers carry their reason in detail; the admin's API names its error in error.code.
+    const message = json?.error?.message ?? json?.message ?? json?.errors?.[0]?.message ?? (typeof json?.detail === "string" ? json.detail : undefined) ?? `HTTP ${response.status}`;
     const error = new Error(`${service} refused ${method} ${new URL(url).pathname}: ${message}`);
     error.status = response.status;
     error.service = service;
+    if (typeof json?.error?.code === "string") error.code = json.error.code;
     throw error;
   }
   return json;
@@ -963,6 +1013,46 @@ async function cloudflare(pathname, options = {}) {
   return json?.result;
 }
 
+/** Every item of a Polar list, 100 a page, read with one of the deployment's Polar tokens on POLAR's server. */
+async function polarList(run, token, pathname) {
+  const base = URLS.polar ?? POLAR_SERVERS[run.settings.POLAR];
+  const items = [];
+  for (let page = 1; ; page += 1) {
+    const data = await http("Polar", `${base}${pathname}?page=${page}&limit=100`, { headers: { Authorization: `Bearer ${token}`, "polar-version": POLAR_API_VERSION } });
+    items.push(...(data?.items ?? []));
+    if (page >= (data?.pagination?.max_page ?? 1)) return items;
+  }
+}
+
+/** The one organization a Polar organization token belongs to, as Polar lists it to that token. */
+async function polarOrganizationOf(run, token, who) {
+  let organizations;
+  try {
+    organizations = await polarList(run, token, "/v1/organizations/");
+  } catch (error) {
+    // Which token it was, for the message and for hints().
+    error.message = `${who}: ${error.message}`;
+    throw error;
+  }
+  if (organizations.length !== 1) {
+    throw Object.assign(new Error(`${who} reaches ${organizations.length} Polar organizations. Use an organization token, made in the organization's Settings > Developers, which reaches exactly one`), { service: "Polar" });
+  }
+  return organizations[0];
+}
+
+/**
+ * The deployment's Polar organization: the one polar.tokens found the worker's token belongs to, else the setting (a
+ * state file from before polar.tokens recorded it). The two can only differ when the setting changed afterwards.
+ */
+function polarOrganization(run) {
+  const recorded = v(run, "POLAR_ORGANIZATION_ID");
+  const setting = run.settings.POLAR_ORGANIZATION_ID;
+  if (recorded && setting && recorded.toLowerCase() !== setting.toLowerCase()) {
+    throw new Error(`POLAR_ORGANIZATION_ID in ${run.file} is ${setting}, but the worker's Polar token belongs to ${recorded}. To move to another organization, put its tokens in the secrets file, then redo polar.tokens`);
+  }
+  return recorded ?? setting;
+}
+
 // ---------------------------------------------------------------- up
 
 async function up(run) {
@@ -986,16 +1076,23 @@ async function up(run) {
     await stripeKeysStep(run);
   } else if (s.DEPLOYMENT_MODE === "cloud") {
     console.log("\nPolar");
-    await step(run, "polar.tokens", "Polar's two platform tokens (Polar makes tokens only in its dashboard)", async () => {
+    await step(run, "polar.tokens", "Polar's two platform tokens, and the organization they belong to (Polar makes tokens only in its dashboard)", async () => {
       if (!given("POLAR_ADMIN_TOKEN") || !given("POLAR_WORKER_TOKEN")) await byHand([
         `In Polar's ${s.POLAR} organization, Settings > Developers > New Token, make two tokens (guide 3.7, "Selling plans (Polar)", step 3):`,
         `"${baseName(s)} admin" with customer_sessions:write only, and "${baseName(s)} worker" with checkouts:write,`,
         "events:write, organizations:read, meters:read, products:read, discounts:read, subscriptions:write, customers:write.",
       ]);
-      return {
-        POLAR_ADMIN_TOKEN: await secret("POLAR_ADMIN_TOKEN", "The admin's Polar token"),
-        POLAR_WORKER_TOKEN: await secret("POLAR_WORKER_TOKEN", "The worker's Polar token"),
-      };
+      const admin = await secret("POLAR_ADMIN_TOKEN", "The admin's Polar token");
+      const worker = await secret("POLAR_WORKER_TOKEN", "The worker's Polar token");
+      if (admin === worker) throw new Error("POLAR_ADMIN_TOKEN and POLAR_WORKER_TOKEN are the same token. Make two, each with only its own scopes (guide 3.7, \"Selling plans (Polar)\", step 3)");
+      // The worker's token reads its organization (organizations:read), as Stripe's keys name their account. The
+      // admin's can only open customer portals, so it isn't checked.
+      const organization = await polarOrganizationOf(run, worker, "The worker's Polar token");
+      if (s.POLAR_ORGANIZATION_ID && s.POLAR_ORGANIZATION_ID.toLowerCase() !== String(organization.id).toLowerCase()) {
+        throw new Error(`the worker's Polar token belongs to the ${s.POLAR} organization ${organization.name} (${organization.id}), and POLAR_ORGANIZATION_ID in ${run.file} is ${s.POLAR_ORGANIZATION_ID}. Make both tokens in that organization, or empty POLAR_ORGANIZATION_ID to use ${organization.id}`);
+      }
+      console.log(`  the worker's token belongs to Polar's ${s.POLAR} organization ${organization.name} (${organization.id})`);
+      return { POLAR_ADMIN_TOKEN: admin, POLAR_WORKER_TOKEN: worker, POLAR_ORGANIZATION_ID: organization.id };
     });
   }
   console.log("\nRailway");
@@ -1016,7 +1113,9 @@ async function up(run) {
     const railwayHost = v(run, "RAILWAY_HOST");
     const host = appHost(run);
     const first = railwayHost && railwayHost !== host ? ` (https://${railwayHost} answers first, while DNS spreads and Railway issues the certificate)` : "";
-    console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}, run:\n  node devops/bootstrap.mjs connect ${run.file}${openByHand(run, "up")}`);
+    // connect's Polar billing works with the operator key, which acts as OPERATOR_EMAIL's account: signing up first saves a wait there.
+    const next = s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "polar" ? `, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL} with the 6-digit code from the email\n(connect sets Polar up with a key that acts as that account). Then run:` : ", run:";
+    console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}${next}\n  node devops/bootstrap.mjs connect ${run.file}${openByHand(run, "up")}`);
   }
 }
 
@@ -1954,7 +2053,7 @@ function variableSections(run) {
       STORAGE_PROVIDER: "s3", S3_BUCKET: "${{Bucket.BUCKET}}", S3_ENDPOINT: "${{Bucket.ENDPOINT}}", S3_REGION: "${{Bucket.REGION}}",
       S3_ACCESS_KEY_ID: "${{Bucket.ACCESS_KEY_ID}}", S3_SECRET_ACCESS_KEY: "${{Bucket.SECRET_ACCESS_KEY}}", S3_FORCE_PATH_STYLE: "false",
       ...(cloud && x("TWILIO_ALERT_SMS_FROM") ? { TWILIO_ALERT_SMS_FROM: x("TWILIO_ALERT_SMS_FROM") } : {}),
-      ...(polar ? { POLAR_ORGANIZATION_ID: s.POLAR_ORGANIZATION_ID, ...(s.POLAR === "sandbox" ? { POLAR_API_BASE_URL: "https://sandbox-api.polar.sh" } : {}) } : {}),
+      ...(polar ? { POLAR_ORGANIZATION_ID: polarOrganization(run), ...(s.POLAR === "sandbox" ? { POLAR_API_BASE_URL: POLAR_SERVERS.sandbox } : {}) } : {}),
       ...(stripe ? { BILLING_PROVIDER: "stripe", STRIPE_ACCOUNT_ID: x("STRIPE_ACCOUNT_ID") } : {}),
     }],
     ["admin", {
@@ -2241,6 +2340,282 @@ async function currentRailwayHost(run) {
   }
 }
 
+/**
+ * Sets those of the admin's variables that differ, which makes Railway deploy it again. Returns what waiting for that
+ * deployment needs ({ after: the newest deployment before }), or null when nothing differed.
+ */
+async function setAdminVariables(run, variables) {
+  const where = { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: v(run, "RAILWAY_SERVICE_IDS").admin };
+  const current = (await railway(Q.readVariables, where)).variables ?? {};
+  const changed = Object.fromEntries(Object.entries(variables).filter(([key, wanted]) => current[key] !== wanted));
+  if (!Object.keys(changed).length) {
+    console.log(`  = the admin has ${Object.keys(variables).join(" and ")} already`);
+    return null;
+  }
+  const before = await latestDeployment(run, where.serviceId);
+  await railway(Q.variables, { input: { ...where, variables: changed, skipDeploys: false } });
+  console.log(`  ~ admin: ${Object.keys(changed).join(", ")} (Railway deploys it again)`);
+  return { after: before?.id ?? null };
+}
+
+// ---------------------------------------------------------------- Polar billing, from connect
+
+// What the billing steps share within one run, and never save: the admin's deployment to wait for, the admin's address
+// that answers, and the operator key. The setup token is kept with the other tokens, in memory only.
+const billingRun = { redeploy: null, base: null, key: null };
+const SETUP_SCOPES = "organizations:write, meters:write, products:write, discounts:write and webhooks:write";
+const pollPause = () => new Promise((resolve) => setTimeout(resolve, Number(process.env.BOOTSTRAP_POLL_MS ?? 3000)));
+const withoutTrailingSlash = (url) => String(url ?? "").replace(/\/+$/, "");
+
+/** Waits until the admin runs its newest deployment: the one this run started by changing its variables, else whatever is newest. */
+async function adminDeployed(run) {
+  const serviceId = v(run, "RAILWAY_SERVICE_IDS").admin;
+  const started = billingRun.redeploy;
+  billingRun.redeploy = null;
+  if (started) {
+    console.log("  waiting for the admin's new deployment, with its new variables (a few minutes)");
+    return waitForDeployment(run, "admin", serviceId, started);
+  }
+  const latest = await latestDeployment(run, serviceId);
+  if (!latest) throw new Error("the admin has no deployment in Railway. Run up again");
+  if (["SUCCESS", "SLEEPING"].includes(latest.status)) return;
+  console.log(`  the admin's newest deployment is ${String(latest.status).toLowerCase()}: waiting for it`);
+  return waitForDeployment(run, "admin", serviceId, { id: latest.id });
+}
+
+/** The admin's address that answers: APP_BASE_URL's, else Railway's while DNS or the certificate is on its way. */
+async function answeringAdmin(hosts) {
+  if (billingRun.base) return billingRun.base;
+  if (process.env.BOOTSTRAP_APP_URL) return (billingRun.base = process.env.BOOTSTRAP_APP_URL);
+  let failures = [];
+  // A deployment that just went live may take a moment to answer at every address.
+  for (let tries = 0; tries < 20; tries += 1) {
+    failures = [];
+    for (const host of [...new Set(hosts.filter(Boolean))]) {
+      const health = await http("The admin", `https://${host}/api/health/ready`).catch((error) => ({ failed: error.message }));
+      if (health?.ok === true) return (billingRun.base = `https://${host}`);
+      failures.push(`https://${host}: ${health?.failed ?? JSON.stringify(health)}`);
+    }
+    await pollPause();
+  }
+  throw new Error(`the admin doesn't answer (${failures.join("; ")}). Check its deployment in Railway, then run connect again`);
+}
+
+/** The operator's platform key: from the file connect.platformKey wrote, else asked for. Kept in memory only. */
+async function operatorKey(run) {
+  if (billingRun.key) return billingRun.key;
+  const file = v(run, "PLATFORM_KEY_FILE");
+  if (file && fs.existsSync(file)) {
+    let key;
+    try {
+      key = JSON.parse(fs.readFileSync(file, "utf8"))?.key;
+    } catch {
+      // Said below.
+    }
+    if (typeof key !== "string" || !key.startsWith("lsp_")) throw new Error(`${file} holds no platform key (lsp_...). Put the operator key back in it, or delete the file to be asked for the key`);
+    console.log(`  the operator key: from ${file}`);
+    return (billingRun.key = hide(key));
+  }
+  console.log(`  ${file ? `${file} isn't here any more, so` : "There's no key file on this computer, so"} pnpm billing needs the operator key from the password manager.`);
+  return (billingRun.key = await askSecret("the operator key", "The operator's platform key (lsp_...)", (answer) => answer.startsWith("lsp_"), "put the key back in its .platform-keys file instead"));
+}
+
+/**
+ * Checks the operator key against the admin (GET /api/v1/me). The key acts as OPERATOR_EMAIL's account, so until that
+ * account is signed up and verified the admin answers 403 key_owner_inactive: the person signs up, and it checks again.
+ * Returns false when --yes didn't wait for that.
+ */
+async function operatorKeyWorks(run, base, key) {
+  for (let unknown = 0; ; ) {
+    try {
+      await http("The admin", `${base}/api/v1/me`, { headers: { Authorization: `Bearer ${key}` } });
+      console.log("  the operator key works");
+      return true;
+    } catch (error) {
+      if (error.status === 403 && error.code === "key_owner_inactive") {
+        await byHand([`Sign up at ${base}/en/signup as ${run.settings.OPERATOR_EMAIL}, with the 6-digit code from the email (guide 6.1).`,
+          "The operator key acts as that account, so pnpm billing can use it only once the account's email is verified."]);
+        if (byHandSkipped) return false;
+        continue;
+      }
+      // Railway may send a request or two to the deployment from before PLATFORM_API_KEYS changed.
+      if (error.status === 401 && (unknown += 1) < 10) {
+        await pollPause();
+        continue;
+      }
+      if (error.status === 401) throw new Error(`the admin doesn't know the operator key: its PLATFORM_API_KEYS has no entry for it. Give the key connect.platformKey made for ${run.settings.OPERATOR_EMAIL}, or redo connect.platformKey`);
+      throw error;
+    }
+  }
+}
+
+/**
+ * The Polar setup token, from the environment or the secrets file, else asked for, and kept in memory only. It must be
+ * a third token, of the deployment's organization.
+ */
+async function setupToken(run) {
+  const s = run.settings;
+  if (tokens.POLAR_SETUP_TOKEN) return tokens.POLAR_SETUP_TOKEN;
+  if (!process.env.POLAR_SETUP_TOKEN?.trim() && !fromFile("POLAR_SETUP_TOKEN", { quiet: true })) {
+    console.log(`  pnpm billing needs a Polar setup token. In Polar's ${s.POLAR} organization, Settings > Developers > New Token:`);
+    console.log(`  the shortest end date offered, and ${SETUP_SCOPES}. It's used for this run only, never saved.`);
+  }
+  const value = await token("POLAR_SETUP_TOKEN", "The Polar setup token");
+  try {
+    if ([v(run, "POLAR_ADMIN_TOKEN"), v(run, "POLAR_WORKER_TOKEN")].includes(value)) throw new Error(`that's the admin's or the worker's Polar token. The setup token is a third one, with ${SETUP_SCOPES}`);
+    const organization = await polarOrganizationOf(run, value, "The setup token");
+    const deployment = polarOrganization(run);
+    if (deployment && String(organization.id).toLowerCase() !== deployment.toLowerCase()) {
+      throw new Error(`the setup token belongs to Polar's ${s.POLAR} organization ${organization.name} (${organization.id}), and this deployment sells through ${deployment}. Make the setup token in that organization`);
+    }
+    return value;
+  } catch (error) {
+    delete tokens.POLAR_SETUP_TOKEN;
+    throw error;
+  }
+}
+
+/** pnpm billing's connection and token: its own, never a profile or token of the person's shell. */
+function billingEnv(base, key, token, folder) {
+  // XDG_CONFIG_HOME in a folder of its own, so the command line's saved profiles aren't even read.
+  return { ...process.env, LOBBYSTACK_URL: base, LOBBYSTACK_API_KEY: key, POLAR_SETUP_TOKEN: token, POLAR_READ_TOKEN: token, XDG_CONFIG_HOME: folder };
+}
+
+/** Runs pnpm billing from the repository, showing what it prints; says so when pnpm itself is missing. */
+async function pnpmBilling(args, env) {
+  console.log(`  pnpm billing ${args.join(" ")}`);
+  const result = await runToolLive("pnpm", ["--silent", "billing", ...args], { cwd: REPO_ROOT, env });
+  if (result.status === null || (process.platform === "win32" && result.status !== 0 && /is not recognized as an internal or external command/i.test(result.output))) {
+    throw new Error("pnpm isn't installed: npm install --global pnpm, then pnpm install in the repository folder, then run again");
+  }
+  return result;
+}
+
+/** A new folder only this user can read, for pnpm billing's files, deleted once fn is done. */
+async function inPrivateFolder(fn) {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "lobbystack-billing-"));
+  try {
+    return await fn(folder);
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+/** The [service] sections of a file for railway-vars.mjs, such as the one pnpm billing apply writes. */
+function readVariableSections(text) {
+  const services = {};
+  let current = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    const section = line.match(/^\[(.+)\]$/);
+    if (section) current = section[1].split(",").map((name) => name.trim()).filter(Boolean);
+    else if (line && !line.startsWith("#") && line.includes("=")) {
+      for (const service of current) (services[service] ??= {})[line.slice(0, line.indexOf("=")).trim()] = line.slice(line.indexOf("=") + 1).trim();
+    }
+  }
+  return services;
+}
+
+/**
+ * Sets Polar up for the deployment as guide 3.7, "Selling plans (Polar)", steps 5 to 8 do by hand, through the same
+ * pnpm billing: plan, then apply once the person types yes, then the webhook's secret on the admin, then verify. It
+ * uses the operator key connect.platformKey made and one setup token, and saves neither.
+ */
+async function polarBillingSteps(run, hosts) {
+  const s = run.settings;
+  // The webhook is for APP_BASE_URL's address even while only Railway's answers, as OpenAI's is.
+  const webhookUrl = `https://${hosts[0]}${POLAR_WEBHOOK_PATH}`;
+  const flags = ["--brand", s.BRAND, "--polar", s.POLAR, "--webhook-url", webhookUrl];
+  await step(run, "connect.billing.apply", `Polar sells brands/${s.BRAND}/billing.json's plans: pnpm billing plan, then apply once you type yes`, async () => {
+    await adminDeployed(run);
+    const base = await answeringAdmin(hosts);
+    const key = await operatorKey(run);
+    if (!(await operatorKeyWorks(run, base, key))) return {};
+    const token = await setupToken(run);
+    return inPrivateFolder(async (folder) => {
+      const env = billingEnv(base, key, token, folder);
+      const plan = await pnpmBilling(["plan", ...flags], env);
+      if (plan.status === 1) throw new Stop("pnpm billing plan refused, so nothing changed (above). Fix what it lists, then run connect again");
+      if (plan.status !== 0) throw new Error("pnpm billing plan stopped (above). Fix what it says, then run connect again");
+      if (assumeYes) console.log("  --yes: applying the plan without asking");
+      await confirm(`  Apply that plan to ${base} and Polar's ${s.POLAR} organization?`);
+      // The webhook's secret goes through a file in the private folder, never through what pnpm billing prints, all of
+      // which goes to the log.
+      const file = path.join(folder, "railway.env");
+      const apply = await pnpmBilling(["apply", ...flags, "--yes", "--railway-file", file], env);
+      const values = fs.existsSync(file) ? readVariableSections(fs.readFileSync(file, "utf8")) : {};
+      const secret = values.admin?.POLAR_WEBHOOK_SECRET;
+      if (secret) {
+        // Kept at once, so a step that fails after this one still has it. Polar lists it again to the setup token.
+        run.state.values.POLAR_WEBHOOK_SECRET = hide(secret);
+        save(run);
+        console.log("  kept the new webhook's secret, for the admin (connect.billing.secret)");
+      }
+      const organization = values.worker?.POLAR_ORGANIZATION_ID;
+      if (organization && organization.toLowerCase() !== String(polarOrganization(run)).toLowerCase()) throw new Error(`pnpm billing apply set up Polar organization ${organization}, but the deployment uses ${polarOrganization(run)}`);
+      // 1 is drift as well as a refusal: on a first run, apply's own check always finds the admin without the
+      // webhook's secret. The next steps set it, and verify decides.
+      if (apply.status !== 0 && apply.status !== 1) throw new Error("pnpm billing apply stopped (above). Run connect again: what it made in Polar is found again by its tags");
+      return {};
+    });
+  });
+  if (!dryRun && !run.state.done["connect.billing.apply"]) return;
+  await step(run, "connect.billing.secret", "POLAR_WEBHOOK_SECRET on the admin: the signing secret of Polar's webhook, which redeploys it", async () => {
+    const token = await setupToken(run);
+    const endpoints = (await polarList(run, token, "/v1/webhooks/endpoints")).filter((endpoint) => withoutTrailingSlash(endpoint.url) === withoutTrailingSlash(webhookUrl));
+    if (!endpoints.length) {
+      // The apply didn't make it, such as when it was refused after the plan: it runs again.
+      delete run.state.done["connect.billing.apply"];
+      save(run);
+      throw new Error(`Polar has no webhook to ${webhookUrl}, so connect.billing.apply runs again next time. Fix what pnpm billing apply listed, then run connect again`);
+    }
+    if (endpoints.length > 1) throw new Error(`Polar has ${endpoints.length} webhooks to ${webhookUrl}. Delete all but one in Polar (Settings > Webhooks), then run connect again`);
+    const secret = endpoints[0].secret;
+    if (typeof secret !== "string" || !secret) throw Object.assign(new Error("Polar didn't show the webhook's secret: the setup token needs webhooks:write"), { service: "Polar" });
+    hide(secret);
+    if (v(run, "POLAR_WEBHOOK_SECRET") && v(run, "POLAR_WEBHOOK_SECRET") !== secret) console.log("  Polar's webhook has another secret than the state file kept: Polar's is the one that counts, so it's used");
+    const base = await answeringAdmin(hosts);
+    const key = await operatorKey(run);
+    // The admin reports the hash of the secret it runs with, never the secret.
+    const running = async () => (await http("The admin", `${base}/api/v1/billing/catalog`, { headers: { Authorization: `Bearer ${key}` } }))?.polar?.secret_sha256 ?? null;
+    if ((await running()) === hashText(secret)) {
+      console.log("  = the admin runs with the webhook's secret already");
+      return { POLAR_WEBHOOK_SECRET: secret };
+    }
+    const serviceId = v(run, "RAILWAY_SERVICE_IDS").admin;
+    let started = await setAdminVariables(run, { POLAR_WEBHOOK_SECRET: secret });
+    if (!started) {
+      // Railway has it, but the admin runs a deployment from before: deploy it again.
+      started = { after: (await latestDeployment(run, serviceId))?.id ?? null };
+      await railway(Q.redeploy, { environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId });
+    }
+    console.log("  waiting for the admin's new deployment (a few minutes)");
+    await waitForDeployment(run, "admin", serviceId, started);
+    // Railway may still send a request or two to the deployment from before.
+    for (let tries = 1; (await running().catch(() => null)) !== hashText(secret); tries += 1) {
+      if (tries >= 40) throw new Error("the admin's new deployment still doesn't run with the webhook's secret. Check its variables and deployment in Railway, then run connect again");
+      await pollPause();
+    }
+    console.log("  the admin runs with the webhook's secret");
+    return { POLAR_WEBHOOK_SECRET: secret };
+  });
+  if (!dryRun && !run.state.done["connect.billing.secret"]) return;
+  await step(run, "connect.billing.verify", "pnpm billing verify: billing.json, the admin's tables and Polar agree", async () => {
+    const base = await answeringAdmin(hosts);
+    const key = await operatorKey(run);
+    const token = await setupToken(run);
+    const result = await inPrivateFolder((folder) => pnpmBilling(["verify", ...flags], billingEnv(base, key, token, folder)));
+    if (result.status === 1) {
+      // The apply finds what exists and changes only what differs, so running it again is how a difference is fixed.
+      for (const id of ["connect.billing.apply", "connect.billing.secret"]) delete run.state.done[id];
+      save(run);
+      throw new Stop("pnpm billing verify found differences (the DRIFT lines above). Fix what they say, then run connect again: it runs the apply again, and asks for yes");
+    }
+    if (result.status !== 0) throw new Error("pnpm billing verify couldn't read all it checks (above). Run connect again once that's fixed");
+    console.log(`  Polar sells the plans. Delete the setup token now, in Polar's ${s.POLAR} organization (Settings > Developers).`);
+  });
+}
+
 async function connect(run) {
   const s = run.settings;
   if (!run.state.done["deploy.admin"]) throw new Error("run up first, and finish it");
@@ -2336,53 +2711,55 @@ async function connect(run) {
   // connect.variables puts both values on the admin together, so it waits for a webhook --yes didn't wait for.
   if (!dryRun && !run.state.done["connect.webhook"]) return console.log(openByHand(run, "connect"));
   await step(run, "connect.variables", "OPENAI_WEBHOOK_SECRET and PLATFORM_API_KEYS on the admin, which redeploys it", async () => {
-    await railway(Q.variables, {
-      input: {
-        projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: v(run, "RAILWAY_SERVICE_IDS").admin,
-        variables: { OPENAI_WEBHOOK_SECRET: v(run, "OPENAI_WEBHOOK_SECRET"), PLATFORM_API_KEYS: v(run, "PLATFORM_API_KEYS") }, skipDeploys: false,
-      },
-    });
+    // The billing steps wait for this deployment before they use the key.
+    billingRun.redeploy = await setAdminVariables(run, { OPENAI_WEBHOOK_SECRET: v(run, "OPENAI_WEBHOOK_SECRET"), PLATFORM_API_KEYS: v(run, "PLATFORM_API_KEYS") });
   });
-  if (dryRun) return;
-  // The command line's profile is local, so it keeps the settings file's NAME when there is one.
-  const profile = (s.NAME || baseName(s)).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  const keyFile = v(run, "PLATFORM_KEY_FILE") && fs.existsSync(v(run, "PLATFORM_KEY_FILE")) ? v(run, "PLATFORM_KEY_FILE") : null;
-  const login = `pnpm lobbystack login --url https://${host} --key-stdin --profile ${profile}`;
   const cloud = s.DEPLOYMENT_MODE === "cloud";
   const stripe = s.BILLING_PROVIDER === "stripe";
-  const billing = (command) => `pnpm billing ${command} --brand ${s.BRAND} ${stripe ? `--stripe ${s.STRIPE}` : `--polar ${s.POLAR}`} --profile ${profile}`;
-  const billingFile = `.env.${stripe ? "stripe" : "polar"}-${profile}`;
+  if (cloud && !stripe) {
+    console.log("\nPolar billing");
+    await polarBillingSteps(run, [host, railwayHost]);
+    // A step --yes didn't wait at, such as the sign-up, leaves the rest for the next run.
+    if (!dryRun && !run.state.done["connect.billing.verify"]) return console.log(openByHand(run, "connect"));
+  }
+  if (dryRun) return;
+  // The command line's profile is local, so it keeps the settings file's NAME when there is one. The command line
+  // takes up to 40 letters, digits, dashes or underscores.
+  const profile = (s.NAME || baseName(s)).toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/^-+|-+$/g, "") || "default";
+  const keyFile = v(run, "PLATFORM_KEY_FILE") && fs.existsSync(v(run, "PLATFORM_KEY_FILE")) ? v(run, "PLATFORM_KEY_FILE") : null;
+  const login = `pnpm lobbystack login --url https://${host} --key-stdin --profile ${profile}`;
+  const billing = (command) => `pnpm billing ${command} --brand ${s.BRAND} --stripe ${s.STRIPE} --profile ${profile}`;
+  const billingFile = `.env.stripe-${profile}`;
   const noStripeBlock = stripe && brandHasStripeBlock(s.BRAND) === false ? `
      First, brands/${s.BRAND}/billing.json needs a stripe block, which it hasn't yet: add one in a pull request
      (brands/README.md), and deploy it.` : "";
-  const billingSteps = stripe ? `
-  3. Stripe (guide 3.7, "Selling plans (Stripe)", steps 6 to 8), with a setup key (STRIPE_SETUP_KEY) made in
+  // With Polar, connect did the billing above, which needs the operator's account, so the sign-up is done too.
+  const steps = [
+    cloud && !stripe
+      ? `In Polar's ${s.POLAR} organization, Settings > Developers, delete the setup token: billing is set up, and nothing else uses it.`
+      : `Once the admin's new deployment is Active, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL},
+     with the 6-digit code from the email.`,
+    `Sign the command line in with the operator key${keyFile ? ` (in ${keyFile})` : ""}:
+     ${keyFile ? `PowerShell: (Get-Content "${keyFile}" -Raw | ConvertFrom-Json).key | ${login}` : login}
+     ${keyFile ? `Or run ${login}, paste` : "Paste"} the key, press Enter, then Ctrl+D (in PowerShell or cmd: Ctrl+Z, then Enter).${keyFile ? `
+     Then move the key to the password manager and delete the file.` : ""}`,
+    ...(cloud && stripe ? [`Stripe (guide 3.7, "Selling plans (Stripe)", steps 6 to 8), with a setup key (STRIPE_SETUP_KEY) made in
      the same Stripe ${s.STRIPE === "live" ? "account's live mode" : "sandbox"} as the deployment's keys:${noStripeBlock}
      ${billing("plan")}
      ${billing("apply")} --railway-file ${billingFile}
      Then run node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token
      (the project's Settings > Tokens). Delete the file once the admin has redeployed. Set what
      plan lists for Stripe's Dashboard, which Stripe's API can't, then check:
-     ${billing("verify")}     (should end "Result: in sync (exit 0)")` : `
-  3. Polar (guide 3.7, "Selling plans (Polar)", steps 6 to 8), with a setup token made in Polar's ${s.POLAR} organization:
-     ${billing("plan")}
-     ${billing("apply")} --railway-file ${billingFile}
-     Then run node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token
-     (the project's Settings > Tokens). Delete the file once the admin has redeployed, then check:
-     ${billing("verify")}     (should end "Result: in sync (exit 0)")`;
-  console.log(`
-Done by the script. What's left needs you (guide 4.8, 4.9 and 6.1):
-  1. Once the admin's new deployment is Active, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL},
-     with the 6-digit code from the email.
-  2. Sign the command line in with the operator key${keyFile ? ` (in ${keyFile})` : ""}:
-     ${keyFile ? `PowerShell: (Get-Content "${keyFile}" -Raw | ConvertFrom-Json).key | ${login}` : login}
-     ${keyFile ? `Or run ${login}, paste` : "Paste"} the key, press Enter, then Ctrl+D (in PowerShell or cmd: Ctrl+Z, then Enter).${keyFile ? `
-     Then move the key to the password manager and delete the file.` : ""}${cloud ? billingSteps : ""}
-  ${cloud ? 4 : 3}. Set up the first business and buy its number (guide 6.3 and 6.4), then call it: the receptionist answers.
-     If it rings with no answer, check that the webhook is in the OpenAI project ${openaiProject}.
-  ${cloud ? 5 : 4}. Optional, in Git Bash: pnpm smoke:production (guide 4.9) with this deployment's values on the same line,
+     ${billing("verify")}     (should end "Result: in sync (exit 0)")`] : []),
+    `Set up the first business and buy its number (guide 6.3 and 6.4), then call it: the receptionist answers.
+     If it rings with no answer, check that the webhook is in the OpenAI project ${openaiProject}.`,
+    `Optional, in Git Bash: pnpm smoke:production (guide 4.9) with this deployment's values on the same line,
      ADMIN_BASE_URL=https://${host} SMOKE_EXPECTED_NUMBERS=<the number> and the Twilio values from the .vars file;
-     without them it checks the original project's address and numbers.${openByHand(run, "connect")}`);
+     without them it checks the original project's address and numbers.`,
+  ];
+  console.log(`
+Done by the script${cloud && !stripe ? ", Polar billing included" : ""}. What's left needs you (guide 4.8, 4.9 and 6.1):
+${steps.map((text, index) => `  ${index + 1}. ${text}`).join("\n")}${openByHand(run, "connect")}`);
 }
 
 // ---------------------------------------------------------------- status
@@ -2425,6 +2802,8 @@ const PASSED_ON = {
   "secrets": ["variables"],
   "connect.webhook": ["connect.variables"],
   "connect.platformKey": ["connect.variables"],
+  "connect.billing.apply": ["connect.billing.secret", "connect.billing.verify"],
+  "connect.billing.secret": ["connect.billing.verify"],
 };
 
 /** Takes the done mark off steps, so the next up or connect runs them again. Their values stay, and each step finds what it made before. */
@@ -2445,8 +2824,9 @@ function redo(run, wanted) {
     for (const key of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_IDS", "RAILWAY_HOST", "APP_HOST", "POST_DNS_HOST"]) delete run.state.values[key];
     // Every step that made or set something in the old project runs again in the new one. The secrets stay (the new
     // database gets the same passwords), and so do the webhook's secret and the operator key, which connect puts on
-    // the new admin. Without APP_BASE_URL the address changes, and with it the toll-free number's texting URL.
-    const projectBound = (id) => /^(railway\.|deploy\.|post\.)/.test(id) || ["turnstile", "variables", "connect.health", "connect.variables"].includes(id) || (id === "twilio.tollfree" && !run.settings.CUSTOM_HOST);
+    // the new admin. Without APP_BASE_URL the address changes, and with it the toll-free number's texting URL. The
+    // billing steps run again too: the new database has no plans yet, and Polar's webhook may need the new address.
+    const projectBound = (id) => /^(railway\.|deploy\.|post\.|connect\.billing\.)/.test(id) || ["turnstile", "variables", "connect.health", "connect.variables"].includes(id) || (id === "twilio.tollfree" && !run.settings.CUSTOM_HOST);
     for (const id of Object.keys(run.state.done).filter(projectBound)) {
       delete run.state.done[id];
       console.log(`  ${id}: runs again next time`);
@@ -2475,6 +2855,8 @@ const PROVIDERS = {
     needs: "Zone > DNS > Edit on the zone, and Account > Turnstile > Edit on the account" },
   Stripe: { token: "STRIPE_ADMIN_KEY or STRIPE_WORKER_KEY", make: "https://dashboard.stripe.com/apikeys (Create restricted key)", status: "https://status.stripe.com",
     needs: "a restricted key of the deployment's own account and mode, with the permissions docs/providers/stripe.md lists" },
+  Polar: { token: "the Polar token named above", make: "Polar: the organization's Settings > Developers > New Token", status: "https://status.polar.sh",
+    needs: "an organization token of the deployment's organization, made in Polar's sandbox or live as POLAR says (each knows only its own tokens), with the scopes guide 3.7 lists" },
 };
 
 /** Suggestions for an error, from what failed and how. */
@@ -2543,7 +2925,7 @@ async function doctor(run) {
     if (readable.length) note(`other accounts on this computer can read ${readable.join(", ")}. To keep them to yours, in PowerShell: icacls <file> /inheritance:r /grant:r "\${env:USERNAME}:F"`);
   }
   const pnpm = tool("pnpm", ["--version"]);
-  (pnpm.status === 0 ? ok : fix)(pnpm.status === 0 ? `pnpm ${pnpm.stdout.trim()} (connect uses it for the platform key)` : missingTool(pnpm) ? "pnpm isn't installed: connect needs it (npm install --global pnpm, then pnpm install here)" : `pnpm didn't run: ${firstLine(pnpm)}`);
+  (pnpm.status === 0 ? ok : fix)(pnpm.status === 0 ? `pnpm ${pnpm.stdout.trim()} (connect uses it for the platform key${s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "polar" ? " and pnpm billing" : ""})` : missingTool(pnpm) ? "pnpm isn't installed: connect needs it (npm install --global pnpm, then pnpm install here)" : `pnpm didn't run: ${firstLine(pnpm)}`);
   const cli = tool(RAILWAY_CLI, ["--version"]);
   (cli.status === 0 ? ok : note)(cli.status === 0 ? `Railway CLI ${cli.stdout.trim()} (makes the bucket)` : "no Railway CLI: you'll make the bucket by hand (npm install --global @railway/cli to avoid that)");
   if (s.STEP_GITHUB) {
@@ -2672,9 +3054,29 @@ async function doctor(run) {
     }
     if (brandHasStripeBlock(s.BRAND) === false) note(`Stripe: brands/${s.BRAND}/billing.json has no stripe block yet, which pnpm billing --stripe needs after the deploy: add one in a pull request (brands/README.md)`);
   } else if (s.DEPLOYMENT_MODE === "cloud") {
-    for (const name of ["POLAR_ADMIN_TOKEN", "POLAR_WORKER_TOKEN"]) {
-      const set = process.env[name]?.trim() || fromFile(name, { quiet: true });
-      (set ? ok : note)(`Polar: ${name} ${set ? "is set" : "isn't set, so up will ask for it"}`);
+    const polarToken = (name) => process.env[name]?.trim() || fromFile(name, { quiet: true }) || (run.state.done["polar.tokens"] ? v(run, name) : undefined);
+    const admin = polarToken("POLAR_ADMIN_TOKEN");
+    const worker = polarToken("POLAR_WORKER_TOKEN");
+    // The admin's token can only open billing portals, so no read-only call checks it.
+    (admin ? ok : note)(`Polar: POLAR_ADMIN_TOKEN ${admin ? "is set" : "isn't set, so up will ask for it"}`);
+    if (admin && admin === worker) fix("Polar: POLAR_ADMIN_TOKEN and POLAR_WORKER_TOKEN are the same token. Make two, each with only its own scopes (guide 3.7, \"Selling plans (Polar)\", step 3)");
+    // The worker's token reads its organization, which becomes POLAR_ORGANIZATION_ID; connect's setup token must be of the same one.
+    let expected = s.POLAR_ORGANIZATION_ID || v(run, "POLAR_ORGANIZATION_ID");
+    for (const [name, value, asker] of [["POLAR_WORKER_TOKEN", worker, "up"], ["POLAR_SETUP_TOKEN", process.env.POLAR_SETUP_TOKEN?.trim() || fromFile("POLAR_SETUP_TOKEN", { quiet: true }), "connect"]]) {
+      if (!value) {
+        note(`Polar: ${name} isn't set, so ${asker} will ask for it`);
+        continue;
+      }
+      hide(value);
+      try {
+        const organization = await polarOrganizationOf(run, value, name);
+        if (expected && expected.toLowerCase() !== String(organization.id).toLowerCase()) fix(`Polar: ${name} belongs to the ${s.POLAR} organization ${organization.name} (${organization.id}), not to ${expected}`);
+        else ok(`Polar: ${name} works (the ${s.POLAR} organization ${organization.name}, ${organization.id}${expected ? "" : ", which up makes POLAR_ORGANIZATION_ID"})`);
+        expected ||= String(organization.id);
+      } catch (error) {
+        fix(`Polar: ${error.message}`);
+        for (const tip of hints(error)) console.log(`         ${tip}`);
+      }
     }
   }
   const host = v(run, "APP_HOST") && appHost(run);

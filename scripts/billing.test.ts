@@ -329,6 +329,17 @@ describe("pnpm billing", () => {
     expect(printed.out).toContain("to POLAR_WEBHOOK_SECRET on lobbystack-admin, or run again with --railway-file next time.");
   });
 
+  it("leaves POLAR_API_BASE_URL out of a live Railway file, since an unset one means Polar's live server", async () => {
+    const context = await setUp({ seeded: false });
+    context.instance.polar.env = "production";
+    const railwayFile = join(root, "railway-live.txt");
+    await billing(["apply", "--brand", "alloplace", "--polar", "live", "--yes", "--railway-file", railwayFile], context);
+    const railway = await readFile(railwayFile, "utf8");
+    expect(railway).toContain(`[admin, worker]\nPOLAR_ORGANIZATION_ID=${context.fake.state.organization.id}\n`);
+    expect(railway).not.toContain("POLAR_API_BASE_URL");
+    expect(railway).toContain("[admin]\nPOLAR_WEBHOOK_SECRET=");
+  });
+
   it("keeps a new webhook's secret in the Railway file when a later Polar call fails", async () => {
     const context = await setUp({ seeded: false });
     await billing(["apply", ...sandbox, "--yes"], context);

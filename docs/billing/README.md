@@ -123,7 +123,7 @@ Flags that need a person's say:
 | `--allow-archive` | Archiving a product or discount the file no longer has. |
 | `--allow-undeployed` | Trying a file the deployment wasn't built with, on a sandbox. |
 | `--webhook-url <url>` | A webhook address other than the deployment's own `/api/webhooks/polar` or `/api/webhooks/stripe`. |
-| `--railway-file <new file>` | Saving `POLAR_API_BASE_URL`, `POLAR_ORGANIZATION_ID` and, when the run made the webhook, `POLAR_WEBHOOK_SECRET` to a new file readable only by you; on Stripe, `STRIPE_ACCOUNT_ID`, and the `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET` Stripe shows once. A name like `.env.railway` keeps it out of commits. Delete it once the values are set. |
+| `--railway-file <new file>` | Saving `POLAR_ORGANIZATION_ID`, `POLAR_API_BASE_URL` on the sandbox, and, when the run made the webhook, `POLAR_WEBHOOK_SECRET` to a new file readable only by you; on Stripe, `STRIPE_ACCOUNT_ID`, and the `STRIPE_WEBHOOK_SECRET` and `STRIPE_METER_WEBHOOK_SECRET` Stripe shows once. A name like `.env.railway` keeps it out of commits. Delete it once the values are set. |
 | `--admin-service <name>` | The admin's Railway service in that file and in what `apply` prints, when it isn't named `admin`, such as `lobbystack-admin` in a project set up like the original project's. |
 
 The file's format is the input of `devops/railway-vars.mjs`; setting the values in Railway by hand works the same. Current subscribers keep their old price, and edits made by hand in the provider's dashboard are put back to match the file.

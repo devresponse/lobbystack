@@ -208,10 +208,14 @@ function UserMenu({ user }: Pick<DashboardShellProps, "user">) {
   const openUpgradePlanDialog = useOpenUpgradePlanDialog();
   const signOut = useSignOut();
   const { business } = useActiveBusiness();
-  const billing = useQuery({ queryKey: ["billing", business?.businessId], enabled: Boolean(business?.businessId), queryFn: () => requestJson<{ account: { plan: string | null } | null; effectivePlan?: string; permissions: BillingPermissions; availableCheckoutPlans: Array<"starter" | "pro">; availableCheckoutIntervals: Record<"starter" | "pro", string[]> }>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`) });
+  const billing = useQuery({ queryKey: ["billing", business?.businessId], enabled: Boolean(business?.businessId), queryFn: () => requestJson<{ account: { plan: string | null } | null; effectivePlan?: string; permissions: BillingPermissions; availableCheckoutPlans: Array<"starter" | "pro">; availableCheckoutIntervals: Record<"starter" | "pro", string[]>; packOffers?: Array<{ checkoutAvailable: boolean }> }>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`) });
   // A business on a pack can start a plan too, even beside the subscription the pack replaced.
-  const showUpgradeToPro = billing.data?.permissions.hasCheckoutAccess === true && (billing.data.effectivePlan === "prepaid" || (billing.data.account?.plan ?? "free_cloud") === "free_cloud") && (billing.data.availableCheckoutPlans ?? []).some(plan => billing.data?.availableCheckoutIntervals[plan].length);
-  return <NavUser user={user} onSignOut={() => void signOut()} onUpgradeToPro={openUpgradePlanDialog} showUpgradeToPro={showUpgradeToPro} />;
+  const onFreeOrPack = billing.data?.effectivePlan === "prepaid" || (billing.data?.account?.plan ?? "free_cloud") === "free_cloud";
+  const plansOnSale = billing.data?.permissions.hasCheckoutAccess === true && (billing.data.availableCheckoutPlans ?? []).some(plan => billing.data?.availableCheckoutIntervals[plan].length);
+  // Packs are bought as plans are, from the Upgrade plan dialog, so where only packs are on sale it opens for them.
+  const packsOnSale = (billing.data?.packOffers ?? []).some((offer) => offer.checkoutAvailable);
+  const showUpgradeToPro = Boolean(billing.data) && onFreeOrPack && (plansOnSale || packsOnSale);
+  return <NavUser user={user} onSignOut={() => void signOut()} onUpgradeToPro={openUpgradePlanDialog} showUpgradeToPro={showUpgradeToPro} upgradeLabel={plansOnSale ? "pro" : "plan"} />;
 }
 
 // The commit the build came from (next.config.ts), so anyone signed in can tell

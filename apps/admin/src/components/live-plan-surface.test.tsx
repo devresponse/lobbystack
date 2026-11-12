@@ -220,39 +220,59 @@ describe("original billing overview behavior", () => {
 });
 
 describe("a business on prepaid packs", () => {
-  const packUsage = { secondsTotal: 30_000, secondsUsed: 6_000, secondsLeft: 24_030, nextEndsAt: "2027-01-30T00:00:00.000Z", lastEndsAt: "2027-03-30T00:00:00.000Z" };
+  const allowance = (total: number, used: number) => ({ total, used, left: total - used });
+  const packUsage = { secondsTotal: 30_000, secondsUsed: 6_000, secondsLeft: 24_030, alertSmsSegments: allowance(300, 12), outboundCallAttempts: allowance(120, 3), chatAiUnits: allowance(300, 40), nextEndsAt: "2027-01-30T00:00:00.000Z", lastEndsAt: "2027-03-30T00:00:00.000Z" };
   const usageStatus = (pack: Record<string, unknown> | null) => ({ usageComplete: true, voiceBlocked: false, alertSmsBlocked: false, outboundCallAttemptsBlocked: false, overageSpendingCapReached: false, overageSpendCents: 0, overageSpendingCapCents: null, pack });
-  const offer = { code: "pack-500-180", names: { en: "500 minutes" }, minutes: 500, voiceSeconds: 30_000, days: 180, amountCents: 9_900, currency: "cad", smsSegments: 50, outboundCalls: 20, chatUnits: 50, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable: true };
+  const offer = { code: "pack-500-180", names: { en: "500 minutes" }, minutes: 500, voiceSeconds: 30_000, days: 180, amountCents: 9_900, currency: "cad", smsSegments: 300, outboundCalls: 120, chatUnits: 300, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable: true };
+  const held = (patch: Record<string, unknown> = {}) => ({ id: "held", code: "pack-500-180", names: { en: "500 minutes, 180 days" }, status: "active", days: 180, amountCents: 9_900, currency: "cad", secondsTotal: 30_000, secondsLeft: 24_030, paidAt: "2026-10-01T00:00:00.000Z", endsAt: "2027-03-30T00:00:00.000Z", ...patch });
 
-  it("is labelled Prepaid, with its minutes left until its last pack ends instead of a voice allowance, and no plan end or waiting change", () => {
-    setup({ plan: "prepaid", cancelsAt: "2026-12-01T12:00:00.000Z", nextChange: { plan: "starter", tier: "starter", names: null, interval: "monthly", at: "2026-12-01T12:00:00.000Z" }, extra: { usageStatus: usageStatus(packUsage) } });
-    expect(screen.getByText("billing.planLabels.prepaidCard")).toBeTruthy();
-    expect(screen.queryByText("billing.planLabels.enterpriseCard")).toBeNull();
-    expect(screen.getByText("400")).toBeTruthy();
-    expect(translate).toHaveBeenCalledWith("billing.currentPlan.prepaidMinutesLeft", { count: 400 });
-    expect(translate).toHaveBeenCalledWith("billing.currentPlan.prepaidUntil", { date: expect.stringContaining("2027") });
-    // What it includes, but no custom voice allowance: its minutes are the ones left.
-    expect(screen.queryByText("billing.currentPlan.includedVoiceCustom")).toBeNull();
-    expect(screen.getByText("billing.currentPlan.includedSms")).toBeTruthy();
-    expect(translate).not.toHaveBeenCalledWith("billing.currentPlan.planEndsOn", expect.anything());
+  it("has its one pack as its plan: the pack's name, its price for its length, when it ends, and what it includes for that length", () => {
+    setup({ plan: "prepaid", cancelsAt: "2026-12-01T12:00:00.000Z", nextChange: { plan: "starter", tier: "starter", names: null, interval: "monthly", at: "2026-12-01T12:00:00.000Z" }, extra: { usageStatus: usageStatus(packUsage), packs: [held()] } });
+    expect(screen.getByText("500 minutes, 180 days")).toBeTruthy();
+    expect(screen.queryByText("billing.planLabels.prepaidCard")).toBeNull();
+    expect(screen.getByText("CA$99")).toBeTruthy();
+    // Its price is followed by its length, as a plan's is by its month.
+    expect(screen.getByText("common:planDisplay.perDays")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("common:planDisplay.perDays", { count: 180, amount: "180" });
+    // It ends as a plan that ends does, rather than with the subscription it replaced.
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.planEndsOn", { date: expect.stringContaining("2027") });
+    expect(translate).not.toHaveBeenCalledWith("billing.currentPlan.planEndsOn", { date: expect.stringContaining("2026") });
     expect(translate).not.toHaveBeenCalledWith("billing.currentPlan.planChangesOn", expect.anything());
     expect(screen.queryByText("billing.currentPlan.paygMonthlySuffix")).toBeNull();
+    // What it includes for its whole length, as a plan's are for its month.
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedVoice", { count: 500 });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedSms", { count: 300 });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedOutbound", { count: 120 });
+    expect(screen.queryByText("billing.currentPlan.includedVoiceCustom")).toBeNull();
+    expect(screen.queryByText("billing.currentPlan.includedSmsCustom")).toBeNull();
+    // The pack is the plan, so it isn't listed again.
+    expect(screen.queryByText("billing.packs.heldTitle")).toBeNull();
   });
 
-  it("says its minutes never end when one of its packs never ends", () => {
-    setup({ plan: "prepaid", extra: { usageStatus: usageStatus({ ...packUsage, lastEndsAt: null }) } });
-    expect(translate).toHaveBeenCalledWith("billing.currentPlan.prepaidNeverEnds");
-    expect(translate).not.toHaveBeenCalledWith("billing.currentPlan.prepaidUntil", expect.anything());
+  it("shows several packs as Prepaid until the last of them ends, each listed under it", () => {
+    setup({ plan: "prepaid", extra: { usageStatus: usageStatus(packUsage), packs: [held({ id: "first", names: { en: "First pack" }, endsAt: "2027-01-30T00:00:00.000Z" }), held({ id: "second", names: { en: "Second pack" } })] } });
+    expect(screen.getByText("billing.planLabels.prepaidCard")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.planEndsOn", { date: expect.stringContaining("Mar") });
+    expect(translate).not.toHaveBeenCalledWith("billing.currentPlan.planEndsOn", { date: expect.stringContaining("Jan") });
+    expect(screen.getByText("billing.packs.heldTitle")).toBeTruthy();
+    expect(screen.getByText("First pack")).toBeTruthy();
+    expect(screen.getByText("Second pack")).toBeTruthy();
+  });
+
+  it("says its plan has no end date when one of its packs never ends", () => {
+    setup({ plan: "prepaid", extra: { usageStatus: usageStatus({ ...packUsage, lastEndsAt: null }), packs: [held({ days: null, endsAt: null })] } });
+    expect(screen.getByText("billing.currentPlan.planNeverEnds")).toBeTruthy();
+    expect(screen.getByText("common:planDisplay.paidOnce")).toBeTruthy();
+    expect(translate).not.toHaveBeenCalledWith("billing.currentPlan.planEndsOn", expect.anything());
   });
 
   it("is offered Starter and Pro", () => {
-    setup({ plan: "prepaid", configured: true, extra: { usageStatus: usageStatus(packUsage) } });
+    setup({ plan: "prepaid", configured: true, extra: { usageStatus: usageStatus(packUsage), packs: [held()] } });
     expect(screen.getByRole("button", { name: "billing.actions.upgradeToPro" })).toBeTruthy();
   });
 
   it("can enter a promo code, whose plan it is warned ends its packs and the minutes left on them", async () => {
-    const held = (id: string, status: string, secondsLeft: number) => ({ id, code: "pack-500-180", names: { en: "500 minutes" }, status, secondsTotal: 30_000, secondsLeft, paidAt: "2026-10-01T00:00:00.000Z", endsAt: "2027-03-30T00:00:00.000Z" });
-    const fetchMock = setup({ plan: "prepaid", extra: { usageStatus: usageStatus(packUsage), packs: [held("live", "active", 24_030), held("disputed", "frozen", 6_000)] } });
+    const fetchMock = setup({ plan: "prepaid", extra: { usageStatus: usageStatus(packUsage), packs: [held({ id: "live" }), held({ id: "disputed", status: "frozen", secondsLeft: 6_000 })] } });
     const view: BillingCodeView = { code: "SALONS-2026", plan: "salons-half-off", tier: "starter", names: { en: "Salons half off" }, discount: null, currency: "cad", current: false, prices: [{ interval: "monthly", cents: 2900, discountedCents: 2900, checkoutAvailable: true }], included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1, receptionists: 1 }, moreThanTier: [] };
     fetchMock.mockImplementation(async (url: string) => url.startsWith("/api/billing/promo?") ? Response.json(view) : Response.json({}));
     await userEvent.click(screen.getByRole("button", { name: "billing.promo.link" }));
@@ -265,10 +285,11 @@ describe("a business on prepaid packs", () => {
     expect(screen.getByRole("button", { name: "billing.promo.subscribe.monthly" })).toBeTruthy();
   });
 
-  it("sees its packs and can buy more", () => {
-    setup({ plan: "prepaid", extra: { usageStatus: usageStatus(packUsage), packOffers: [offer], packs: [{ id: "held", code: "pack-500-180", names: { en: "500 minutes" }, status: "active", secondsTotal: 30_000, secondsLeft: 24_030, paidAt: "2026-10-01T00:00:00.000Z", endsAt: "2027-03-30T00:00:00.000Z" }], packCheckout: { refusal: null, endsSubscription: null } } });
-    expect(screen.getByText("billing.packs.title")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "billing.packs.buyMore" })).toHaveProperty("disabled", false);
+  it("buys another pack from the Upgrade plan dialog, as a plan is bought, with no picker of its own", () => {
+    setup({ plan: "prepaid", extra: { usageStatus: usageStatus(packUsage), packOffers: [offer], packs: [held()], packCheckout: { refusal: null, endsSubscription: null } } });
+    expect(screen.getByRole("button", { name: "billing.actions.upgradePlan" })).toBeTruthy();
+    expect(screen.queryByText("billing.packs.title")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
   });
 });
 
@@ -283,6 +304,25 @@ describe("prepaid packs on the plan page", () => {
   it("never sells packs on Enterprise", () => {
     setup({ plan: "enterprise", extra: { packOffers: [{ code: "pack-500-180", names: { en: "500 minutes" }, minutes: 500, voiceSeconds: 30_000, days: 180, amountCents: 9_900, currency: "cad", smsSegments: 50, outboundCalls: 20, chatUnits: 50, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable: false }], packCheckout: { refusal: "pack_not_sold_on_plan", endsSubscription: null } } });
     expect(screen.queryByText("billing.packs.title")).toBeNull();
+    expect(screen.queryByRole("button", { name: "billing.actions.upgradePlan" })).toBeNull();
+  });
+
+  it("offers Upgrade plan on Free where only packs are on sale, Upgrade to Pro where a plan is too, and nothing where no pack can be bought now", () => {
+    const pack = (checkoutAvailable: boolean) => ({ code: "listing_1_180", names: { en: "1 listing" }, minutes: 250, voiceSeconds: 15_000, days: 180, amountCents: 9_900, currency: "cad", smsSegments: 300, outboundCalls: 120, chatUnits: 300, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable });
+    setup({ plan: "free_cloud", extra: { packOffers: [pack(true)], packCheckout: { refusal: null, endsSubscription: null } } });
+    expect(screen.getByRole("button", { name: "billing.actions.upgradePlan" })).toBeTruthy();
+    cleanup();
+    setup({ plan: "free_cloud", configured: true, extra: { packOffers: [pack(true)], packCheckout: { refusal: null, endsSubscription: null } } });
+    expect(screen.getByRole("button", { name: "billing.actions.upgradeToPro" })).toBeTruthy();
+    cleanup();
+    setup({ plan: "free_cloud", extra: { packOffers: [pack(false)], packCheckout: { refusal: null, endsSubscription: null } } });
+    expect(screen.queryByRole("button", { name: "billing.actions.upgradePlan" })).toBeNull();
+  });
+
+  it("lists a pack a dispute froze beside Free", () => {
+    setup({ plan: "free_cloud", extra: { packs: [{ id: "frozen", code: "pack-500-180", names: { en: "500 minutes" }, status: "frozen", days: 180, amountCents: 9_900, currency: "cad", secondsTotal: 30_000, secondsLeft: 30_000, paidAt: "2026-10-01T00:00:00.000Z", endsAt: "2027-03-30T00:00:00.000Z" }] } });
+    expect(screen.getByText("billing.packs.heldTitle")).toBeTruthy();
+    expect(screen.getByText("billing.packs.frozen")).toBeTruthy();
   });
 
   it("waits for a pack's payment when the provider sends the person back, then shows the pack and cleans the address", async () => {

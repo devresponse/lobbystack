@@ -22,11 +22,12 @@ import { ConfirmActionDialog } from "./confirm-action-dialog";
 import { Skeleton } from "./ui/skeleton";
 import { Surface } from "./ui/surface";
 import { Table, TableBody, TableCard, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import { formatDateTime, intlLocale } from "@/lib/locale";
+import { formatDateTime } from "@/lib/locale";
 import type { BillingPackOfferViewModel, BillingPackViewModel, PackCheckoutViewModel, PackUsageViewModel } from "@/lib/page-view-models";
+import { packPriceSuffix } from "@/lib/plan-display";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
-import { formatPackDate, PacksSection } from "./billing-packs";
+import { HeldPacks } from "./billing-packs";
 
 type Billing = {
   /** The deployment's billing provider, and its name. */
@@ -158,6 +159,7 @@ export function LivePlanSurface() {
 
   const account = billing.data?.account;
   const plan = billing.data.effectivePlan;
+  const locale = i18n.language;
   const currency = billing.data.plans.currency;
   // A promo plan the business took with a code, shown by its own name and price while it has the plan's tier.
   const promoPlan = billing.data.promoPlan?.tier === plan ? billing.data.promoPlan : null;
@@ -170,13 +172,28 @@ export function LivePlanSurface() {
   // Free costs nothing, a custom plan has no fixed price (null), and a paid plan shows a month of its
   // interval, or nothing once the plan list no longer sells that price (undefined).
   const monthlyPrice = plan === "free_cloud" ? 0 : promoPrice ? promoPrice.perMonth : offer?.custom ? null : monthlyPriceCents(offer, annual ? "annual" : "monthly");
-  // What the plan includes as the server enforces it, so a promo plan shows its own allowances. A pack's
-  // minutes show as minutes left instead, since they last the whole pack.
-  const included = includedLines(billingPlanIncluded(billing.data.limits), (key, options) => options ? t(key, options) : t(key), i18n.language).filter((line) => plan !== "prepaid" || line.key !== "voiceSeconds").map((line) => line.text);
+  const packOffers = billing.data.packOffers ?? [];
+  const packs = billing.data.packs ?? [];
+  // On the prepaid tier the usage status says what the live packs hold for their whole length.
+  const packUsage = plan === "prepaid" ? billing.data.usageStatus?.pack ?? null : null;
+  // A pack is a plan paid once for its length, so a business on one pack has it as its plan: its name, its price for
+  // its length and when it ends. Several show as Prepaid until the last of them ends, each listed under it.
+  const planPack = plan === "prepaid" && packs.length === 1 ? packs[0]! : null;
+  const livePacks = packs.filter((pack) => pack.status === "active");
+  const prepaidEnd = plan === "prepaid" && livePacks.length > 0 ? { at: livePacks.some((pack) => pack.endsAt === null) ? null : livePacks.reduce((last, pack) => (pack.endsAt! > last ? pack.endsAt! : last), livePacks[0]!.endsAt!) } : null;
+  // What the plan includes as the server enforces it, so a promo plan shows its own allowances. On packs, it is what
+  // the live packs hold for their whole length, as a plan's is for its month; their limits are the server's.
+  const limitsIncluded = billingPlanIncluded(billing.data.limits);
+  const packIncluded = packUsage ? { ...limitsIncluded, voiceSeconds: packUsage.secondsTotal, alertSmsSegments: packUsage.alertSmsSegments.total, outboundCallAttempts: packUsage.outboundCallAttempts.total } : null;
+  const packCounted = new Set(["voiceSeconds", "alertSmsSegments", "outboundCallAttempts"]);
+  const included = includedLines(packIncluded ?? limitsIncluded, (key, options) => options ? t(key, options) : t(key), locale).filter((line) => plan !== "prepaid" || packIncluded !== null || !packCounted.has(line.key)).map((line) => line.text);
   const permissions = billing.data?.permissions;
   // A business on a pack can buy Starter or Pro, which ends its packs.
-  const canUpgrade = permissions?.hasCheckoutAccess && billing.data?.availableCheckoutPlans.some(target =>
+  const canUpgradePlan = permissions?.hasCheckoutAccess === true && billing.data.availableCheckoutPlans.some(target =>
     (plan === "free_cloud" || plan === "prepaid" || (plan === "starter" && target === "pro")) && billing.data.availableCheckoutIntervals[target].length > 0);
+  // Packs are bought as plans are, from the Upgrade plan dialog's cards, where the business may buy one now.
+  const canBuyPack = plan !== "self_host" && plan !== "enterprise" && packOffers.some((offer) => offer.checkoutAvailable);
+  const canUpgrade = canUpgradePlan || canBuyPack;
   const canManage = permissions?.hasCustomerPortalAccess === true;
   const paymentActionUrl = billing.data.paymentActionUrl ?? null;
   // Cancel, resume and keep a paid plan here on a provider that lets the app do them.
@@ -186,13 +203,8 @@ export function LivePlanSurface() {
   const changeWaits = Boolean(billing.data.nextChange && !billing.data.cancelsAt && !promoPlan?.ends);
   // Anyone who could buy a plan here can enter a code, a business on a pack too, except on a plan billed outside the provider.
   const canEnterCode = permissions?.hasCheckoutAccess === true && (plan === "free_cloud" || plan === "prepaid" || plan === "starter" || plan === "pro");
-  const packOffers = billing.data.packOffers ?? [];
-  const packs = billing.data.packs ?? [];
   // A code's plan bought from Free or a pack starts a subscription, which ends every pack held, frozen ones too, as the plan dialog warns.
   const packMinutesLeft = plan === "free_cloud" || plan === "prepaid" ? Math.floor(packs.reduce((seconds, pack) => seconds + pack.secondsLeft, 0) / 60) : 0;
-  // On the prepaid tier the usage status says what the live packs hold: their minutes left, and when the last of them ends.
-  const packUsage = plan === "prepaid" ? billing.data.usageStatus?.pack ?? null : null;
-  const prepaidMinutesLeft = Math.floor((packUsage?.secondsLeft ?? 0) / 60);
 
   return <PageSurface title={t("sections.billing")}>
     <div className="flex w-full flex-col gap-10">
@@ -202,26 +214,23 @@ export function LivePlanSurface() {
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
             <div className="flex flex-col gap-3">
               <span className="text-xl font-medium leading-7 text-foreground">
-                {promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? t(`billing.planLabels.${promoPlan.tier}Card`) : t(`billing.planLabels.${plan === "free_cloud" ? "freeCloudCard" : plan === "self_host" ? "selfHost" : plan === "starter" ? "starterCard" : plan === "pro" ? "proCard" : plan === "prepaid" ? "prepaidCard" : "enterpriseCard"}`)}
+                {promoPlan ? billingPlanName(promoPlan.names, locale) ?? t(`billing.planLabels.${promoPlan.tier}Card`) : planPack ? billingPlanName(planPack.names, locale) ?? planPack.code : t(`billing.planLabels.${plan === "free_cloud" ? "freeCloudCard" : plan === "self_host" ? "selfHost" : plan === "starter" ? "starterCard" : plan === "pro" ? "proCard" : plan === "prepaid" ? "prepaidCard" : "enterpriseCard"}`)}
               </span>
               <div className="flex flex-col items-start gap-0.5">
                 {plan === "self_host" ? (
                   <span className="text-[15px] leading-6 text-muted-foreground">
                     {t("billing.currentPlan.selfHostNotice")}
                   </span>
-                ) : plan === "prepaid" ? packUsage ? <>
+                ) : plan === "prepaid" ? planPack ? (
                   <div className="flex flex-wrap items-end gap-2">
                     <span className="text-4xl font-semibold tracking-tight text-foreground">
-                      {prepaidMinutesLeft.toLocaleString(intlLocale(i18n.language))}
+                      {formatMoney(planPack.amountCents, planPack.currency, locale)}
                     </span>
                     <span className="pb-1 text-base text-muted-foreground">
-                      {t("billing.currentPlan.prepaidMinutesLeft", { count: prepaidMinutesLeft })}
+                      {packPriceSuffix(planPack.days, locale, (key, options) => t(key, options ?? {}))}
                     </span>
                   </div>
-                  <span className="text-base text-muted-foreground">
-                    {packUsage.lastEndsAt ? t("billing.currentPlan.prepaidUntil", { date: formatPackDate(packUsage.lastEndsAt, i18n.language) }) : t("billing.currentPlan.prepaidNeverEnds")}
-                  </span>
-                </> : null : <div className="flex flex-wrap items-end gap-2">
+                ) : null : <div className="flex flex-wrap items-end gap-2">
                   {typeof monthlyPrice === "number" ? (
                     <span className="text-4xl font-semibold tracking-tight text-foreground">
                       {money(monthlyPrice)}
@@ -253,7 +262,11 @@ export function LivePlanSurface() {
                   <span className="text-sm text-muted-foreground">
                     {t(promoPlan.endsWith === "cancel" ? "billing.promo.endsCancel" : "billing.promo.endsTier", { date: formatBillingDate(promoPlan.ends, i18n.language), tier: t(`billing.planLabels.${promoPlan.tier}`) })}
                   </span>
-                ) : plan === "prepaid" ? null : billing.data.cancelsAt ? (
+                ) : plan === "prepaid" ? prepaidEnd ? (
+                  <span className="text-sm text-muted-foreground">
+                    {prepaidEnd.at ? t("billing.currentPlan.planEndsOn", { date: formatBillingDate(prepaidEnd.at, locale) }) : t("billing.currentPlan.planNeverEnds")}
+                  </span>
+                ) : null : billing.data.cancelsAt ? (
                   <span className="text-sm text-muted-foreground">
                     {t("billing.currentPlan.planEndsOn", { date: formatBillingDate(billing.data.cancelsAt, i18n.language) })}
                   </span>
@@ -289,6 +302,8 @@ export function LivePlanSurface() {
               </div>
             </div>}
           </div>
+          {/* Several packs, or one held beside another plan such as one a dispute froze, are each listed under the plan. */}
+          {packs.length > 0 && !planPack && plan !== "self_host" && plan !== "enterprise" ? <HeldPacks locale={locale} packs={packs} /> : null}
           {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null} /> : null}
           {(canUpgrade || canManage || paymentActionUrl || planActions) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -309,7 +324,7 @@ export function LivePlanSurface() {
                   variant="outline"
                   onClick={openUpgradePlanDialog}
                 >
-                  {t("billing.actions.upgradeToPro")}
+                  {t(canUpgradePlan ? "billing.actions.upgradeToPro" : "billing.actions.upgradePlan")}
                 </Button>
               )}
               {/* A promo plan that ends cancelled stays that way: its ending isn't the business's to undo. */}
@@ -358,7 +373,7 @@ export function LivePlanSurface() {
         </div>
       </Surface>
     </SectionBlock>
-    {plan !== "self_host" ? <>{plan !== "enterprise" ? <PacksSection key={`packs:${business.businessId}`} businessId={business.businessId} eligibility={billing.data.packCheckout ?? { refusal: null, endsSubscription: null }} managesBilling={permissions?.hasBillingManagementAccess === true} offers={packOffers} packs={packs} /> : null}<SpendingCapSection key={business.businessId} businessId={business.businessId} locale={i18n.language} t={(key, options) => t(key, options ?? {})} status={{ plan, currency, overageSpendingCapCents: account?.overageSpendingCapCents ?? null, overageSpendCents: billing.data?.usageStatus?.overageSpendCents ?? 0, overageSpendCentsComplete: billing.data?.usageStatus?.usageComplete ?? true, overageSpendingCapReached: billing.data?.usageStatus?.overageSpendingCapReached ?? false, hasBillingManagementAccess: permissions?.hasBillingManagementAccess === true }} /><Transactions locale={i18n.language} transactions={billing.data?.transactions ?? []} t={t} providerName={billing.data?.providerName ?? ""} /></> : null}
+    {plan !== "self_host" ? <><SpendingCapSection key={business.businessId} businessId={business.businessId} locale={i18n.language} t={(key, options) => t(key, options ?? {})} status={{ plan, currency, overageSpendingCapCents: account?.overageSpendingCapCents ?? null, overageSpendCents: billing.data?.usageStatus?.overageSpendCents ?? 0, overageSpendCentsComplete: billing.data?.usageStatus?.usageComplete ?? true, overageSpendingCapReached: billing.data?.usageStatus?.overageSpendingCapReached ?? false, hasBillingManagementAccess: permissions?.hasBillingManagementAccess === true }} /><Transactions locale={i18n.language} transactions={billing.data?.transactions ?? []} t={t} providerName={billing.data?.providerName ?? ""} /></> : null}
     </div>
   </PageSurface>;
 }

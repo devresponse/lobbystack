@@ -232,16 +232,15 @@
       "chatAiUnitsCustom": "Clavardage du site sur mesure",
       "knowledgeStorageMegabytes": "{{amount}} Mo de stockage des connaissances",
       "knowledgeStorageGigabytes": "{{amount}} Go de stockage des connaissances",
-      "knowledgeStorageCustom": "Stockage des connaissances sur mesure",
-      "packVoiceMinutes_one": "{{amount}} minute vocale sur {{days}}",
-      "packVoiceMinutes_many": "{{amount}} minutes vocales sur {{days}}",
-      "packVoiceMinutes_other": "{{amount}} minutes vocales sur {{days}}",
-      "packVoiceMinutesNoEnd_one": "{{amount}} minute vocale, sans date de fin",
-      "packVoiceMinutesNoEnd_many": "{{amount}} minutes vocales, sans date de fin",
-      "packVoiceMinutesNoEnd_other": "{{amount}} minutes vocales, sans date de fin"
+      "knowledgeStorageCustom": "Stockage des connaissances sur mesure"
     },
-    "days_one": "{{count}} jour",
-    "days_many": "{{count}} de jours",
-    "days_other": "{{count}} jours"
+    "days_one": "{{amount}} jour",
+    "days_many": "{{amount}} de jours",
+    "days_other": "{{amount}} jours",
+    "perDays_one": "/{{amount}} jour",
+    "perDays_many": "/{{amount}} de jours",
+    "perDays_other": "/{{amount}} jours",
+    "paidOnce": "payé une fois",
+    "noEndDate": "Sans date de fin"
   }
 }

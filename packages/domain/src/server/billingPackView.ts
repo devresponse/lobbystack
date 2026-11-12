@@ -40,12 +40,21 @@ export type PackOfferView = {
   checkoutAvailable: boolean;
 };
 
-/** A pack the business holds, with time left: live, or frozen while a dispute holds its payment. */
+/**
+ * A pack the business holds, with time left: live, or frozen while a dispute
+ * holds its payment. Settings > Plan shows it as a plan: its name, its price
+ * for its length, and when it ends.
+ */
 export type BusinessPackView = {
   id: string;
   code: string;
   names: Record<string, string>;
   status: "active" | "frozen";
+  /** Its length in days, as bought; null when it never ends. */
+  days: number | null;
+  /** What was paid for it, in currency. */
+  amountCents: number;
+  currency: string;
   /** The seconds it holds after refunds. */
   secondsTotal: number;
   secondsLeft: number;
@@ -111,7 +120,7 @@ export async function loadPackOffers(tx: DatabaseTransaction, input: { checkout:
  * ends first first and one that never ends last, as calls draw on them.
  */
 export async function loadBusinessPacks(tx: DatabaseTransaction, businessId: string, now = new Date()): Promise<BusinessPackView[]> {
-  const rows = await tx.select({ id: billingPacks.id, code: billingPacks.pack, names: billingPackPlans.names, status: billingPacks.status, secondsTotal: billingPacks.secondsTotal, secondsUsed: billingPacks.secondsUsed, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents, paidAt: billingPacks.paidAt, endsAt: billingPacks.endsAt })
+  const rows = await tx.select({ id: billingPacks.id, code: billingPacks.pack, names: billingPackPlans.names, status: billingPacks.status, days: billingPacks.days, currency: billingPacks.currency, secondsTotal: billingPacks.secondsTotal, secondsUsed: billingPacks.secondsUsed, amountCents: billingPacks.amountCents, refundedCents: billingPacks.refundedCents, paidAt: billingPacks.paidAt, endsAt: billingPacks.endsAt })
     .from(billingPacks)
     .innerJoin(billingPackPlans, eq(billingPackPlans.code, billingPacks.pack))
     .where(and(eq(billingPacks.businessId, businessId), inArray(billingPacks.status, ["active", "frozen"]), or(isNull(billingPacks.endsAt), gt(billingPacks.endsAt, now))))
@@ -121,6 +130,9 @@ export async function loadBusinessPacks(tx: DatabaseTransaction, businessId: str
     code: row.code,
     names: row.names,
     status: row.status === "frozen" ? "frozen" : "active",
+    days: row.days,
+    amountCents: row.amountCents,
+    currency: row.currency.toLowerCase(),
     secondsTotal: packCapacitySeconds(row),
     secondsLeft: packSecondsLeft(row),
     paidAt: row.paidAt,

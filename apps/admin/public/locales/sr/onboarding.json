@@ -419,14 +419,17 @@
     "current": {
       "title": "Ova firma već ima paket {{plan}}.",
       "description": "Paket je već podešen, pa možete da pređete na broj telefona.",
-      "prepaidTitle": "Ova firma već ima dopunu minuta.",
-      "prepaidDescription": "Minuti su spremni, pa možete da pređete na broj telefona."
+      "prepaidTitle": "Ova firma već ima pripejd paket.",
+      "prepaidDescription": "Paket je spreman, pa možete da pređete na broj telefona."
     },
     "packs": {
-      "title": "Više volite dopunu minuta?",
-      "description": "Kupite minute jednom, bez mesečnog računa. Traju dok ih ne potrošite ili dok dopuna ne istekne.",
-      "cta": "Kupi dopunu minuta",
-      "priceSuffix": "jednokratno",
+      "title": "Pripejd paketi",
+      "description": "Platite jednom za određeni broj dana, bez mesečnog računa i bez obnavljanja. Sve što je uključeno traje ceo period.",
+      "cta": "Počnite na {{days}}",
+      "ctaNoEnd": "Počnite sada",
+      "cardDescription": "Plaća se jednom, bez obnavljanja. Uključuje {{minutes}} minuta razgovora na {{days}}.",
+      "cardDescriptionNoEnd": "Plaća se jednom, bez obnavljanja. Uključuje {{minutes}} minuta razgovora, bez datuma isteka.",
+      "lengthLabel": "Trajanje paketa",
       "waiting": "Dodavanje minuta...",
       "processing": "Plaćanje se još obrađuje. Proverite ponovo za nekoliko minuta.",
       "checkAgain": "Proveri ponovo",

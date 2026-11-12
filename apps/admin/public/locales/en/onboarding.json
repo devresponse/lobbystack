@@ -400,14 +400,17 @@
     "current": {
       "title": "This business is already on the {{plan}} plan.",
       "description": "Its plan is already set up, so you can go on to its phone number.",
-      "prepaidTitle": "This business already has prepaid minutes.",
-      "prepaidDescription": "Its minutes are ready, so you can go on to its phone number."
+      "prepaidTitle": "This business already has a prepaid plan.",
+      "prepaidDescription": "Its plan is ready, so you can go on to its phone number."
     },
     "packs": {
-      "title": "Prefer prepaid minutes?",
-      "description": "Buy minutes once, with no monthly bill. They last until they run out or the pack ends.",
-      "cta": "Buy pack",
-      "priceSuffix": "paid once",
+      "title": "Prepaid plans",
+      "description": "Pay once for a set number of days, with no monthly bill and no renewal. Everything included lasts the whole time.",
+      "cta": "Start for {{days}}",
+      "ctaNoEnd": "Start now",
+      "cardDescription": "Paid once, with no renewal. Includes {{minutes}} voice minutes for {{days}}.",
+      "cardDescriptionNoEnd": "Paid once, with no renewal. Includes {{minutes}} voice minutes with no end date.",
+      "lengthLabel": "Plan length",
       "waiting": "Adding your minutes...",
       "processing": "Your payment is still processing. Check again in a few minutes.",
       "checkAgain": "Check again",

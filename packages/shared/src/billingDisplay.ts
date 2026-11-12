@@ -72,7 +72,7 @@ const allowance = z.enum(planDisplayAllowances);
 // A card shows a plan, or a prepaid pack of the file: one of the two.
 const card = z.strictObject({
   plan: z.enum(cloudBillingPlanSlugs).optional(),
-  // A pack's code, from the file's packs: its card shows the pack's price, paid once, and its button buys it.
+  // A pack's code, from the file's packs: its card is drawn as a plan's, its price followed by its length, and its button buys it.
   pack: z.string().min(1).max(48).optional(),
   // The card the screens mark as popular: at most one.
   popular: z.boolean().optional(),
@@ -120,7 +120,9 @@ export const billingDisplaySchema = z.strictObject({
   comparisonIntro: planDisplayTextSchema.optional(),
   // The comparison's groups and rows, in their order; an empty list shows no comparison.
   comparison: z.array(group).max(12).optional(),
-  // The prepaid packs' box on the plan step, when packs are on sale and no card shows a pack.
+  // The words of the Prepaid plans section, which follows the plans' cards on the plan step and in the
+  // Upgrade plan dialog when packs are on sale and no card shows a pack: its heading, the line under it
+  // and its cards' button.
   packs: z.strictObject({ title: planDisplayTextSchema.optional(), description: planDisplayTextSchema.optional(), button: planDisplayTextSchema.optional() }).optional(),
 });
 

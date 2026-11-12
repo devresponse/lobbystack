@@ -13,8 +13,8 @@ vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string, values?: { commit?: string }) => values?.commit ? `${key} ${values.commit}` : key }) }));
 vi.mock("./live-upgrade-plan-provider", () => ({ LiveUpgradePlanProvider: ({ children }: { children: ReactNode }) => <UpgradePlanDialogProvider onOpen={vi.fn()}>{children}</UpgradePlanDialogProvider> }));
 vi.mock("./dashboard-utility-bar", () => ({ DashboardUtilityBar: () => null }));
-const navUser = vi.hoisted(() => ({ showUpgradeToPro: undefined as boolean | undefined }));
-vi.mock("./nav-user", () => ({ NavUser: ({ showUpgradeToPro }: { showUpgradeToPro?: boolean }) => { navUser.showUpgradeToPro = showUpgradeToPro; return null; } }));
+const navUser = vi.hoisted(() => ({ showUpgradeToPro: undefined as boolean | undefined, upgradeLabel: undefined as string | undefined }));
+vi.mock("./nav-user", () => ({ NavUser: ({ showUpgradeToPro, upgradeLabel }: { showUpgradeToPro?: boolean; upgradeLabel?: string }) => { navUser.showUpgradeToPro = showUpgradeToPro; navUser.upgradeLabel = upgradeLabel; return null; } }));
 const clients: QueryClient[] = [];
 beforeEach(() => {
   route.pathname = "/"; window.innerWidth = 1440;
@@ -112,6 +112,19 @@ describe("the user menu's upgrade", () => {
 
   it("isn't offered on a live Pro plan, as before packs", () => {
     setup("business_owner", { ...sellsPro, effectivePlan: "pro", account: { plan: "pro" } });
+    expect(navUser.showUpgradeToPro).toBe(false);
+  });
+
+  it("says Upgrade to Pro where a plan is on sale, and Upgrade plan where only packs are", () => {
+    setup("business_owner", { ...sellsPro, effectivePlan: "free_cloud", account: null, packOffers: [{ checkoutAvailable: true }] });
+    expect(navUser.showUpgradeToPro).toBe(true);
+    expect(navUser.upgradeLabel).toBe("pro");
+    cleanup();
+    setup("business_owner", { permissions: { hasCheckoutAccess: true }, availableCheckoutPlans: [], availableCheckoutIntervals: { starter: [], pro: [] }, effectivePlan: "free_cloud", account: null, packOffers: [{ checkoutAvailable: true }] });
+    expect(navUser.showUpgradeToPro).toBe(true);
+    expect(navUser.upgradeLabel).toBe("plan");
+    cleanup();
+    setup("business_owner", { permissions: { hasCheckoutAccess: true }, availableCheckoutPlans: [], availableCheckoutIntervals: { starter: [], pro: [] }, effectivePlan: "free_cloud", account: null, packOffers: [{ checkoutAvailable: false }] });
     expect(navUser.showUpgradeToPro).toBe(false);
   });
 });

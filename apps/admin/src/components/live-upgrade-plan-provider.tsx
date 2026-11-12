@@ -68,8 +68,10 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   // Moving off a promo plan drops it, its discount and its allowances.
   const promoPlan = changesPlan && billing.data?.promoPlan?.tier === plan ? billing.data.promoPlan : null;
   // A checkout from Free or a pack starts a subscription, which ends every pack the business
-  // holds, frozen ones too, and the minutes left on them. A plan changed in place ends none.
-  const packMinutesLeft = plan === "free_cloud" || plan === "prepaid" ? Math.floor((billing.data?.packs ?? []).reduce((seconds, pack) => seconds + pack.secondsLeft, 0) / 60) : 0;
+  // holds, frozen ones too, and the minutes left on them. A plan changed in place ends none,
+  // and where no plan is sold, buying another pack only adds to them, so nothing warns.
+  const plansOnSale = (billing.data?.availableCheckoutPlans ?? []).some((target) => (billing.data?.availableCheckoutIntervals?.[target] ?? []).length > 0);
+  const packMinutesLeft = plansOnSale && (plan === "free_cloud" || plan === "prepaid") ? Math.floor((billing.data?.packs ?? []).reduce((seconds, pack) => seconds + pack.secondsLeft, 0) / 60) : 0;
   const activeBusinessId = () => selectActiveBusiness(client.getQueryData<WorkspaceResponse>(["businesses"])?.businesses)?.businessId;
   const mutation = useMutation({
     mutationFn: (input: CheckoutInput) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),

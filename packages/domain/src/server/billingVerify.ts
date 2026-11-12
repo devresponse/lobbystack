@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { PolarSnapshot } from "@lobbystack/providers";
 import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
-import { billingProfileForProvider, billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "@lobbystack/shared";
+import { billingProfileForProvider, billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, upgradeStoredBillingProfile, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "@lobbystack/shared";
 
 import { billingCatalogDeployment, desiredBillingPacks, desiredBillingPlans, diffBillingCatalog, diffBillingPackCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPack, type DesiredBillingPlan, type StoredBillingPack, type StoredBillingPackPrice, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, type PolarStep, type PolarStepObject } from "./billingPolar";
@@ -293,7 +293,8 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
   const catalog = await getBillingCatalogForApi(context, { deployment: billingCatalogDeployment(input.brand, input.env, { withSecret: false }) });
   const latest = catalog.last_run;
   if (!latest || !catalog.profile || !catalog.provider.last_link) return { status: "skipped", reason: "nothing was linked yet" };
-  const parsed = billingProfileSchema.safeParse(catalog.profile);
+  // A profile stored before packs took a plan's fields reads in today's shape, with the same rows.
+  const parsed = billingProfileSchema.safeParse(upgradeStoredBillingProfile(catalog.profile));
   if (!parsed.success) throw new Error(`The profile stored on catalog run ${latest.id} no longer passes billingProfileSchema.`);
   const sells = billingProfileForProvider(parsed.data, deployment.provider);
   const file = { brand: latest.brand, hash: latest.hash, profile: parsed.data, plans: desiredBillingPlans(sells), packs: desiredBillingPacks(sells) };

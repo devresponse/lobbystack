@@ -419,14 +419,17 @@
     "current": {
       "title": "Este negocio ya tiene el plan {{plan}}.",
       "description": "Su plan ya está listo, así que puede pasar a su número de teléfono.",
-      "prepaidTitle": "Este negocio ya tiene minutos prepagados.",
-      "prepaidDescription": "Sus minutos ya están listos, así que puede pasar a su número de teléfono."
+      "prepaidTitle": "Este negocio ya tiene un plan prepagado.",
+      "prepaidDescription": "Su plan ya está listo, así que puede pasar a su número de teléfono."
     },
     "packs": {
-      "title": "¿Prefiere minutos prepagados?",
-      "description": "Compre minutos una sola vez, sin factura mensual. Duran hasta que se agotan o termina el paquete.",
-      "cta": "Comprar paquete de minutos",
-      "priceSuffix": "pago único",
+      "title": "Planes prepagados",
+      "description": "Pague una sola vez por un número fijo de días, sin factura mensual ni renovación. Todo lo incluido dura todo el período.",
+      "cta": "Empezar por {{days}}",
+      "ctaNoEnd": "Empezar ahora",
+      "cardDescription": "Pago único, sin renovación. Incluye {{minutes}} minutos de voz durante {{days}}.",
+      "cardDescriptionNoEnd": "Pago único, sin renovación. Incluye {{minutes}} minutos de voz, sin fecha de fin.",
+      "lengthLabel": "Duración del plan",
       "waiting": "Agregando sus minutos...",
       "processing": "Su pago aún se está procesando. Vuelva a comprobarlo en unos minutos.",
       "checkAgain": "Comprobar de nuevo",

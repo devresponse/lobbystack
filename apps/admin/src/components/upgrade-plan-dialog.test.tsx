@@ -64,6 +64,8 @@ describe("main upgrade dialog", () => {
     expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.endsPacks", { count: 1_250, minutes: "1,250" });
     expect(screen.queryByRole("button", { name: "billing.upgradeDialog.actions.currentPlan" })).toBeNull();
     expect(screen.getByRole("button", { name: "billing.upgradeDialog.actions.starter" }).hasAttribute("disabled")).toBe(false);
+    // Free comes back once the packs end, which no button starts.
+    expect(screen.getByRole("button", { name: "billing.upgradeDialog.actions.freeAfterPacks" }).hasAttribute("disabled")).toBe(true);
     cleanup();
     translate.mockClear();
     setup();
@@ -135,22 +137,28 @@ describe("packs billing.json gives cards of their own", () => {
   const display: NonNullable<Props["display"]> = { plans: [{ plan: "free_cloud" }, { pack: "listings_3", popular: true, badge: words("Best value"), description: words("{{voiceMinutes}} minutes over {{days}} days"), button: words("Get {{receptionists}} listings"), bullets: [words("Up to {{receptionists}} listings"), "voiceMinutes"] }, { pack: "listing_1" }], comparison: [] };
   const headings = () => screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent);
 
-  it("shows each pack on sale in its card after Free, priced and filled from the pack, and buys the card's pack", async () => {
+  it("shows each pack on sale in its card after Free, priced for its length and filled from the pack, and buys the card's pack", async () => {
     const onBuyPack = vi.fn();
     const props = setup({ display, onBuyPack, packOffers: [offer("listings_3"), offer("listing_1")] });
     expect(headings()).toEqual(["billing.upgradeDialog.plans.free_cloud.name", "listings_3 name", "listing_1 name"]);
     expect(screen.getByText("Best value")).toBeTruthy();
     expect(screen.getAllByText("CA$249")).toHaveLength(2);
-    expect(screen.getAllByText("billing.packs.priceSuffix")).toHaveLength(2);
+    // A pack's price is followed by its length, as a plan's is by its month.
+    expect(screen.getAllByText("common:planDisplay.perDays")).toHaveLength(2);
+    expect(translate).toHaveBeenCalledWith("common:planDisplay.perDays", { count: 365, amount: "365" });
     expect(screen.getByText("750 minutes over 365 days")).toBeTruthy();
     expect(screen.getByText("Up to 3 listings")).toBeTruthy();
-    expect(translate).toHaveBeenCalledWith("common:planDisplay.bullets.packVoiceMinutes", { count: 750, amount: "750", days: "common:planDisplay.days" });
-    // The card the section gives no words takes the built-in ones.
-    expect(screen.getByText("billing.packs.description")).toBeTruthy();
+    // Its minutes are said in a plan card's words, with no overage rate.
+    expect(translate).toHaveBeenCalledWith("common:planDisplay.bullets.voiceMinutes", { count: 750, amount: "750" });
+    // The card the section gives no words takes the built-in ones: its length and a plan's allowances.
+    expect(screen.getByText("billing.packs.cardDescription")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("billing.packs.cardDescription", { days: "common:planDisplay.days" });
+    expect(translate).toHaveBeenCalledWith("common:planDisplay.bullets.alertSmsSegments", { count: 150, amount: "150" });
+    expect(translate).toHaveBeenCalledWith("common:planDisplay.bullets.outboundCallAttempts", { count: 60, amount: "60" });
     expect(screen.queryByText("billing.packs.unavailable")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Get 3 listings" }));
     expect(onBuyPack).toHaveBeenCalledWith("listings_3");
-    await userEvent.click(screen.getByRole("button", { name: "billing.packs.buy" }));
+    await userEvent.click(screen.getByRole("button", { name: "billing.packs.start" }));
     expect(onBuyPack).toHaveBeenLastCalledWith("listing_1");
     expect(props.onStartCheckout).not.toHaveBeenCalled();
   });
@@ -168,11 +176,47 @@ describe("packs billing.json gives cards of their own", () => {
     setup({ display, onBuyPack: vi.fn(), packOffers: [offer("listings_3", false), offer("listing_1")], packUnavailable: "Packs can't be bought here right now." });
     expect(screen.getByRole("button", { name: "Get 3 listings" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getAllByText("Packs can't be bought here right now.")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "billing.packs.buy" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "billing.packs.start" }).hasAttribute("disabled")).toBe(false);
     cleanup();
     setup({ display, loading: "checkout", loadingPack: "listing_1", onBuyPack: vi.fn(), packOffers: [offer("listings_3"), offer("listing_1")] });
     expect(screen.getByRole("button", { name: "Get 3 listings" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "billing.actions.openingCheckout" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.queryByRole("button", { name: "billing.packs.buy" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "billing.packs.start" })).toBeNull();
+  });
+});
+describe("packs without cards of their own", () => {
+  const offer = (code: string, minutes: number, days: number | null, amountCents: number) => ({ code, names: { en: `${code} name` }, minutes, voiceSeconds: minutes * 60, days, amountCents, currency: "usd", smsSegments: 150, outboundCalls: 60, chatUnits: 150, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable: true });
+  const packs = [offer("pack_250_90", 250, 90, 5_500), offer("pack_500_90", 500, 90, 9_500), offer("pack_250_365", 250, 365, 6_500), offer("pack_1000_ever", 1_000, null, 29_900)];
+  const cardNames = () => screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent);
+
+  it("follow the plans under a Prepaid plans heading, a tab for each length, in the plans' cards, and buy the card's pack", async () => {
+    const onBuyPack = vi.fn();
+    setup({ onBuyPack, packOffers: packs });
+    expect(screen.getByRole("heading", { level: 2, name: "billing.packs.title" })).toBeTruthy();
+    expect(screen.getByText("billing.packs.description")).toBeTruthy();
+    // The plans' four cards, then the shortest length's packs, as the plans' cards are.
+    expect(cardNames()).toEqual(["billing.upgradeDialog.plans.free_cloud.name", "billing.upgradeDialog.plans.starter.name", "billing.upgradeDialog.plans.pro.name", "billing.upgradeDialog.plans.enterprise.name", "pack_250_90 name", "pack_500_90 name"]);
+    const lengths = screen.getByRole("tablist", { name: "billing.packs.lengthLabel" });
+    expect([...lengths.querySelectorAll("[role=tab]")].map((tab) => tab.textContent)).toEqual(["common:planDisplay.days", "common:planDisplay.days", "common:planDisplay.noEndDate"]);
+    expect(screen.getByText("$55")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("billing.packs.start", { days: "common:planDisplay.days" });
+    await userEvent.click(screen.getAllByRole("button", { name: "billing.packs.start" })[1]!);
+    expect(onBuyPack).toHaveBeenCalledWith("pack_500_90");
+    // Another length shows its own packs; one that never ends is paid once.
+    await userEvent.click(screen.getByRole("tab", { name: "common:planDisplay.noEndDate" }));
+    expect(cardNames().slice(4)).toEqual(["pack_1000_ever name"]);
+    expect(screen.getByText("common:planDisplay.paidOnce")).toBeTruthy();
+    expect(screen.getByText("billing.packs.cardDescriptionNoEnd")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "billing.packs.startNoEnd" }));
+    expect(onBuyPack).toHaveBeenLastCalledWith("pack_1000_ever");
+  });
+
+  it("need no tabs when they come in one length, and show nothing when none is on sale", () => {
+    setup({ onBuyPack: vi.fn(), packOffers: packs.filter((pack) => pack.days === 90) });
+    expect(screen.queryByRole("tablist", { name: "billing.packs.lengthLabel" })).toBeNull();
+    expect(cardNames().slice(4)).toEqual(["pack_250_90 name", "pack_500_90 name"]);
+    cleanup();
+    setup();
+    expect(screen.queryByText("billing.packs.title")).toBeNull();
   });
 });

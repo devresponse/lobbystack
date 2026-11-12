@@ -309,14 +309,14 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect((await packPrices(tx, "pack_250_90")).map((row) => [row.currency, row.cents, row.provider_ref, row.retired_at])).toEqual([["cad", 5500, null, null]]);
       await byHand(tx, sql`update public.billing_pack_plans set frozen_at = now(), status = 'active' where code = 'pack_250_90'`);
       const runs = await count(tx, "billing_runs");
-      const fewer = await refusal(apply(tx, file((value) => { value.packs.pack_250_90.minutes = 200; })));
+      const fewer = await refusal(apply(tx, file((value) => { value.packs.pack_250_90.included.voiceMinutes = 200; })));
       expect(fewer).toMatchObject({ status: 409, code: "conflict", details: [{ code: "plan_frozen", path: "billing_file.packs.pack_250_90" }] });
       const shorter = await refusal(apply(tx, file((value) => { value.packs.pack_250_90.days = 60; })));
       expect(shorter.details!.map((detail) => detail.code)).toEqual(["plan_frozen"]);
       expect(await count(tx, "billing_runs")).toBe(runs);
 
       // A new price is new terms: the pack waits in draft until its provider sells the price.
-      const raised = await apply(tx, file((value) => { value.packs.pack_250_90.priceCents = 6000; value.packs.pack_250_90.names.en = "250 minutes for 90 days"; }));
+      const raised = await apply(tx, file((value) => { value.packs.pack_250_90.prices.onceCents = 6000; value.packs.pack_250_90.names.en = "250 minutes for 90 days"; }));
       expect(raised.run.changes.map((change) => [change.table, change.action, change.key, Object.keys(change.fields).sort(), change.raises_price])).toEqual([
         ["billing_pack_plans", "update", "pack_250_90", ["names", "status", "terms_hash"], false],
         ["billing_pack_prices", "update", "pack_250_90/cad", ["cents"], true],

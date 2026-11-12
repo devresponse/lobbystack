@@ -386,7 +386,7 @@
       "proCard": "Pro paket",
       "enterprise": "Enterprise",
       "enterpriseCard": "Enterprise paket",
-      "prepaidCard": "Pripejd"
+      "prepaidCard": "Pripejd paket"
     },
     "subscriptionStates": {
       "active": "Aktivna",
@@ -398,6 +398,7 @@
     },
     "actions": {
       "upgradeToPro": "Pređite na Pro",
+      "upgradePlan": "Nadogradite paket",
       "starter": {
         "monthly": "Starter mesečno",
         "annual": "Starter godišnje"
@@ -438,6 +439,7 @@
       "subscriptionStateTitle": "Pretplata",
       "billingPeriod": "Trenutni period se resetuje {{resetAt}}",
       "planEndsOn": "Vaš paket ističe {{date}}.",
+      "planNeverEnds": "Vaš paket nema datum isteka.",
       "planChangesOn": "Vaš paket prelazi na {{plan}} {{date}}.",
       "overageNote": "Potrošnja preko uključene naplaćuje se na posebnom računu, prvog dana svakog meseca.",
       "completePaymentHint": "Vaša banka traži da potvrdite plaćanje novog paketa.",
@@ -466,12 +468,7 @@
       "includedReceptionistsCustom": "Prilagođen broj recepcionera",
       "includedSmsCustom": "Prilagođen broj SMS poruka",
       "includedOutboundCustom": "Prilagođen broj preusmeravanja",
-      "includedStorage": "{{amount}} {{unit}} skladišnog prostora",
-      "prepaidMinutesLeft_one": "preostali minut",
-      "prepaidMinutesLeft_few": "preostala minuta",
-      "prepaidMinutesLeft_other": "preostalih minuta",
-      "prepaidUntil": "Do {{date}}",
-      "prepaidNeverEnds": "Bez datuma isteka"
+      "includedStorage": "{{amount}} {{unit}} skladišnog prostora"
     },
     "upgradeDialog": {
       "title": "Nadogradite paket",
@@ -495,6 +492,7 @@
       },
       "actions": {
         "currentPlan": "Trenutni paket",
+        "freeAfterPacks": "Kada dopune isteknu",
         "starter": "Izaberite Starter",
         "pro": "Pređite na Pro",
         "enterprise": "Kontaktirajte nas"
@@ -601,8 +599,9 @@
       "unlimited": "Neograničeno",
       "blocked": "Limit dostignut",
       "blockedDescription": "Limit je dostignut — potrošnja je pauzirana do sledećeg perioda.",
-      "packDescription": "Vaši minuti dolaze iz dopuna minuta i traju dok svaka dopuna ne istekne.",
+      "packDescription": "Vaše stavke dolaze iz dopuna minuta i traju dok svaka dopuna ne istekne, umesto da se obnavljaju svakog meseca.",
       "packBlockedDescription": "Nema preostalih minuta. Pozivi dobijaju signal zauzeća dok ne kupite novu dopunu minuta.",
+      "packAllowanceBlockedDescription": "Ništa nije preostalo. Kupite novu dopunu minuta da biste dobili još.",
       "overageCount": "{{count}} preko limita",
       "overageCost": "≈ {{amount}} za prekoračenja",
       "noOverages": "Bez prekoračenja — potrošnja je strogo ograničena na uključeni iznos.",
@@ -639,26 +638,20 @@
       "removeFailed": "Nije moguće ukloniti mesečni limit prekoračenja."
     },
     "packs": {
-      "title": "Dopune minuta",
-      "description": "Kupite minute unapred, bez mesečnog računa. Pozivi ih koriste dok ne ponestane minuta ili dok dopuna ne istekne.",
-      "minutesLabel": "Minuti",
-      "lengthLabel": "Trajanje",
-      "minutesOption_one": "{{minutes}} minut",
-      "minutesOption_few": "{{minutes}} minuta",
-      "minutesOption_other": "{{minutes}} minuta",
-      "daysOption_one": "{{count}} dan",
-      "daysOption_few": "{{count}} dana",
-      "daysOption_other": "{{count}} dana",
-      "neverEndsOption": "Bez isteka",
-      "priceSuffix": "jednokratno",
+      "title": "Pripejd paketi",
+      "description": "Platite jednom za određeni broj dana, bez mesečnog računa i bez obnavljanja. Sve što je uključeno traje ceo period.",
+      "lengthLabel": "Trajanje paketa",
+      "cardDescription": "Na {{days}}, jednokratno",
+      "cardDescriptionNoEnd": "Jednokratno, bez datuma isteka",
+      "start": "Počnite na {{days}}",
+      "startNoEnd": "Počnite sada",
+      "heldTitle": "Vaše dopune minuta",
       "left_one": "Preostao {{left}} minut od {{total}}",
       "left_few": "Preostala {{left}} minuta od {{total}}",
       "left_other": "Preostalo {{left}} minuta od {{total}}",
       "endsOn": "Ističe {{date}}",
       "neverEnds": "Bez datuma isteka",
       "frozen": "Na čekanju dok je spor oko plaćanja otvoren",
-      "buy": "Kupi dopunu minuta",
-      "buyMore": "Kupi još",
       "unavailable": "Dopune minuta trenutno nije moguće kupiti ovde.",
       "refusals": {
         "managed_plan": "Vašim paketom se upravlja umesto Vas, pa ovde nije moguće kupiti dopune minuta.",

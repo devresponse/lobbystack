@@ -477,7 +477,7 @@ describe("Polar packs", () => {
     await applyWithPacks(fake, profile());
     const product = fake.state.products.find((entry) => entry.metadata.lobbystack_pack === "pack_250_90")!;
     const raised = () => profile((file) => {
-      file.packs.pack_250_90.priceCents = 6000;
+      file.packs.pack_250_90.prices.onceCents = 6000;
     });
     const { first } = await applyWithPacks(fake, raised());
     expect(first.steps.map((step) => [step.action, step.subject, step.changes])).toEqual([["update", 'Product "250 minutes, 90 days"', ["add 60.00 CAD once", "drop 55.00 CAD fixed", expect.stringMatching(/^made from older terms/)]]]);

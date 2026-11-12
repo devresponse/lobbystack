@@ -1,7 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 
 import { useBranding } from "@/components/branding-provider";
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import { intlLocale } from "@/lib/locale";
-import { cardBullets, displayText, openingInterval, packCardBullets, packName, packPrice, packTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, screenCards, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
+import { cardBullets, displayText, hasPackCards, openingInterval, packCardBullets, packLengthKey, packLengthName, packLengths, packName, packPrice, packPriceSuffix, packSectionText, packTextValues, pageTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, screenCards, shownInterval, type PlanCardView, type PlanDisplayTranslate } from "@/lib/plan-display";
 import type { BillingPackOfferViewModel } from "@/lib/page-view-models";
 import { cn } from "@/lib/utils";
 import {
@@ -26,6 +26,8 @@ import {
   type BillingPlanSlug,
   type CloudBillingPlanSlug,
   type HostedCheckoutPlanIntervals,
+  type PlanDisplayCard,
+  type PlanDisplayPackCard,
 } from "@lobbystack/shared";
 
 export type HostedUpgradePlan = "starter" | "pro";
@@ -36,8 +38,11 @@ type BillingTranslation = TFunction<"settings">;
 // popular one and their bullets come from billing.json's display section, as
 // on the onboarding plan step; these built-in bullets fill a card it gives none.
 // The short line under a plan's price and its buttons stay the dialog's own. A
-// card the section gives a prepaid pack shows that pack's price, paid once,
-// and the section's words, as on the plan step, and its button buys the pack.
+// prepaid pack is a plan paid once for a number of days, so its card is a
+// plan's card in every part: its price for its length, such as /180 days, the
+// section's words or the dialog's own, its allowances for that length, and a
+// button that buys it. Packs the section gives no card follow the plans under
+// a Prepaid plans heading, a tab for each length, as the plans' intervals.
 const builtInHighlights: Record<CloudBillingPlanSlug, string[]> = {
   free_cloud: ["voiceMinutes", "receptionists", "allFeatures", "support"],
   starter: ["voiceMinutes", "receptionists", "dedicatedNumber", "phoneNumber", "support"],
@@ -52,6 +57,70 @@ function isHostedUpgradePlan(slug: CloudBillingPlanSlug): slug is HostedUpgradeP
 /** The popular card's badge, where billing.json words one. */
 function Badge({ children }: { children: ReactNode }) {
   return <span className="mb-3 inline-flex rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{children}</span>;
+}
+
+/**
+ * A card in the dialog in its original design, the same for a plan and a
+ * pack: its name, its price and what follows it, its description, its
+ * bullets, its button, and why the button can't be used where it can't.
+ */
+function DialogPlanCard({ card, loadingLabel }: { card: PlanCardView; loadingLabel: string }) {
+  return (
+    <section
+      className={cn(
+        "flex min-h-[29rem] flex-col rounded-xl border bg-background p-5",
+        card.popular
+          ? "border-foreground/30 bg-muted/20"
+          : "border-border/70",
+      )}
+    >
+      <div className="mb-5">
+        {card.badge !== null ? <Badge>{card.badge}</Badge> : null}
+        <h3 className="font-heading text-lg font-medium tracking-[-0.03em]">
+          {card.name}
+        </h3>
+        <div className="mt-4 flex items-baseline gap-1">
+          <span className="font-heading text-4xl font-medium tracking-[-0.05em] tabular-nums">
+            {card.price}
+          </span>
+          {card.priceSuffix !== null ? (
+            <span className="text-sm text-muted-foreground">
+              {card.priceSuffix}
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          {card.description}
+        </p>
+      </div>
+
+      <div className="flex-1 border-t border-border/60 pt-4">
+        <ul className="flex flex-col gap-3">
+          {card.bullets.map((bullet, index) => (
+            <li className="flex items-start gap-2.5 text-sm" key={index}>
+              <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
+              <span className="whitespace-pre-line">{bullet}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <Button
+        className="mt-6 w-full rounded-full"
+        disabled={card.action.disabled}
+        loading={card.action.busy}
+        loadingLabel={loadingLabel}
+        onClick={card.action.onClick}
+        type="button"
+        variant={card.popular ? "default" : "outline"}
+      >
+        {card.action.label}
+      </Button>
+      {card.note !== null ? (
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{card.note}</p>
+      ) : null}
+    </section>
+  );
 }
 
 export function UpgradePlanDialog({
@@ -115,6 +184,8 @@ export function UpgradePlanDialog({
   t: BillingTranslation;
 }) {
   const { appName } = useBranding();
+  // The length of the prepaid plans the person picked, while the packs show under a heading of their own.
+  const [chosenLength, setChosenLength] = useState<string | null>(null);
   const translate: PlanDisplayTranslate = (key, options) => t(key, options ?? {});
   const cards = planCards(display);
   // Every card in billing.json's order: the plans', and the packs' that are on sale.
@@ -132,6 +203,96 @@ export function UpgradePlanDialog({
       ? availableBillingIntervals
       : pricedIntervals(plans, cards);
   const selectedBillingInterval = shownInterval(billingInterval ?? openingInterval(display), switcherIntervals, availableBillingIntervals);
+  // The page's own words from billing.json print any plan's values, such as {{free_cloud.voiceMinutes}}.
+  const pageValues = display ? pageTextValues(plans, locale, translate, appName) : {};
+  // Without cards of their own, the packs follow the plans under a heading, a tab for each length.
+  const packSection = !hasPackCards(display) && packOffers.length > 0;
+  const lengths = packLengths(packOffers);
+  // A pack that never ends has no days, so the tab picked is found by its place rather than by a value that may be null.
+  const chosenIndex = lengths.findIndex((days) => packLengthKey(days) === chosenLength);
+  const length = chosenIndex >= 0 ? lengths[chosenIndex] : lengths[0];
+  const sectionPacks = packSection ? packOffers.filter((offer) => offer.days === length) : [];
+
+  // A plan's card, from the plan list and billing.json's bullets for it, else the built-in ones.
+  const planCard = (slug: CloudBillingPlanSlug, popular: boolean, card: PlanDisplayCard | null): PlanCardView => {
+    const isCurrentPlan = currentPlan === slug;
+    const checkoutPlan = isHostedUpgradePlan(slug) ? slug : null;
+    const isEnterprisePlan = slug === "enterprise";
+    const isSelectedIntervalAvailable =
+      checkoutPlan === null ||
+      availableCheckoutIntervals[checkoutPlan].includes(selectedBillingInterval);
+    // Moving a paid plan down happens in the billing portal, so only an upgrade changes it here.
+    const isDowngrade = changesPlan && currentPlan === "pro" && checkoutPlan === "starter";
+    const isAvailable =
+      isEnterprisePlan ||
+      (checkoutPlan !== null &&
+        !isDowngrade &&
+        availableCheckoutPlans.includes(checkoutPlan) &&
+        isSelectedIntervalAvailable);
+    const offer = findPlan(plans, slug);
+    const values = planValues(offer, plans.currency, locale);
+    const textValues = card ? planTextValues(offer, plans.currency, locale, translate, appName) : {};
+    // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
+    const monthly = checkoutPlan !== null ? monthlyPriceCents(offer, selectedBillingInterval) : undefined;
+    // A business on a pack goes back to Free once its packs end, which no button starts.
+    const label = isCurrentPlan
+      ? t("billing.upgradeDialog.actions.currentPlan")
+      : slug === "free_cloud" && currentPlan === "prepaid"
+        ? t("billing.upgradeDialog.actions.freeAfterPacks")
+        : checkoutPlan !== null
+          ? t(`billing.upgradeDialog.actions.${checkoutPlan}`)
+          : t("billing.upgradeDialog.actions.enterprise");
+    return {
+      key: slug,
+      name: t(`billing.upgradeDialog.plans.${slug}.name`),
+      price: slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : isEnterprisePlan || offer?.custom ? t("billing.upgradeDialog.customPrice") : monthly !== undefined ? formatMoney(monthly, plans.currency, locale) : "—",
+      priceSuffix: monthly !== undefined ? t("billing.upgradeDialog.perMonth") : null,
+      description: t(`billing.upgradeDialog.plans.${slug}.description.${selectedBillingInterval}`),
+      bullets: card?.bullets
+        ? cardBullets(card.bullets, offer, plans.currency, locale, translate, textValues)
+        : builtInHighlights[slug].map((highlight) => t(`billing.upgradeDialog.plans.${slug}.highlights.${highlight}`, planStringValues(highlight, values))),
+      popular,
+      badge: popular && card?.badge ? displayText(card.badge, locale, textValues) : null,
+      action: {
+        label,
+        disabled: loading === "checkout" || isCurrentPlan || !isAvailable,
+        busy: loading === "checkout" && checkoutPlan !== null && checkoutPlan === loadingPlan,
+        onClick: () => {
+          if (checkoutPlan !== null) {
+            onStartCheckout(checkoutPlan, selectedBillingInterval);
+          } else if (isEnterprisePlan) {
+            onContactEnterprise();
+          }
+        },
+      },
+      note: null,
+    };
+  };
+  // A pack's card, a plan's card in every part: its price for its length, its words from billing.json where it gives
+  // them, else the dialog's own, and its allowances for that length.
+  const packCard = (offer: BillingPackOfferViewModel, popular: boolean, card: PlanDisplayPackCard | null): PlanCardView => {
+    const textValues = packTextValues(offer, locale, translate, appName);
+    const days = offer.days === null ? null : packLengthName(offer.days, locale, translate);
+    return {
+      key: `pack:${offer.code}`,
+      name: packName(offer, locale),
+      price: packPrice(offer, locale),
+      priceSuffix: packPriceSuffix(offer.days, locale, translate),
+      description: card?.description ? displayText(card.description, locale, textValues) : days === null ? t("billing.packs.cardDescriptionNoEnd") : t("billing.packs.cardDescription", { days }),
+      bullets: packCardBullets(card, offer, locale, translate, textValues),
+      popular,
+      badge: popular && card?.badge ? displayText(card.badge, locale, textValues) : null,
+      action: {
+        label: card?.button ? displayText(card.button, locale, textValues) : packSectionText(display, "button", locale, pageValues) ?? (days === null ? t("billing.packs.startNoEnd") : t("billing.packs.start", { days })),
+        disabled: loading === "checkout" || !offer.checkoutAvailable || !onBuyPack,
+        busy: loading === "checkout" && loadingPack === offer.code,
+        onClick: () => onBuyPack?.(offer.code),
+      },
+      note: offer.checkoutAvailable || !packUnavailable ? null : packUnavailable,
+    };
+  };
+  const loadingLabel = t(changesPlan ? "billing.actions.changingPlan" : "billing.actions.openingCheckout");
+  const packLoadingLabel = t("billing.actions.openingCheckout");
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -197,163 +358,55 @@ export function UpgradePlanDialog({
         </div> : null}
 
         <div className={cn("grid gap-4", planCardColumns(shownCards.length))}>
-          {shownCards.map((shown) => {
-            if (shown.kind === "pack") {
-              const offer = packOffers.find((entry) => entry.code === shown.pack)!;
-              const card = shown.display;
-              const textValues = packTextValues(offer, locale, translate, appName);
-              return (
-                <section
-                  className={cn(
-                    "flex min-h-[29rem] flex-col rounded-xl border bg-background p-5",
-                    shown.popular ? "border-foreground/30 bg-muted/20" : "border-border/70",
-                  )}
-                  key={`pack:${offer.code}`}
-                >
-                  <div className="mb-5">
-                    {shown.popular && card.badge ? <Badge>{displayText(card.badge, locale, textValues)}</Badge> : null}
-                    <h3 className="font-heading text-lg font-medium tracking-[-0.03em]">
-                      {packName(offer, locale)}
-                    </h3>
-                    <div className="mt-4 flex items-baseline gap-1">
-                      <span className="font-heading text-4xl font-medium tracking-[-0.05em] tabular-nums">
-                        {packPrice(offer, locale)}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {t("billing.packs.priceSuffix")}
-                      </span>
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                      {card.description ? displayText(card.description, locale, textValues) : t("billing.packs.description")}
-                    </p>
-                  </div>
-
-                  <div className="flex-1 border-t border-border/60 pt-4">
-                    <ul className="flex flex-col gap-3">
-                      {packCardBullets(card, offer, locale, translate, textValues).map((bullet, index) => (
-                        <li className="flex items-start gap-2.5 text-sm" key={index}>
-                          <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
-                          <span className="whitespace-pre-line">{bullet}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <Button
-                    className="mt-6 w-full rounded-full"
-                    disabled={loading === "checkout" || !offer.checkoutAvailable || !onBuyPack}
-                    loading={loading === "checkout" && loadingPack === offer.code}
-                    loadingLabel={t("billing.actions.openingCheckout")}
-                    onClick={() => onBuyPack?.(offer.code)}
-                    type="button"
-                    variant={shown.popular ? "default" : "outline"}
-                  >
-                    {card.button ? displayText(card.button, locale, textValues) : t("billing.packs.buy")}
-                  </Button>
-                  {offer.checkoutAvailable || !packUnavailable ? null : (
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{packUnavailable}</p>
-                  )}
-                </section>
-              );
-            }
-            const { plan: slug, popular, display: card } = shown;
-            const isCurrentPlan = currentPlan === slug;
-            const checkoutPlan = isHostedUpgradePlan(slug) ? slug : null;
-            const isEnterprisePlan = slug === "enterprise";
-            const isSelectedIntervalAvailable =
-              checkoutPlan === null ||
-              availableCheckoutIntervals[checkoutPlan].includes(selectedBillingInterval);
-            // Moving a paid plan down happens in the billing portal, so only an upgrade changes it here.
-            const isDowngrade = changesPlan && currentPlan === "pro" && checkoutPlan === "starter";
-            const isAvailable =
-              isEnterprisePlan ||
-              (checkoutPlan !== null &&
-                !isDowngrade &&
-                availableCheckoutPlans.includes(checkoutPlan) &&
-                isSelectedIntervalAvailable);
-            const offer = findPlan(plans, slug);
-            const values = planValues(offer, plans.currency, locale);
-            const textValues = card ? planTextValues(offer, plans.currency, locale, translate, appName) : {};
-            const highlights = card?.bullets
-              ? cardBullets(card.bullets, offer, plans.currency, locale, translate, textValues)
-              : builtInHighlights[slug].map((highlight) => t(`billing.upgradeDialog.plans.${slug}.highlights.${highlight}`, planStringValues(highlight, values)));
-            // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
-            const monthly = checkoutPlan !== null ? monthlyPriceCents(offer, selectedBillingInterval) : undefined;
-            const price = slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : isEnterprisePlan || offer?.custom ? t("billing.upgradeDialog.customPrice") : monthly !== undefined ? formatMoney(monthly, plans.currency, locale) : "—";
-            const actionLabel = isCurrentPlan
-              ? t("billing.upgradeDialog.actions.currentPlan")
-              : checkoutPlan !== null
-                ? t(`billing.upgradeDialog.actions.${checkoutPlan}`)
-                : t("billing.upgradeDialog.actions.enterprise");
-
-            return (
-              <section
-                className={cn(
-                  "flex min-h-[29rem] flex-col rounded-xl border bg-background p-5",
-                  popular
-                    ? "border-foreground/30 bg-muted/20"
-                    : "border-border/70",
-                )}
-                key={slug}
-              >
-                <div className="mb-5">
-                  {popular && card?.badge ? <Badge>{displayText(card.badge, locale, textValues)}</Badge> : null}
-                  <h3 className="font-heading text-lg font-medium tracking-[-0.03em]">
-                    {t(`billing.upgradeDialog.plans.${slug}.name`)}
-                  </h3>
-                  <div className="mt-4 flex items-baseline gap-1">
-                    <span className="font-heading text-4xl font-medium tracking-[-0.05em] tabular-nums">
-                      {price}
-                    </span>
-                    {monthly !== undefined ? (
-                      <span className="text-sm text-muted-foreground">
-                        {t("billing.upgradeDialog.perMonth")}
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                    {t(
-                      `billing.upgradeDialog.plans.${slug}.description.${selectedBillingInterval}`,
-                    )}
-                  </p>
-                </div>
-
-                <div className="flex-1 border-t border-border/60 pt-4">
-                  <ul className="flex flex-col gap-3">
-                    {highlights.map((highlight, index) => (
-                      <li className="flex items-start gap-2.5 text-sm" key={index}>
-                        <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
-                        <span className="whitespace-pre-line">{highlight}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <Button
-                  className="mt-6 w-full rounded-full"
-                  disabled={loading === "checkout" || isCurrentPlan || !isAvailable}
-                  loading={
-                    loading === "checkout" &&
-                    checkoutPlan !== null &&
-                    checkoutPlan === loadingPlan
-                  }
-                  loadingLabel={t(changesPlan ? "billing.actions.changingPlan" : "billing.actions.openingCheckout")}
-                  onClick={() => {
-                    if (checkoutPlan !== null) {
-                      onStartCheckout(checkoutPlan, selectedBillingInterval);
-                    } else if (isEnterprisePlan) {
-                      onContactEnterprise();
-                    }
-                  }}
-                  type="button"
-                  variant={popular ? "default" : "outline"}
-                >
-                  {actionLabel}
-                </Button>
-              </section>
-            );
-          })}
+          {shownCards.map((shown) => shown.kind === "pack"
+            ? <DialogPlanCard card={packCard(packOffers.find((entry) => entry.code === shown.pack)!, shown.popular, shown.display)} key={`pack:${shown.pack}`} loadingLabel={packLoadingLabel} />
+            : <DialogPlanCard card={planCard(shown.plan, shown.popular, shown.display)} key={shown.plan} loadingLabel={loadingLabel} />)}
         </div>
+
+        {packSection ? (
+          <section className="flex flex-col gap-4 border-t border-border/60 pt-6">
+            <div className="flex flex-col gap-1.5">
+              <h2 className="font-heading text-lg font-medium tracking-[-0.03em]">
+                {packSectionText(display, "title", locale, pageValues) ?? t("billing.packs.title")}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {packSectionText(display, "description", locale, pageValues) ?? t("billing.packs.description")}
+              </p>
+            </div>
+            {lengths.length > 1 ? (
+              <div className="flex justify-center">
+                <div
+                  aria-label={t("billing.packs.lengthLabel")}
+                  className="inline-flex max-w-full flex-wrap justify-center rounded-full border border-border bg-muted/40 p-1"
+                  role="tablist"
+                >
+                  {lengths.map((days) => (
+                    <Button
+                      aria-selected={days === length}
+                      className={cn(
+                        "h-auto min-h-9 shrink whitespace-normal rounded-full px-3 py-1 sm:px-4",
+                        days === length
+                          ? "bg-background text-foreground shadow-sm hover:bg-background"
+                          : "border-transparent bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                      key={packLengthKey(days)}
+                      onClick={() => setChosenLength(packLengthKey(days))}
+                      role="tab"
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {packLengthName(days, locale, translate)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <div className={cn("grid gap-4", planCardColumns(sectionPacks.length))}>
+              {sectionPacks.map((offer) => <DialogPlanCard card={packCard(offer, false, null)} key={`pack:${offer.code}`} loadingLabel={packLoadingLabel} />)}
+            </div>
+          </section>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

@@ -20833,7 +20833,7 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991,
-                  "description": "Voice seconds the pack holds."
+                  "description": "Voice seconds the pack holds for its whole length."
                 },
                 "days": {
                   "anyOf": [
@@ -20852,19 +20852,19 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991,
-                  "description": "Alert SMS segments included a month."
+                  "description": "Alert SMS segments included for the pack's whole length."
                 },
                 "calls_out": {
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991,
-                  "description": "Outbound call attempts included a month."
+                  "description": "Outbound call attempts included for the pack's whole length."
                 },
                 "chat_units": {
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991,
-                  "description": "Website chat AI units included a month."
+                  "description": "Website chat AI units included for the pack's whole length."
                 },
                 "kb_bytes": {
                   "type": "integer",
@@ -21014,7 +21014,7 @@
                 "prices"
               ],
               "additionalProperties": false,
-              "description": "A prepaid pack: voice minutes paid for once, to use within its days of the payment."
+              "description": "A prepaid pack: a plan paid for once that lasts its days from the payment without renewing, with its voice minutes and every other allowance for that whole length."
             },
             "description": "Every prepaid pack, whatever its status, by sort then code. Empty when no applied file had packs."
           },
@@ -22925,24 +22925,33 @@
                       ],
                       "additionalProperties": false
                     },
-                    "minutes": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 100000
-                    },
                     "days": {
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 1095
                     },
-                    "priceCents": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 10000000
+                    "prices": {
+                      "type": "object",
+                      "properties": {
+                        "onceCents": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 10000000
+                        }
+                      },
+                      "required": [
+                        "onceCents"
+                      ],
+                      "additionalProperties": false
                     },
                     "included": {
                       "type": "object",
                       "properties": {
+                        "voiceMinutes": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        },
                         "alertSmsSegments": {
                           "type": "integer",
                           "minimum": 0,
@@ -22959,6 +22968,12 @@
                           "maximum": 1000000
                         }
                       },
+                      "required": [
+                        "voiceMinutes",
+                        "alertSmsSegments",
+                        "outboundCallAttempts",
+                        "chatAiUnits"
+                      ],
                       "additionalProperties": false
                     },
                     "limits": {
@@ -22980,13 +22995,18 @@
                           "maximum": 50
                         }
                       },
+                      "required": [
+                        "knowledgeStorageMb",
+                        "businessNumbers"
+                      ],
                       "additionalProperties": false
                     }
                   },
                   "required": [
                     "names",
-                    "minutes",
-                    "priceCents"
+                    "prices",
+                    "included",
+                    "limits"
                   ],
                   "additionalProperties": false
                 }

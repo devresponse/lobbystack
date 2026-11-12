@@ -33,7 +33,10 @@ import type { BillingPackOfferViewModel } from "./page-view-models";
 // the cards' words and bullets, and the comparison. A screen says whatever the
 // section leaves out in its built-in words, and a deployment without a section
 // shows the built-in screens. A plan's numbers always come from the plan list,
-// and a pack's, with its price, from the packs on sale.
+// and a pack's, with its price, from the packs on sale. A pack is a plan paid
+// once for a number of days, so its card is a plan's card in every part: its
+// price is followed by its length, as a plan's is by /mo, and its bullets say
+// what it includes for that length in a plan card's words.
 
 /** A translation function that also reaches the common namespace as `common:...`. */
 export type PlanDisplayTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -68,7 +71,11 @@ export function screenCards(display: BillingDisplay | null | undefined, offers: 
   });
 }
 
-/** Whether the section gives a pack a card, which takes the place of the plan step's packs' box. */
+/**
+ * Whether the section gives a pack a card, which puts the packs among the
+ * plans' cards in its order. Without one, a screen shows the packs on sale
+ * after the plans, under a Prepaid plans heading, in cards of the same kind.
+ */
 export function hasPackCards(display: BillingDisplay | null | undefined): boolean {
   return display?.plans?.some(isPackDisplayCard) ?? false;
 }
@@ -157,9 +164,70 @@ export function packPrice(offer: BillingPackOfferViewModel, locale: string): str
 }
 
 /**
- * The values a pack's text prints as {{name}}: its voice minutes for its
- * whole length, its length in days (a dash for a pack that never ends), its
- * price, and what it gives each month or allows while it lasts.
+ * What follows a pack's price, as /mo follows a plan's: the length it is paid
+ * for, such as /180 days, or paid once for a pack that never ends.
+ */
+export function packPriceSuffix(days: number | null, locale: string, t: PlanDisplayTranslate): string {
+  return days === null ? t("common:planDisplay.paidOnce") : t("common:planDisplay.perDays", { count: days, amount: days.toLocaleString(intlLocale(locale)) });
+}
+
+/** A pack's length as a tab or a sentence names it, such as 180 days, or no end date. */
+export function packLengthName(days: number | null, locale: string, t: PlanDisplayTranslate): string {
+  return days === null ? t("common:planDisplay.noEndDate") : t("common:planDisplay.days", { count: days, amount: days.toLocaleString(intlLocale(locale)) });
+}
+
+/** Lengths from shortest to longest, with a pack that never ends last. */
+function byLength(left: number | null, right: number | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left - right;
+}
+
+/**
+ * The lengths the packs on sale come in, shortest first and one that never
+ * ends last: the tabs a screen's prepaid plans show, as the plans show their
+ * billing intervals. One length needs no tab.
+ */
+export function packLengths(offers: readonly BillingPackOfferViewModel[]): Array<number | null> {
+  return [...new Set(offers.map((offer) => offer.days))].sort(byLength);
+}
+
+/** A pack length's tab, which a tab list keys by a string: its days, or none for a pack that never ends. */
+export function packLengthKey(days: number | null): string {
+  return days === null ? "none" : String(days);
+}
+
+/** The section's own words for the screens' prepaid plans, with the page's values; null where it gives none, for the screen's built-in words. */
+export function packSectionText(display: BillingDisplay | null | undefined, field: "title" | "description" | "button", locale: string, values: Readonly<Record<string, string>>): string | null {
+  const value = display?.packs?.[field];
+  return value ? displayText(value, locale, values) : null;
+}
+
+/**
+ * A card on a plan screen, whether it sells a plan or a pack: the same parts
+ * in the same places, so a pack's card looks and works as a plan's does. Its
+ * price is followed by a plan's /mo or a pack's length, such as /180 days.
+ */
+export type PlanCardView = {
+  key: string;
+  name: string;
+  price: string;
+  priceSuffix: string | null;
+  description: string;
+  bullets: string[];
+  popular: boolean;
+  /** The popular card's badge, where the screen shows one. */
+  badge: string | null;
+  action: { label: string; disabled: boolean; busy: boolean; onClick: () => void };
+  /** Why the card's button can't be used now, under it. */
+  note: string | null;
+};
+
+/**
+ * The values a pack's text prints as {{name}}: its voice minutes and other
+ * allowances for its whole length, its length in days (a dash for a pack that
+ * never ends), its price, and its limits while it lasts.
  */
 export function packDisplayValues(offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate): Record<PackDisplayValueName, string> {
   const count = (value: number) => value.toLocaleString(intlLocale(locale));
@@ -182,22 +250,22 @@ export function packTextValues(offer: BillingPackOfferViewModel, locale: string,
   return { ...packDisplayValues(offer, locale, t), appName };
 }
 
-/** The bullets a pack's card shows when the section gives it none. */
-export const builtInPackBullets: PlanDisplayAllowance[] = ["voiceMinutes", "receptionists", "businessNumbers"];
+/** The bullets a pack's card shows when the section gives it none, as a plan's card shows its allowances. */
+export const builtInPackBullets: PlanDisplayAllowance[] = ["voiceMinutes", "receptionists", "businessNumbers", "alertSmsSegments", "outboundCallAttempts"];
 
 /**
  * What a pack card's bullet that names an allowance says: the pack's own
- * number with its plural. Its voice minutes are for its whole length, so they
- * say how long it lasts.
+ * number with its plural, in a plan card's words. Everything a pack includes
+ * lasts its whole length, which its price names, as a plan's month does; a
+ * pack has no overage, so its minutes name no rate, and a pack without a
+ * business number calls from the browser only, as a plan without one does.
  */
 export function packAllowanceBullet(allowance: PlanDisplayAllowance, offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate): string {
   const say = (name: string, options: Record<string, unknown> = {}) => t(`common:planDisplay.bullets.${name}`, options);
   const amount = (count: number) => ({ count, amount: count.toLocaleString(intlLocale(locale)) });
   switch (allowance) {
     case "voiceMinutes":
-      return offer.days === null
-        ? say("packVoiceMinutesNoEnd", amount(offer.minutes))
-        : say("packVoiceMinutes", { ...amount(offer.minutes), days: t("common:planDisplay.days", { count: offer.days }) });
+      return say(offer.numbers === 0 ? "browserVoiceMinutes" : "voiceMinutes", amount(offer.minutes));
     case "businessNumbers":
       return offer.numbers === 0 ? say("businessNumbersNone") : say("businessNumbers", amount(offer.numbers));
     case "knowledgeStorage": {
@@ -215,9 +283,9 @@ export function packAllowanceBullet(allowance: PlanDisplayAllowance, offer: Bill
   }
 }
 
-/** A pack card's bullets: the section's, else the built-in ones, each an allowance's own words or the section's text with the pack's values. */
-export function packCardBullets(card: PlanDisplayPackCard, offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate, values: Readonly<Record<string, string>>): string[] {
-  return (card.bullets ?? builtInPackBullets).map((bullet) => (isPlanDisplayText(bullet) ? displayText(bullet, locale, values) : packAllowanceBullet(bullet, offer, locale, t)));
+/** A pack card's bullets: the section's, else the built-in ones, each an allowance's own words or the section's text with the pack's values. card is null for a card the section doesn't word. */
+export function packCardBullets(card: PlanDisplayPackCard | null, offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate, values: Readonly<Record<string, string>>): string[] {
+  return (card?.bullets ?? builtInPackBullets).map((bullet) => (isPlanDisplayText(bullet) ? displayText(bullet, locale, values) : packAllowanceBullet(bullet, offer, locale, t)));
 }
 
 /** The section's text in the visitor's language, with its values filled in. */

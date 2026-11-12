@@ -1688,11 +1688,11 @@ export const billingPackPlans = pgTable(
     voiceSec: integer("voice_sec").notNull(),
     /** How long the pack lasts from its payment, in 24-hour days; null means it never ends. */
     days: smallint("days"),
-    /** Alert SMS segments included a month while the pack lasts. */
+    /** Alert SMS segments included for the pack's whole length (0151). */
     smsSeg: integer("sms_seg").notNull(),
-    /** Outbound call attempts (transfers) included a month. */
+    /** Outbound call attempts (transfers) included for the pack's whole length. */
     callsOut: integer("calls_out").notNull(),
-    /** Website chat AI units included a month. */
+    /** Website chat AI units included for the pack's whole length. */
     chatUnits: integer("chat_units").notNull(),
     /** Knowledge storage limit in bytes. */
     kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
@@ -1798,9 +1798,16 @@ export const billingPacks = pgTable(
     secondsTotal: integer("seconds_total").notNull(),
     /** Voice seconds calls have drawn; never more than bought. */
     secondsUsed: integer("seconds_used").default(0).notNull(),
+    /** Alert SMS segments bought, for the pack's whole length (0151). */
     smsSeg: integer("sms_seg").notNull(),
+    /** Outbound call attempts (transfers) bought, for the pack's whole length. */
     callsOut: integer("calls_out").notNull(),
+    /** Website chat AI units bought, for the pack's whole length. */
     chatUnits: integer("chat_units").notNull(),
+    /** What texts, transfers and chats have drawn; never more than bought. */
+    smsUsed: integer("sms_used").default(0).notNull(),
+    callsUsed: integer("calls_used").default(0).notNull(),
+    chatUsed: integer("chat_used").default(0).notNull(),
     kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
     numbers: smallint("numbers").notNull(),
     receptionists: smallint("receptionists").notNull(),
@@ -1810,7 +1817,7 @@ export const billingPacks = pgTable(
     endsAt: timestamp("ends_at", { withTimezone: true }),
     /** active, expired, replaced (a subscription started), refunded or frozen (a dispute). */
     status: varchar("status", { length: 10 }).default("active").notNull(),
-    /** Refunds so far, from the provider's events; a partial refund takes its share of the seconds off the pack. */
+    /** Refunds so far, from the provider's events; a partial refund takes its share of every allowance off the pack. */
     refundedCents: integer("refunded_cents").default(0).notNull(),
     /** When it ended. */
     endedAt: timestamp("ended_at", { withTimezone: true }),
@@ -1835,7 +1842,9 @@ export const billingPackDraws = pgTable(
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
     /** The usage row's source_key, such as voice:<call id>. */
     sourceKey: varchar("source_key", { length: 255 }).notNull(),
-    /** Seconds the call took from the pack. */
+    /** The usage row's kind (0151): voice_seconds for a call, alert_sms_segments, outbound_call_attempts or chat_ai_tokens. */
+    usageKind: varchar("usage_kind", { length: 32 }).default("voice_seconds").notNull(),
+    /** What the use took from the pack: seconds for a call, segments for a text, attempts for a transfer, units for a chat. */
     seconds: integer("seconds").notNull(),
     ...timestamps,
   },

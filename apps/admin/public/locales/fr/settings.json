@@ -386,7 +386,7 @@
       "proCard": "Forfait Pro",
       "enterprise": "Entreprise",
       "enterpriseCard": "Forfait Entreprise",
-      "prepaidCard": "Prépayé"
+      "prepaidCard": "Forfait prépayé"
     },
     "subscriptionStates": {
       "active": "Actif",
@@ -398,6 +398,7 @@
     },
     "actions": {
       "upgradeToPro": "Passer à Pro",
+      "upgradePlan": "Changer de forfait",
       "starter": {
         "monthly": "Starter mensuel",
         "annual": "Starter annuel"
@@ -438,6 +439,7 @@
       "subscriptionStateTitle": "État de l'abonnement",
       "billingPeriod": "La période en cours se réinitialise le {{resetAt}}",
       "planEndsOn": "Votre forfait prend fin le {{date}}.",
+      "planNeverEnds": "Votre forfait n'a pas de date de fin.",
       "planChangesOn": "Votre forfait passe à {{plan}} le {{date}}.",
       "overageNote": "L'utilisation au-delà de ce qui est inclus est facturée sur une facture distincte, le 1er de chaque mois.",
       "completePaymentHint": "Votre banque demande de confirmer le paiement du nouveau forfait.",
@@ -466,12 +468,7 @@
       "includedReceptionistsCustom": "Nombre de réceptionnistes sur mesure",
       "includedSmsCustom": "Volume SMS sur mesure",
       "includedOutboundCustom": "Allocation de transferts personnalisée",
-      "includedStorage": "{{amount}} {{unit}} stockage",
-      "prepaidMinutesLeft_one": "minute restante",
-      "prepaidMinutesLeft_many": "de minutes restantes",
-      "prepaidMinutesLeft_other": "minutes restantes",
-      "prepaidUntil": "Jusqu'au {{date}}",
-      "prepaidNeverEnds": "Sans date de fin"
+      "includedStorage": "{{amount}} {{unit}} stockage"
     },
     "upgradeDialog": {
       "title": "Changer de forfait",
@@ -495,6 +492,7 @@
       },
       "actions": {
         "currentPlan": "Forfait actuel",
+        "freeAfterPacks": "À la fin de vos packs",
         "starter": "Choisir Starter",
         "pro": "Passer à Pro",
         "enterprise": "Nous contacter"
@@ -601,8 +599,9 @@
       "unlimited": "Illimité",
       "blocked": "Limite atteinte",
       "blockedDescription": "Limite atteinte — l'utilisation est suspendue jusqu'à la prochaine période.",
-      "packDescription": "Vos minutes viennent de vos packs de minutes et durent jusqu'à la fin de chaque pack.",
+      "packDescription": "Vos allocations viennent de vos packs de minutes et durent jusqu'à la fin de chaque pack, au lieu de repartir à zéro chaque mois.",
       "packBlockedDescription": "Plus aucune minute. Les appels sonnent occupé jusqu'à l'achat d'un autre pack de minutes.",
+      "packAllowanceBlockedDescription": "Plus rien de disponible. Achetez un autre pack de minutes pour en avoir plus.",
       "overageCount": "{{count}} au-dessus de la limite",
       "overageCost": "≈ {{amount}} de dépassements",
       "noOverages": "Aucun dépassement — l'utilisation est plafonnée au volume inclus.",
@@ -639,26 +638,20 @@
       "removeFailed": "Impossible de supprimer le plafond mensuel de dépassement."
     },
     "packs": {
-      "title": "Minutes prépayées",
-      "description": "Achetez des minutes d'avance, sans facture mensuelle. Les appels les utilisent jusqu'à épuisement ou jusqu'à la fin du pack.",
-      "minutesLabel": "Minutes",
-      "lengthLabel": "Durée",
-      "minutesOption_one": "{{minutes}} minute",
-      "minutesOption_many": "{{minutes}} de minutes",
-      "minutesOption_other": "{{minutes}} minutes",
-      "daysOption_one": "{{count}} jour",
-      "daysOption_many": "{{count}} de jours",
-      "daysOption_other": "{{count}} jours",
-      "neverEndsOption": "Sans date de fin",
-      "priceSuffix": "payé une fois",
+      "title": "Forfaits prépayés",
+      "description": "Payez une seule fois pour un nombre de jours fixe, sans facture mensuelle ni renouvellement. Tout ce qui est inclus dure toute la période.",
+      "lengthLabel": "Durée du forfait",
+      "cardDescription": "Pour {{days}}, payé une fois",
+      "cardDescriptionNoEnd": "Payé une fois, sans date de fin",
+      "start": "Commencer pour {{days}}",
+      "startNoEnd": "Commencer maintenant",
+      "heldTitle": "Vos packs de minutes",
       "left_one": "{{left}} minute restante sur {{total}}",
       "left_many": "{{left}} de minutes restantes sur {{total}}",
       "left_other": "{{left}} minutes restantes sur {{total}}",
       "endsOn": "Prend fin le {{date}}",
       "neverEnds": "Sans date de fin",
       "frozen": "En attente tant qu'un litige de paiement est ouvert",
-      "buy": "Acheter un pack de minutes",
-      "buyMore": "En acheter plus",
       "unavailable": "Les packs de minutes ne peuvent pas être achetés ici pour le moment.",
       "refusals": {
         "managed_plan": "Votre forfait est géré pour vous, donc les packs de minutes ne peuvent pas être achetés ici.",

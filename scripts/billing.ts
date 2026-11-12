@@ -6,11 +6,13 @@
 //   pnpm billing plan   --brand alloplace --polar sandbox [--profile <name>] [--json], and apply's other flags
 //   pnpm billing apply  --brand alloplace --polar sandbox [--profile <name>] [--adopt] [--yes]
 //                       [--allow-replace] [--allow-archive] [--allow-undeployed]
-//                       [--webhook-url <url>] [--railway-file <new file>]
+//                       [--webhook-url <url>] [--railway-file <new file>] [--admin-service <name>]
 //   pnpm billing verify --brand alloplace --polar sandbox [--profile <name>] [--webhook-url <url>] [--json]
 //
 // --stripe sandbox|live in place of --polar sets up a deployment that bills
-// through Stripe, with all the flags but --adopt.
+// through Stripe, with all the flags but --adopt. --admin-service names the
+// admin's Railway service in the file and the messages: admin unless given,
+// as the deployment guide and devops/bootstrap.mjs name it.
 //
 // The instance and its operator key come from a `lobbystack login` profile,
 // or LOBBYSTACK_URL and LOBBYSTACK_API_KEY. apply needs a Polar setup token
@@ -59,9 +61,10 @@ const USAGE = [
   "  pnpm billing plan   --brand <brand> --polar sandbox|live [--profile <name>] [--json] and apply's flags but --yes and --railway-file",
   "  pnpm billing apply  --brand <brand> --polar sandbox|live [--profile <name>] [--adopt] [--yes]",
   "                      [--allow-replace] [--allow-archive] [--allow-undeployed]",
-  "                      [--webhook-url <url>] [--railway-file <new file>]",
+  "                      [--webhook-url <url>] [--railway-file <new file>] [--admin-service <name>]",
   "  pnpm billing verify --brand <brand> --polar sandbox|live [--profile <name>] [--webhook-url <url>] [--json]",
   "  --stripe sandbox|live in place of --polar sets up a deployment that bills through Stripe; --adopt is Polar's.",
+  "  --admin-service names the admin's Railway service in what it prints and saves: admin unless given.",
 ].join("\n");
 
 const exit = { ok: 0, drift: 1, failed: 2 } as const;
@@ -99,6 +102,8 @@ type Options = {
   allowUndeployed: boolean;
   webhookUrl: string | undefined;
   railwayFile: string | undefined;
+  /** The admin's Railway service, for the --railway-file lines and the messages: admin unless --admin-service names another. */
+  adminService: string;
   plan: PolarPlanOptions;
 };
 
@@ -122,6 +127,7 @@ function parse(argv: string[]): Options {
         "allow-undeployed": { type: "boolean" },
         "webhook-url": { type: "string" },
         "railway-file": { type: "string" },
+        "admin-service": { type: "string" },
       },
     });
   } catch (error) {
@@ -141,7 +147,7 @@ function parse(argv: string[]): Options {
   // A plan takes apply's flags but --yes and --railway-file, so it shows what that apply would do.
   const misplaced = (names: ReadonlyArray<keyof typeof values>) => names.filter((name) => values[name] !== undefined).map((name) => `--${String(name)}`).join(", ");
   if (command !== "apply" && misplaced(["yes", "railway-file"])) throw new Usage(`${misplaced(["yes", "railway-file"])} only goes with apply.`);
-  if (command === "verify" && misplaced(["adopt", "allow-replace", "allow-archive", "allow-undeployed"])) throw new Usage(`${misplaced(["adopt", "allow-replace", "allow-archive", "allow-undeployed"])} only goes with plan and apply.`);
+  if (command === "verify" && misplaced(["adopt", "allow-replace", "allow-archive", "allow-undeployed", "admin-service"])) throw new Usage(`${misplaced(["adopt", "allow-replace", "allow-archive", "allow-undeployed", "admin-service"])} only goes with plan and apply.`);
   if (command === "apply" && values.json) throw new Usage("--json only goes with plan and verify.");
   if (values["webhook-url"] !== undefined) {
     let url: URL;
@@ -152,6 +158,8 @@ function parse(argv: string[]): Options {
     }
     if (url.protocol !== "https:") throw new Usage(`--webhook-url must start with https://, as ${stripe ? "Stripe" : "Polar"} only calls https addresses.`);
   }
+  // A Railway service name goes into a [...] line of the file, so no commas, brackets or spaces.
+  if (values["admin-service"] !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(values["admin-service"])) throw new Usage("--admin-service names the admin's Railway service, such as admin or lobbystack-admin: letters, digits, dots, dashes and underscores.");
   return {
     command,
     brand: values.brand,
@@ -164,6 +172,7 @@ function parse(argv: string[]): Options {
     allowUndeployed: values["allow-undeployed"] === true,
     webhookUrl: values["webhook-url"],
     railwayFile: values["railway-file"],
+    adminService: values["admin-service"] ?? "admin",
     plan: { adopt: values.adopt === true, allowReplace: values["allow-replace"] === true, allowArchive: values["allow-archive"] === true },
   };
 }
@@ -224,7 +233,7 @@ function preflight(options: Options, file: BillingFile, catalog: ApiBillingCatal
     reasons.push(`The instance bills through ${billingProviderNames[catalog.provider.id]}, not Polar, so pnpm billing --polar can't set it up.`);
     return reasons;
   }
-  if (catalog.polar.org === null) reasons.push(`The instance has no POLAR_ORGANIZATION_ID. Set it to ${org.id}, and POLAR_API_BASE_URL to ${polarBaseUrls[options.polar]}, on lobbystack-admin and worker, redeploy, then run again.`);
+  if (catalog.polar.org === null) reasons.push(`The instance has no POLAR_ORGANIZATION_ID. Set it to ${org.id}, and POLAR_API_BASE_URL to ${polarBaseUrls[options.polar]}, on ${options.adminService} and worker, redeploy, then run again.`);
   else if (catalog.polar.env !== options.polar || catalog.polar.org !== org.id) reasons.push(`The instance uses Polar ${polarWord(catalog.polar.env)} organization ${catalog.polar.org}, and the token reaches ${word} organization ${org.name} (${org.id}). Use a token for the instance's organization.`);
   const link = catalog.polar.last_link;
   if (link && (link.polar_env !== options.polar || link.polar_org !== org.id)) reasons.push(`The instance was linked to Polar ${polarWord(link.polar_env ?? "production")} organization ${String(link.polar_org)}, and it stays with it. Live payments get a deployment of their own.`);
@@ -233,19 +242,20 @@ function preflight(options: Options, file: BillingFile, catalog: ApiBillingCatal
 }
 
 // No product IDs: checkout sells the products the links name, so the four
-// POLAR_*_PRODUCT_ID variables aren't needed.
+// POLAR_*_PRODUCT_ID variables aren't needed. Nor POLAR_API_BASE_URL on live,
+// where an unset one already means Polar's live server.
 function railwayText(options: Options, organizationId: string, webhookSecret: string | null, today: string): string {
   const shown = /\s/.test(options.railwayFile!) ? `"${options.railwayFile}"` : options.railwayFile!;
   return [
     `# Railway variables from pnpm billing apply --brand ${options.brand} (Polar ${polarWord(options.polar)}), ${today}.`,
-    `# Set them with: node railway-vars.mjs ${shown}`,
+    `# Set them with: node devops/railway-vars.mjs ${shown}`,
     "# Each [...] line names Railway services; change it if yours are named differently.",
     ...(webhookSecret ? ["# It holds the webhook secret, so delete it once Railway has the values."] : []),
     "",
-    "[lobbystack-admin, worker]",
-    `POLAR_API_BASE_URL=${polarBaseUrls[options.polar]}`,
+    `[${options.adminService}, worker]`,
+    ...(options.polar === "sandbox" ? [`POLAR_API_BASE_URL=${polarBaseUrls.sandbox}`] : []),
     `POLAR_ORGANIZATION_ID=${organizationId}`,
-    ...(webhookSecret ? ["", "[lobbystack-admin]", `POLAR_WEBHOOK_SECRET=${webhookSecret}`] : []),
+    ...(webhookSecret ? ["", `[${options.adminService}]`, `POLAR_WEBHOOK_SECRET=${webhookSecret}`] : []),
     "",
   ].join("\n");
 }
@@ -254,9 +264,9 @@ function railwayText(options: Options, organizationId: string, webhookSecret: st
 async function saveRailwayValues(options: Options, io: BillingIo, organizationId: string, webhookSecret: string | null): Promise<void> {
   if (options.railwayFile) {
     await writeFile(options.railwayFile, railwayText(options, organizationId, webhookSecret, new Date().toISOString().slice(0, 10)), { flag: "wx", mode: 0o600 });
-    io.out(`\nSaved the Railway variables to ${options.railwayFile}. Set them with: node railway-vars.mjs ${options.railwayFile}`);
+    io.out(`\nSaved the Railway variables to ${options.railwayFile}. Set them with: node devops/railway-vars.mjs ${options.railwayFile}`);
   } else if (webhookSecret) {
-    io.out("\nPolar made the webhook just now. Copy its secret from the webhook's page in Polar to POLAR_WEBHOOK_SECRET on lobbystack-admin, or run again with --railway-file next time.");
+    io.out(`\nPolar made the webhook just now. Copy its secret from the webhook's page in Polar to POLAR_WEBHOOK_SECRET on ${options.adminService}, or run again with --railway-file next time.`);
   }
 }
 
@@ -426,7 +436,7 @@ function stripePreflight(options: Options, file: BillingFile, catalog: ApiBillin
     reasons.push(`The instance bills through ${billingProviderNames[catalog.provider.id]}, not Stripe, so pnpm billing --stripe can't set it up.`);
     return reasons;
   }
-  if (catalog.provider.account === null) reasons.push(`The instance has no STRIPE_ACCOUNT_ID. Set it to ${account} on lobbystack-admin and worker, redeploy, then run again.`);
+  if (catalog.provider.account === null) reasons.push(`The instance has no STRIPE_ACCOUNT_ID. Set it to ${account} on ${options.adminService} and worker, redeploy, then run again.`);
   else if (catalog.provider.account !== account) reasons.push(`The instance uses Stripe account ${catalog.provider.account}, and the key reaches ${account}. Use a key of the instance's account.`);
   if (catalog.provider.env !== options.stripe) reasons.push(`The instance's STRIPE_API_KEY is a ${catalog.provider.env === "live" ? "live" : "test"} key, and this run is for Stripe ${stripeWord(options.stripe)}.`);
   const link = catalog.provider.last_link;
@@ -442,13 +452,13 @@ function stripeRailwayText(options: Options, accountId: string, secrets: { webho
   const admin = [...(secrets.webhookSecret ? [`STRIPE_WEBHOOK_SECRET=${secrets.webhookSecret}`] : []), ...(secrets.meterWebhookSecret ? [`STRIPE_METER_WEBHOOK_SECRET=${secrets.meterWebhookSecret}`] : [])];
   return [
     `# Railway variables from pnpm billing apply --brand ${options.brand} (Stripe ${stripeWord(options.stripe)}), ${today}.`,
-    `# Set them with: node railway-vars.mjs ${shown}`,
+    `# Set them with: node devops/railway-vars.mjs ${shown}`,
     "# Each [...] line names Railway services; change it if yours are named differently.",
     ...(admin.length ? ["# It holds secrets Stripe shows only once, so delete it once Railway has the values."] : []),
     "",
-    "[lobbystack-admin, worker]",
+    `[${options.adminService}, worker]`,
     `STRIPE_ACCOUNT_ID=${accountId}`,
-    ...(admin.length ? ["", "[lobbystack-admin]", ...admin] : []),
+    ...(admin.length ? ["", `[${options.adminService}]`, ...admin] : []),
     "",
   ].join("\n");
 }
@@ -457,9 +467,9 @@ function stripeRailwayText(options: Options, accountId: string, secrets: { webho
 async function saveStripeRailwayValues(options: Options, io: BillingIo, accountId: string, secrets: { webhookSecret: string | null; meterWebhookSecret: string | null }): Promise<void> {
   if (options.railwayFile) {
     await writeFile(options.railwayFile, stripeRailwayText(options, accountId, secrets, new Date().toISOString().slice(0, 10)), { flag: "wx", mode: 0o600 });
-    io.out(`\nSaved the Railway variables to ${options.railwayFile}. Set them with: node railway-vars.mjs ${options.railwayFile}`);
+    io.out(`\nSaved the Railway variables to ${options.railwayFile}. Set them with: node devops/railway-vars.mjs ${options.railwayFile}`);
   } else if (secrets.webhookSecret || secrets.meterWebhookSecret) {
-    io.out("\nStripe made the webhook endpoint or the meter error destination just now. Reveal its signing secret on its page in Stripe's Dashboard and set it on lobbystack-admin, as STRIPE_WEBHOOK_SECRET or STRIPE_METER_WEBHOOK_SECRET, or run with --railway-file next time.");
+    io.out(`\nStripe made the webhook endpoint or the meter error destination just now. Reveal its signing secret on its page in Stripe's Dashboard and set it on ${options.adminService}, as STRIPE_WEBHOOK_SECRET or STRIPE_METER_WEBHOOK_SECRET, or run with --railway-file next time.`);
   }
 }
 

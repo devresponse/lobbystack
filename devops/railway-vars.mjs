@@ -3,10 +3,10 @@
 //
 // The file lists variables under the services that get them:
 //
-//   [lobbystack-admin, worker]
+//   [admin, worker]
 //   STRIPE_ACCOUNT_ID=acct_...
 //
-//   [lobbystack-admin]
+//   [admin]
 //   STRIPE_API_KEY=?
 //   STRIPE_WEBHOOK_SECRET=whsec_...
 //

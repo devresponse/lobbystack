@@ -231,8 +231,8 @@ describe("pnpm billing --stripe", () => {
     expect([catalog.meters.length, catalog.products.length, catalog.prices.length, catalog.portalConfigurations.length, catalog.webhooks.length, catalog.eventDestinations.length]).toEqual([3, 14, 16, 1, 1, 1]);
     // The secrets Stripe showed once, saved for Railway and never printed.
     const railway = await readFile(railwayFile, "utf8");
-    expect(railway).toContain("[lobbystack-admin, worker]\nSTRIPE_ACCOUNT_ID=acct_dev1\n");
-    expect(railway).toContain(`[lobbystack-admin]\nSTRIPE_WEBHOOK_SECRET=${catalog.webhooks[0]!.secret}\nSTRIPE_METER_WEBHOOK_SECRET=${catalog.eventDestinations[0]!.secret}\n`);
+    expect(railway).toContain("[admin, worker]\nSTRIPE_ACCOUNT_ID=acct_dev1\n");
+    expect(railway).toContain(`[admin]\nSTRIPE_WEBHOOK_SECRET=${catalog.webhooks[0]!.secret}\nSTRIPE_METER_WEBHOOK_SECRET=${catalog.eventDestinations[0]!.secret}\n`);
     expect(applied.out).not.toContain("whsec_");
     // The link names Stripe, its objects and the endpoint secret's hash.
     const linked = context.instance.requests.find((request) => request.path === "POST /api/v1/billing/catalog/links")!.body;

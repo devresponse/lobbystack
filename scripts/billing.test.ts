@@ -201,6 +201,8 @@ describe("pnpm billing", () => {
     expect((await billing(["apply", "--brand", "alloplace", "--polar", "prod"], context)).err).toContain("--polar is sandbox or live.");
     expect((await billing(["plan", ...sandbox, "--yes"], context)).err).toContain("--yes only goes with apply.");
     expect((await billing(["verify", ...sandbox, "--adopt"], context)).err).toContain("--adopt only goes with plan and apply.");
+    expect((await billing(["apply", ...sandbox, "--admin-service", "admin, worker"], context)).err).toContain("--admin-service names the admin's Railway service");
+    expect((await billing(["verify", ...sandbox, "--admin-service", "lobbystack-admin"], context)).err).toContain("--admin-service only goes with plan and apply.");
     await writeFile(join(root, "taken.txt"), "");
     expect((await billing(["apply", ...sandbox, "--railway-file", join(root, "taken.txt")], context)).err).toContain("already exists");
     expect((await billing(["plan", "--brand", "cadre", "--polar", "sandbox"], context))).toMatchObject({ code: 2, err: "There's no brands/cadre/billing.json in this checkout." });
@@ -262,7 +264,7 @@ describe("pnpm billing", () => {
     // The Railway values, readable only by this user, without a webhook secret: Polar already had the webhook.
     const railway = await readFile(railwayFile, "utf8");
     expect((await stat(railwayFile)).mode & 0o777).toBe(0o600);
-    expect(railway).toContain("[lobbystack-admin, worker]\nPOLAR_API_BASE_URL=https://sandbox-api.polar.sh\nPOLAR_ORGANIZATION_ID=org_test\n");
+    expect(railway).toContain("[admin, worker]\nPOLAR_API_BASE_URL=https://sandbox-api.polar.sh\nPOLAR_ORGANIZATION_ID=org_test\n");
     expect(railway).not.toContain("PRODUCT_ID");
     expect(railway).not.toContain("POLAR_WEBHOOK_SECRET");
 
@@ -301,7 +303,7 @@ describe("pnpm billing", () => {
     expect(applied.out).toContain("ok     checkout sells the linked products; no product ID variable is needed");
     const secret = context.fake.state.webhooks[0]!.secret!;
     const railway = await readFile(railwayFile, "utf8");
-    expect(railway).toContain(`[lobbystack-admin]\nPOLAR_WEBHOOK_SECRET=${secret}\n`);
+    expect(railway).toContain(`[admin]\nPOLAR_WEBHOOK_SECRET=${secret}\n`);
     expect(railway).toContain("delete it once Railway has the values");
     // The secret goes to the file only, never to the output.
     expect(applied.out).not.toContain(secret);
@@ -309,6 +311,33 @@ describe("pnpm billing", () => {
     // Once Railway has the values, verify passes.
     context.instance.polar.secret = secret;
     expect((await billing(["verify", ...sandbox], context, { env: { POLAR_READ_TOKEN: "polar_oat_read" } })).code).toBe(0);
+  });
+
+  it("names the admin service --admin-service gives in the Railway file and in what it prints", async () => {
+    const context = await setUp({ seeded: false });
+    const railwayFile = join(root, "railway-named.txt");
+    await billing(["apply", ...sandbox, "--yes", "--admin-service", "lobbystack-admin", "--railway-file", railwayFile], context);
+    const railway = await readFile(railwayFile, "utf8");
+    expect(railway).toContain("[lobbystack-admin, worker]\nPOLAR_API_BASE_URL=https://sandbox-api.polar.sh\n");
+    expect(railway).toContain("[lobbystack-admin]\nPOLAR_WEBHOOK_SECRET=");
+    expect(railway).not.toContain("[admin");
+    expect(railway).toContain(`# Set them with: node devops/railway-vars.mjs `);
+
+    // Without a file, the message names the same service.
+    const again = await setUp({ seeded: false });
+    const printed = await billing(["apply", ...sandbox, "--yes", "--admin-service", "lobbystack-admin"], again);
+    expect(printed.out).toContain("to POLAR_WEBHOOK_SECRET on lobbystack-admin, or run again with --railway-file next time.");
+  });
+
+  it("leaves POLAR_API_BASE_URL out of a live Railway file, since an unset one means Polar's live server", async () => {
+    const context = await setUp({ seeded: false });
+    context.instance.polar.env = "production";
+    const railwayFile = join(root, "railway-live.txt");
+    await billing(["apply", "--brand", "alloplace", "--polar", "live", "--yes", "--railway-file", railwayFile], context);
+    const railway = await readFile(railwayFile, "utf8");
+    expect(railway).toContain(`[admin, worker]\nPOLAR_ORGANIZATION_ID=${context.fake.state.organization.id}\n`);
+    expect(railway).not.toContain("POLAR_API_BASE_URL");
+    expect(railway).toContain("[admin]\nPOLAR_WEBHOOK_SECRET=");
   });
 
   it("keeps a new webhook's secret in the Railway file when a later Polar call fails", async () => {
@@ -329,7 +358,7 @@ describe("pnpm billing", () => {
     expect(stopped.out).toContain("done create Webhook");
     expect(stopped.err).toContain("Polar answered 401 to PATCH /v1/products/prod_gold");
     expect(stopped.code).toBe(2);
-    expect(await readFile(railwayFile, "utf8")).toContain(`[lobbystack-admin]\nPOLAR_WEBHOOK_SECRET=${context.fake.state.webhooks[0]!.secret}\n`);
+    expect(await readFile(railwayFile, "utf8")).toContain(`[admin]\nPOLAR_WEBHOOK_SECRET=${context.fake.state.webhooks[0]!.secret}\n`);
     expect(context.instance.linkRuns).toHaveLength(1);
   });
 

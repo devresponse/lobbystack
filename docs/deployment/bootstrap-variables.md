@@ -1,10 +1,10 @@
 # Bootstrap script variables: a data dictionary
 
-**Status:** checked on 11 November 2026 against `devops/bootstrap.mjs` on `releases/r2` at `c0107a3`. The copy on `main` (last changed 2 November) has no Stripe support and no `BILLING_PROVIDER` or `STRIPE` settings.
+**Status:** checked on 12 November 2026 against `devops/bootstrap.mjs` on `releases/r2` at `4711924` plus fork PR #157, with which `up` reads the Polar organization from the worker's token and `connect` sets Polar's plans up. The copy on `main` (last changed 2 November) has no Stripe support, no `BILLING_PROVIDER` or `STRIPE` settings, and no billing in `connect`.
 
 ## How to read this
 
-You give the bootstrap script 28 settings and up to 6 provider tokens. It finds or makes everything else, records it in a state file, and writes about 90 variables onto five Railway services: 93 for a cloud test deployment on Polar, and 3 more after `connect` and `pnpm billing apply`. [`devops/bootstrap.md`](../../devops/bootstrap.md) says how to run it; this page says what each value is, where it comes from and how it is checked.
+You give the bootstrap script 28 settings and up to 6 provider tokens. It finds or makes everything else, records it in a state file, and writes about 90 variables onto five Railway services: 93 for a cloud test deployment on Polar, and 3 more from `connect`. [`devops/bootstrap.md`](../../devops/bootstrap.md) says how to run it; this page says what each value is, where it comes from and how it is checked.
 
 ```mermaid
 flowchart LR
@@ -13,7 +13,7 @@ flowchart LR
   providerApis["Provider APIs<br/>OpenAI, Twilio, Resend,<br/>Cloudflare, Railway"]
   stateFile["State file<br/>IDs, names and keys<br/>and the 13 secrets"]
   railwayVars["Railway variables<br/>from the variables step<br/>copied to the .vars file"]
-  afterUp["After up<br/>connect: webhook secret and platform keys<br/>pnpm billing apply: billing webhook secret"]
+  afterUp["After up<br/>connect: webhook secret and platform keys,<br/>then with Polar the billing webhook secret"]
   settingsFile -->|read on every run| railwayVars
   secretsFile --> stateFile
   providerApis -->|what each step makes| stateFile
@@ -29,7 +29,9 @@ Settings are read on every run, and everything a step makes is kept in the state
 | --- | --- | --- |
 | Settings | The settings file. A key set twice: the last line wins. Empty: the default | No, read on every run |
 | Provider tokens (below) | Environment variable, then secrets file, then asked with typing hidden | Never |
+| Polar setup token (`POLAR_SETUP_TOKEN`), for `connect` | Environment variable, then secrets file, then asked with typing hidden | Never |
 | Polar tokens, Stripe keys, OpenAI webhook secret | Environment variable, then secrets file, then asked | Yes, once their step is done |
+| Polar webhook secret | The file `pnpm billing apply` writes for `connect`, then Polar's list of webhooks, read with the setup token. Polar's wins | Yes |
 | Things you already have (below) | Secrets file only, never the environment. Absent: the script makes them | Yes |
 | The 13 platform secrets | State file, then secrets file, then the value already on Railway, then new random | Yes |
 | Everything else a step found or made | The step itself, through the provider's API | Yes |
@@ -40,11 +42,11 @@ Settings are read on every run, and everything a step makes is kept in the state
 | --- | --- | --- | --- |
 | `.env.bootstrap-<name>` | The settings | You (`init` writes a template) | No |
 | `.env.bootstrap-<name>.secrets` | Provider tokens and things you already have | You | Yes |
-| `.env.bootstrap-<name>.state.json` | Each step's result: IDs, names, the 13 platform secrets, provider keys | The script | Yes |
+| `.env.bootstrap-<name>.state.json` | Each step's result: IDs, names, the 13 platform secrets, provider keys, and with Polar the billing webhook's secret. Never the setup token or the operator key | The script | Yes |
 | `.env.bootstrap-<name>.vars` | Every service's Railway variables, in `railway-vars.mjs` format | The `variables` step | Yes |
 | `.env.bootstrap-<name>.log` | Each run's output and API calls, secrets shown as ‹hidden› | The script | No |
 | `.platform-keys/<prefix>.json` | The operator's platform key | `connect` | Yes |
-| `.env.polar-<name>` or `.env.stripe-<name>` | Billing webhook secrets, until Railway has them | `pnpm billing apply` | Yes |
+| `.env.stripe-<name>`, or for Polar the file you name | Billing webhook secrets, until Railway has them | `pnpm billing apply`, when you run it yourself. `connect` has it write into a temporary folder only you can read, and deletes the folder | Yes |
 
 ## Settings
 
@@ -73,7 +75,7 @@ The settings file `.env.bootstrap-<name>` holds nothing secret, one `KEY=value` 
 | `CLOUDFLARE_ACCOUNT_ID` | No | Empty: you make the Turnstile widget by hand | 32 hex characters | The Turnstile widget made by API |
 | `TWILIO_TOLLFREE` | No | Empty: none | Cloud mode only. `buy`, or a number in the subaccount in `+` and 8 to 15 digits | `TWILIO_ALERT_SMS_FROM` on the admin and the worker |
 | `BILLING_PROVIDER` | No | `polar` | `polar` or `stripe`. `stripe` only in cloud mode | Which provider's values go on Railway |
-| `POLAR_ORGANIZATION_ID` | In cloud mode with Polar | None | Not empty (no format check). Never compared with the Polar tokens: `pnpm billing` compares it with the setup token's organization later | `POLAR_ORGANIZATION_ID` on the admin and the worker |
+| `POLAR_ORGANIZATION_ID` | No | Empty: the organization the worker's Polar token belongs to | Empty, or the organization's ID, a UUID. Set, `up` stops when the worker's token belongs to another organization, and `doctor` marks FIX | `POLAR_ORGANIZATION_ID` on the admin and the worker, through the state file |
 | `POLAR` | No | `sandbox` | `sandbox` or `live` | `sandbox` adds `POLAR_API_BASE_URL=https://sandbox-api.polar.sh` |
 | `STRIPE` | No | `sandbox` | `sandbox` or `live`. Each Stripe key must be of that mode | Which Stripe keys are accepted |
 | `STEP_GITHUB`, `STEP_OPENAI`, `STEP_TWILIO`, `STEP_RESEND`, `STEP_TURNSTILE` | No | `yes` | `yes`, `no`, `true`, `false`, `on`, `off`, `1` or `0` | `no` skips that provider's API: its values come from the secrets file or are asked for |
@@ -105,7 +107,7 @@ Each of these, given in the secrets file, is used instead of making a new one, a
 | `TWILIO_SIP_TRUNK_SID` | `TK` and 32 characters, a trunk in that account | Making the SIP trunk | The worker's `TWILIO_SIP_TRUNK_SID` |
 | `SMTP_PASSWORD` | Resend's sending key, `re_…` | Making the sending key | The worker's `SMTP_PASSWORD` |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Both. `post.turnstile` adds the deployment's addresses to that widget | Making the widget | The admin's `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` |
-| `POLAR_ADMIN_TOKEN`, `POLAR_WORKER_TOKEN` | Cloud mode with Polar, made in the `POLAR_ORGANIZATION_ID` organization. Admin: `customer_sessions:write`. Worker: `checkouts:write`, `events:write`, `organizations:read`, `meters:read`, `products:read`, `discounts:read`, `subscriptions:write`, `customers:write`. One token with all nine works for both. No `webhooks:read`. `doctor` only checks that they are set | Nothing: Polar makes tokens only in its dashboard | `POLAR_ACCESS_TOKEN`, on the admin and on the worker, each its own |
+| `POLAR_ADMIN_TOKEN`, `POLAR_WORKER_TOKEN` | Cloud mode with Polar, both made in the deployment's organization. Admin: `customer_sessions:write`. Worker: `checkouts:write`, `events:write`, `organizations:read`, `meters:read`, `products:read`, `discounts:read`, `subscriptions:write`, `customers:write`. One token with all nine works for both. No `webhooks:read`. `doctor` and `polar.tokens` read the organization the worker's token belongs to; the admin's can only open billing portals, so nothing checks it | Nothing: Polar makes tokens only in its dashboard | `POLAR_ACCESS_TOKEN`, on the admin and on the worker, each its own |
 | `STRIPE_ADMIN_KEY`, `STRIPE_WORKER_KEY` | Cloud mode with Stripe. Restricted keys, `rk_test_…` in a sandbox or `rk_live_…`, of the `STRIPE` mode, both in one account. A secret `sk_` key passes, and `doctor` says a restricted one is safer | Nothing: Stripe makes restricted keys only in its dashboard | `STRIPE_API_KEY` on each service; their account becomes `STRIPE_ACCOUNT_ID` on both |
 | `OPENAI_WEBHOOK_SECRET` | Starts `whsec_`. From the webhook made in the OpenAI project the trunk sends calls to | Being asked for it by `connect` | The admin's `OPENAI_WEBHOOK_SECRET` |
 | Any of the 13 platform secrets | At least 32 letters, digits, dashes or underscores | A new random value | See the next section |
@@ -184,7 +186,8 @@ The state file holds each finished step's result, so a later run reuses it inste
 
 | Value | Kept by | Where it comes from | What uses it |
 | --- | --- | --- | --- |
-| `POLAR_ADMIN_TOKEN`, `POLAR_WORKER_TOKEN` | `polar.tokens` | The environment variable, then the secrets file, then asked. You make them in Polar, in the `POLAR_ORGANIZATION_ID` organization: Settings > Developers > New Token | `POLAR_ACCESS_TOKEN` on the admin and on the worker |
+| `POLAR_ADMIN_TOKEN`, `POLAR_WORKER_TOKEN` | `polar.tokens` | The environment variable, then the secrets file, then asked. You make them in Polar, in the deployment's organization: Settings > Developers > New Token | `POLAR_ACCESS_TOKEN` on the admin and on the worker |
+| `POLAR_ORGANIZATION_ID` | `polar.tokens` | Asked of Polar with the worker's token (`GET /v1/organizations/`, which lists the one organization an organization token belongs to). When the setting is set, the two must be the same | `POLAR_ORGANIZATION_ID` on both services. `doctor` and `connect` check the setup token against it |
 | `STRIPE_ADMIN_KEY`, `STRIPE_WORKER_KEY` | `stripe.keys` | The environment variable, then the secrets file, then asked. You make them in the deployment's Stripe account: Developers > API keys > Create restricted key | `STRIPE_API_KEY` on the admin and on the worker |
 | `STRIPE_ACCOUNT_ID` | `stripe.keys` | Asked of Stripe with each key. Both keys must belong to the same account, `acct_…` | `STRIPE_ACCOUNT_ID` on both services |
 
@@ -195,7 +198,8 @@ The state file holds each finished step's result, so a later run reuses it inste
 | `OPENAI_WEBHOOK_SECRET` | `connect.webhook` | The environment variable or the secrets file, when either gives it. Else the admin's current value on Railway. Else asked, once you have made the webhook in the OpenAI project the trunk sends calls to, which shows its `whsec_` secret only once | The admin's `OPENAI_WEBHOOK_SECRET`, which `connect.variables` sets |
 | `WEBHOOK_URL` | `connect.webhook` | `https://<address>/api/webhooks/openai/live`, the URL the webhook was made for | A later `connect` compares it with the admin's address now, and asks you to change the webhook's URL when the address moved |
 | `PLATFORM_API_KEYS` | `connect.platformKey` | The admin's current value, read from Railway, plus a new operator entry from `pnpm platform-key:create`, unless one for `OPERATOR_EMAIL` is there already. Each entry holds a key's hash, never the key | The admin's `PLATFORM_API_KEYS`, which `connect.variables` sets |
-| `PLATFORM_KEY_FILE` | `connect.platformKey` | The path of `.platform-keys/<prefix>.json`, where that command wrote the new key | `connect`'s last message, which names the file to sign the command line in with |
+| `PLATFORM_KEY_FILE` | `connect.platformKey` | The path of `.platform-keys/<prefix>.json`, where that command wrote the new key | `connect`'s last message, which names the file to sign the command line in with. The billing steps read the key from that file, or ask for it when the file is gone |
+| `POLAR_WEBHOOK_SECRET` | `connect.billing.apply`, as soon as its `pnpm billing apply` makes the webhook, then `connect.billing.secret` | Polar's webhook to `https://<address>/api/webhooks/polar`, which `apply` makes: first from the file `apply` writes in a temporary folder, then from Polar's list of webhooks, read with the setup token. When the two differ, Polar's is used | The admin's `POLAR_WEBHOOK_SECRET`, which `connect.billing.secret` sets |
 
 **The rest of the state file.** Beside `values`, it holds `done`, each finished step with the time it finished, which `redo` takes off, and `byHand`, the steps whose BY HAND part `--yes` didn't wait for, which run again next time. The `template` command keeps a state file of its own, `.env.bootstrap-<name>.template.state.json`, with the template project's Railway values and `TEMPLATE_CODE`, the code it prints for `RAILWAY_TEMPLATE`.
 
@@ -290,7 +294,7 @@ A value written `${{…}}` is a Railway reference, resolved when the service sta
 
 | Variable | On | Value | Rule |
 | --- | --- | --- | --- |
-| `POLAR_ORGANIZATION_ID` | admin, worker | The `POLAR_ORGANIZATION_ID` setting | Polar only. An instance stays with the first organization it is linked to |
+| `POLAR_ORGANIZATION_ID` | admin, worker | State: `polar.tokens`, the worker token's organization | Polar only. An instance stays with the first organization it is linked to |
 | `POLAR_API_BASE_URL` | admin, worker | `https://sandbox-api.polar.sh` with `POLAR=sandbox`. Unset when live, meaning `https://api.polar.sh` | Subscriptions don't move between the two |
 | `POLAR_ACCESS_TOKEN` | admin; worker | State: `polar.tokens`, `POLAR_ADMIN_TOKEN` on the admin and `POLAR_WORKER_TOKEN` on the worker | Each from the configured organization |
 | `BILLING_PROVIDER` | admin, worker | `stripe`, Stripe only. Unset means Polar | Any value but `polar`, `stripe` or unset stops both at start |
@@ -301,28 +305,28 @@ A value written `${{…}}` is a Railway reference, resolved when the service sta
 
 ## Variables set after up
 
-Three more values reach the admin after `up`: two from `connect`, and the billing webhook's secret from `pnpm billing apply`. Each redeploys the admin.
+Three more values reach the admin after `up`, all from `connect`: the OpenAI webhook's secret and the platform keys together, then, in cloud mode with Polar, the billing webhook's secret. Each change redeploys the admin.
 
 | Variable | On | Set by | Comes from | Rule |
 | --- | --- | --- | --- | --- |
 | `OPENAI_WEBHOOK_SECRET` | admin | `connect` | The secrets file, else the admin's current value, else asked | Starts `whsec_`. The webhook is made by hand in the OpenAI project the trunk sends calls to, with only `live.transport.incoming` |
 | `PLATFORM_API_KEYS` | admin | `connect` | `pnpm platform-key:create`, added to the admin's existing keys. An operator key for `OPERATOR_EMAIL` already there is kept | A JSON list. A mistake in it stops every platform key |
-| `POLAR_WEBHOOK_SECRET` | admin | `pnpm billing apply`, then `node devops/railway-vars.mjs` | The Polar webhook to `https://<address>/api/webhooks/polar`, which `apply` makes | Missing: `pnpm billing verify` reports `DRIFT webhook_secret` |
-| `POLAR_API_BASE_URL`, `POLAR_ORGANIZATION_ID` | admin, worker | The same file | The setup token's organization | The script set them already. `apply` refuses when the token's organization differs from the instance's |
+| `POLAR_WEBHOOK_SECRET` | admin | `connect`, after the `pnpm billing apply` it runs (`connect.billing.secret`). By hand: `pnpm billing apply`, then `node devops/railway-vars.mjs` | The Polar webhook to `https://<address>/api/webhooks/polar`, which `apply` makes | Missing: `pnpm billing verify` reports `DRIFT webhook_secret`. `connect` waits until the admin reports that secret's hash |
+| `POLAR_ORGANIZATION_ID`, and on the sandbox `POLAR_API_BASE_URL` | admin, worker | The same file, when you run `apply` yourself. `connect` doesn't set them again | The setup token's organization | The script set them already. `apply` refuses when the token's organization differs from the instance's. Since fork PR #157 a live file has no `POLAR_API_BASE_URL` line, since unset means Polar's live server |
 | `STRIPE_WEBHOOK_SECRET`, `STRIPE_METER_WEBHOOK_SECRET` | admin | `pnpm billing apply --stripe`, then `railway-vars.mjs` | Stripe shows each once | During a rotation `STRIPE_WEBHOOK_SECRET` holds two, comma-separated, the new one first |
 | `STRIPE_ACCOUNT_ID` | admin, worker | The same file | The setup key's account | The script set it already. Never changes |
 
-`pnpm billing apply` writes its file under `[lobbystack-admin, worker]` and `[lobbystack-admin]` lines. Change `lobbystack-admin` to `admin` before running `railway-vars.mjs`, since the bootstrap script names the service `admin`, then delete the file.
+Run by you, `pnpm billing apply` writes its file under `[admin, worker]` and `[admin]` lines, the names the bootstrap script gives the services, so `railway-vars.mjs` takes it as it is; delete the file afterwards. A file written before fork PR #157 names the admin `lobbystack-admin`: change that to `admin` first.
 
 **Read on your computer, never put on Railway.**
 
 | Variable | Read by | What it must be |
 | --- | --- | --- |
-| `POLAR_SETUP_TOKEN` | `pnpm billing apply` | A token in the deployment's organization with `organizations:write`, `meters:write`, `products:write`, `discounts:write` and `webhooks:write`, on the shortest end date. Unset: asked, typing hidden |
+| `POLAR_SETUP_TOKEN` | `connect`, in cloud mode with Polar, and `pnpm billing apply` | A token in the deployment's organization with `organizations:write`, `meters:write`, `products:write`, `discounts:write` and `webhooks:write`, on the shortest end date. Unset: asked, typing hidden. `connect` checks its organization, keeps it in memory only, and gives it to `pnpm billing` as both `POLAR_SETUP_TOKEN` and `POLAR_READ_TOKEN`. Delete it in Polar once `connect` is done |
 | `POLAR_READ_TOKEN` | `pnpm billing plan` and `verify` | A read token. Unset: the setup token is used |
 | `STRIPE_SETUP_KEY`, `STRIPE_READ_KEY` | `pnpm billing --stripe` | A restricted key with write access to the catalog objects, and a read key |
 | `RAILWAY_TOKEN` | `node devops/railway-vars.mjs` | A project token for the deployment's project and environment (the project's Settings > Tokens) |
-| `LOBBYSTACK_URL`, `LOBBYSTACK_API_KEY`, `LOBBYSTACK_BUSINESS` | The `lobbystack` command line and `pnpm billing` | They replace the saved profile. The profile `connect` suggests is `NAME`, else the address with dots as dashes |
+| `LOBBYSTACK_URL`, `LOBBYSTACK_API_KEY`, `LOBBYSTACK_BUSINESS` | The `lobbystack` command line and `pnpm billing` | They replace the saved profile. `connect` sets the first two itself for the `pnpm billing` it runs, with the operator key, and an empty `XDG_CONFIG_HOME`, so your saved profiles aren't read. The profile `connect` suggests for signing in is `NAME`, else the address, in lower-case letters, digits and dashes, cut to the command line's 40 characters |
 
 ## Variables the script never sets
 
@@ -356,11 +360,12 @@ Running `up` or `connect` again is safe: finished steps are skipped, and `variab
 
 | To | Run | Runs again | Kept | What changes on Railway |
 | --- | --- | --- | --- | --- |
-| Rebuild in a new Railway project | Delete the old project first, then `redo <settings> railway.project`, `up`, `connect`, and `pnpm billing` again. Add `polar.tokens` to the redo when the tokens are new, such as for a new Polar organization | Every `railway.*` step, `turnstile`, `variables`, `deploy.*`, `post.*`, `connect.health`, `connect.variables`; `twilio.tollfree` too without `APP_BASE_URL` | The OpenAI project and key, Twilio, Resend, the Polar tokens or Stripe keys, the 13 platform secrets, the webhook secret, the operator key | New IDs, Railway address, empty bucket and empty database. `AUTH_TRUSTED_ORIGINS` gets the new Railway address. `POLAR_WEBHOOK_SECRET` comes from a new `apply` |
+| Rebuild in a new Railway project | Delete the old project first, then `redo <settings> railway.project`, `up` and `connect`, which with Polar sets the plans up again (with Stripe, `pnpm billing --stripe` again). Add `polar.tokens` to the redo when the tokens are new, such as for a new Polar organization | Every `railway.*` step, `turnstile`, `variables`, `deploy.*`, `post.*`, `connect.health`, `connect.variables`, `connect.billing.*`; `twilio.tollfree` too without `APP_BASE_URL` | The OpenAI project and key, Twilio, Resend, the Polar tokens and organization or the Stripe keys, the 13 platform secrets, the webhook secret, the operator key | New IDs, Railway address, empty bucket and empty database. `AUTH_TRUSTED_ORIGINS` gets the new Railway address. `connect` puts `POLAR_WEBHOOK_SECRET` on the new admin: the same webhook's while the address stays, else a new webhook's, and the old one, to the old Railway address, is then left for you to delete in Polar |
 | Put on new Polar tokens or Stripe keys | Change them in the secrets file, `redo … polar.tokens` (or `stripe.keys`), `up` | That step and `variables` | Everything else | `POLAR_ACCESS_TOKEN` (or `STRIPE_API_KEY` and `STRIPE_ACCOUNT_ID`) on both services |
 | Give the admin another address | Change `APP_BASE_URL`, `redo … railway.domain railway.custom turnstile variables "post.*"`, `up`, `connect` | Those steps | The names | `APP_BASE_URL` and what follows it. `connect` asks you to change the OpenAI webhook's URL |
 | Move to another OpenAI project | Its `OPENAI_PROJECT_ID` and `OPENAI_API_KEY` in the secrets file, `redo … openai.project`, `up` | `openai.key`, `twilio.origination`, `variables` | Everything else | `OPENAI_API_KEY`; the trunk sends calls to the new project |
 | Change the webhook secret | Put it in the secrets file, `redo … connect.webhook connect.variables`, `connect` | Those two steps | Everything else | `OPENAI_WEBHOOK_SECRET` |
+| Sell changed plans, once a change to `billing.json` is deployed (Polar) | `redo … connect.billing.apply`, `connect`, with a new setup token | `connect.billing.*` | Everything else | `POLAR_WEBHOOK_SECRET` only if Polar's webhook had to be made again |
 | Empty a test database but keep the project | `node devops/reset-database.mjs` with `--redis` ([guide 7.28](guide/part-7-operations.md#728-reset-a-test-environment)), run by you | Nothing in the script | Every variable | Nothing |
 
 `redo … secrets` changes nothing, because the state file's values win for the 13 platform secrets. To change one, follow [guide 7.18](guide/part-7-operations.md#718-rotate-secrets-and-keys).
@@ -377,16 +382,16 @@ Running `up` or `connect` again is safe: finished steps are skipped, and `variab
 
 ## Validation rules
 
-Values are checked at eight points, from the moment the settings file loads to the services' start. Nothing checks a Polar platform token against `POLAR_ORGANIZATION_ID`: a wrong one shows only when a checkout or the worker's daily check fails.
+Values are checked at eight points, from the moment the settings file loads to the services' start. The admin's Polar token is the one value nothing checks: it can only open billing portals, so one from another organization shows only when **Manage subscription** fails.
 
 | When | What is checked | On failure |
 | --- | --- | --- |
-| Every command, as the settings load | The rules in the Settings table: required keys, allowed values and formats, `APP_BASE_URL` inside `CLOUDFLARE_ZONE` and not on another brand's domain, production with `APP_BASE_URL`, `POLAR_ORGANIZATION_ID` in cloud mode with Polar | Stops with `<file> needs fixing` and a list. Unknown or repeated keys only warn |
-| `doctor` | Node.js, pnpm, the Railway CLI and `gh`. Git ignores the files that hold secrets, and on Windows whether other accounts can read them. Each provider token, by a read-only call. `RAILWAY_WORKSPACE_ID` set. Stripe keys' mode and account. Polar tokens: only that they are set | Marks FIX, changes nothing |
-| `up`, step by step | Given values' formats: `proj_…`, `AC` and 32, `TK` and 32, platform secrets of 32 or more URL-safe characters, Stripe keys of the `STRIPE` mode in one account. Two things with the same name at a provider. `brands/<BRAND>` on `BRANCH`. Any variable without a value. A running database's passwords | Stops at that step. Finished steps stay recorded |
+| Every command, as the settings load | The rules in the Settings table: required keys, allowed values and formats, `APP_BASE_URL` inside `CLOUDFLARE_ZONE` and not on another brand's domain, production with `APP_BASE_URL`, `POLAR_ORGANIZATION_ID` empty or a UUID | Stops with `<file> needs fixing` and a list. Unknown or repeated keys only warn |
+| `doctor` | Node.js, pnpm, the Railway CLI and `gh`. Git ignores the files that hold secrets, and on Windows whether other accounts can read them. Each provider token, by a read-only call. `RAILWAY_WORKSPACE_ID` set. Stripe keys' mode and account. Polar: the admin's token set, and the organization that the worker's token and, when given, the setup token belong to, which must be one, and `POLAR_ORGANIZATION_ID`'s when set | Marks FIX, changes nothing |
+| `up`, step by step | Given values' formats: `proj_…`, `AC` and 32, `TK` and 32, platform secrets of 32 or more URL-safe characters, Stripe keys of the `STRIPE` mode in one account. The worker's Polar token's organization, against `POLAR_ORGANIZATION_ID` when set. Two things with the same name at a provider. `brands/<BRAND>` on `BRANCH`. Any variable without a value. A running database's passwords | Stops at that step. Finished steps stay recorded |
 | migrate's pre-deploy, every deploy | The migrations, the four roles' passwords, `check`, and row-level security (`verify-rls`) | migrate's deployment fails, and `up` stops at `deploy.migrate` |
 | `up`, after the deploy | `post.urls`: the admin's `APP_BASE_URL`, `SITE_URL` and `AUTH_TRUSTED_ORIGINS` and the worker's `APP_BASE_URL` match. `post.dns`: the custom domain is verified. `post.turnstile`: the widget lists both addresses. As each code service is connected, a deployment trigger for `REPO` and `BRANCH` | Sets what differs, which redeploys. No trigger: a WARNING with the fix |
-| `connect` | The admin answers `/api/health/ready` with the right brand. The webhook secret starts `whsec_`. `APP_BASE_URL` is unchanged since `up`, and the project isn't being deleted | Stops before changing anything |
+| `connect` | The admin answers `/api/health/ready` with the right brand. The webhook secret starts `whsec_`. `APP_BASE_URL` is unchanged since `up`, and the project isn't being deleted. In cloud mode with Polar: the operator key works on the admin (`GET /api/v1/me`), the setup token is a third token of the deployment's organization, `pnpm billing plan` passes and you type `yes`, the apply's organization is the deployment's, Polar has one webhook to the address, the admin then reports that webhook's secret, and `pnpm billing verify` passes | Stops before changing anything. A billing step stops where it failed, and the next run picks up there: a refused plan changes nothing, and differences found by `verify` run the apply again |
 | `pnpm billing plan` and `apply` | The instance shows the `--brand` brand. It has `POLAR_ORGANIZATION_ID`, and the setup token reaches that organization in the same mode. It stays with the first organization it was linked to (`polar_org_changed`). The applied file is the one deployed | Refuses and lists why. Exit 2 when Polar refuses the token |
 | The admin and the worker start, with `NODE_ENV=production` | The admin's `BETTER_AUTH_SECRET`, `INTERNAL_SERVICE_SECRET`, `INTERNAL_SERVICE_TOKEN`, `WIDGET_SESSION_SECRET`, `ENCRYPTION_KEY` and `OTP_HASH_SECRET`, and the worker's `ENCRYPTION_KEY` and `OTP_HASH_SECRET`: set, 32 or more characters, not a placeholder such as `replace-with-…`. `LOCAL_STORAGE_SIGNING_SECRET` too when storage isn't `s3`. `BILLING_PROVIDER` is `polar`, `stripe` or unset. A brand applies (`BRAND_REQUIRED`). The database roles sign in. On Stripe, the worker's key belongs to `STRIPE_ACCOUNT_ID` | The service refuses to start, so the deploy fails |
 

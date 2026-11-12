@@ -315,29 +315,113 @@ export const BRAND_PLAN_DISPLAYS: Record<string, BrandPlanDisplay> = {
             "sr": "Podrška zajednice"
           }
         ]
+      },
+      {
+        "pack": "listing_1_180",
+        "description": {
+          "en": "One payment for one listing, with no subscription.",
+          "fr": "Un seul paiement pour une inscription, sans abonnement.",
+          "es": "Un solo pago por una propiedad, sin suscripción.",
+          "sr": "Jedno plaćanje za jedan oglas, bez pretplate."
+        },
+        "button": {
+          "en": "Add it to your listing",
+          "fr": "Ajoutez-le à votre inscription",
+          "es": "Agréguelo a su propiedad",
+          "sr": "Dodajte ga svom oglasu"
+        },
+        "bullets": [
+          {
+            "en": "Your sign answers every inquiry, day or night",
+            "fr": "Votre affiche répond à chaque demande, jour et nuit",
+            "es": "Su letrero responde cada consulta, de día o de noche",
+            "sr": "Vaša tabla odgovara na svaki upit, danju i noću"
+          },
+          "voiceMinutes",
+          "businessNumbers",
+          {
+            "en": "Active {{days}} days, then it expires",
+            "fr": "Actif {{days}} jours, puis il expire",
+            "es": "Activo {{days}} días, luego vence",
+            "sr": "Aktivan {{days}} dana, zatim ističe"
+          }
+        ]
+      },
+      {
+        "pack": "listings_3_365",
+        "popular": true,
+        "badge": {
+          "en": "Best value",
+          "fr": "Meilleure offre",
+          "es": "Mejor valor",
+          "sr": "Najbolja vrednost"
+        },
+        "description": {
+          "en": "CA$83 per listing (save CA$48)",
+          "fr": "83 $ CA par inscription (économisez 48 $ CA)",
+          "es": "83 CA$ por propiedad (ahorre 48 CA$)",
+          "sr": "83 CA$ po oglasu (uštedite 48 CA$)"
+        },
+        "button": {
+          "en": "Get 3 listings",
+          "fr": "Obtenir 3 inscriptions",
+          "es": "Obtener 3 propiedades",
+          "sr": "Uzmite 3 oglasa"
+        },
+        "bullets": [
+          {
+            "en": "Everything in a single listing, times three",
+            "fr": "Tout ce qu'offre une inscription, multiplié par trois",
+            "es": "Todo lo de una propiedad, multiplicado por tres",
+            "sr": "Sve što ima jedan oglas, puta tri"
+          },
+          {
+            "en": "Up to {{receptionists}} listings at once",
+            "fr": "Jusqu'à {{receptionists}} inscriptions à la fois",
+            "es": "Hasta {{receptionists}} propiedades a la vez",
+            "sr": "Do {{receptionists}} oglasa istovremeno"
+          },
+          "voiceMinutes"
+        ]
+      },
+      {
+        "pack": "listings_6_365",
+        "description": {
+          "en": "CA$75 per listing (save CA$145)",
+          "fr": "75 $ CA par inscription (économisez 145 $ CA)",
+          "es": "75 CA$ por propiedad (ahorre 145 CA$)",
+          "sr": "75 CA$ po oglasu (uštedite 145 CA$)"
+        },
+        "button": {
+          "en": "Get 6 listings",
+          "fr": "Obtenir 6 inscriptions",
+          "es": "Obtener 6 propiedades",
+          "sr": "Uzmite 6 oglasa"
+        },
+        "bullets": [
+          {
+            "en": "Everything in a single listing, times six",
+            "fr": "Tout ce qu'offre une inscription, multiplié par six",
+            "es": "Todo lo de una propiedad, multiplicado por seis",
+            "sr": "Sve što ima jedan oglas, puta šest"
+          },
+          {
+            "en": "Up to {{receptionists}} listings at once",
+            "fr": "Jusqu'à {{receptionists}} inscriptions à la fois",
+            "es": "Hasta {{receptionists}} propiedades a la vez",
+            "sr": "Do {{receptionists}} oglasa istovremeno"
+          },
+          "voiceMinutes",
+          {
+            "en": "For agents who always have a sign up",
+            "fr": "Pour les agents qui ont toujours une affiche en place",
+            "es": "Para agentes que siempre tienen un letrero puesto",
+            "sr": "Za agente koji uvek imaju postavljenu tablu"
+          }
+        ]
       }
     ],
-    "comparison": [],
-    "packs": {
-      "title": {
-        "en": "Upgrade with a listing pack",
-        "fr": "Passez à un pack d'inscriptions",
-        "es": "Mejore con un paquete de propiedades",
-        "sr": "Nadogradite uz dopunu za oglase"
-      },
-      "description": {
-        "en": "One payment, no subscription. Try it: 1 listing with 250 minutes for 180 days. Or 3 listings with 750 minutes, or 6 listings with 1,500 minutes, each good for 12 months.",
-        "fr": "Un seul paiement, sans abonnement. Essai : 1 inscription avec 250 minutes pendant 180 jours. Ou 3 inscriptions avec 750 minutes, ou 6 inscriptions avec 1 500 minutes, valables 12 mois.",
-        "es": "Un solo pago, sin suscripción. Prueba: 1 propiedad con 250 minutos durante 180 días. O 3 propiedades con 750 minutos, o 6 propiedades con 1.500 minutos, válidos por 12 meses.",
-        "sr": "Jedno plaćanje, bez pretplate. Proba: 1 oglas sa 250 minuta na 180 dana. Ili 3 oglasa sa 750 minuta ili 6 oglasa sa 1.500 minuta, koji važe 12 meseci."
-      },
-      "button": {
-        "en": "Buy pack",
-        "fr": "Acheter le pack",
-        "es": "Comprar el paquete",
-        "sr": "Kupi dopunu"
-      }
-    }
+    "comparison": []
   }
 };
 

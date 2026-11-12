@@ -10,8 +10,10 @@ import { normalizeInterfaceLocale, type InterfaceLocale } from "./locales";
 // carries it into generated.ts, from which GET /api/billing hands the
 // deployment's own to the screens. The numbers always come from the plan
 // list: an allowance named here prints that plan's own, from the catalog or,
-// before an apply, from the file the build carries. Every field is optional,
-// and a screen uses its built-in words for whatever the section leaves out.
+// before an apply, from the file the build carries. A card can also show a
+// prepaid pack of the file, whose numbers and price come from the packs on
+// sale. Every field is optional, and a screen uses its built-in words for
+// whatever the section leaves out.
 
 /** The allowances a card bullet or a comparison row can name, as billing.json names them. */
 export const planDisplayAllowances = ["voiceMinutes", "receptionists", "businessNumbers", "alertSmsSegments", "outboundCallAttempts", "chatAiUnits", "knowledgeStorage"] as const;
@@ -39,6 +41,18 @@ export type PlanDisplayRowName = (typeof planDisplayRowNames)[number];
 export const planDisplayValueNames = [...planDisplayAllowances, "voiceMinuteRate", "alertSmsSegmentRate", "outboundCallAttemptRate"] as const;
 export type PlanDisplayValueName = (typeof planDisplayValueNames)[number];
 
+/**
+ * The values a pack card's text can print as {{name}}: the pack's voice
+ * minutes for its whole length, its length in days, its price, paid once, and
+ * what it gives each month or allows while it lasts, formatted in the
+ * visitor's language. A pack that never ends prints a dash for its days.
+ */
+export const packDisplayValueNames = ["voiceMinutes", "days", "price", "receptionists", "businessNumbers", "alertSmsSegments", "outboundCallAttempts", "chatAiUnits", "knowledgeStorage"] as const;
+export type PackDisplayValueName = (typeof packDisplayValueNames)[number];
+
+/** The most cards a plan screen shows: the four plans' and some packs'. */
+export const MAX_PLAN_DISPLAY_CARDS = 12;
+
 /** The words the plan screens show for comparison values they don't spell out. */
 export const planDisplayCellWords = ["unlimited", "custom", "multiple"] as const;
 export type PlanDisplayCellWord = (typeof planDisplayCellWords)[number];
@@ -55,16 +69,27 @@ export type PlanDisplayIntervalText = z.output<typeof intervalText>;
 
 const allowance = z.enum(planDisplayAllowances);
 
+// A card shows a plan, or a prepaid pack of the file: one of the two.
 const card = z.strictObject({
-  plan: z.enum(cloudBillingPlanSlugs),
-  // The plan the screens mark as popular: at most one.
+  plan: z.enum(cloudBillingPlanSlugs).optional(),
+  // A pack's code, from the file's packs: its card shows the pack's price, paid once, and its button buys it.
+  pack: z.string().min(1).max(48).optional(),
+  // The card the screens mark as popular: at most one.
   popular: z.boolean().optional(),
+  // The popular card's badge, in place of the word Popular.
+  badge: planDisplayTextSchema.optional(),
+  // A pack's card takes one text, since a pack has no monthly or annual price.
   description: intervalText.optional(),
   button: intervalText.optional(),
-  // An allowance's name prints the plan's own number, with its plural and rate; anything else is text.
+  // An allowance's name prints the plan's or the pack's own number, with its plural and, for a plan, its rate; anything else is text.
   bullets: z.array(z.union([allowance, planDisplayTextSchema])).min(1).max(12).optional(),
 });
-export type PlanDisplayCard = z.output<typeof card>;
+/** A card as the file writes it: a plan's or a pack's. */
+export type PlanDisplayEntry = z.output<typeof card>;
+/** A plan's card. */
+export type PlanDisplayCard = PlanDisplayEntry & { plan: CloudBillingPlanSlug; pack?: undefined };
+/** A prepaid pack's card, with one text for its description and button. */
+export type PlanDisplayPackCard = Omit<PlanDisplayEntry, "description" | "button"> & { pack: string; plan?: undefined; description?: PlanDisplayText; button?: PlanDisplayText };
 
 // What a plan gets in a comparison row: included or not, one of the words, or text.
 const cell = z.union([z.boolean(), z.enum(planDisplayCellWords), planDisplayTextSchema]);
@@ -89,13 +114,13 @@ export type PlanDisplayGroup = z.output<typeof group>;
 export const billingDisplaySchema = z.strictObject({
   // The tab the plan step opens on, when the plans sell it.
   defaultInterval: z.enum(billingIntervals).optional(),
-  // The cards, in their order, which is also the comparison's columns. A plan left out gets neither.
-  plans: z.array(card).min(1).max(cloudBillingPlanSlugs.length).optional(),
+  // The cards, in their order: the plans', which are also the comparison's columns, and the packs'. A plan left out gets neither.
+  plans: z.array(card).min(1).max(MAX_PLAN_DISPLAY_CARDS).optional(),
   comparisonTitle: planDisplayTextSchema.optional(),
   comparisonIntro: planDisplayTextSchema.optional(),
   // The comparison's groups and rows, in their order; an empty list shows no comparison.
   comparison: z.array(group).max(12).optional(),
-  // The prepaid packs' box on the plan step, when packs are on sale.
+  // The prepaid packs' box on the plan step, when packs are on sale and no card shows a pack.
   packs: z.strictObject({ title: planDisplayTextSchema.optional(), description: planDisplayTextSchema.optional(), button: planDisplayTextSchema.optional() }).optional(),
 });
 
@@ -113,10 +138,21 @@ export function planDisplayPlaceholders(value: string): string[] {
 }
 
 const planValueNames = new Set<string>([...planDisplayValueNames, "appName"]);
+const packValueNames = new Set<string>([...packDisplayValueNames, "appName"]);
 const pageValueNames = new Set<string>(["appName", ...cloudBillingPlanSlugs.flatMap((plan) => planDisplayValueNames.map((name) => `${plan}.${name}`))]);
 
 function isText(value: unknown): value is PlanDisplayText {
   return typeof value === "object" && value !== null && "en" in value;
+}
+
+/** Whether a card shows a prepaid pack rather than a plan. */
+export function isPackDisplayCard(entry: PlanDisplayEntry): entry is PlanDisplayPackCard {
+  return entry.pack !== undefined && entry.plan === undefined && (entry.description === undefined || isText(entry.description)) && (entry.button === undefined || isText(entry.button));
+}
+
+/** Whether a card shows one of the four plans. */
+export function isPlanDisplayCard(entry: PlanDisplayEntry): entry is PlanDisplayCard {
+  return entry.plan !== undefined && entry.pack === undefined;
 }
 
 /** The section's words in one interval's version. */
@@ -124,17 +160,24 @@ function intervalTexts(value: PlanDisplayIntervalText): Array<[Array<string>, Pl
   return isText(value) ? [[[], value]] : [[["monthly"], value.monthly], [["annual"], value.annual]];
 }
 
+const placeholderHints = {
+  plan: "a plan's text prints an allowance such as {{voiceMinutes}}, a rate such as {{voiceMinuteRate}}, or {{appName}}",
+  pack: "a pack's text prints its {{voiceMinutes}}, {{days}}, {{price}}, an allowance such as {{receptionists}}, or {{appName}}",
+  page: "the page's text prints a plan's value such as {{free_cloud.voiceMinutes}}, or {{appName}}",
+} as const;
+
 /**
  * The checks the JSON Schema can't carry. issue's path starts inside the
- * section: each card at most once, one popular at most, a Starter or Pro card
- * only for a plan the file sells, a value in a row only for a plan with a
- * card and in a row of the brand's own for every such plan, and only known
- * names in {{...}}.
+ * section: a card for a plan or for a pack of the file (packs, its codes),
+ * each at most once, one popular at most, a badge only on it, a Starter or
+ * Pro card only for a plan the file sells, one text for a pack card's words, a
+ * value in a row only for a plan with a card and in a row of the brand's own
+ * for every such plan, and only known names in {{...}}.
  */
-export function checkBillingDisplay(display: BillingDisplay, sold: Record<"starter" | "pro", boolean>, issue: (path: Array<string | number>, message: string) => void): void {
-  const placeholders = (path: Array<string | number>, value: PlanDisplayText, scope: "plan" | "page") => {
-    const allowed = scope === "plan" ? planValueNames : pageValueNames;
-    const hint = scope === "plan" ? "a plan's text prints an allowance such as {{voiceMinutes}}, a rate such as {{voiceMinuteRate}}, or {{appName}}" : "the page's text prints a plan's value such as {{free_cloud.voiceMinutes}}, or {{appName}}";
+export function checkBillingDisplay(display: BillingDisplay, sold: Record<"starter" | "pro", boolean>, packs: readonly string[], issue: (path: Array<string | number>, message: string) => void): void {
+  const placeholders = (path: Array<string | number>, value: PlanDisplayText, scope: "plan" | "pack" | "page") => {
+    const allowed = scope === "plan" ? planValueNames : scope === "pack" ? packValueNames : pageValueNames;
+    const hint = placeholderHints[scope];
     for (const locale of Object.keys(value) as InterfaceLocale[]) {
       for (const name of planDisplayPlaceholders(value[locale])) {
         if (!allowed.has(name)) issue([...path, locale], `{{${name}}} isn't a value it knows: ${hint}`);
@@ -143,21 +186,42 @@ export function checkBillingDisplay(display: BillingDisplay, sold: Record<"start
   };
   const cards = display.plans ?? [];
   const seen = new Set<string>();
+  const filePacks = new Set(packs);
   cards.forEach((entry, index) => {
-    if (seen.has(entry.plan)) issue(["plans", index, "plan"], `${entry.plan} already has a card`);
-    seen.add(entry.plan);
-    if ((entry.plan === "starter" || entry.plan === "pro") && !sold[entry.plan]) issue(["plans", index, "plan"], `${entry.plan} isn't sold in this file, so it can't have a card`);
+    if ((entry.plan === undefined) === (entry.pack === undefined)) {
+      issue(["plans", index], "a card shows a plan or a pack: name one of the two, plan or pack");
+      return;
+    }
+    const scope = entry.pack !== undefined ? "pack" : "plan";
+    if (entry.pack !== undefined) {
+      if (!filePacks.has(entry.pack)) issue(["plans", index, "pack"], `${entry.pack} isn't a pack in this file: use a code under packs`);
+      if (seen.has(`pack:${entry.pack}`)) issue(["plans", index, "pack"], `${entry.pack} already has a card`);
+      seen.add(`pack:${entry.pack}`);
+    } else if (entry.plan !== undefined) {
+      if (seen.has(entry.plan)) issue(["plans", index, "plan"], `${entry.plan} already has a card`);
+      seen.add(entry.plan);
+      if ((entry.plan === "starter" || entry.plan === "pro") && !sold[entry.plan]) issue(["plans", index, "plan"], `${entry.plan} isn't sold in this file, so it can't have a card`);
+    }
+    if (entry.badge) {
+      if (!entry.popular) issue(["plans", index, "badge"], "a badge shows only on the popular card: set popular too");
+      placeholders(["plans", index, "badge"], entry.badge, scope);
+    }
     for (const field of ["description", "button"] as const) {
       const value = entry[field];
-      if (value) for (const [suffix, version] of intervalTexts(value)) placeholders(["plans", index, field, ...suffix], version, "plan");
+      if (!value) continue;
+      if (scope === "pack" && !isText(value)) {
+        issue(["plans", index, field], "a pack is paid once, so its card takes one text, not a monthly and an annual one");
+        continue;
+      }
+      for (const [suffix, version] of intervalTexts(value)) placeholders(["plans", index, field, ...suffix], version, scope);
     }
     entry.bullets?.forEach((bullet, at) => {
-      if (isText(bullet)) placeholders(["plans", index, "bullets", at], bullet, "plan");
+      if (isText(bullet)) placeholders(["plans", index, "bullets", at], bullet, scope);
     });
   });
-  if (cards.filter((entry) => entry.popular).length > 1) issue(["plans"], "only one plan can be popular");
-  // The comparison's columns are the cards', or all four when the section names none.
-  const columns = new Set<string>(display.plans ? cards.map((entry) => entry.plan) : cloudBillingPlanSlugs);
+  if (cards.filter((entry) => entry.popular).length > 1) issue(["plans"], "only one card can be popular");
+  // The comparison's columns are the plans' cards, or all four when the section names no card.
+  const columns = new Set<string>(display.plans ? cards.flatMap((entry) => (entry.plan !== undefined && entry.pack === undefined ? [entry.plan] : [])) : cloudBillingPlanSlugs);
   for (const field of ["comparisonTitle", "comparisonIntro"] as const) {
     const value = display[field];
     if (value) placeholders([field], value, "page");

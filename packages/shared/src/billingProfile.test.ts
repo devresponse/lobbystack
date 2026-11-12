@@ -369,10 +369,10 @@ describe("prepaid packs", () => {
       ["listings_3_365", 750, 365, 3, 1, 24900],
       ["listings_6_365", 1500, 365, 6, 1, 44900],
     ]);
-    // The plan screens show Free alone, with no comparison, and the packs' box beside it.
-    expect(profile.display?.plans?.map((card) => card.plan)).toEqual(["free_cloud"]);
+    // The plan screens show Free and a card for each pack, the middle one popular, with no comparison and no packs' box.
+    expect(profile.display?.plans?.map((card) => [card.plan ?? card.pack, card.popular === true])).toEqual([["free_cloud", false], ["listing_1_180", false], ["listings_3_365", true], ["listings_6_365", false]]);
     expect(profile.display?.comparison).toEqual([]);
-    expect(profile.display?.packs?.title?.en).toBe("Upgrade with a listing pack");
+    expect(profile.display?.packs).toBeUndefined();
   });
 
   it("takes what a pack leaves out from Starter, and keeps what it sets", () => {
@@ -543,7 +543,7 @@ describe("the plan screens' display section", () => {
     expect(displayProblems(withDisplay({ title: words("Plans") }))).toEqual([expect.stringMatching(/^display: /)]);
     // Each card once, and one popular at most.
     expect(displayProblems(withDisplay({ plans: [{ plan: "pro" }, { plan: "pro" }] }))).toEqual(["display.plans.1.plan: pro already has a card"]);
-    expect(displayProblems(withDisplay({ plans: [{ plan: "starter", popular: true }, { plan: "pro", popular: true }] }))).toEqual(["display.plans: only one plan can be popular"]);
+    expect(displayProblems(withDisplay({ plans: [{ plan: "starter", popular: true }, { plan: "pro", popular: true }] }))).toEqual(["display.plans: only one card can be popular"]);
     // A Starter or Pro card only for a plan the file sells; Free and Enterprise are never sold, and always may have one.
     const unsold = (file: Record<string, any>) => {
       delete file.packs;
@@ -560,6 +560,47 @@ describe("the plan screens' display section", () => {
     expect(displayProblems(withDisplay({ comparisonIntro: words("Test {{voiceMinutes}} minutes on Free.") }))).toHaveLength(4);
     expect(displayProblems(withDisplay({ comparisonIntro: words("Test {{free_cloud.voiceMinutes}} minutes on {{appName}}.") }))).toEqual([]);
     expect(displayProblems(withDisplay({ plans: [{ plan: "pro", bullets: [words("{{pro.voiceMinutes}} minutes")] }] }))).toHaveLength(4);
+  });
+
+  it("takes a card for each of the file's packs beside the plans', with the pack's own values in its words", () => {
+    const cards = [
+      { plan: "free_cloud" },
+      { pack: "pack_250_90", description: words("{{voiceMinutes}} minutes for {{days}} days, {{price}} once."), button: words("Get {{receptionists}} receptionist"), bullets: ["voiceMinutes", "businessNumbers", words("{{chatAiUnits}} chats and {{knowledgeStorage}} on {{appName}}")] },
+      { pack: "pack_500_365", popular: true, badge: words("Best value") },
+    ];
+    expect(problems(withDisplay({ plans: cards, comparison: [] }))).toEqual([]);
+    // A pack's card is no column: a row of the brand's own needs only the plans' values.
+    expect(displayProblems(withDisplay({ plans: cards, comparison: [{ group: words("Booking"), rows: [{ label: words("Booking"), values: { free_cloud: true } }] }] }))).toEqual([]);
+    // RealInfoBot's own file: Free and a card for each of its three listing packs.
+    const realinfobot = JSON.parse(readFileSync(new URL("../../../brands/realinfobot/billing.json", import.meta.url), "utf8"));
+    expect(problems(realinfobot)).toEqual([]);
+    expect(realinfobot.display.plans.map((card: { plan?: string; pack?: string }) => card.plan ?? card.pack)).toEqual(["free_cloud", "listing_1_180", "listings_3_365", "listings_6_365"]);
+  });
+
+  it("refuses a pack's card the screens can't show, with the path to fix", () => {
+    // A card shows a plan or a pack, never both or neither.
+    expect(displayProblems(withDisplay({ plans: [{ plan: "pro", pack: "pack_250_90" }] }))).toEqual(["display.plans.0: a card shows a plan or a pack: name one of the two, plan or pack"]);
+    expect(displayProblems(withDisplay({ plans: [{ popular: true }] }))).toEqual(["display.plans.0: a card shows a plan or a pack: name one of the two, plan or pack"]);
+    // Only a pack of this file, each once.
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pack_250_30" }] }))).toEqual(["display.plans.0.pack: pack_250_30 isn't a pack in this file: use a code under packs"]);
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pro" }] }))).toEqual(["display.plans.0.pack: pro isn't a pack in this file: use a code under packs"]);
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pack_250_90" }, { pack: "pack_250_90" }] }))).toEqual(["display.plans.1.pack: pack_250_90 already has a card"]);
+    // One popular card among the plans' and the packs', and a badge only on it.
+    expect(displayProblems(withDisplay({ plans: [{ plan: "pro", popular: true }, { pack: "pack_250_90", popular: true }] }))).toEqual(["display.plans: only one card can be popular"]);
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pack_250_90", badge: words("Best value") }] }))).toEqual(["display.plans.0.badge: a badge shows only on the popular card: set popular too"]);
+    // A pack is paid once: one text, not a monthly and an annual one.
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pack_250_90", button: { monthly: words("Buy"), annual: words("Buy") } }] }))).toEqual(["display.plans.0.button: a pack is paid once, so its card takes one text, not a monthly and an annual one"]);
+    // A pack's text prints the pack's values, not a plan's rates or another plan's numbers; a plan's text, not a pack's length.
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pack_250_90", description: words("Then {{voiceMinuteRate}} a minute") }] }))).toEqual([
+      expect.stringMatching(/^display\.plans\.0\.description\.en: \{\{voiceMinuteRate\}\} isn't a value it knows: a pack's text prints/),
+      expect.stringMatching(/^display\.plans\.0\.description\.fr: /),
+      expect.stringMatching(/^display\.plans\.0\.description\.es: /),
+      expect.stringMatching(/^display\.plans\.0\.description\.sr: /),
+    ]);
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pack_250_90", bullets: [words("{{free_cloud.voiceMinutes}} on Free")] }] }))).toHaveLength(4);
+    expect(displayProblems(withDisplay({ plans: [{ plan: "pro", bullets: [words("Lasts {{days}} days")] }] }))).toHaveLength(4);
+    // A badge prints its card's values.
+    expect(displayProblems(withDisplay({ plans: [{ pack: "pack_250_90", popular: true, badge: words("{{voiceMinutes}} minutes") }] }))).toEqual([]);
   });
 
   it("checks the comparison against the cards: a value only for a plan with a card, and every such plan's in a row of the brand's own", () => {

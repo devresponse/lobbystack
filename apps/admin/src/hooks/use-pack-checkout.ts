@@ -65,9 +65,12 @@ type Checkout = { businessId: string; checkoutId: string; pack: string; billingE
 
 /**
  * Starts and follows a pack checkout for the business. pending holds from the
- * click until the page leaves for the provider or the checkout fails.
+ * click until the page leaves for the provider or the checkout fails. writer
+ * names it among those that say an upgrade is in progress, so two screens
+ * that sell packs at once, such as Settings > Plan and the Upgrade plan
+ * dialog over it, don't clear each other's.
  */
-export function usePackCheckout(businessId: string | undefined) {
+export function usePackCheckout(businessId: string | undefined, writer = "pack") {
   const { t } = useTranslation("settings");
   const queryClient = useQueryClient();
   const [checkout, setCheckout] = useState<Checkout | null>(null);
@@ -117,7 +120,7 @@ export function usePackCheckout(businessId: string | undefined) {
       if (redirected.current === click) return;
       redirected.current = click;
       // Heading to the payment page is leaving on purpose: say so before the page starts to unload.
-      setUpgradeInProgress(true, "pack");
+      setUpgradeInProgress(true, writer);
       setLeaving(true);
       window.location.assign(data.checkoutUrl);
       return;
@@ -140,12 +143,12 @@ export function usePackCheckout(businessId: string | undefined) {
       toast.error(t(data?.closedForPlan ? "billing.packs.toast.closedForPlan" : data?.status === "expired" ? "billing.packs.toast.checkoutExpired" : "billing.packs.toast.checkoutFailed"));
     }
     setCheckout(null);
-  }, [businessId, checkout, data, queryClient, status.isError, t]);
+  }, [businessId, checkout, data, queryClient, status.isError, t, writer]);
   const pending = (mutation.isPending && mutation.variables?.businessId === businessId) || checkout?.businessId === businessId || leaving;
   useEffect(() => {
-    setUpgradeInProgress(pending, "pack");
-    return () => setUpgradeInProgress(false, "pack");
-  }, [pending]);
+    setUpgradeInProgress(pending, writer);
+    return () => setUpgradeInProgress(false, writer);
+  }, [pending, writer]);
   return {
     /** Starts a checkout for the pack, with a billing email when the provider asked for one. */
     start(pack: string, billingEmail?: string) {

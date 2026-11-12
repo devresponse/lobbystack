@@ -1035,7 +1035,7 @@
         },
         "plans": {
           "minItems": 1,
-          "maxItems": 4,
+          "maxItems": 12,
           "type": "array",
           "items": {
             "type": "object",
@@ -1049,8 +1049,16 @@
                   "enterprise"
                 ]
               },
+              "pack": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48
+              },
               "popular": {
                 "type": "boolean"
+              },
+              "badge": {
+                "$ref": "#/$defs/PlanDisplayText"
               },
               "description": {
                 "anyOf": [
@@ -1123,9 +1131,6 @@
                 }
               }
             },
-            "required": [
-              "plan"
-            ],
             "additionalProperties": false
           }
         },

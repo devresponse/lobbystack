@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { StrictMode } from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -271,6 +271,76 @@ describe("prepaid packs during onboarding", () => {
     cleanup();
     setup(false, false, "free_cloud", builtInBillingPlanList(), { ...onSale, packCheckout: { refusal: "managed_plan", endsSubscription: null } });
     expect(screen.queryByText("plan.packs.title")).toBeNull();
+  });
+
+  describe("packs billing.json gives cards of their own", () => {
+    const words = (en: string) => ({ en });
+    // Free, a card for each of two packs on sale, and one for a pack that isn't.
+    const planDisplay = { plans: [{ plan: "free_cloud" }, { pack: "pack-500-180", button: words("Get it") }, { pack: "pack-500-365", popular: true, badge: words("Best value"), description: words("{{voiceMinutes}} minutes for {{appName}}"), bullets: ["voiceMinutes", words("Lasts {{days}} days for {{price}}")] }, { pack: "pack-missing" }], comparison: [] };
+    const card = (name: string) => screen.getByRole("heading", { level: 3, name }).closest("section")!;
+    const bullets = (name: string) => within(card(name)).getAllByRole("listitem").map((item) => item.textContent);
+
+    it("shows them beside the plans in the section's order, in place of the packs' box, priced and filled from the packs on sale", () => {
+      setup(false, false, "free_cloud", builtInBillingPlanList(), { ...onSale, planDisplay });
+      expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["plan.tiers.free_cloud.name", "pack-500-180", "pack-500-365"]);
+      expect(screen.queryByText("plan.packs.title")).toBeNull();
+      expect(screen.queryByRole("radio")).toBeNull();
+      expect(within(card("pack-500-365")).getByText("Best value")).toBeTruthy();
+      expect(within(card("pack-500-180")).queryByText("plan.popular")).toBeNull();
+      for (const name of ["pack-500-180", "pack-500-365"]) {
+        expect(within(card(name)).getByText("CA$99")).toBeTruthy();
+        expect(within(card(name)).getByText("plan.packs.priceSuffix")).toBeTruthy();
+      }
+      expect(within(card("pack-500-365")).getByText("500 minutes for LobbyStack")).toBeTruthy();
+      expect(bullets("pack-500-365")).toEqual(["common:planDisplay.bullets.packVoiceMinutes", "Lasts 365 days for CA$99"]);
+      expect(translate).toHaveBeenCalledWith("common:planDisplay.bullets.packVoiceMinutes", { count: 500, amount: "500", days: "common:planDisplay.days" });
+      expect(translate).toHaveBeenCalledWith("common:planDisplay.days", { count: 365 });
+      // A card the section gives no words takes the built-in ones.
+      expect(within(card("pack-500-180")).getByText("plan.packs.description")).toBeTruthy();
+      expect(bullets("pack-500-180")).toEqual(["common:planDisplay.bullets.packVoiceMinutes", "common:planDisplay.bullets.receptionists", "common:planDisplay.bullets.businessNumbers"]);
+      expect(screen.getByRole("button", { name: "plan.packs.cta" })).toBeTruthy();
+    });
+
+    it("buys the card's pack, and records the choice and its checkout as prepaid", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { ...window.location, assign });
+      setup(false, false, "free_cloud", builtInBillingPlanList(), { ...onSale, planDisplay });
+      const fetchMock = servePacks({ status: "ready", checkoutUrl: "https://pay.example/pc-1" });
+      await userEvent.click(screen.getByRole("button", { name: "Get it" }));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/pc-1"));
+      const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/billing/packs/checkout")!;
+      expect(JSON.parse(String(init!.body))).toEqual({ businessId: "business", pack: "pack-500-180" });
+      telemetryRef.current!.expectEvent("web.onboarding.plan_selected", { businessId: "business", plan: "prepaid" });
+      telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_started", { businessId: "business", plan: "prepaid" });
+      // Every card waits while the pack's checkout opens.
+      expect(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }).hasAttribute("disabled")).toBe(true);
+      expect(screen.getByRole("button", { name: "plan.packs.cta" }).hasAttribute("disabled")).toBe(true);
+    });
+
+    it("says why a card's pack can't be bought, and shows no card for a pack the plan doesn't sell", () => {
+      setup(false, false, "free_cloud", builtInBillingPlanList(), { packOffers: [offer("pack-500-180", 500, 180, false), offer("pack-500-365", 500, 365)], packCheckout: { refusal: null, endsSubscription: null }, planDisplay });
+      expect(screen.getByRole("button", { name: "Get it" }).hasAttribute("disabled")).toBe(true);
+      expect(within(card("pack-500-180")).getByText("billing.packs.unavailable")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "plan.packs.cta" }).hasAttribute("disabled")).toBe(false);
+      expect(screen.getAllByText("billing.packs.unavailable")).toHaveLength(1);
+      cleanup();
+      setup(false, false, "free_cloud", builtInBillingPlanList(), { ...onSale, packCheckout: { refusal: "pack_not_sold_on_plan", endsSubscription: null }, planDisplay });
+      expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["plan.tiers.free_cloud.name"]);
+    });
+
+    it("asks first when the pack's payment ends the business's plan, then buys that card's pack", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { ...window.location, assign });
+      setup(false, false, "free_cloud", builtInBillingPlanList(), { ...onSale, packCheckout: { refusal: null, endsSubscription: { plan: "starter", promo: false, periodEnd: null } }, planDisplay });
+      const fetchMock = servePacks({ status: "ready", checkoutUrl: "https://pay.example/pc-1" });
+      await userEvent.click(screen.getByRole("button", { name: "plan.packs.cta" }));
+      expect(await screen.findByText("billing.packs.endsPlanDialog.title")).toBeTruthy();
+      expect(fetchMock.mock.calls.some(([url]) => url === "/api/billing/packs/checkout")).toBe(false);
+      await userEvent.click(screen.getByRole("button", { name: "billing.packs.endsPlanDialog.confirm" }));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/pc-1"));
+      const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/billing/packs/checkout")!;
+      expect(JSON.parse(String(init!.body))).toEqual({ businessId: "business", pack: "pack-500-365" });
+    });
   });
 
   it("waits for a pack's payment after the provider sends them back, records the checkout once, and goes on to the number step", async () => {

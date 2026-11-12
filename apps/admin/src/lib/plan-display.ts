@@ -1,8 +1,11 @@
 import {
   billingIntervals,
+  billingPlanName,
   billingPlanPrice,
   cloudBillingPlanSlugs,
   fillPlanDisplayText,
+  isPackDisplayCard,
+  isPlanDisplayCard,
   isPlanDisplayText,
   planDisplayIntervalText,
   planDisplayText,
@@ -12,21 +15,25 @@ import {
   type BillingPlanOffer,
   type CloudBillingPlanSlug,
   type PlanDisplayAllowance,
+  type PackDisplayValueName,
   type PlanDisplayCard,
   type PlanDisplayIntervalText,
+  type PlanDisplayPackCard,
   type PlanDisplayText,
   type PlanDisplayValueName,
 } from "@lobbystack/shared";
 
 import { findPlan, formatMoney, storageSize } from "./billing-plans";
 import { intlLocale } from "./locale";
+import type { BillingPackOfferViewModel } from "./page-view-models";
 
 // The plan screens' layout and words from the deployment's billing.json
 // display section, which GET /api/billing returns as planDisplay: which plans
-// get a card and in what order, the popular one, the opening tab, the cards'
-// words and bullets, and the comparison. A screen says whatever the section
-// leaves out in its built-in words, and a deployment without a section shows
-// the built-in screens. The numbers always come from the plan list.
+// and packs get a card and in what order, the popular one, the opening tab,
+// the cards' words and bullets, and the comparison. A screen says whatever the
+// section leaves out in its built-in words, and a deployment without a section
+// shows the built-in screens. A plan's numbers always come from the plan list,
+// and a pack's, with its price, from the packs on sale.
 
 /** A translation function that also reaches the common namespace as `common:...`. */
 export type PlanDisplayTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -36,9 +43,34 @@ export type PlanCard = { plan: CloudBillingPlanSlug; popular: boolean; display: 
 
 const builtInCards: PlanCard[] = cloudBillingPlanSlugs.map((plan) => ({ plan, popular: plan === "pro", display: null }));
 
-/** The cards in their order, which are also the comparison's columns: the section's, else Free, Starter, Pro (popular) and Enterprise. */
+/** The plans' cards in their order, which are also the comparison's columns: the section's, else Free, Starter, Pro (popular) and Enterprise. */
 export function planCards(display: BillingDisplay | null | undefined): PlanCard[] {
-  return display?.plans ? display.plans.map((card) => ({ plan: card.plan, popular: card.popular === true, display: card })) : builtInCards;
+  return display?.plans ? display.plans.filter(isPlanDisplayCard).map((card) => ({ plan: card.plan, popular: card.popular === true, display: card })) : builtInCards;
+}
+
+/** A pack's card: the code of the pack it sells, whether it's marked popular, and the section's words for it. */
+export type PackCard = { pack: string; popular: boolean; display: PlanDisplayPackCard };
+
+/** A card a plan screen shows, a plan's or a pack's, in the section's order. */
+export type ScreenCard = ({ kind: "plan" } & PlanCard) | ({ kind: "pack" } & PackCard);
+
+/**
+ * Every card a plan screen shows, in the section's order: the plans' and the
+ * packs'. A pack's card shows only while its pack is on sale, as offers says,
+ * since its price and numbers come from there.
+ */
+export function screenCards(display: BillingDisplay | null | undefined, offers: readonly BillingPackOfferViewModel[]): ScreenCard[] {
+  if (!display?.plans) return builtInCards.map((card) => ({ kind: "plan", ...card }));
+  const onSale = new Set(offers.map((offer) => offer.code));
+  return display.plans.flatMap((card): ScreenCard[] => {
+    if (isPackDisplayCard(card)) return onSale.has(card.pack) ? [{ kind: "pack", pack: card.pack, popular: card.popular === true, display: card }] : [];
+    return isPlanDisplayCard(card) ? [{ kind: "plan", plan: card.plan, popular: card.popular === true, display: card }] : [];
+  });
+}
+
+/** Whether the section gives a pack a card, which takes the place of the plan step's packs' box. */
+export function hasPackCards(display: BillingDisplay | null | undefined): boolean {
+  return display?.plans?.some(isPackDisplayCard) ?? false;
 }
 
 /**
@@ -112,6 +144,80 @@ export function pageTextValues(plans: BillingPlanList, locale: string, t: PlanDi
     for (const [name, value] of Object.entries(planDisplayValues(findPlan(plans, plan), plans.currency, locale, t))) values[`${plan}.${name}`] = value;
   }
   return values;
+}
+
+/** A pack's name in the visitor's language, else English, else its code. */
+export function packName(offer: BillingPackOfferViewModel, locale: string): string {
+  return billingPlanName(offer.names, locale) ?? offer.code;
+}
+
+/** A pack's price, paid once, in its currency. */
+export function packPrice(offer: BillingPackOfferViewModel, locale: string): string {
+  return formatMoney(offer.amountCents, offer.currency, locale);
+}
+
+/**
+ * The values a pack's text prints as {{name}}: its voice minutes for its
+ * whole length, its length in days (a dash for a pack that never ends), its
+ * price, and what it gives each month or allows while it lasts.
+ */
+export function packDisplayValues(offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate): Record<PackDisplayValueName, string> {
+  const count = (value: number) => value.toLocaleString(intlLocale(locale));
+  const size = storageSize(offer.knowledgeStorageBytes, locale);
+  return {
+    voiceMinutes: count(offer.minutes),
+    days: offer.days === null ? "—" : count(offer.days),
+    price: packPrice(offer, locale),
+    receptionists: count(offer.receptionists),
+    businessNumbers: count(offer.numbers),
+    alertSmsSegments: count(offer.smsSegments),
+    outboundCallAttempts: count(offer.outboundCalls),
+    chatAiUnits: count(offer.chatUnits),
+    knowledgeStorage: t(`common:planDisplay.storage.${size.unit === "GB" ? "gigabytes" : "megabytes"}`, { amount: size.amount }),
+  };
+}
+
+/** What text about one pack prints: its values, and the app's name. */
+export function packTextValues(offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate, appName: string): Record<string, string> {
+  return { ...packDisplayValues(offer, locale, t), appName };
+}
+
+/** The bullets a pack's card shows when the section gives it none. */
+export const builtInPackBullets: PlanDisplayAllowance[] = ["voiceMinutes", "receptionists", "businessNumbers"];
+
+/**
+ * What a pack card's bullet that names an allowance says: the pack's own
+ * number with its plural. Its voice minutes are for its whole length, so they
+ * say how long it lasts.
+ */
+export function packAllowanceBullet(allowance: PlanDisplayAllowance, offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate): string {
+  const say = (name: string, options: Record<string, unknown> = {}) => t(`common:planDisplay.bullets.${name}`, options);
+  const amount = (count: number) => ({ count, amount: count.toLocaleString(intlLocale(locale)) });
+  switch (allowance) {
+    case "voiceMinutes":
+      return offer.days === null
+        ? say("packVoiceMinutesNoEnd", amount(offer.minutes))
+        : say("packVoiceMinutes", { ...amount(offer.minutes), days: t("common:planDisplay.days", { count: offer.days }) });
+    case "businessNumbers":
+      return offer.numbers === 0 ? say("businessNumbersNone") : say("businessNumbers", amount(offer.numbers));
+    case "knowledgeStorage": {
+      const size = storageSize(offer.knowledgeStorageBytes, locale);
+      return say(size.unit === "GB" ? "knowledgeStorageGigabytes" : "knowledgeStorageMegabytes", { amount: size.amount });
+    }
+    case "receptionists":
+      return say("receptionists", amount(offer.receptionists));
+    case "alertSmsSegments":
+      return say("alertSmsSegments", amount(offer.smsSegments));
+    case "outboundCallAttempts":
+      return say("outboundCallAttempts", amount(offer.outboundCalls));
+    case "chatAiUnits":
+      return say("chatAiUnits", amount(offer.chatUnits));
+  }
+}
+
+/** A pack card's bullets: the section's, else the built-in ones, each an allowance's own words or the section's text with the pack's values. */
+export function packCardBullets(card: PlanDisplayPackCard, offer: BillingPackOfferViewModel, locale: string, t: PlanDisplayTranslate, values: Readonly<Record<string, string>>): string[] {
+  return (card.bullets ?? builtInPackBullets).map((bullet) => (isPlanDisplayText(bullet) ? displayText(bullet, locale, values) : packAllowanceBullet(bullet, offer, locale, t)));
 }
 
 /** The section's text in the visitor's language, with its values filled in. */

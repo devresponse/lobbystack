@@ -232,7 +232,16 @@
       "chatAiUnitsCustom": "Čet na sajtu po dogovoru",
       "knowledgeStorageMegabytes": "{{amount}} MB baze znanja",
       "knowledgeStorageGigabytes": "{{amount}} GB baze znanja",
-      "knowledgeStorageCustom": "Baza znanja po dogovoru"
-    }
+      "knowledgeStorageCustom": "Baza znanja po dogovoru",
+      "packVoiceMinutes_one": "{{amount}} minut razgovora na {{days}}",
+      "packVoiceMinutes_few": "{{amount}} minuta razgovora na {{days}}",
+      "packVoiceMinutes_other": "{{amount}} minuta razgovora na {{days}}",
+      "packVoiceMinutesNoEnd_one": "{{amount}} minut razgovora, bez datuma isteka",
+      "packVoiceMinutesNoEnd_few": "{{amount}} minuta razgovora, bez datuma isteka",
+      "packVoiceMinutesNoEnd_other": "{{amount}} minuta razgovora, bez datuma isteka"
+    },
+    "days_one": "{{count}} dan",
+    "days_few": "{{count}} dana",
+    "days_other": "{{count}} dana"
   }
 }

@@ -426,6 +426,7 @@
       "title": "¿Prefiere minutos prepagados?",
       "description": "Compre minutos una sola vez, sin factura mensual. Duran hasta que se agotan o termina el paquete.",
       "cta": "Comprar paquete de minutos",
+      "priceSuffix": "pago único",
       "waiting": "Agregando sus minutos...",
       "processing": "Su pago aún se está procesando. Vuelva a comprobarlo en unos minutos.",
       "checkAgain": "Comprobar de nuevo",

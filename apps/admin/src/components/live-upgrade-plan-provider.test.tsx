@@ -342,3 +342,52 @@ describe("starting a plan from a prepaid pack", () => {
     expect(screen.queryByText("billing.actions.changingPlan")).toBeNull();
   });
 });
+
+describe("buying a pack from its card", () => {
+  const offer = { code: "listing_1", names: { en: "One listing" }, minutes: 250, voiceSeconds: 15_000, days: 180, amountCents: 9_900, currency: "cad", smsSegments: 50, outboundCalls: 20, chatUnits: 50, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable: true };
+  const planDisplay = { plans: [{ plan: "free_cloud" }, { pack: "listing_1", button: { en: "Add it to your listing" } }], comparison: [] };
+  async function openPlans(account: Record<string, unknown>, packCheckout: Record<string, unknown>) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account, planDisplay, packOffers: [offer], packCheckout, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["monthly"], pro: ["monthly"] } });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/billing/packs/checkout" && init?.method === "POST") return Response.json({ checkoutId: "pc-1" }, { status: 202 });
+      if (url.startsWith("/api/billing/packs/checkout?")) return Response.json({ status: "ready", checkoutUrl: "https://pay.example/pc-1", error: null, packStatus: null, synced: false, closedForPlan: false, refusal: null, providerName: "Stripe" });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    const bought = () => fetchMock.mock.calls.filter(([url]) => url === "/api/billing/packs/checkout").map(([, init]) => JSON.parse(String(init!.body)));
+    return { assign, bought, view };
+  }
+
+  it("opens the pack's payment page, and lets go of the upgrade once it unmounts", async () => {
+    const { assign, bought, view } = await openPlans({ plan: "free_cloud" }, { refusal: null, endsSubscription: null });
+    await userEvent.click(screen.getByRole("button", { name: "Add it to your listing" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/pc-1"), { timeout: 3_000 });
+    expect(bought()).toEqual([{ businessId: "business", pack: "listing_1" }]);
+    expect(isUpgradeInProgress()).toBe(true);
+    view.unmount();
+    expect(isUpgradeInProgress()).toBe(false);
+  });
+
+  it("asks first when the pack's payment ends the business's plan", async () => {
+    const { assign, bought } = await openPlans({ plan: "starter", billingInterval: "monthly", subscriptionState: "active" }, { refusal: null, endsSubscription: { plan: "starter", promo: false, periodEnd: null } });
+    await userEvent.click(screen.getByRole("button", { name: "Add it to your listing" }));
+    expect(await screen.findByText("billing.packs.endsPlanDialog.title")).toBeTruthy();
+    expect(bought()).toEqual([]);
+    await userEvent.click(screen.getByRole("button", { name: "billing.packs.endsPlanDialog.confirm" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/pc-1"), { timeout: 3_000 });
+    expect(bought()).toEqual([{ businessId: "business", pack: "listing_1" }]);
+  });
+
+  it("shows no pack card where the business's plan sells none", async () => {
+    await openPlans({ source: "managed", plan: "enterprise" }, { refusal: "managed_plan", endsSubscription: null });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add it to your listing" })).toBeNull();
+  });
+});

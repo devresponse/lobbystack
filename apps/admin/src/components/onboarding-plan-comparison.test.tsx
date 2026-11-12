@@ -70,3 +70,16 @@ it.each(["en", "es", "fr", "sr"] as const)("shows how many receptionists each pl
   ]);
   expect(row.previousElementSibling?.textContent).toContain(t("plan.comparison.features.voiceMinutes"));
 });
+
+it("shows no comparison when the display section's cards are all packs', which compare no plans", async () => {
+  const i18n = createInstance();
+  await i18n.init({ lng: "en", resources: { en: { onboarding: en } } });
+  const t = i18n.getFixedT("en", "onboarding");
+  const { container } = render(<OnboardingPlanComparison display={{ plans: [{ pack: "pack_250_90" }] }} locale="en" plans={builtInBillingPlanList()} t={t} />);
+  expect(container.innerHTML).toBe("");
+  cleanup();
+  // A section with plans' and packs' cards compares its plans, the popular one under its card's badge.
+  const words = (en: string) => ({ en, fr: en, es: en, sr: en });
+  render(<OnboardingPlanComparison display={{ plans: [{ plan: "free_cloud" }, { pack: "pack_250_90" }, { plan: "pro", popular: true, badge: words("{{voiceMinutes}} minutes") }] }} locale="en" plans={builtInBillingPlanList()} t={t} />);
+  expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([t("plan.featureHeader"), t("plan.tiers.free_cloud.name"), `${t("plan.tiers.pro.name")}500 minutes`]);
+});

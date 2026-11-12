@@ -407,6 +407,7 @@
       "title": "Prefer prepaid minutes?",
       "description": "Buy minutes once, with no monthly bill. They last until they run out or the pack ends.",
       "cta": "Buy pack",
+      "priceSuffix": "paid once",
       "waiting": "Adding your minutes...",
       "processing": "Your payment is still processing. Check again in a few minutes.",
       "checkAgain": "Check again",

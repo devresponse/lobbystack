@@ -421,14 +421,20 @@ const tableWidths = ["min-w-[360px]", "min-w-[360px]", "min-w-[480px]", "min-w-[
 /**
  * The plan comparison: billing.json's display section where it lays one out,
  * with a column for each plan that has a card, else the built-in table. An
- * empty comparison in the section shows none.
+ * empty comparison in the section shows none, and so does a section whose
+ * cards are all packs'.
  */
 export function OnboardingPlanComparison({ display = null, locale, plans, t }: { display?: BillingDisplay | null; locale: string; plans: BillingPlanList; t: OnboardingT }) {
   const { appName } = useBranding();
   if (display?.comparison?.length === 0) return null;
   const cards = planCards(display);
+  // A section whose cards are all packs' has no plan to compare.
+  if (cards.length === 0) return null;
   const columns = cards.map((card) => card.plan);
-  const popular = cards.find((card) => card.popular)?.plan ?? null;
+  const popularCard = cards.find((card) => card.popular);
+  const popular = popularCard?.plan ?? null;
+  // The popular column's badge: its card's, where the section words one.
+  const badge = popularCard?.display?.badge ? displayText(popularCard.display.badge, locale, planTextValues(findPlan(plans, popularCard.plan), plans.currency, locale, (key, options) => t(key, options ?? {}), appName)) : t("plan.popular");
   const groups = display?.comparison ? displayGroups(display.comparison, plans, locale, t, appName) : builtInGroups(plans, locale, t);
   const page = display ? pageTextValues(plans, locale, (key, options) => t(key, options ?? {}), appName) : {};
   const freeMinutes = planValues(findPlan(plans, "free_cloud"), plans.currency, locale).minutes;
@@ -445,7 +451,7 @@ export function OnboardingPlanComparison({ display = null, locale, plans, t }: {
           <thead>
             <tr className="border-b border-border/60">
               <th className="pr-8 pb-4 text-left text-xs font-medium text-muted-foreground">{t("plan.featureHeader")}</th>
-              {columns.map((plan) => <th className="w-[150px] px-4 pb-4 text-center text-xs font-medium text-muted-foreground" key={plan}>{plan === popular ? <span className="inline-flex items-center gap-1.5">{t(`plan.tiers.${plan}.name`)}<span className="rounded-full bg-foreground px-1.5 py-px text-[10px] font-medium text-background">{t("plan.popular")}</span></span> : t(`plan.tiers.${plan}.name`)}</th>)}
+              {columns.map((plan) => <th className="w-[150px] px-4 pb-4 text-center text-xs font-medium text-muted-foreground" key={plan}>{plan === popular ? <span className="inline-flex items-center gap-1.5">{t(`plan.tiers.${plan}.name`)}<span className="rounded-full bg-foreground px-1.5 py-px text-[10px] font-medium text-background">{badge}</span></span> : t(`plan.tiers.${plan}.name`)}</th>)}
             </tr>
           </thead>
           <tbody>

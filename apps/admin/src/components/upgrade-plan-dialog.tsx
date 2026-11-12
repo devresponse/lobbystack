@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import { intlLocale } from "@/lib/locale";
-import { cardBullets, openingInterval, planCardColumns, planCards, planTextValues, pricedIntervals, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
+import { cardBullets, displayText, openingInterval, packCardBullets, packName, packPrice, packTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, screenCards, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
+import type { BillingPackOfferViewModel } from "@/lib/page-view-models";
 import { cn } from "@/lib/utils";
 import {
   billingIntervals,
@@ -34,7 +35,9 @@ type BillingTranslation = TFunction<"settings">;
 // Prices and allowances come from the plan list. The cards, their order, the
 // popular one and their bullets come from billing.json's display section, as
 // on the onboarding plan step; these built-in bullets fill a card it gives none.
-// The short line under the price and the buttons stay the dialog's own.
+// The short line under a plan's price and its buttons stay the dialog's own. A
+// card the section gives a prepaid pack shows that pack's price, paid once,
+// and the section's words, as on the plan step, and its button buys the pack.
 const builtInHighlights: Record<CloudBillingPlanSlug, string[]> = {
   free_cloud: ["voiceMinutes", "receptionists", "allFeatures", "support"],
   starter: ["voiceMinutes", "receptionists", "dedicatedNumber", "phoneNumber", "support"],
@@ -44,6 +47,11 @@ const builtInHighlights: Record<CloudBillingPlanSlug, string[]> = {
 
 function isHostedUpgradePlan(slug: CloudBillingPlanSlug): slug is HostedUpgradePlan {
   return slug === "starter" || slug === "pro";
+}
+
+/** The popular card's badge, where billing.json words one. */
+function Badge({ children }: { children: ReactNode }) {
+  return <span className="mb-3 inline-flex rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{children}</span>;
 }
 
 export function UpgradePlanDialog({
@@ -56,13 +64,17 @@ export function UpgradePlanDialog({
   leavesPromoPlan = null,
   leavesPacks = null,
   loading,
+  loadingPack = null,
   loadingPlan,
   locale,
   onBillingIntervalChange,
   onContactEnterprise,
+  onBuyPack,
   onOpenChange,
   onStartCheckout,
   open,
+  packOffers = [],
+  packUnavailable = null,
   plans,
   prompt = null,
   t,
@@ -81,13 +93,21 @@ export function UpgradePlanDialog({
   /** The minutes left on the business's prepaid packs, which starting a plan ends. */
   leavesPacks?: { minutesLeft: number } | null;
   loading: "checkout" | null;
+  /** The pack whose checkout is opening. */
+  loadingPack?: string | null;
   loadingPlan: HostedUpgradePlan | null;
   locale: string;
   onBillingIntervalChange: (billingInterval: BillingInterval) => void;
   onContactEnterprise: () => void;
+  /** Buys a pack a card shows. */
+  onBuyPack?: (pack: string) => void;
   onOpenChange: (open: boolean) => void;
   onStartCheckout: (target: HostedUpgradePlan, billingInterval: BillingInterval) => void;
   open: boolean;
+  /** The packs on sale to the business, from GET /api/billing: the ones a card shows. */
+  packOffers?: BillingPackOfferViewModel[];
+  /** Why a pack can't be bought now, under the button of a pack card that can't. */
+  packUnavailable?: string | null;
   /** The deployment's plans, from GET /api/billing. */
   plans: BillingPlanList;
   /** Shown above the plans, such as the request for a billing email. */
@@ -97,6 +117,8 @@ export function UpgradePlanDialog({
   const { appName } = useBranding();
   const translate: PlanDisplayTranslate = (key, options) => t(key, options ?? {});
   const cards = planCards(display);
+  // Every card in billing.json's order: the plans', and the packs' that are on sale.
+  const shownCards = screenCards(display, packOffers);
   const annualBadgeText = annualBadge(plans, (key, options) => t(key, options), "billing.upgradeDialog.annualFreeMonths", "billing.upgradeDialog.annualDiscount");
   const availableBillingIntervals = billingIntervals.filter(
     (interval) =>
@@ -174,8 +196,67 @@ export function UpgradePlanDialog({
           </div>
         </div> : null}
 
-        <div className={cn("grid gap-4", planCardColumns(cards.length))}>
-          {cards.map(({ plan: slug, popular, display: card }) => {
+        <div className={cn("grid gap-4", planCardColumns(shownCards.length))}>
+          {shownCards.map((shown) => {
+            if (shown.kind === "pack") {
+              const offer = packOffers.find((entry) => entry.code === shown.pack)!;
+              const card = shown.display;
+              const textValues = packTextValues(offer, locale, translate, appName);
+              return (
+                <section
+                  className={cn(
+                    "flex min-h-[29rem] flex-col rounded-xl border bg-background p-5",
+                    shown.popular ? "border-foreground/30 bg-muted/20" : "border-border/70",
+                  )}
+                  key={`pack:${offer.code}`}
+                >
+                  <div className="mb-5">
+                    {shown.popular && card.badge ? <Badge>{displayText(card.badge, locale, textValues)}</Badge> : null}
+                    <h3 className="font-heading text-lg font-medium tracking-[-0.03em]">
+                      {packName(offer, locale)}
+                    </h3>
+                    <div className="mt-4 flex items-baseline gap-1">
+                      <span className="font-heading text-4xl font-medium tracking-[-0.05em] tabular-nums">
+                        {packPrice(offer, locale)}
+                      </span>
+                      <span className="text-sm text-muted-foreground">
+                        {t("billing.packs.priceSuffix")}
+                      </span>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                      {card.description ? displayText(card.description, locale, textValues) : t("billing.packs.description")}
+                    </p>
+                  </div>
+
+                  <div className="flex-1 border-t border-border/60 pt-4">
+                    <ul className="flex flex-col gap-3">
+                      {packCardBullets(card, offer, locale, translate, textValues).map((bullet, index) => (
+                        <li className="flex items-start gap-2.5 text-sm" key={index}>
+                          <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
+                          <span className="whitespace-pre-line">{bullet}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <Button
+                    className="mt-6 w-full rounded-full"
+                    disabled={loading === "checkout" || !offer.checkoutAvailable || !onBuyPack}
+                    loading={loading === "checkout" && loadingPack === offer.code}
+                    loadingLabel={t("billing.actions.openingCheckout")}
+                    onClick={() => onBuyPack?.(offer.code)}
+                    type="button"
+                    variant={shown.popular ? "default" : "outline"}
+                  >
+                    {card.button ? displayText(card.button, locale, textValues) : t("billing.packs.buy")}
+                  </Button>
+                  {offer.checkoutAvailable || !packUnavailable ? null : (
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{packUnavailable}</p>
+                  )}
+                </section>
+              );
+            }
+            const { plan: slug, popular, display: card } = shown;
             const isCurrentPlan = currentPlan === slug;
             const checkoutPlan = isHostedUpgradePlan(slug) ? slug : null;
             const isEnterprisePlan = slug === "enterprise";
@@ -192,8 +273,9 @@ export function UpgradePlanDialog({
                 isSelectedIntervalAvailable);
             const offer = findPlan(plans, slug);
             const values = planValues(offer, plans.currency, locale);
+            const textValues = card ? planTextValues(offer, plans.currency, locale, translate, appName) : {};
             const highlights = card?.bullets
-              ? cardBullets(card.bullets, offer, plans.currency, locale, translate, planTextValues(offer, plans.currency, locale, translate, appName))
+              ? cardBullets(card.bullets, offer, plans.currency, locale, translate, textValues)
               : builtInHighlights[slug].map((highlight) => t(`billing.upgradeDialog.plans.${slug}.highlights.${highlight}`, planStringValues(highlight, values)));
             // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
             const monthly = checkoutPlan !== null ? monthlyPriceCents(offer, selectedBillingInterval) : undefined;
@@ -215,6 +297,7 @@ export function UpgradePlanDialog({
                 key={slug}
               >
                 <div className="mb-5">
+                  {popular && card?.badge ? <Badge>{displayText(card.badge, locale, textValues)}</Badge> : null}
                   <h3 className="font-heading text-lg font-medium tracking-[-0.03em]">
                     {t(`billing.upgradeDialog.plans.${slug}.name`)}
                   </h3>

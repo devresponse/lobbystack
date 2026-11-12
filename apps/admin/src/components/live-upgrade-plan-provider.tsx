@@ -6,12 +6,14 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { billingPlanName, isPaidSubscription, type BillingDisplay, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { useActiveBusiness } from "@/hooks/use-active-business";
+import { usePackCheckout } from "@/hooks/use-pack-checkout";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
 import { enterpriseSalesHref, isBillingRateLimited, isPlanChangePending, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
-import type { WorkspaceViewModel } from "@/lib/page-view-models";
+import type { BillingPackOfferViewModel, PackCheckoutViewModel, WorkspaceViewModel } from "@/lib/page-view-models";
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "./billing-email-form";
+import { PackEndsPlanDialog } from "./billing-packs";
 import { UpgradePlanDialog, type HostedUpgradePlan } from "./upgrade-plan-dialog";
 import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
 
@@ -28,6 +30,9 @@ type Billing = {
   /** billing.json's words for the plan screens. */
   planDisplay?: BillingDisplay | null;
   promoPlan?: BillingPromoPlanView | null;
+  /** The packs on sale, which billing.json can give cards of their own, and whether the business may buy one now. */
+  packOffers?: BillingPackOfferViewModel[];
+  packCheckout?: PackCheckoutViewModel | null;
 };
 type CheckoutInput = { businessId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail?: string };
 type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail: string | null };
@@ -43,6 +48,8 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const [interval, setInterval] = useState<BillingInterval | null>(null);
   const [checkout, setCheckout] = useState<Checkout | null>(null);
   const [emailPrompt, setEmailPrompt] = useState<EmailPrompt | null>(null);
+  // The pack whose purchase, which ends the business's Starter or Pro plan, waits for the person to confirm.
+  const [confirmingPack, setConfirmingPack] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   // Redirect once per checkout. A page restored from the browser's cache can rerun the
   // effect with the old ready checkout and send them straight back to it.
@@ -76,7 +83,23 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
     // A plan change keeps checking until Polar's webhook has moved the business onto the plan.
     refetchInterval: query => ["ready", "error"].includes(query.state.data?.status ?? "") || (query.state.data?.status === "changed" && query.state.data.synced) ? false : 1500,
   });
-  useEffect(() => { setOpen(false); setCheckout(null); setEmailPrompt(null); }, [businessId]);
+  useEffect(() => { setOpen(false); setCheckout(null); setEmailPrompt(null); setConfirmingPack(null); }, [businessId]);
+  // A pack a card shows is bought as on Settings > Plan: its checkout, then the provider's page, which sends
+  // the person back to Settings > Plan. The packs on sale are none where the business's plan sells none.
+  const packCheckout = usePackCheckout(businessId, "upgrade-pack");
+  const packRefusal = billing.data?.packCheckout?.refusal ?? null;
+  const packOffers = packRefusal === "managed_plan" || packRefusal === "pack_not_sold_on_plan" ? [] : billing.data?.packOffers ?? [];
+  const packEnds = billing.data?.packCheckout?.endsSubscription ?? null;
+  const packPrompt = packCheckout.emailPrompt;
+  // The provider wouldn't make the business's customer with the person's email: the dialog asks for another.
+  useEffect(() => { if (packPrompt) setOpen(true); }, [packPrompt]);
+  const buyPack = (code: string) => {
+    if (packCheckout.pending) return;
+    setEmailPrompt(null);
+    packCheckout.dismissEmailPrompt();
+    if (packEnds) setConfirmingPack(code);
+    else packCheckout.start(code);
+  };
   const resetCheckoutRequest = mutation.reset;
   useEffect(() => {
     // The back button from checkout can restore this page from the browser's cache, still
@@ -130,6 +153,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [businessId, checkout, client, result.data, t]);
   const pending = mutation.isPending && mutation.variables.businessId === businessId || checkout?.businessId === businessId;
+  const busy = pending || packCheckout.pending;
   // The picker only renders once billing loads. If that request fails, an open flag alone
   // would hold the survey off for the rest of the visit.
   const pickerShown = open && Boolean(businessId && billing.data);
@@ -140,6 +164,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   }, [upgrading]);
   return <UpgradePlanDialogProvider onOpen={() => setOpen(true)}>
     {children}
+    {businessId && billing.data && packEnds ? <PackEndsPlanDialog ends={packEnds} onConfirm={() => { if (confirmingPack) packCheckout.start(confirmingPack); }} onOpenChange={(next) => { if (!next) setConfirmingPack(null); }} open={confirmingPack !== null} pending={packCheckout.pending} /> : null}
     {businessId && billing.data ? <UpgradePlanDialog
       availableCheckoutPlans={billing.data.availableCheckoutPlans ?? []}
       availableCheckoutIntervals={billing.data.availableCheckoutIntervals ?? { starter: [], pro: [] }}
@@ -149,16 +174,22 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       display={billing.data.planDisplay ?? null}
       leavesPromoPlan={promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? promoPlan.plan : null}
       leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null}
-      loading={pending ? "checkout" : null}
-      loadingPlan={checkout?.target ?? (mutation.isPending ? mutation.variables.target : null)}
+      loading={busy ? "checkout" : null}
+      loadingPack={packCheckout.pendingPack}
+      loadingPlan={pending ? checkout?.target ?? (mutation.isPending ? mutation.variables.target : null) : null}
       locale={i18n.language}
       onBillingIntervalChange={setInterval}
+      onBuyPack={buyPack}
       onContactEnterprise={() => window.location.assign(enterpriseSalesHref(t("billing.upgradeDialog.enterpriseSubject")))}
-      onOpenChange={(next) => { setOpen(next); if (!next) setEmailPrompt(null); }}
-      onStartCheckout={(target, billingInterval) => { setEmailPrompt(null); mutation.mutate({ businessId, target, billingInterval }); }}
+      onOpenChange={(next) => { setOpen(next); if (!next) { setEmailPrompt(null); packCheckout.dismissEmailPrompt(); } }}
+      onStartCheckout={(target, billingInterval) => { setEmailPrompt(null); packCheckout.dismissEmailPrompt(); mutation.mutate({ businessId, target, billingInterval }); }}
       open={open}
+      packOffers={packOffers}
+      packUnavailable={packRefusal ? t(`billing.packs.refusals.${packRefusal}`) : t("billing.packs.unavailable")}
       plans={billing.data.plans}
-      prompt={emailPrompt ? <BillingEmailForm key={`${emailPrompt.target}:${emailPrompt.billingInterval}`} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => mutation.mutate({ businessId, target: emailPrompt.target, billingInterval: emailPrompt.billingInterval, billingEmail })} pending={pending} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /> : null}
+      prompt={emailPrompt
+        ? <BillingEmailForm key={`${emailPrompt.target}:${emailPrompt.billingInterval}`} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => mutation.mutate({ businessId, target: emailPrompt.target, billingInterval: emailPrompt.billingInterval, billingEmail })} pending={pending} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} />
+        : packPrompt ? <BillingEmailForm key={`pack:${packPrompt.pack}`} onCancel={packCheckout.dismissEmailPrompt} onSubmit={(billingEmail) => packCheckout.start(packPrompt.pack, billingEmail)} pending={packCheckout.pending} refusal={packPrompt.refusal} refusedEmail={packPrompt.email} /> : null}
       t={t}
     /> : null}
   </UpgradePlanDialogProvider>;

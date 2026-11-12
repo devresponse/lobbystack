@@ -21,7 +21,7 @@ import { PromoCodeEntry } from "@/components/promo-code-entry";
 import { useTelemetry } from "@/components/product-analytics";
 import { paidPackToastKey, usePackCheckout, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
-import { cardBullets, cardText, displayText, openingInterval, pageTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
+import { cardBullets, cardText, displayText, hasPackCards, openingInterval, packCardBullets, packName, packPrice, packTextValues, pageTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, screenCards, shownInterval, type PlanDisplayTranslate } from "@/lib/plan-display";
 import type { BillingPackOfferViewModel, PackCheckoutViewModel } from "@/lib/page-view-models";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +83,8 @@ export function OnboardingPlanSurface() {
   const returnAttempt = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
   const packReturnAttempt = useRef<{ key: string; promise: Promise<"attribution" | "phone_number"> } | null>(null);
   const [chosenPack, setChosenPack] = useState<string | null>(null);
-  const [confirmingPack, setConfirmingPack] = useState(false);
+  // The pack whose purchase, which ends the business's Starter or Pro plan, waits for the person to confirm.
+  const [confirmingPack, setConfirmingPack] = useState<string | null>(null);
   // A pack's payment that came back failed, or refunded before it arrived: the plans to choose from again, with why.
   const [packReturnFailed, setPackReturnFailed] = useState<"failed" | "refunded" | null>(null);
   const { business } = useActiveBusiness();
@@ -228,22 +229,25 @@ export function OnboardingPlanSurface() {
   // The packs on sale, unless the business's plan sells none, such as an operator-managed one.
   const packRefusal = billing.data?.packCheckout?.refusal ?? null;
   const packOffers = packRefusal === "managed_plan" || packRefusal === "pack_not_sold_on_plan" ? [] : billing.data?.packOffers ?? [];
+  // billing.json can give packs cards of their own beside the plans', in place of the packs' box.
+  const packBox = !hasPackCards(display);
   const selectedPack = packOffers.find((offer) => offer.code === chosenPack) ?? packOffers[0];
   const packEndsSubscription = billing.data?.packCheckout?.endsSubscription ?? null;
   const packPrompt = packCheckout.emailPrompt;
+  const packUnavailable = packRefusal ? billingT(`billing.packs.refusals.${packRefusal}`) : billingT("billing.packs.unavailable");
   function startPack(code: string) {
     if (!business) return;
     telemetry.track("web.onboarding.plan_checkout_started", { businessId: business.businessId, plan: "prepaid" });
     packCheckout.start(code);
   }
-  function buyPack() {
-    if (!business || pendingPlan || !selectedPack?.checkoutAvailable) return;
+  function buyPack(code: string) {
+    if (!business || pendingPlan || !packOffers.find((offer) => offer.code === code)?.checkoutAvailable) return;
     setCheckoutError(null);
     setEmailPrompt(null);
     setPackReturnFailed(null);
     telemetry.track("web.onboarding.plan_selected", { businessId: business.businessId, plan: "prepaid" });
-    if (packEndsSubscription) setConfirmingPack(true);
-    else startPack(selectedPack.code);
+    if (packEndsSubscription) setConfirmingPack(code);
+    else startPack(code);
   }
 
   // A business that already has a paid plan, such as one LobbyStack bills directly, has nothing to buy here.
@@ -280,6 +284,8 @@ export function OnboardingPlanSurface() {
     const value = display?.packs?.[field];
     return value ? displayText(value, locale, pageValues) : t(builtIn);
   };
+  // The cards in billing.json's order: the plans', and the packs' that are on sale.
+  const shownCards = screenCards(display, packOffers);
 
   return (
     <div className="flex flex-col gap-12">
@@ -296,8 +302,22 @@ export function OnboardingPlanSurface() {
       </div> : null}
       {/* A promo link's code waits here from sign-up, filled in and checked. */}
       {business && billing.data?.checkoutAvailable ? <div className="-mt-6 flex justify-center"><PromoCodeEntry businessId={business.businessId} /></div> : null}
-      <div className={cn("grid gap-6", planCardColumns(cards.length))}>
-        {cards.map(({ plan: slug, popular, display: card }) => {
+      <div className={cn("grid gap-6", planCardColumns(shownCards.length))}>
+        {shownCards.map((shown) => {
+          if (shown.kind === "pack") {
+            const offer = packOffers.find((entry) => entry.code === shown.pack)!;
+            const card = shown.display;
+            const textValues = packTextValues(offer, locale, translate, appName);
+            const busy = pendingPlan === "pack" && packCheckout.pendingPack === offer.code;
+            return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", shown.popular ? "border-foreground/30 shadow-sm" : "border-border/60")} key={`pack:${offer.code}`}>
+              {shown.popular ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{card.badge ? displayText(card.badge, locale, textValues) : t("plan.popular")}</div> : null}
+              <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{packName(offer, locale)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{packPrice(offer, locale)}</span><span className="text-sm text-muted-foreground">{t("plan.packs.priceSuffix")}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{card.description ? displayText(card.description, locale, textValues) : t("plan.packs.description")}</p></div>
+              <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || !offer.checkoutAvailable} onClick={() => buyPack(offer.code)} type="button" variant={shown.popular ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{card.button ? displayText(card.button, locale, textValues) : t("plan.packs.cta")}<ArrowRight className="ml-1 size-4" /></>}</Button>
+              {offer.checkoutAvailable ? null : <p className="-mt-3 mb-6 text-sm text-muted-foreground">{packUnavailable}</p>}
+              <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{packCardBullets(card, offer, locale, translate, textValues).map((bullet, index) => <li className="flex items-start gap-2.5 text-sm" key={index}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{bullet}</span></li>)}</ul></div>
+            </section>;
+          }
+          const { plan: slug, popular, display: card } = shown;
           const paid = slug === "starter" || slug === "pro";
           const busy = slug === "free_cloud" ? pendingPlan === "free_cloud" : paid && pendingPlan === "paid";
           const offer = findPlan(plans, slug);
@@ -311,23 +331,24 @@ export function OnboardingPlanSurface() {
           const cta = card?.button ? cardText(card.button, interval, locale, textValues) : paid ? t(`plan.tiers.${slug}.cta.${interval}`) : t(`plan.tiers.${slug}.cta`);
           const bullets = card?.bullets ? cardBullets(card.bullets, offer, plans.currency, locale, translate, textValues) : builtInFeatures[slug].map((feature) => t(`plan.tiers.${slug}.highlights.${feature}`, planStringValues(feature, values)));
           return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", popular ? "border-foreground/30 shadow-sm" : "border-border/60")} key={slug}>
-            {popular ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{t("plan.popular")}</div> : null}
+            {popular ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{card?.badge ? displayText(card.badge, locale, textValues) : t("plan.popular")}</div> : null}
             <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{t(`plan.tiers.${slug}.name`)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{price}</span><span className="text-sm text-muted-foreground">{t(`plan.tiers.${slug}.period`)}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{description}</p></div>
             <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || (paid && (!billing.data?.checkoutAvailable || (configuredIntervals && !configuredIntervals[slug].includes(interval))))} onClick={() => act(slug)} type="button" variant={popular ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{cta}<ArrowRight className="ml-1 size-4" /></>}</Button>
             <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{bullets.map((bullet, index) => <li className="flex items-start gap-2.5 text-sm" key={index}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{bullet}</span></li>)}</ul></div>
           </section>;
         })}
       </div>
-      {selectedPack ? <section className="mx-auto flex w-full max-w-3xl flex-col gap-5 rounded-2xl border border-border/60 bg-background p-8">
+      {packBox && selectedPack ? <section className="mx-auto flex w-full max-w-3xl flex-col gap-5 rounded-2xl border border-border/60 bg-background p-8">
         <div><h3 className="font-heading text-lg font-semibold tracking-tight">{packText("title", "plan.packs.title")}</h3><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{packText("description", "plan.packs.description")}</p></div>
         <PackPicker disabled={Boolean(pendingPlan)} offers={packOffers} onChange={setChosenPack} value={selectedPack.code} />
         <div className="flex flex-col items-start gap-2">
-          <Button className="w-full rounded-full sm:w-auto" disabled={!business || Boolean(pendingPlan) || !selectedPack.checkoutAvailable} onClick={buyPack} type="button" variant="outline">{pendingPlan === "pack" ? <LoaderCircle className="size-4 animate-spin" /> : <>{packText("button", "plan.packs.cta")}<ArrowRight className="ml-1 size-4" /></>}</Button>
-          {selectedPack.checkoutAvailable ? null : <p className="text-sm text-muted-foreground">{packRefusal ? billingT(`billing.packs.refusals.${packRefusal}`) : billingT("billing.packs.unavailable")}</p>}
+          <Button className="w-full rounded-full sm:w-auto" disabled={!business || Boolean(pendingPlan) || !selectedPack.checkoutAvailable} onClick={() => buyPack(selectedPack.code)} type="button" variant="outline">{pendingPlan === "pack" ? <LoaderCircle className="size-4 animate-spin" /> : <>{packText("button", "plan.packs.cta")}<ArrowRight className="ml-1 size-4" /></>}</Button>
+          {selectedPack.checkoutAvailable ? null : <p className="text-sm text-muted-foreground">{packUnavailable}</p>}
         </div>
         {packPrompt ? <BillingEmailForm key={packPrompt.pack} onCancel={packCheckout.dismissEmailPrompt} onSubmit={(billingEmail) => packCheckout.start(packPrompt.pack, billingEmail)} pending={pendingPlan === "pack"} refusal={packPrompt.refusal} refusedEmail={packPrompt.email} /> : null}
-        {packEndsSubscription ? <PackEndsPlanDialog ends={packEndsSubscription} onConfirm={() => startPack(selectedPack.code)} onOpenChange={setConfirmingPack} open={confirmingPack} pending={pendingPlan === "pack"} /> : null}
       </section> : null}
+      {!packBox && packPrompt ? <div className="flex justify-center"><BillingEmailForm key={packPrompt.pack} onCancel={packCheckout.dismissEmailPrompt} onSubmit={(billingEmail) => packCheckout.start(packPrompt.pack, billingEmail)} pending={pendingPlan === "pack"} refusal={packPrompt.refusal} refusedEmail={packPrompt.email} /></div> : null}
+      {packEndsSubscription ? <PackEndsPlanDialog ends={packEndsSubscription} onConfirm={() => { if (confirmingPack) startPack(confirmingPack); }} onOpenChange={(open) => { if (!open) setConfirmingPack(null); }} open={confirmingPack !== null} pending={pendingPlan === "pack"} /> : null}
       {emailPrompt ? <div className="flex justify-center"><BillingEmailForm key={emailPrompt.target} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => startCheckout.mutate({ target: emailPrompt.target, billingEmail })} pending={pendingPlan === "paid"} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /></div> : null}
       {selectFree.isError || startCheckout.isError || checkoutError ? <FieldError>{selectFree.error?.message ?? startCheckout.error?.message ?? checkoutError ?? t("plan.continueFailed")}</FieldError> : null}
       <OnboardingPlanComparison display={display} locale={locale} plans={plans} t={t} />

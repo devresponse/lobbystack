@@ -155,7 +155,7 @@ describe("compileBrands", () => {
     expect(brandsModuleSource(compiled)).toContain(`export const BRAND_PLAN_DISPLAYS: Record<string, BrandPlanDisplay> = ${JSON.stringify({ alloplace: display }, null, 2)};`);
     // A section the screens can't show stops the build, naming the file.
     withBilling.brands.alloplace!.billing = { ...billing, display: { ...display, plans: display.plans.map((card: Record<string, unknown>) => ({ ...card, popular: true })) } };
-    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json display.plans: only one plan can be popular");
+    expect(() => compileBrands(withBilling)).toThrow("brands/alloplace/billing.json display.plans: only one card can be popular");
   });
 
   it("carries a billing.json's accounts section to the admin, apart from the hash", () => {

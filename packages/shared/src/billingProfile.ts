@@ -264,8 +264,8 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
     if (Object.hasOwn(profile.plans, code)) packIssue([], "a plan already has this code");
   }
   packs.slice(MAX_BILLING_PACKS).forEach((code) => context.addIssue({ code: "custom", path: ["packs", code], message: `a file holds at most ${MAX_BILLING_PACKS} packs` }));
-  // C11: the display section's cards, rows and {{names}}.
-  if (profile.display) checkBillingDisplay(profile.display, { starter: profile.plans.starter.sold, pro: profile.plans.pro.sold }, (path, message) => context.addIssue({ code: "custom", path: ["display", ...path], message }));
+  // C11: the display section's cards, a plan's or one of this file's packs, rows and {{names}}.
+  if (profile.display) checkBillingDisplay(profile.display, { starter: profile.plans.starter.sold, pro: profile.plans.pro.sold }, packs, (path, message) => context.addIssue({ code: "custom", path: ["display", ...path], message }));
   // C12: a cap per plan names a plan of this file, or prepaid for a business with a live pack.
   for (const code of Object.keys(profile.accounts?.maxBusinessesByPlan ?? {}).sort()) {
     if (code !== PREPAID_BUSINESS_CAP_KEY && !Object.hasOwn(profile.plans, code)) context.addIssue({ code: "custom", path: ["accounts", "maxBusinessesByPlan", code], message: `not a plan in this file: use a code under plans, or ${PREPAID_BUSINESS_CAP_KEY} for a business with a live pack` });

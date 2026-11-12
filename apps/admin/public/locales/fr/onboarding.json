@@ -426,6 +426,7 @@
       "title": "Vous préférez des minutes prépayées ?",
       "description": "Achetez des minutes une seule fois, sans facture mensuelle. Elles durent jusqu'à épuisement ou jusqu'à la fin du pack.",
       "cta": "Acheter un pack de minutes",
+      "priceSuffix": "payé une fois",
       "waiting": "Ajout de vos minutes...",
       "processing": "Votre paiement est encore en cours de traitement. Vérifiez de nouveau dans quelques minutes.",
       "checkAgain": "Vérifier de nouveau",

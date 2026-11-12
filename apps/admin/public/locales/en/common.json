@@ -215,7 +215,13 @@
       "chatAiUnitsCustom": "Custom website chats",
       "knowledgeStorageMegabytes": "{{amount}} MB knowledge base",
       "knowledgeStorageGigabytes": "{{amount}} GB knowledge base",
-      "knowledgeStorageCustom": "Custom knowledge base"
-    }
+      "knowledgeStorageCustom": "Custom knowledge base",
+      "packVoiceMinutes_one": "{{amount}} voice minute over {{days}}",
+      "packVoiceMinutes_other": "{{amount}} voice minutes over {{days}}",
+      "packVoiceMinutesNoEnd_one": "{{amount}} voice minute, with no end date",
+      "packVoiceMinutesNoEnd_other": "{{amount}} voice minutes, with no end date"
+    },
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days"
   }
 }

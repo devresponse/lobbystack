@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
+import type { ComponentProps } from "react";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { billingIntervals, billingProfileSchema, brandBillingPlans, brandPlanDisplay, perMonthCents, resolveBillingPlans, type BillingDisplay, type BillingPlanList, type BrandBillingPlan, type CloudBillingPlanSlug } from "@lobbystack/shared";
+import { billingIntervals, billingProfileSchema, brandBillingPlans, brandPlanDisplay, perMonthCents, resolveBillingPacks, resolveBillingPlans, type BillingDisplay, type BillingPlanList, type BrandBillingPlan, type CloudBillingPlanSlug } from "@lobbystack/shared";
 
 import { createI18nInstance } from "@/i18n";
 import { formatMoney } from "@/lib/billing-plans";
@@ -13,8 +14,11 @@ import { localeResources } from "@/lib/i18n-resources";
 import type { SupportedLocale } from "@/lib/locale";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
 import exampleFile from "../../../../packages/shared/src/brands/testing/plans-and-packs.billing.json";
+import realInfoBotFile from "../../../../brands/realinfobot/billing.json";
 import { OnboardingPlanSurface } from "./onboarding-plan-surface";
 import { UpgradePlanDialog } from "./upgrade-plan-dialog";
+
+type DialogProps = ComponentProps<typeof UpgradePlanDialog>;
 
 // The plan screens with billing.json's display section, in the real words of each language.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
@@ -71,9 +75,9 @@ function renderPlanStep(locale: SupportedLocale, billing: Record<string, unknown
   return render(<I18nextProvider i18n={i18nFor(locale)}><QueryClientProvider client={client}><OnboardingPlanSurface /></QueryClientProvider></I18nextProvider>);
 }
 
-function renderDialog(locale: SupportedLocale, plans: BillingPlanList, display: BillingDisplay | null) {
+function renderDialog(locale: SupportedLocale, plans: BillingPlanList, display: BillingDisplay | null, extra: Partial<DialogProps> = {}) {
   const i18n = i18nFor(locale);
-  return render(<I18nextProvider i18n={i18n}><UpgradePlanDialog availableCheckoutIntervals={{ starter: [], pro: [] }} availableCheckoutPlans={[]} billingInterval={null} currentPlan="free_cloud" display={display} loading={null} loadingPlan={null} locale={locale} onBillingIntervalChange={vi.fn()} onContactEnterprise={vi.fn()} onOpenChange={vi.fn()} onStartCheckout={vi.fn()} open plans={plans} t={i18n.getFixedT(locale, "settings")} /></I18nextProvider>);
+  return render(<I18nextProvider i18n={i18n}><UpgradePlanDialog availableCheckoutIntervals={{ starter: [], pro: [] }} availableCheckoutPlans={[]} billingInterval={null} currentPlan="free_cloud" display={display} loading={null} loadingPlan={null} locale={locale} onBillingIntervalChange={vi.fn()} onContactEnterprise={vi.fn()} onOpenChange={vi.fn()} onStartCheckout={vi.fn()} open plans={plans} t={i18n.getFixedT(locale, "settings")} {...extra} /></I18nextProvider>);
 }
 
 /** Each card's name and bullets, in order. */
@@ -242,24 +246,56 @@ describe("plans sold monthly only, as on Stripe as merchant of record", () => {
 describe("RealInfoBot's listing packs", () => {
   const plans = brandPlanList("realinfobot");
   const display = brandPlanDisplay("realinfobot");
-  const offer = (code: string, minutes: number, days: number, receptionists: number, amountCents: number) => ({ code, names: { en: code }, minutes, voiceSeconds: minutes * 60, days, amountCents, currency: "cad", smsSegments: 50 * receptionists, outboundCalls: 20 * receptionists, chatUnits: 50 * receptionists, knowledgeStorageBytes: 20_971_520 * receptionists, numbers: 1, receptionists, checkoutAvailable: true });
-  const onSale = { packOffers: [offer("listing_1_180", 250, 180, 1, 9_900), offer("listings_3_365", 750, 365, 3, 24_900), offer("listings_6_365", 1_500, 365, 6, 44_900)], packCheckout: { refusal: null, endsSubscription: null } };
+  // The packs as GET /api/billing lists them once the brand's file is applied, in their order.
+  const packOffers = resolveBillingPacks(billingProfileSchema.parse(realInfoBotFile)).map((pack) => ({ code: pack.code, names: pack.names, minutes: pack.voice_sec / 60, voiceSeconds: pack.voice_sec, days: pack.days, amountCents: pack.price.cents, currency: pack.price.currency, smsSegments: pack.sms_seg, outboundCalls: pack.calls_out, chatUnits: pack.chat_units, knowledgeStorageBytes: pack.kb_bytes, numbers: pack.numbers, receptionists: pack.receptionists, checkoutAvailable: true }));
+  const onSale = { packOffers, packCheckout: { refusal: null, endsSubscription: null } };
+  const packCards: Array<[string, string[]]> = [
+    ["Try it: 1 listing, 180 days", ["Your sign answers every inquiry, day or night", "250 voice minutes over 180 days", "1 dedicated business number", "Active 180 days, then it expires"]],
+    ["3 listings, 365 days", ["Everything in a single listing, times three", "Up to 3 listings at once", "750 voice minutes over 365 days"]],
+    ["Pro: 6 listings, 365 days", ["Everything in a single listing, times six", "Up to 6 listings at once", "1,500 voice minutes over 365 days", "For agents who always have a sign up"]],
+  ];
+  /** The card a text is on, by its name. */
+  const cardOf = (text: string) => screen.getByText(text).closest("section")!.querySelector("h3")!.textContent;
 
-  it("shows Free alone on the plan step, with no tabs and no comparison, and the packs' box in the brand's words", () => {
+  it("shows Free and a card for each pack on the plan step, as on the brand's pricing table, with no tabs, comparison or packs' box", () => {
     renderPlanStep("en", { plans, planDisplay: display, ...onSale });
-    expect(cardBullets(document.body)).toEqual([["Free", ["30 browser voice minutes included", "1 receptionist", "No telephone number", "Community support"]]]);
+    expect(cardBullets(document.body)).toEqual([["Free", ["30 browser voice minutes included", "1 receptionist", "No telephone number", "Community support"]], ...packCards]);
     expect(screen.queryAllByRole("tab")).toEqual([]);
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByRole("button", { name: "Start free" })).toBeTruthy();
-    expect(screen.getByText("Upgrade with a listing pack")).toBeTruthy();
-    expect(screen.getByText(/^One payment, no subscription\. Try it: 1 listing with 250 minutes for 180 days\./)).toBeTruthy();
-    expect(screen.getByText("CA$99")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Buy pack" })).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByText("Upgrade with a listing pack")).toBeNull();
+    // Each pack's price, paid once, and the middle pack the popular one under the brand's badge.
+    expect(["CA$99", "CA$249", "CA$449"].map(cardOf)).toEqual(packCards.map(([name]) => name));
+    expect(screen.getAllByText("paid once")).toHaveLength(3);
+    expect(cardOf("Best value")).toBe("3 listings, 365 days");
+    expect(cardOf("One payment for one listing, with no subscription.")).toBe("Try it: 1 listing, 180 days");
+    expect(cardOf("CA$83 per listing (save CA$48)")).toBe("3 listings, 365 days");
+    expect(cardOf("CA$75 per listing (save CA$145)")).toBe("Pro: 6 listings, 365 days");
+    for (const name of ["Start free", "Add it to your listing", "Get 3 listings", "Get 6 listings"]) expect(screen.getByRole("button", { name })).toBeTruthy();
   });
 
-  it("speaks the visitor's language in the packs' box", () => {
+  it("speaks the visitor's language on the pack cards", () => {
     renderPlanStep("fr", { plans, planDisplay: display, ...onSale });
-    expect(screen.getByText("Passez à un pack d'inscriptions")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Acheter le pack" })).toBeTruthy();
+    expect(cardBullets(document.body)[2]).toEqual(["3 inscriptions, 365 jours", ["Tout ce qu'offre une inscription, multiplié par trois", "Jusqu'à 3 inscriptions à la fois", "750 minutes vocales sur 365 jours"]]);
+    expect(cardOf("Meilleure offre")).toBe("3 inscriptions, 365 jours");
+    expect(screen.getAllByText("payé une fois")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Obtenir 3 inscriptions" })).toBeTruthy();
+  });
+
+  it("shows Free alone until the packs are on sale", () => {
+    renderPlanStep("en", { plans, planDisplay: display });
+    expect(cardBullets(document.body).map(([name]) => name)).toEqual(["Free"]);
+    expect(screen.queryByRole("radio")).toBeNull();
+  });
+
+  it("gives the upgrade dialog the same cards, each buying its pack", async () => {
+    const onBuyPack = vi.fn();
+    renderDialog("en", plans, display, { onBuyPack, packOffers });
+    const dialog = screen.getByRole("dialog");
+    expect(cardBullets(dialog)).toEqual([["Free", ["30 browser voice minutes included", "1 receptionist", "No telephone number", "Community support"]], ...packCards]);
+    expect(within(dialog).getAllByText("paid once")).toHaveLength(3);
+    expect(cardOf("Best value")).toBe("3 listings, 365 days");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Get 3 listings" }));
+    expect(onBuyPack).toHaveBeenCalledWith("listings_3_365");
   });
 });

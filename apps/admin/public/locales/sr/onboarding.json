@@ -426,6 +426,7 @@
       "title": "Više volite dopunu minuta?",
       "description": "Kupite minute jednom, bez mesečnog računa. Traju dok ih ne potrošite ili dok dopuna ne istekne.",
       "cta": "Kupi dopunu minuta",
+      "priceSuffix": "jednokratno",
       "waiting": "Dodavanje minuta...",
       "processing": "Plaćanje se još obrađuje. Proverite ponovo za nekoliko minuta.",
       "checkAgain": "Proveri ponovo",

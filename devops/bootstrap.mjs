@@ -2360,17 +2360,15 @@ async function connect(run) {
      the same Stripe ${s.STRIPE === "live" ? "account's live mode" : "sandbox"} as the deployment's keys:${noStripeBlock}
      ${billing("plan")}
      ${billing("apply")} --railway-file ${billingFile}
-     In ${billingFile}, change lobbystack-admin to admin in the [...] lines, then run
-     node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token (the project's
-     Settings > Tokens). Delete the file once the admin has redeployed. Set what plan lists for Stripe's
-     Dashboard, which Stripe's API can't, then check:
+     Then run node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token
+     (the project's Settings > Tokens). Delete the file once the admin has redeployed. Set what
+     plan lists for Stripe's Dashboard, which Stripe's API can't, then check:
      ${billing("verify")}     (should end "Result: in sync (exit 0)")` : `
   3. Polar (guide 3.7, "Selling plans (Polar)", steps 6 to 8), with a setup token made in Polar's ${s.POLAR} organization:
      ${billing("plan")}
      ${billing("apply")} --railway-file ${billingFile}
-     In ${billingFile}, change lobbystack-admin to admin in the [...] lines, then run
-     node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token (the project's
-     Settings > Tokens). Delete the file once the admin has redeployed, then check:
+     Then run node devops/railway-vars.mjs ${billingFile}, which asks for a Railway project token
+     (the project's Settings > Tokens). Delete the file once the admin has redeployed, then check:
      ${billing("verify")}     (should end "Result: in sync (exit 0)")`;
   console.log(`
 Done by the script. What's left needs you (guide 4.8, 4.9 and 6.1):

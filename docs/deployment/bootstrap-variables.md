@@ -312,7 +312,7 @@ Three more values reach the admin after `up`: two from `connect`, and the billin
 | `STRIPE_WEBHOOK_SECRET`, `STRIPE_METER_WEBHOOK_SECRET` | admin | `pnpm billing apply --stripe`, then `railway-vars.mjs` | Stripe shows each once | During a rotation `STRIPE_WEBHOOK_SECRET` holds two, comma-separated, the new one first |
 | `STRIPE_ACCOUNT_ID` | admin, worker | The same file | The setup key's account | The script set it already. Never changes |
 
-`pnpm billing apply` writes its file under `[lobbystack-admin, worker]` and `[lobbystack-admin]` lines. Change `lobbystack-admin` to `admin` before running `railway-vars.mjs`, since the bootstrap script names the service `admin`, then delete the file.
+`pnpm billing apply` writes its file under `[admin, worker]` and `[admin]` lines, the names the bootstrap script gives the services, so `railway-vars.mjs` takes it as it is; delete the file afterwards. A file written before fork PR #157 names the admin `lobbystack-admin`: change that to `admin` first.
 
 **Read on your computer, never put on Railway.**
 

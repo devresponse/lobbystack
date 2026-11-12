@@ -254,10 +254,9 @@ Until this step, the plan dialog shows the brand's prices from `brands/<brand>/b
    ```
 
    `apply` creates the products, prices and meters in Polar, records which product sells each price, creates Polar's webhook to `https://<address>/api/webhooks/polar`, and writes three Railway values to `.env.polar-<name>`: `POLAR_API_BASE_URL` and `POLAR_ORGANIZATION_ID` for the admin and the worker, and `POLAR_WEBHOOK_SECRET` for the admin. The script set the first two already.
-3. **Put the webhook's secret on the admin.** The file names the admin `lobbystack-admin`, and this script names it `admin`, so change the name first. `railway-vars.mjs` needs a project token for this project and environment (in Railway: the project, **Settings > Tokens**).
+3. **Put the webhook's secret on the admin.** `railway-vars.mjs` needs a project token for this project and environment (in Railway: the project, **Settings > Tokens**). The file names the admin `admin`, as this script does; one written before fork PR #157 names it `lobbystack-admin`, so change that to `admin` first.
 
    ```powershell
-   (Get-Content .env.polar-<name>) -replace 'lobbystack-admin', 'admin' | Set-Content .env.polar-<name>
    $env:RAILWAY_TOKEN = Read-Host -MaskInput "Railway project token"
    node devops/railway-vars.mjs .env.polar-<name>
    Remove-Item Env:RAILWAY_TOKEN; Remove-Item .env.polar-<name>
@@ -413,7 +412,7 @@ Git ignores all of them. Once the environment works, copy the state and variable
 - **OpenAI's webhook, GPT-Live SIP access and spending limit.** OpenAI's API has no endpoint for any of them: its webhook and project-limit settings exist only in the dashboard, and it documents no switch for SIP calls. So the webhook is the one step between `up` and `connect`, and SIP access may need OpenAI support.
 - **Twilio's geo permissions, business profile, texting registration and toll-free verification.** Twilio has APIs for these, but each needs a decision or documents the script can't supply. Each country you allow for transfers adds a risk of toll fraud, so you choose them. The business profile and registrations need your business's details and Twilio's review, which takes days.
 - **Polar's tokens and Stripe's keys.** Polar makes organization tokens, and Stripe restricted keys, only in their dashboards. Selling plans is `pnpm billing`, a separate command that works through the running deployment with the operator's key, so it comes after `connect` and signing the command line in.
-- **The Polar webhook's secret on Railway.** `pnpm billing apply` writes it to a file that uses the original project's service name, `lobbystack-admin`, and `railway-vars.mjs` needs a project token. It takes one rename and one command ([step 8](#8-cloud-mode-sell-plans-through-polar), step 3).
+- **The Polar webhook's secret on Railway.** `pnpm billing apply` writes it to a file, and `railway-vars.mjs` puts it on the admin with a project token. It takes one command ([step 8](#8-cloud-mode-sell-plans-through-polar), step 3).
 - **Signing up, the command-line login, and phone numbers.** Signing up needs the code emailed to a person, and each business buys its own number from the dashboard (in cloud mode, once its plan includes one).
 - **DNS outside Cloudflare.** The script prints the records for you to add.
 - **The optional services:** Google Calendar, the map, website import, PostHog, Zapier and Make ([guide 3.7](../docs/deployment/guide/part-3-outside-services.md#37-optional-services)), and telemetry (`OTEL_EXPORTER_OTLP_*`). Add their variables by hand.

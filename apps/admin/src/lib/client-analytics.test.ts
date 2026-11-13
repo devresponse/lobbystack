@@ -55,6 +55,19 @@ describe("client analytics initialization", () => {
     });
   });
 
+  it("links to PostHog's EU app when events go to PostHog's EU address", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
+    await start();
+    expect(mocks.posthog.init.mock.calls[0]![1]).toMatchObject({ api_host: "https://eu.i.posthog.com", ui_host: "https://eu.posthog.com" });
+  });
+
+  it("links to PostHog's US app when events go to PostHog's US address", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
+    await start();
+    expect(mocks.posthog.init.mock.calls[0]![1]).toMatchObject({ api_host: "https://us.i.posthog.com", ui_host: "https://us.posthog.com" });
+  });
+
   // PostHog keeps an opt-in in localStorage and starts opted in from it, so a
   // page whose business has telemetry off, or a sign-in page after a business
   // that has it on, would capture its page view.

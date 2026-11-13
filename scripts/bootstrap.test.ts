@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { POLAR_API_VERSION } from "../packages/shared/src/billing";
 
 // devops/bootstrap.mjs end to end, run as a person runs it: against one local server that stands in for Railway's API,
-// Polar's API and the deployment's admin, with a fake pnpm on PATH for platform-key:create and pnpm billing. Each test
+// Polar's API, PostHog's API and the deployment's admin, with a fake pnpm on PATH for platform-key:create and pnpm billing. Each test
 // writes a settings file and the state file an earlier run would have left, runs the script, and checks what it did
 // to the stand-ins and what it kept on disk. The fake pnpm is a shell script, so Windows skips these.
 
@@ -34,6 +34,10 @@ const polarTokens = {
   setup: `polar_oat_setup${"c".repeat(24)}`,
   other: `polar_oat_other${"d".repeat(24)}`,
 };
+// A PostHog personal API key, the organization it reaches, and a project token.
+const posthogKey = `phx_${"k".repeat(40)}`;
+const posthogOrg = { id: "0f1e2d3c-4b5a-4968-8776-655443322110", name: "Acme Analytics" };
+const posthogToken = (id: number) => `phc_project${id}${"t".repeat(32)}`;
 const serviceIds = { Postgres: "svc-postgres", Redis: "svc-redis", migrate: "svc-migrate", admin: "svc-admin", worker: "svc-worker" };
 const platformSecrets = Object.fromEntries(["POSTGRES_PASSWORD", "LOBBYSTACK_AUTH_PASSWORD", "LOBBYSTACK_APP_PASSWORD", "LOBBYSTACK_WORKER_PASSWORD",
   "LOBBYSTACK_DISPATCHER_PASSWORD", "REDIS_PASSWORD", "BETTER_AUTH_SECRET", "ENCRYPTION_KEY", "INTERNAL_SERVICE_SECRET", "INTERNAL_SERVICE_TOKEN",
@@ -165,6 +169,7 @@ type Vars = Record<string, string>;
 type Service = keyof typeof serviceIds;
 type Deployment = { id: string; status: "DEPLOYING" | "SUCCESS"; polls: number };
 type Webhook = { id: string; url: string; secret: string; organization_id: string };
+type PostHogProject = { id: number; name: string; api_token: string; is_demo: boolean; session_recording_opt_in: boolean; recording_domains: string[] };
 type World = {
   /** Each service's variables on Railway, and those its live deployment started with. */
   variables: Record<Service, Vars>;
@@ -180,6 +185,8 @@ type World = {
   ownerInactiveAnswers: number;
   /** The polar-version header of each of bootstrap.mjs's calls to Polar. */
   polarVersions: Array<string | undefined>;
+  /** PostHog's organization as the personal key sees it: its plan's project limit (undefined for the free plan's 1, null for none) and its projects. */
+  posthog: { limit: number | null | undefined; membershipLevel: number; projects: PostHogProject[]; calls: string[] };
 };
 
 const services = Object.keys(serviceIds) as Service[];
@@ -197,6 +204,7 @@ function freshWorld(): World {
     webhooks: [],
     ownerInactiveAnswers: 0,
     polarVersions: [],
+    posthog: { limit: 6, membershipLevel: 15, projects: [], calls: [] },
   };
 }
 
@@ -207,7 +215,7 @@ function deploy(service: Service) {
   list.unshift({ id: `${service}-deployment-${list.length + 1}`, status: "DEPLOYING", polls: 0 });
 }
 
-type GraphQL = { query?: string; variables?: { serviceId?: string; input?: { serviceId?: string; variables?: Vars; skipDeploys?: boolean } } };
+type GraphQL = { query?: string; variables?: { id?: string; serviceId?: string; input?: { serviceId?: string; variables?: Vars; skipDeploys?: boolean } } };
 
 function railwayAnswer(body: GraphQL | null): unknown {
   const operation = /^(?:query|mutation) (\w+)/.exec(body?.query ?? "")?.[1];
@@ -221,9 +229,13 @@ function railwayAnswer(body: GraphQL | null): unknown {
   }
   if (operation === "domains") return { data: { domains: { serviceDomains: [{ id: "domain-1", domain: railwayHost, targetPort: 3000 }], customDomains: [] } } };
   if (operation === "workspace") return { data: { workspace: { name: "Acme's workspace" } } };
-  const service = serviceOf(variables.serviceId ?? variables.input?.serviceId);
+  const service = serviceOf(variables.serviceId ?? variables.input?.serviceId ?? variables.id);
   if (!service) return { errors: [{ message: `the stand-in has no ${operation ?? "such call"} for that service` }] };
   if (operation === "variables") return { data: { variables: { ...world.variables[service] } } };
+  if (operation === "serviceConnect") {
+    deploy(service);
+    return { data: { serviceConnect: { id: serviceIds[service] } } };
+  }
   if (operation === "variableCollectionUpsert") {
     const values = variables.input?.variables ?? {};
     if (world.refuse?.(service, values)) return { errors: [{ message: "Problem processing request" }] };
@@ -271,6 +283,48 @@ function polarAnswer(method: string, path: string, token: string, body: FakeWebh
   return [404, { detail: `the stand-in has no ${method} ${path}` }];
 }
 
+type PostHogBody = { name?: string; session_recording_opt_in?: boolean; recording_domains?: string[] } | null;
+
+/** PostHog's API as the personal key sees it: one organization, its projects, and the plan's and the user's limits on making one. */
+function posthogAnswer(method: string, url: URL, token: string, body: PostHogBody): [number, unknown] {
+  const path = url.pathname.slice("/posthog".length);
+  world.posthog.calls.push(`${method} ${path}`);
+  if (token !== posthogKey) return [401, { type: "authentication_error", code: "authentication_failed", detail: "Invalid personal API key.", attr: null }];
+  const { projects } = world.posthog;
+  const features = world.posthog.limit === undefined ? [] : [{ key: "organizations_projects", name: "Projects", limit: world.posthog.limit }];
+  if (method === "GET" && path === "/api/organizations/") {
+    return [200, { count: 1, next: null, previous: null, results: [{ ...posthogOrg, membership_level: world.posthog.membershipLevel, members_can_create_projects: false, available_product_features: features }] }];
+  }
+  const base = `/api/organizations/${posthogOrg.id}/projects/`;
+  if (path === base && method === "GET") {
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    const results = projects.slice(offset, offset + limit).map(({ id, name, api_token, is_demo }) => ({ id, name, api_token, is_demo, organization: posthogOrg.id }));
+    return [200, { count: projects.length, next: offset + limit < projects.length ? `https://us.posthog.com${base}?limit=${limit}&offset=${offset + limit}` : null, previous: null, results }];
+  }
+  if (path === base && method === "POST") {
+    const limit = world.posthog.limit === undefined ? 1 : world.posthog.limit;
+    if (world.posthog.membershipLevel < 8) return [403, { type: "authentication_error", code: "permission_denied", detail: "You need to be an organization admin or above to create new projects.", attr: null }];
+    if (limit !== null && projects.filter((project) => !project.is_demo).length >= limit) {
+      return [403, { type: "authentication_error", code: "permission_denied", detail: "You have reached the maximum limit of allowed projects for your current plan. Upgrade your plan to be able to create and manage more projects.", attr: null }];
+    }
+    const name = String(body?.name ?? "").trim();
+    if (projects.some((project) => project.name.toLowerCase() === name.toLowerCase())) return [409, { type: "invalid_request", code: "conflict", detail: `There is already a project called "${name}" in this organization. Choose a different name.`, attr: null }];
+    const id = 100 + projects.length;
+    const project = { id, name, api_token: posthogToken(id), is_demo: false, session_recording_opt_in: body?.session_recording_opt_in === true, recording_domains: [] };
+    projects.push(project);
+    return [201, { ...project, api_host: "https://us.i.posthog.com", organization: posthogOrg.id }];
+  }
+  const project = projects.find((item) => path === `${base}${item.id}/`);
+  if (project && method === "GET") return [200, { ...project }];
+  if (project && method === "PATCH") {
+    if (body?.session_recording_opt_in !== undefined) project.session_recording_opt_in = body.session_recording_opt_in;
+    if (body?.recording_domains !== undefined) project.recording_domains = body.recording_domains;
+    return [200, { ...project }];
+  }
+  return [404, { type: "invalid_request", code: "not_found", detail: "Not found.", attr: null }];
+}
+
 function adminAnswer(path: string, key: string): [number, unknown] {
   if (path === "/api/health/ready") return [200, { ok: true, brand: "acme" }];
   // The keys of the admin's live deployment, as PLATFORM_API_KEYS has them.
@@ -307,7 +361,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     const version = request.headers["polar-version"];
     if (request.headers["x-stand-in-caller"] !== "pnpm") world.polarVersions.push(Array.isArray(version) ? version.join(",") : version);
     answer = polarAnswer(request.method ?? "GET", url.pathname.slice("/polar".length), token, body as FakeWebhookRequest | null);
-  } else if (url.pathname.startsWith("/app/")) answer = adminAnswer(url.pathname.slice("/app".length), token);
+  } else if (url.pathname.startsWith("/posthog/")) answer = posthogAnswer(request.method ?? "GET", url, token, body as PostHogBody);
+  else if (url.pathname.startsWith("/app/")) answer = adminAnswer(url.pathname.slice("/app".length), token);
   response.writeHead(answer[0], { "content-type": "application/json" });
   response.end(JSON.stringify(answer[1]));
 }
@@ -325,12 +380,14 @@ const stateText = () => readFileSync(`${settings()}.state.json`, "utf8");
 const readState = () => JSON.parse(stateText()) as State;
 const logText = () => readFileSync(`${settings()}.log`, "utf8");
 
-function writeSettings(changes: Record<string, string> = {}) {
+/** A settings file, PostHog off unless a test turns it on; a change to undefined leaves that line out. */
+function writeSettings(changes: Record<string, string | undefined> = {}, secrets: Record<string, string> = {}) {
   const values = { NAME: "acme-test", BRAND: "acme", ENVIRONMENT: "test", REPO: "acme/lobbystack", BRANCH: "main", DEPLOYMENT_MODE: "cloud",
     OPERATOR_EMAIL: "ops@example.com", EMAIL_FROM: "hello@mail.example.com", RAILWAY_WORKSPACE_ID: "ws-1", BILLING_PROVIDER: "polar", POLAR: "sandbox",
-    POLAR_ORGANIZATION_ID: "", STEP_GITHUB: "no", STEP_OPENAI: "no", STEP_TWILIO: "no", STEP_RESEND: "no", STEP_TURNSTILE: "no", ...changes };
-  writeFileSync(settings(), `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join("\n")}\n`, { mode: 0o600 });
-  writeFileSync(`${settings()}.secrets`, `OPENAI_WEBHOOK_SECRET=${openaiWebhookSecret}\n`, { mode: 0o600 });
+    POLAR_ORGANIZATION_ID: "", STEP_GITHUB: "no", STEP_OPENAI: "no", STEP_TWILIO: "no", STEP_RESEND: "no", STEP_TURNSTILE: "no", POSTHOG: "no", ...changes };
+  writeFileSync(settings(), `${Object.entries(values).filter(([, value]) => value !== undefined).map(([key, value]) => `${key}=${value}`).join("\n")}\n`, { mode: 0o600 });
+  const lines = Object.entries({ OPENAI_WEBHOOK_SECRET: openaiWebhookSecret, ...secrets }).map(([key, value]) => `${key}=${value}`);
+  writeFileSync(`${settings()}.secrets`, `${lines.join("\n")}\n`, { mode: 0o600 });
 }
 
 const writeState = (state: State) => writeFileSync(`${settings()}.state.json`, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
@@ -406,6 +463,7 @@ function bootstrap(args: string[], { input = "", env = {} }: { input?: string; e
         TMPDIR: join(dir, "tmp"),
         BOOTSTRAP_RAILWAY_URL: `${base}/railway`,
         BOOTSTRAP_POLAR_URL: `${base}/polar`,
+        BOOTSTRAP_POSTHOG_URL: `${base}/posthog`,
         BOOTSTRAP_APP_URL: `${base}/app`,
         BOOTSTRAP_POLL_MS: "1",
         BOOTSTRAP_RAILWAY_CLI: join(dir, "no-railway-cli"),
@@ -801,5 +859,200 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(rule).toBeTruthy();
     expect(profile).toBe("reception-for-a-rather-long-brand-exampl");
     expect(new RegExp(String(rule)).test(profile)).toBe(true);
+  });
+
+  /** Railway and the state file as up leaves them, but with the variables to set again (and the admin's first deploy still to come, when `firstBuild`). */
+  function readyForPostHog({ firstBuild = false }: { firstBuild?: boolean } = {}) {
+    railwayAfterUp();
+    const state = stateAfterUp();
+    delete state.done.variables;
+    if (firstBuild) delete state.done["deploy.admin"];
+    writeState(state);
+  }
+
+  const posthogProject = (id: number, name: string, changes: Partial<PostHogProject> = {}): PostHogProject =>
+    ({ id, name, api_token: posthogToken(id), is_demo: false, session_recording_opt_in: false, recording_domains: [], ...changes });
+
+  it("makes a PostHog project in up by default, and puts its values on the services before the admin's first build", async () => {
+    // A settings file with no POSTHOG line, as one from before the PostHog step has.
+    writeSettings({ POSTHOG: undefined }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    readyForPostHog({ firstBuild: true });
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(world.posthog.projects).toEqual([posthogProject(100, "acme-test", { session_recording_opt_in: true, recording_domains: [`https://${railwayHost}`] })]);
+    const token = posthogToken(100);
+    const logs = { OTEL_EXPORTER_OTLP_ENDPOINT: "https://us.i.posthog.com/i", OTEL_EXPORTER_OTLP_HEADERS: `Authorization=Bearer ${token}` };
+    expect(world.variables.admin).toMatchObject({ NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: token, NEXT_PUBLIC_POSTHOG_HOST: "https://us.i.posthog.com", ...logs });
+    expect(world.variables.worker).toMatchObject({ POSTHOG_API_KEY: "${{admin.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN}}", POSTHOG_HOST: "https://us.i.posthog.com", ...logs });
+    expect(world.variables.migrate).toMatchObject(logs);
+    // The admin's variables went in before its first deploy, which then built it with them.
+    expect(world.deployments.admin[0]?.id).toBe("admin-deployment-2");
+    const state = readState();
+    for (const id of ["posthog.project", "variables", "deploy.admin", "post.posthog"]) expect(state.done[id], id).toBeTruthy();
+    expect(state.values).toMatchObject({ POSTHOG_PROJECT_ID: 100, POSTHOG_PROJECT_NAME: "acme-test", POSTHOG_PROJECT_TOKEN: token, POSTHOG_HOST: "https://us.i.posthog.com", POSTHOG_ORGANIZATION_ID: posthogOrg.id });
+    expect(readFileSync(`${settings()}.vars`, "utf8")).toContain(`[migrate, admin, worker]\nOTEL_EXPORTER_OTLP_ENDPOINT=https://us.i.posthog.com/i\nOTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer ${token}`);
+    // The personal key is used, never kept or logged.
+    expect(stateText()).not.toContain(posthogKey);
+    expect(logText()).not.toContain(posthogKey);
+
+    const again = await bootstrap(["up", settings(), "--yes"]);
+    expect(again.code, again.out).toBe(0);
+    expect(again.out).toContain('= PostHog project "acme-test" in PostHog\'s US cloud, with screen recordings on (done');
+    expect(world.posthog.projects).toHaveLength(1);
+  });
+
+  it("leaves PostHog out of a deployment made before the PostHog step until its settings file asks, then runs the variables again", async () => {
+    writeSettings({ POSTHOG: undefined }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    railwayAfterUp();
+    writeState(stateAfterUp());
+    const before = await bootstrap(["up", settings(), "--yes"]);
+    expect(before.code, before.out).toBe(0);
+    expect(before.out).toContain("not added: this deployment was set up before bootstrap made PostHog projects");
+    expect(world.posthog.calls).toEqual([]);
+    expect(world.variables.admin.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN).toBeUndefined();
+    expect(readState().done["posthog.project"]).toBeUndefined();
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain("note   PostHog: not added, since up deployed this before bootstrap made PostHog projects");
+
+    writeSettings({ POSTHOG: "eu" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    const added = await bootstrap(["up", settings(), "--yes"]);
+    expect(added.code, added.out).toBe(0);
+    expect(added.out).toContain("The variables are done already, so they run again below, to bring the PostHog values to the services.");
+    const token = posthogToken(100);
+    expect(world.variables.admin).toMatchObject({ NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: token, NEXT_PUBLIC_POSTHOG_HOST: "https://eu.i.posthog.com", OTEL_EXPORTER_OTLP_ENDPOINT: "https://eu.i.posthog.com/i" });
+    expect(world.variables.worker.POSTHOG_API_KEY).toBe("${{admin.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN}}");
+    // Each deployed service with new values deploys again; the databases' values stay as they were.
+    for (const service of ["migrate", "admin", "worker"] as const) expect(world.deployments[service][0]?.status, service).toBe("DEPLOYING");
+    expect(world.deployments.Postgres).toHaveLength(1);
+    expect(readState().done.variables).toBeTruthy();
+  });
+
+  it("stops with the ways out when PostHog's plan allows no more projects, and doctor says so first", async () => {
+    // The free plan: one project, which the organization has.
+    world.posthog.limit = undefined;
+    world.posthog.projects.push(posthogProject(7, "Another app"));
+    writeSettings({ POSTHOG: "us" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.code, doctor.out).toBe(1);
+    expect(doctor.out).toContain(`ok     PostHog: POSTHOG_PERSONAL_API_KEY works (the organization Acme Analytics, ${posthogOrg.id})`);
+    expect(doctor.out).toContain("FIX    PostHog: the organization Acme Analytics has 1 project, as many as its plan allows (1), so up couldn't make \"acme-test\"");
+
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(1);
+    expect(result.out).toContain("Stopped at posthog.project: PostHog won't make another project in the organization Acme Analytics, which has 1 and whose plan allows 1");
+    expect(result.out).toContain("move the organization to pay-as-you-go in PostHog's billing settings");
+    expect(result.out).toContain("as POSTHOG_PROJECT_TOKEN, which this deployment then shares, or set POSTHOG=no in");
+    expect(result.out).not.toContain("What to try");
+    expect(readState().done["posthog.project"]).toBeUndefined();
+    expect(world.posthog.projects).toHaveLength(1);
+  });
+
+  it("says how to make a personal API key, and stops, when none is given", async () => {
+    writeSettings({ POSTHOG: "eu" });
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(1);
+    expect(result.out).toContain("At https://eu.posthog.com/settings/user-api-keys, Create personal API key");
+    expect(result.out).toContain("Stopped at posthog.project: no PostHog personal API key (phx_...) given.");
+    expect(world.posthog.calls).toEqual([]);
+  });
+
+  it("uses a project token from the secrets file as it is, with no personal key and no call to PostHog", async () => {
+    writeSettings({ POSTHOG: "us" }, { POSTHOG_PROJECT_TOKEN: posthogToken(42) });
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("PostHog project from the secrets file");
+    expect(world.posthog.calls).toEqual([]);
+    expect(world.variables.admin).toMatchObject({ NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: posthogToken(42), NEXT_PUBLIC_POSTHOG_HOST: "https://us.i.posthog.com" });
+    expect(readState().done["post.posthog"]).toBeUndefined();
+
+    // A railway-vars.mjs file given as the secrets file names the project with the admin's own variable.
+    writeFileSync(`${settings()}.secrets`, `[admin]\nNEXT_PUBLIC_POSTHOG_PROJECT_TOKEN=${posthogToken(43)}\n`, { mode: 0o600 });
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain("ok     PostHog: POSTHOG_PROJECT_TOKEN in the secrets file names the project, so no personal API key is needed");
+    expect(world.posthog.calls).toEqual([]);
+  });
+
+  it("reuses the project with the deployment's name, turns its screen recordings on, and keeps its recording addresses", async () => {
+    world.posthog.projects.push(posthogProject(9, "ACME-TEST", { recording_domains: ["https://old.example.com"] }));
+    writeSettings({ POSTHOG: "us" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("~ screen recordings turned on");
+    expect(world.posthog.projects).toEqual([posthogProject(9, "ACME-TEST", { session_recording_opt_in: true, recording_domains: ["https://old.example.com", `https://${railwayHost}`] })]);
+    expect(world.variables.admin.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN).toBe(posthogToken(9));
+  });
+
+  it("keeps the PostHog token the admin has already, with its address, and finds its project", async () => {
+    world.posthog.projects.push(posthogProject(5, "Hand made", { session_recording_opt_in: true }));
+    writeSettings({ POSTHOG: "us" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    readyForPostHog();
+    Object.assign(world.variables.admin, { NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: posthogToken(5), NEXT_PUBLIC_POSTHOG_HOST: "https://e.example.com" });
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain('ok     PostHog: the project "Hand made" (5), whose token the admin has, exists and will be reused');
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain('= the admin\'s, 5 ("Hand made")');
+    expect(world.posthog.projects).toHaveLength(1);
+    // The dashboard's events keep their address; logs go to PostHog's own.
+    expect(world.variables.admin).toMatchObject({ NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: posthogToken(5), NEXT_PUBLIC_POSTHOG_HOST: "https://e.example.com", OTEL_EXPORTER_OTLP_ENDPOINT: "https://us.i.posthog.com/i" });
+    expect(world.variables.worker.POSTHOG_HOST).toBe("https://us.i.posthog.com");
+    expect(readState().values).toMatchObject({ POSTHOG_PROJECT_ID: 5, POSTHOG_PROJECT_NAME: "Hand made" });
+  });
+
+  it("keeps a token of a project outside the organization as it is, and leaves that project's settings alone", async () => {
+    const elsewhere = `phc_elsewhere${"x".repeat(32)}`;
+    // An EU organization, while the admin's token, with no address beside it, goes to PostHog's US address.
+    writeSettings({ POSTHOG: "eu" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    readyForPostHog();
+    world.variables.admin.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN = elsewhere;
+    // With no room for another project, doctor still says up needs none.
+    world.posthog.limit = undefined;
+    world.posthog.projects.push(posthogProject(7, "Another app"));
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain("note   PostHog: the admin has a token whose project isn't in the organization Acme Analytics, so up keeps it as it is");
+    expect(doctor.out).not.toContain("FIX    PostHog");
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("kept as it is: its project isn't in the organization Acme Analytics");
+    expect(result.out).toContain("isn't one the script found in your organization, so its settings stay as they are");
+    expect(world.posthog.projects).toEqual([posthogProject(7, "Another app")]);
+    expect(world.variables.admin).toMatchObject({ NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: elsewhere, NEXT_PUBLIC_POSTHOG_HOST: "https://us.i.posthog.com", OTEL_EXPORTER_OTLP_ENDPOINT: "https://us.i.posthog.com/i" });
+    expect(world.variables.worker.POSTHOG_HOST).toBe("https://us.i.posthog.com");
+    expect(readState().values.POSTHOG_PROJECT_KEPT).toBe(true);
+    const status = await bootstrap(["status", settings()]);
+    expect(status.out).toContain("PostHog project kept from the admin's variables");
+  });
+
+  it("makes the project without screen recordings or logs when the settings say no, and sends the dashboard's events through POSTHOG_PROXY", async () => {
+    writeSettings({ POSTHOG: "us", POSTHOG_RECORDINGS: "no", POSTHOG_LOGS: "no", POSTHOG_PROXY: "https://e.example.com/" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(world.posthog.projects).toEqual([posthogProject(100, "acme-test")]);
+    expect(world.variables.admin).toMatchObject({ NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: posthogToken(100), NEXT_PUBLIC_POSTHOG_HOST: "https://e.example.com" });
+    expect(world.variables.worker.POSTHOG_HOST).toBe("https://us.i.posthog.com");
+    for (const service of ["migrate", "admin", "worker"] as const) expect(world.variables[service].OTEL_EXPORTER_OTLP_ENDPOINT, service).toBeUndefined();
+    expect(readState().done["post.posthog"]).toBeUndefined();
+  });
+
+  it("checks the PostHog settings, and redo posthog.project runs the variables and the recording addresses again", async () => {
+    writeSettings({ POSTHOG: "maybe" });
+    const wrong = await bootstrap(["status", settings()]);
+    expect(wrong.code, wrong.out).toBe(1);
+    expect(wrong.out).toContain("POSTHOG is us, eu, a self-hosted PostHog's https:// address with no path, or no");
+
+    writeSettings({ POSTHOG: "https://posthog.example.com/" });
+    railwayAfterUp();
+    const state = stateAfterUp();
+    Object.assign(state.done, { "posthog.project": earlier, "post.posthog": earlier });
+    writeState(state);
+    const redo = await bootstrap(["redo", settings(), "posthog.project"]);
+    expect(redo.code, redo.out).toBe(0);
+    const after = readState();
+    for (const id of ["posthog.project", "variables", "post.posthog"]) expect(after.done[id], id).toBeUndefined();
   });
 });

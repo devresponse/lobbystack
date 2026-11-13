@@ -439,8 +439,10 @@ The free plan reads 1,000 pages a month, and an import reads up to 50 pages, so 
 
 Collects the errors and logs of every LobbyStack service in one place. It's optional, and recommended for production. The free tier covers 1 million events, 100,000 errors and 10 GB of logs a month.
 
+**With `devops/bootstrap.mjs`,** this is done for you unless its settings file says `POSTHOG=no` (fork PR #165). Its `up` finds or makes the environment's project, turns its screen recordings on, and puts every variable below on the services before the admin's first build, with the EU's addresses when the settings say `POSTHOG=eu`. You sign up (step 1) and make one personal API key, which PostHog's API can't make: at `us.posthog.com/settings/user-api-keys`, or `eu.posthog.com/settings/user-api-keys`, **Create personal API key**, limited to your organization, with `organization:read`, `project:read` and `project:write`. The key stays on your computer, and the services get only the project's token ([`devops/bootstrap.md`, PostHog](../../../devops/bootstrap.md#posthog)). The steps below are the way by hand.
+
 1. Sign up at `us.posthog.com`, or at `eu.posthog.com` to keep the data in Europe. The region can't be changed later.
-2. Create a project for each environment, and copy its project token from the project's settings. It starts with `phc_`. Don't use a personal API key, which starts with `phx_`.
+2. Create a project for each environment, and copy its project token from the project's settings. It starts with `phc_`. Don't use a personal API key, which starts with `phx_`. PostHog's free plan allows one project per organization, and pay-as-you-go, which has no monthly fee, allows six, so move the organization to pay-as-you-go in PostHog's billing settings before you make the second.
 
 | What it's for | Variable | Value | Service | Built in? |
 | --- | --- | --- | --- | --- |
@@ -448,13 +450,13 @@ Collects the errors and logs of every LobbyStack service in one place. It's opti
 | Where the dashboard sends them | `NEXT_PUBLIC_POSTHOG_HOST` | `https://us.i.posthog.com`, or `https://eu.i.posthog.com` | admin | Yes |
 | The worker's events and error reports | `POSTHOG_API_KEY` | `phc_…` | worker | No |
 | Where the worker sends them | `POSTHOG_HOST` | Needed only for EU: `https://eu.i.posthog.com` | worker | No |
-| Logs from every service | `OTEL_EXPORTER_OTLP_ENDPOINT` | `https://us.i.posthog.com/i` | admin, worker and migrate | No |
+| Logs from every service | `OTEL_EXPORTER_OTLP_ENDPOINT` | `https://us.i.posthog.com/i`, or `https://eu.i.posthog.com/i` | admin, worker and migrate | No |
 | The logs' credentials | `OTEL_EXPORTER_OTLP_HEADERS` | `Authorization=Bearer phc_…` | admin, worker and migrate | No |
 
 - On Docker Compose, always set `NEXT_PUBLIC_POSTHOG_HOST`: without it, Compose sends the dashboard's data to the original project's own PostHog relay, the default written in `docker-compose.yml`.
 - Once the token is built in, dashboard analytics are on for every business from the start, recordings of operators' screens included. Each business can turn them off with **Share telemetry data** under **Settings** > **Preferences** ([7.11](part-7-operations.md#711-logs-error-ids-and-following-one-call)).
 
-**Not yet confirmed:** the EU address for logs, presumably `https://eu.i.posthog.com/i`, and whether PostHog charges for the traces and metrics that LobbyStack sends along with its logs, since its free tier lists neither.
+**Not yet confirmed:** whether PostHog charges for the traces and metrics that LobbyStack sends along with its logs, since its free tier lists neither. The EU address for logs, `https://eu.i.posthog.com/i`, is the one PostHog's documentation gives.
 
 ### Zapier
 

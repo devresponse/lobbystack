@@ -5,6 +5,9 @@ import { sendBrowserErrorsTo } from "./browser-error-reporting";
 
 const projectToken = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN;
 const apiHost = process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() || "https://us.i.posthog.com";
+// The PostHog app the SDK's links open: the EU's for PostHog's EU addresses, else the US's, as before (a reverse proxy
+// doesn't say which region it forwards to).
+const uiHost = /^https:\/\/eu(\.i)?\.posthog\.com\/?$/i.test(apiHost) ? "https://eu.posthog.com" : "https://us.posthog.com";
 
 /**
  * Starts PostHog in the browser, once. `ProductAnalytics` calls this as it
@@ -19,7 +22,7 @@ export function initializeClientAnalytics(): void {
   if (!posthog.__loaded) {
     posthog.init(projectToken, {
       api_host: apiHost,
-      ui_host: "https://us.posthog.com",
+      ui_host: uiHost,
       defaults: "2026-05-30",
       autocapture: false,
       capture_exceptions: false,

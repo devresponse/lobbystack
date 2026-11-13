@@ -9,7 +9,7 @@ An instance needs neither site. The dashboard, the receptionist, calls, the webs
 Without a brand of your own ([3.6](part-3-outside-services.md#36-your-brand)), these links open LobbyStack's pages:
 
 - The sign-up page says that by creating an account, people agree to the Terms of Service and the Privacy Policy, and links to those of Lobbystack Inc., the original LobbyStack's company. Onboarding links to them too.
-- The "see docs." link in the dashboard's **Feedback** box opens the original project's Help Center. The question mark at the top left of each screen opens the app's own help pages, which name no brand ([help pages](../../features/help-pages.md)).
+- The "see docs." link in the dashboard's **Feedback** box opens the original project's Help Center. The question mark at the top right of each screen opens the app's own help pages, which name no brand ([help pages](../../features/help-pages.md)).
 - The logo on the public demo page, and the footer of each public profile page, link to the original project's website.
 - Replies to HELP texts name LobbyStack's website and email address, and the dashboard's feedback panel gives LobbyStack's address.
 

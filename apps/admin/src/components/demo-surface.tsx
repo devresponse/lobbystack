@@ -69,7 +69,7 @@ export function DemoSurface() {
   const active = preview?.state === "active";
 
   return <div className="flex min-h-svh flex-col bg-background text-foreground xl:h-svh xl:overflow-hidden">
-    <LandingNavbar locale={locale} start={<ScreenHelpButton className="-ml-2" size="icon" />} />
+    <LandingNavbar end={<ScreenHelpButton className="-ml-1 -mr-2" size="icon" />} locale={locale} />
     <div className="flex flex-1 flex-col items-center px-6 pt-12 pb-8 xl:min-h-0 xl:overflow-hidden xl:pt-10 xl:pb-6">
       <div className={cn("flex w-full flex-1 flex-col items-center xl:min-h-0", active ? "max-w-7xl" : "max-w-xl justify-center")}>
         {!preview ? <div aria-busy="true" className="flex flex-col items-center gap-3 text-center" role="status"><LoaderCircle className="size-6 animate-spin text-muted-foreground" /><p className="text-sm text-muted-foreground">{t("loading.label")}</p></div> : active && token && preview.businessSlug ? <>

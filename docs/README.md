@@ -43,7 +43,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Phone numbers](features/phone-numbers.md) | Picking or claiming a business's Twilio number, and debugging a failed pick |
 | [Text messages](features/sms.md) | Texts in and out: hand replies, consent, alerts and who they come from |
 | [Archive conversations in Messages](features/messages.md) | Taking a conversation off the Messages list without deleting it, finding it under **Archived** and restoring it |
-| [Help pages for every screen](features/help-pages.md) | A help page for each screen of the app, brand-neutral, opened from the question mark at the top left of every screen in a panel beside it, public at `/en/help`, and in one Markdown file for AI assistants |
+| [Help pages for every screen](features/help-pages.md) | A help page for each screen of the app, brand-neutral, opened from the question mark at the top right of every screen in a panel beside it, public at `/en/help`, and in one Markdown file for AI assistants |
 | [Use the dashboard on a phone](features/dashboard-on-phones.md) | The menu button's row and the space above page titles on a phone, the rules that keep it tight, and what still doesn't fit a phone |
 | [Email](features/email.md) | Every email the worker sends, and its layout |
 | [Website widget](features/website-widget.md) | Chat, browser calls and live chat on a business's website |

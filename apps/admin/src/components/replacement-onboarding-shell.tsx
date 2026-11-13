@@ -45,13 +45,18 @@ export function ReplacementOnboardingShell({ eyebrow, title, description, progre
   const marketingLocale = resolveLocale(i18n.resolvedLanguage, i18n.language);
   return (
     <div className="relative flex min-h-svh w-full flex-col bg-background text-foreground">
-      <ScreenHelpButton className="absolute left-6 top-7" size="icon" />
-      {onSignOut ? (
-        <button className="absolute right-6 top-6 rounded-full px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" onClick={onSignOut} type="button">
-          {t("shell.signOut")}
-        </button>
-      ) : null}
-      <main className="flex flex-1 flex-col items-center px-6 py-12">
+      {/* The screen's help at the top right, after Sign out where a step has it. */}
+      <div className="absolute right-6 top-6 flex h-11 items-center gap-1">
+        {onSignOut ? (
+          <button className="rounded-full px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" onClick={onSignOut} type="button">
+            {t("shell.signOut")}
+          </button>
+        ) : null}
+        <ScreenHelpButton size="icon" />
+      </div>
+      {/* On a phone or a tablet, the room above the logo clears the buttons at the top right,
+          so a step taller than the screen doesn't run its logo into them. */}
+      <main className="flex flex-1 flex-col items-center px-6 pb-12 pt-20 md:pt-12">
         <div className={cn("my-auto flex w-full flex-col items-center", widths[width])}>
           <BrandMark />
           <div className="mt-10 flex w-full flex-col items-center gap-4 text-center">

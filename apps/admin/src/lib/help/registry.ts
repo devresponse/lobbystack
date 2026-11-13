@@ -75,7 +75,7 @@ const englishWords: HelpWords = {
   helpCenter: "Help center",
   indexTitle: "Help center",
   indexDescription: "How each screen of the dashboard works: what it is for, what it shows, the fields it needs and how to do the common jobs there.",
-  indexIntro: "Every screen of the dashboard has a page here. Each one explains what the screen is for, what you see on it, which fields it needs and how to do the common jobs, in the same order on every page. The question mark at the top left of a screen opens its page beside the screen.",
+  indexIntro: "Every screen of the dashboard has a page here. Each one explains what the screen is for, what you see on it, which fields it needs and how to do the common jobs, in the same order on every page. The question mark at the top right of a screen opens its page beside the screen.",
   markdownLink: "All help pages in one Markdown file",
   markdownIntro: "Every help page of the dashboard, in one file for AI assistants and knowledge bases. Each page starts with a level-one heading and lists the help page's own address.",
   sections: {

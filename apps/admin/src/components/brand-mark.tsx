@@ -40,8 +40,8 @@ export function BrandWordmark() {
   }
   return (
     <span aria-label={appName} className="flex min-w-0 items-center gap-2">
-      {logoUrl ? <img alt="" aria-hidden="true" className="h-7 w-auto max-w-28 shrink-0 object-contain @max-[14rem]:max-w-10" decoding="async" src={logoUrl} /> : null}
-      <span className={cn("truncate font-heading text-lg font-semibold leading-7 text-foreground", logoUrl ? "@max-[8.5rem]:hidden" : null)}>{appName}</span>
+      {logoUrl ? <img alt="" aria-hidden="true" className="h-7 w-auto max-w-28 shrink-0 object-contain @max-[11.75rem]:max-w-10" decoding="async" src={logoUrl} /> : null}
+      <span className={cn("truncate font-heading text-lg font-semibold leading-7 text-foreground", logoUrl ? "@max-[6.25rem]:hidden" : null)}>{appName}</span>
     </span>
   );
 }

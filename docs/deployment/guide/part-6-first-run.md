@@ -189,7 +189,7 @@ Callers can keep dialing the number they know: ask the business's phone company 
 The website widget adds the receptionist's chat to any website, with a button to talk to it. The business's public page shows the same chat at your own address.
 
 1. Open **Settings** > **Website widget**. If it says "New website widgets are not available yet", set `WIDGET_KEY_ISSUANCE_ENABLED=true` on the admin and deploy.
-2. Give the key a **Label**. Under **Allowed origins**, enter each website address the chat will be on, such as `https://www.example.com`. You can also change the **Title**, the **Greeting**, the **Accent color** and the **Position**.
+2. Give the key a **Label**. **Allowed origins (list of websites allowed to host a chat widget)** starts with the dashboard's own address (since fork PR #161): add each website address the chat will be on after it, separated by commas, such as `https://www.example.com`, or put yours in its place. You can also change the **Title**, the **Greeting**, the **Accent color** and the **Position**.
    - **Ask visitors for their contact details** asks for an email or a phone number, before the chat or during it.
    - **Let visitors chat with your team**: during opening hours, a visitor who asks for a person gets someone from your team, who replies from **Messages**. If nobody replies within 3 minutes, the receptionist offers to take a message.
 3. Click **Create widget key**, then **Copy embed snippet**. Paste the snippet into the HTML of every page that should show the chat, or into your site builder's custom code setting. It starts with `<script src="https://<your address>/embed.js?key=wk_live_`.

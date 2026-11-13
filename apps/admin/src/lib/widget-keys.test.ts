@@ -19,7 +19,7 @@ vi.mock("@lobbystack/db", async (importOriginal) => {
   };
 });
 
-import { createReceptionistPageToken, createWidgetSessionToken, hashWidgetKey, isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyReceptionistPageToken, verifyWidgetSessionToken } from "./widget-keys";
+import { createReceptionistPageToken, createWidgetSessionToken, defaultWidgetKeyOrigin, hashWidgetKey, isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyReceptionistPageToken, verifyWidgetSessionToken } from "./widget-keys";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -54,6 +54,32 @@ describe("widget key hashing and origin policy", () => {
     expect(isAllowedWidgetOrigin("https://evil.com", allowed)).toBe(false);
     expect(isAllowedWidgetOrigin("http://localhost:3000", allowed)).toBe(true);
     expect(isAllowedWidgetOrigin("https://app.lobbystack.com", allowed)).toBe(true);
+  });
+
+  it("never lets a key that lists the deployment's own address run on every website", () => {
+    // A new key's list starts with that address, so it must open that address alone, strict check or not.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("APP_BASE_URL", "https://app.lobbystack.com");
+    const allowed = ["https://app.lobbystack.com", "https://shop.example"];
+    for (const options of [{}, { allowAdminOrigin: false, allowLocalhost: false }]) {
+      expect(isAllowedWidgetOrigin("https://app.lobbystack.com", allowed, options)).toBe(true);
+      expect(isAllowedWidgetOrigin("https://shop.example", allowed, options)).toBe(true);
+      expect(isAllowedWidgetOrigin("https://evil.example", allowed, options)).toBe(false);
+    }
+  });
+
+  it("starts a new key's allowed origins at the deployment's own address, or at nothing when it has none", () => {
+    vi.stubEnv("APP_BASE_URL", "https://dev2.realinfobot.example/");
+    expect(defaultWidgetKeyOrigin()).toBe("https://dev2.realinfobot.example");
+    vi.stubEnv("APP_BASE_URL", "https://app.lobbystack.example/dashboard");
+    expect(defaultWidgetKeyOrigin()).toBe("https://app.lobbystack.example");
+    vi.stubEnv("APP_BASE_URL", "http://localhost:13000");
+    expect(defaultWidgetKeyOrigin()).toBe("http://localhost:13000");
+    // Unset, or not a web address, the field starts empty, as it did before.
+    for (const value of ["", "localhost:3000", "dev2.realinfobot.example", "ftp://files.example"]) {
+      vi.stubEnv("APP_BASE_URL", value);
+      expect(defaultWidgetKeyOrigin(), value).toBe("");
+    }
   });
 
   it("lets a widget run on its business's published profile page, on the deployment's own domain", () => {

@@ -47,7 +47,7 @@
     "fields": {
       "label": "Étiquette",
       "labelPlaceholder": "Site principal",
-      "origins": "Origines autorisées",
+      "origins": "Origines autorisées (liste des sites web autorisés à héberger un widget de clavardage)",
       "color": "Couleur d’accent",
       "position": "Position",
       "title": "Titre",

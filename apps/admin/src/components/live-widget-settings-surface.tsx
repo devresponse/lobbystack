@@ -46,11 +46,15 @@ function originsToText(origins: string[]): string {
   return origins.join(", ");
 }
 
-export function LiveWidgetSettingsSurface() {
+/**
+ * defaultOrigin is the website a new key's allowed origins start with, the deployment's own address
+ * (APP_BASE_URL's origin), which the owner can change. Empty leaves the field empty.
+ */
+export function LiveWidgetSettingsSurface({ defaultOrigin = "" }: { defaultOrigin?: string } = {}) {
   const { i18n, t } = useTranslation("settings");
   const queryClient = useQueryClient();
   const [label, setLabel] = useState("");
-  const [origins, setOrigins] = useState("");
+  const [origins, setOrigins] = useState(defaultOrigin);
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [position, setPosition] = useState<"bottom-right" | "bottom-left" | "bottom-center">("bottom-right");
   const [leadEnabled, setLeadEnabled] = useState(false);
@@ -81,7 +85,7 @@ export function LiveWidgetSettingsSurface() {
     }),
     onSuccess: async (result) => {
       setCreatedKey(result.key);
-      setLabel(""); setOrigins(""); setCopied(false); setReceptionistId(null);
+      setLabel(""); setOrigins(defaultOrigin); setCopied(false); setReceptionistId(null);
       setColor(DEFAULT_COLOR); setPosition("bottom-right"); setTitle(""); setSubtitle(""); setGreeting(""); setLocaleOverride("");
       setLeadEnabled(false); setLeadRequireEmail(false); setLeadRequirePhone(false); setLeadShowBeforeChat(false); setLiveChatEnabled(false);
       await queryClient.invalidateQueries({ queryKey: ["widget-keys", business?.businessId] });
@@ -203,8 +207,9 @@ function WidgetKeyEditor({ row, receptionists, onSave, onStatus, busy, saved, em
         </div>
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1.5 text-sm font-medium">{t("widget.fields.label")}<input className="min-h-10 w-full rounded-xl border border-border px-3 font-normal" value={label} onChange={(event) => setLabel(event.target.value)} /></label>
-        <label className="space-y-1.5 text-sm font-medium">{t("widget.fields.origins")}<input className="min-h-10 w-full rounded-xl border border-border px-3 font-normal" value={origins} onChange={(event) => setOrigins(event.target.value)} /></label>
+        {/* Full width, as in the form above: the origins label is a sentence long, and side by side it would push its field below the label's. */}
+        <label className="space-y-1.5 text-sm font-medium sm:col-span-2">{t("widget.fields.label")}<input className="min-h-10 w-full rounded-xl border border-border px-3 font-normal" value={label} onChange={(event) => setLabel(event.target.value)} /></label>
+        <label className="space-y-1.5 text-sm font-medium sm:col-span-2">{t("widget.fields.origins")}<input className="min-h-10 w-full rounded-xl border border-border px-3 font-normal" value={origins} onChange={(event) => setOrigins(event.target.value)} /></label>
         <label className="space-y-1.5 text-sm font-medium">{t("widget.fields.color")}<div className="flex items-center gap-2"><input className="h-10 w-14 rounded-xl border p-1" type="color" value={config.color ?? DEFAULT_COLOR} onChange={(event) => setConfig({ ...config, color: event.target.value })} /><span className="text-xs text-muted-foreground">{config.color ?? DEFAULT_COLOR}</span></div></label>
         <label className="space-y-1.5 text-sm font-medium">{t("widget.fields.position")}<select className="min-h-10 w-full rounded-xl border border-border bg-background px-3 font-normal" value={config.position ?? "bottom-right"} onChange={(event) => setConfig({ ...config, position: event.target.value as NonNullable<WidgetKeyConfig["position"]> })}><option value="bottom-right">{t("widget.positions.bottomRight")}</option><option value="bottom-left">{t("widget.positions.bottomLeft")}</option><option value="bottom-center">{t("widget.positions.bottomCenter")}</option></select></label>
         <label className="space-y-1.5 text-sm font-medium">{t("widget.fields.title")}<input className="min-h-10 w-full rounded-xl border border-border px-3 font-normal" value={config.title ?? ""} onChange={(event) => setConfig({ ...config, title: event.target.value })} /></label>

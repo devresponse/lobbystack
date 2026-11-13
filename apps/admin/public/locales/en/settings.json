@@ -47,7 +47,7 @@
     "fields": {
       "label": "Label",
       "labelPlaceholder": "Main website",
-      "origins": "Allowed origins",
+      "origins": "Allowed origins (list of websites allowed to host a chat widget)",
       "color": "Accent color",
       "position": "Position",
       "title": "Title",

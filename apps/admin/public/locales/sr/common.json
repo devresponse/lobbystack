@@ -65,7 +65,6 @@
     "placeholder": "Imate ideju kako da poboljšamo {{appName}}? Javite timu.",
     "characterCount": "{{count}} / {{max}} znakova",
     "helpText": "Potrebna Vam je pomoć?",
-    "helpCenter": "Centar za pomoć",
     "contactLink": "Kontaktirajte nas",
     "helpTextSeparator": "ili",
     "docsLink": "pogledajte dokumentaciju.",
@@ -74,6 +73,16 @@
       "sent": "Povratne informacije su poslate.",
       "failed": "Nismo uspeli da sačuvamo povratne informacije."
     }
+  },
+  "help": {
+    "screen": "Pomoć za ovaj ekran",
+    "openPage": "Otvori u novoj kartici",
+    "allTopics": "Sve teme pomoći",
+    "back": "Nazad",
+    "loading": "Učitavanje pomoći…",
+    "failed": "Pomoć se nije učitala. Proverite vezu i pokušajte ponovo.",
+    "retry": "Pokušaj ponovo",
+    "englishOnly": "Pomoć je za sada na engleskom."
   },
   "testCall": {
     "trigger": "Probni poziv",

@@ -3,7 +3,7 @@
 import { type FormEvent, useState } from "react";
 
 import { brandLinks, contactEmailFor } from "@lobbystack/shared";
-import { CircleQuestionMarkIcon, MessageSquare } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -148,31 +148,6 @@ export function DashboardFeedbackWidget({ businessId, className }: FeedbackWidge
             </form>
           </PopoverContent>
         </Popover>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              aria-label={t("feedback.helpCenter")}
-              role="link"
-              className="text-sidebar-foreground hover:bg-transparent hover:text-sidebar-accent-foreground"
-              nativeButton={false}
-              render={
-                <a
-                  aria-label={t("feedback.helpCenter")}
-                  href={links.docsUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                />
-              }
-              size="icon-xs"
-              variant="ghost"
-            />
-          }
-        >
-          <CircleQuestionMarkIcon className="size-[18px]" strokeWidth={1.75} />
-        </TooltipTrigger>
-        <TooltipContent>{t("feedback.helpCenter")}</TooltipContent>
       </Tooltip>
     </div>
   );

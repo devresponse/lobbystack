@@ -16,25 +16,37 @@ const labels = {
 
 type LandingNavbarProps = {
   locale?: MarketingLocale
+  /** Shown left of the logo, such as the screen's help button. */
+  start?: React.ReactNode
 }
 
-/** Marketing header for the public demo page: logo back to the site, plus sign-in and sign-up links. */
-export function LandingNavbar({ locale = "en" }: LandingNavbarProps) {
+/**
+ * Marketing header for the public demo page: logo back to the site, plus
+ * sign-in and sign-up links. On a phone the sign-in link gives way, so the
+ * logo keeps room beside the help button and the sign-up link; a long name
+ * ends in an ellipsis rather than running into the links. The logo's side is
+ * a container, so the name can give way to the logo where too little of it
+ * would show.
+ */
+export function LandingNavbar({ locale = "en", start }: LandingNavbarProps) {
   const copy = labels[locale]
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-6">
-        <a
-          href={localizeMarketingHref(locale, "/")}
-          className="flex items-center focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        >
-          <BrandWordmark />
-        </a>
-        <div className="flex items-center gap-3">
+        <div className="@container flex min-w-0 flex-1 items-center gap-2">
+          {start}
+          <a
+            href={localizeMarketingHref(locale, "/")}
+            className="flex min-w-0 items-center overflow-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            <BrandWordmark />
+          </a>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
           <a
             href={localizePublicPath("/login", locale)}
-            className="rounded-md text-sm font-medium text-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="hidden rounded-md text-sm font-medium whitespace-nowrap text-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:inline"
           >
             {copy.login}
           </a>

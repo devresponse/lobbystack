@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaimDemoSurface } from "./claim-demo-surface";
 
 const router = vi.hoisted(() => ({ replace: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/claim-demo", useRouter: () => router }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 const clients: QueryClient[] = [];
 beforeEach(() => { router.replace.mockReset(); sessionStorage.clear(); window.history.replaceState({}, "", "/claim-demo?token=fixture-token"); });

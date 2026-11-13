@@ -15,6 +15,8 @@ export function routeNamespaces(pathname: string): string[] {
   const section = stripLocalePrefix(pathname).split("/")[1] ?? "";
   if (["login", "signup", "forgot-password", "reset-password", "verify-email", "confirm-email-change", "accept-invite", "cancel-account"].includes(section)) return ["common", "auth", "onboarding"];
   if (section === "embed") return ["common", "widget"];
+  // Help pages carry their own words, in the language they're written in.
+  if (section === "help") return ["common"];
   if (section === "profile") return ["common", "profile"];
   if (["demo", "claim-demo"].includes(section)) return ["common", "auth", "demos", "widget"];
   if (section === "onboarding") return ["common", "onboarding", "auth", "settings", "nav"];

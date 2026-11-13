@@ -7,7 +7,7 @@ import { AcceptInviteSurface } from "./accept-invite-surface";
 
 const spies = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn(), replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }));
 vi.mock("sonner", () => ({ toast: spies }));
-vi.mock("next/navigation", () => ({ useRouter: () => spies }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/accept-invite", useRouter: () => spies }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", resolvedLanguage: "en" }, t: (key: string) => key }) }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); window.history.replaceState({}, "", "/"); });
 

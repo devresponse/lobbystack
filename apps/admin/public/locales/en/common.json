@@ -59,7 +59,6 @@
     "placeholder": "Have an idea to improve {{appName}}? Tell the team.",
     "characterCount": "{{count}} / {{max}} characters",
     "helpText": "Need help?",
-    "helpCenter": "Help Center",
     "contactLink": "Contact us",
     "helpTextSeparator": "or",
     "docsLink": "see docs.",
@@ -68,6 +67,16 @@
       "sent": "Feedback sent.",
       "failed": "We could not save that feedback."
     }
+  },
+  "help": {
+    "screen": "Help for this screen",
+    "openPage": "Open in a new tab",
+    "allTopics": "All help topics",
+    "back": "Back",
+    "loading": "Loading help…",
+    "failed": "Help didn't load. Check your connection and try again.",
+    "retry": "Try again",
+    "englishOnly": "Help is in English for now."
   },
   "testCall": {
     "trigger": "Test Call",

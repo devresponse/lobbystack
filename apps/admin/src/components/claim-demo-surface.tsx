@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
+import { ScreenHelpButton } from "@/components/screen-help-button";
 import { Button } from "@/components/ui/button";
 import { requestJson } from "@/lib/request-json";
 import { buildAuthPathWithReturnTo } from "@/lib/auth-return-to";
@@ -17,6 +18,20 @@ type Preview = { state: "active" | "claimed" | "preparing" | "invalid" | "expire
 
 type ClaimStatus = "claiming" | "unavailable" | "business-limit" | "error";
 
+/**
+ * The claim screen's frame, with the screen's help at the top left. Every
+ * state renders inside the same frame, so an open help panel stays open when
+ * the claim's state changes.
+ */
+function ClaimFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-6 py-16 text-foreground">
+      <ScreenHelpButton className="absolute left-6 top-7" size="icon" />
+      {children}
+    </div>
+  );
+}
+
 function ClaimShell({
   title,
   description,
@@ -27,14 +42,12 @@ function ClaimShell({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center bg-background px-6 py-16 text-foreground">
-      <div className="w-full max-w-md rounded-xl border bg-muted/30 p-6 text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          {title}
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">{description}</p>
-        {children ? <div className="mt-6">{children}</div> : null}
-      </div>
+    <div className="w-full max-w-md rounded-xl border bg-muted/30 p-6 text-center">
+      <h1 className="text-xl font-semibold tracking-tight text-foreground">
+        {title}
+      </h1>
+      <p className="mt-3 text-sm leading-6 text-muted-foreground">{description}</p>
+      {children ? <div className="mt-6">{children}</div> : null}
     </div>
   );
 }
@@ -152,18 +165,17 @@ export function ClaimDemoSurface() {
     setAttempt((value) => value + 1);
   }
 
+  let content: React.ReactNode;
   if (status === "unavailable") {
-    return (
+    content = (
       <ClaimShell
         description={t("claim.unavailableDescription")}
         title={t("claim.unavailableTitle")}
       />
     );
-  }
-
-  if (status === "business-limit") {
+  } else if (status === "business-limit") {
     // The token stays in this tab, so the claim can go ahead once a business is deleted.
-    return (
+    content = (
       <ClaimShell
         description={t(upgrade ? "claim.businessLimitUpgradeDescription" : "claim.businessLimitDescription")}
         title={t(upgrade ? "claim.businessLimitUpgradeTitle" : "claim.businessLimitTitle")}
@@ -173,10 +185,8 @@ export function ClaimDemoSurface() {
         </Button>
       </ClaimShell>
     );
-  }
-
-  if (status === "error" || previewQuery.isError) {
-    return (
+  } else if (status === "error" || previewQuery.isError) {
+    content = (
       <ClaimShell
         description={t("claim.errorDescription")}
         title={t("claim.errorTitle")}
@@ -190,10 +200,8 @@ export function ClaimDemoSurface() {
         </Button>
       </ClaimShell>
     );
-  }
-
-  return (
-    <div className="flex min-h-svh flex-col items-center justify-center bg-background px-6 py-16 text-foreground">
+  } else {
+    content = (
       <div className="flex flex-col items-center gap-4 text-center">
         <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
         <div>
@@ -205,6 +213,8 @@ export function ClaimDemoSurface() {
           </p>
         </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  return <ClaimFrame>{content}</ClaimFrame>;
 }

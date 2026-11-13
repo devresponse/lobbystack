@@ -88,6 +88,19 @@ it("keeps a stored locale when the localized path uses a different locale", asyn
   expect(document.cookie).toContain("lobbystack.locale=fr");
 });
 
+it("neither saves nor changes the reader's language on a help page, which is in English for everyone", () => {
+  mocks.pathname = "/en/help/rules";
+  render(<QueryClientProvider client={new QueryClient()}><LocaleProvider initialLocale="en" initialLocaleSource="path"><Controls /></LocaleProvider></QueryClientProvider>);
+  expect(window.localStorage.getItem("lobbystack.locale")).toBeNull();
+  expect(document.cookie).not.toContain("lobbystack.locale=en");
+
+  window.localStorage.setItem("lobbystack.locale", "fr");
+  cleanup();
+  render(<QueryClientProvider client={new QueryClient()}><LocaleProvider initialLocale="en" initialLocaleSource="path"><Controls /></LocaleProvider></QueryClientProvider>);
+  expect(mocks.changeLanguage).not.toHaveBeenCalled();
+  expect(window.localStorage.getItem("lobbystack.locale")).toBe("fr");
+});
+
 it("keeps an explicit query choice after its canonical path redirect", () => {
   mocks.pathname = "/fr/login";
   window.localStorage.setItem("lobbystack.locale", "en");

@@ -4,7 +4,9 @@ import { BRAND_LOGO_PATH, isMaintenanceMode, normalizeInterfaceLocale } from "@l
 
 import { configuredAppOrigins } from "@/lib/app-origins";
 import { LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE_SECONDS, localeTag } from "@/lib/locale";
+import { DEFAULT_HELP_LOCALE, helpLocaleFor, isHelpLocale } from "@/lib/help/locales";
 import {
+  isHelpRoutePath,
   isLegacyPublicRoutePath,
   isPublicRoutePath,
   isTokenBearingRoute,
@@ -61,8 +63,9 @@ function applyResponsePolicy(
     response.headers.set("Vary", "Accept-Encoding");
   }
   // Never add Set-Cookie to canonical locale-prefixed pages: shared caches must
-  // be able to store those responses. Explicit selection persists separately.
-  if (locale.source === "query") {
+  // be able to store those responses. Explicit selection persists separately,
+  // except on a help address, whose language says nothing about the reader's.
+  if (locale.source === "query" && !isHelpRoutePath(request.nextUrl.pathname)) {
     response.cookies.set({
       name: LOCALE_COOKIE,
       value: locale.locale,
@@ -136,7 +139,7 @@ export function proxy(request: NextRequest) {
 
   if (isLegacyPublicRoutePath(pathname)) {
     const target = request.nextUrl.clone();
-    target.pathname = localizePublicPath(pathname, negotiatedLocale.locale);
+    target.pathname = localizePublicPath(pathname, isHelpRoutePath(pathname) ? helpLocaleFor(negotiatedLocale.locale) : negotiatedLocale.locale);
     target.searchParams.delete("lng");
     return applyResponsePolicy(
       NextResponse.redirect(target, 308),
@@ -147,10 +150,26 @@ export function proxy(request: NextRequest) {
     );
   }
 
+  // Help pages exist in fewer languages than the interface, so an address in
+  // another language goes to the default help language. It's temporary: the
+  // address works once that language's help is written.
+  if (pathLocale && isHelpRoutePath(pathname) && !isHelpLocale(pathLocale)) {
+    const target = request.nextUrl.clone();
+    target.pathname = localizePublicPath(pathname, DEFAULT_HELP_LOCALE);
+    target.searchParams.delete("lng");
+    return applyResponsePolicy(
+      NextResponse.redirect(target, 307),
+      request,
+      headers,
+      negotiatedLocale,
+      "private, no-store",
+    );
+  }
+
   if (pathLocale && isPublicRoutePath(pathname) && request.nextUrl.searchParams.has("lng")) {
     const targetLocale = queryLocale ?? pathLocale;
     const target = request.nextUrl.clone();
-    target.pathname = localizePublicPath(pathname, targetLocale);
+    target.pathname = localizePublicPath(pathname, isHelpRoutePath(pathname) ? helpLocaleFor(targetLocale) : targetLocale);
     target.searchParams.delete("lng");
     return applyResponsePolicy(
       NextResponse.redirect(target, 308),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isHelpRoutePath,
   isLegacyPublicRoutePath,
   isPublicRoutePath,
   isTokenBearingRoute,
@@ -31,5 +32,14 @@ describe("locale paths", () => {
     expect(isTokenBearingRoute("/fr/reset-password/token", new URLSearchParams())).toBe(true);
     expect(isTokenBearingRoute("/en/verify-email", new URLSearchParams("token=private"))).toBe(true);
     expect(isTokenBearingRoute("/en/login", new URLSearchParams())).toBe(false);
+  });
+
+  it("knows the help center's addresses, with or without a language", () => {
+    for (const path of ["/help", "/help/rules", "/en/help", "/fr/help/rules", "/en/help.md", "/help.md"]) {
+      expect(isHelpRoutePath(path), path).toBe(true);
+      expect(isPublicRoutePath(path), path).toBe(true);
+    }
+    expect(isLegacyPublicRoutePath("/help/rules")).toBe(true);
+    for (const path of ["/", "/agent/rules", "/en/login", "/helpers"]) expect(isHelpRoutePath(path), path).toBe(false);
   });
 });

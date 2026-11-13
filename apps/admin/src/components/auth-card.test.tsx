@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthCard } from "./auth-card";
 const analytics = vi.hoisted(() => ({ record: vi.fn() }));
 const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/login", useRouter: () => navigation }));
 vi.mock("@/lib/auth-success-analytics", () => ({ recordAuthSuccess: analytics.record }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en", resolvedLanguage: "en" } }) }));
 vi.mock("@/components/turnstile", () => ({ Turnstile: ({ siteKey, onTokenChange }: { siteKey: string; onTokenChange: (token: string) => void }) => <button data-testid="challenge" data-site-key={siteKey} onClick={() => onTokenChange("fixture-challenge-token")}>Solve challenge</button> }));

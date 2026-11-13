@@ -65,7 +65,6 @@
     "placeholder": "Une idée pour améliorer {{appName}} ? Dites-le à l’équipe.",
     "characterCount": "{{count}} / {{max}} caractères",
     "helpText": "Besoin d’aide ?",
-    "helpCenter": "Centre d’aide",
     "contactLink": "Contactez-nous",
     "helpTextSeparator": "ou",
     "docsLink": "consultez la doc.",
@@ -74,6 +73,16 @@
       "sent": "Feedback envoyé.",
       "failed": "Nous n’avons pas pu enregistrer ce feedback."
     }
+  },
+  "help": {
+    "screen": "Aide pour cet écran",
+    "openPage": "Ouvrir dans un nouvel onglet",
+    "allTopics": "Tous les sujets d’aide",
+    "back": "Retour",
+    "loading": "Chargement de l’aide…",
+    "failed": "L’aide ne s’est pas chargée. Vérifiez votre connexion et réessayez.",
+    "retry": "Réessayer",
+    "englishOnly": "L’aide est en anglais pour le moment."
   },
   "testCall": {
     "trigger": "Appel test",

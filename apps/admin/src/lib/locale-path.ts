@@ -7,6 +7,8 @@ const publicRouteSections = new Set([
   "confirm-email-change",
   "demo",
   "forgot-password",
+  "help",
+  "help.md",
   "login",
   "reset-password",
   "signup",
@@ -35,6 +37,12 @@ export function localizePublicPath(pathname: string, locale: SupportedLocale): s
 export function isPublicRoutePath(pathname: string): boolean {
   const section = stripLocalePrefix(pathname).split("/")[1] ?? "";
   return publicRouteSections.has(section);
+}
+
+/** Whether the address is the help center, one of its pages or its Markdown file, with or without a language. */
+export function isHelpRoutePath(pathname: string): boolean {
+  const section = stripLocalePrefix(pathname).split("/")[1] ?? "";
+  return section === "help" || section === "help.md";
 }
 
 export function isLegacyPublicRoutePath(pathname: string): boolean {

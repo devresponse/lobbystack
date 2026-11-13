@@ -94,6 +94,7 @@ The admin caches the saved row for 30 seconds, so other admin replicas pick up a
 - The picture in link previews of those pages, from the brand file's `ogImage`. A business's public profile page has its own preview, without it.
 - The logo and name above the sign-in, sign-up, password reset, invitation, email change, verification, OAuth consent, and onboarding pages.
 - The header of the public demo page.
+- The header of the help pages at `/{locale}/help`, which links to the dashboard ([help pages](features/help-pages.md)).
 - The foot of each business's [public profile page](features/public-profile-and-qr.md) at `/profile/<slug>`, after "Answered by", and of the page a visitor gets for a profile that isn't published. Both link to the website.
 - Every dashboard string in all four languages that used to say LobbyStack: 21 strings, which now use the `{{appName}}` i18n variable.
 
@@ -133,7 +134,7 @@ Where each one appears:
 
 - **Website**: the logo on the public demo page, the "visit" link in the SMS HELP reply, and the terms and privacy links when the brand file has no page for them. On the original project's website the links open the page in the reader's language, under `/fr/`, `/es/`, or `/sr/`. Any other site gets the same path in every language, such as `/terms`.
 - **Terms and privacy**: the links under the sign-up form and at the foot of onboarding, and the affiliate program's terms link. With `links.terms` set, the affiliate link opens the top of that page, since only LobbyStack's terms have an `#affiliate-program` section.
-- **Docs**: the "see docs" and Help Center links in the dashboard's feedback panel, and `resource_documentation` in the MCP server's OAuth metadata, which adds `/ai/mcp`.
+- **Docs**: the "see docs." link in the dashboard's **Feedback** box, and `resource_documentation` in the MCP server's OAuth metadata, which adds `/ai/mcp`. The question mark at the top left of each screen opens the app's own help pages instead, which name no brand and don't use this link ([help pages](features/help-pages.md)).
 - **Contact address**: the feedback panel's "Contact us" link, the Enterprise plan's contact button in onboarding and billing, and both SMS HELP replies. The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when the address or the website changes. Since fork PR #102 it's also the inbox told when an owner asks to cancel their account, and when they confirm. Without the brand's own address those emails go to `FEEDBACK_TO_EMAIL`, never to LobbyStack's ([cancel an account](features/account-cancellation.md#know-whos-told)).
 - **Zapier integration**: the Zapier card on the **Integrations** page, whose dialog opens the link (fork PR #94). Without a link the card isn't shown ([integrations](features/api-cli-integrations.md#connect-zapier)).
 - **Make app**: the Make card on the **Integrations** page, whose dialog opens the link (fork PR #95). Without a link the card isn't shown ([integrations](features/api-cli-integrations.md#connect-make)).

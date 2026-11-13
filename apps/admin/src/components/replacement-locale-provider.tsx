@@ -14,7 +14,7 @@ import {
   writeStoredLocaleCookie,
   type SupportedLocale,
 } from "@/lib/locale";
-import { isPublicRoutePath, localizePublicPath } from "@/lib/locale-path";
+import { isHelpRoutePath, isPublicRoutePath, localizePublicPath } from "@/lib/locale-path";
 import { localeFromCookieHeader, type LocaleSource } from "@/lib/locale-request";
 import { readPublicAuthSession } from "@/lib/public-auth-session";
 
@@ -51,6 +51,9 @@ export function LocaleProvider({
   const router = useRouter();
   const pathname = usePathname() ?? "/";
   const publicPage = isPublicRoutePath(pathname) || /^\/embed(?:\/|$)/.test(pathname);
+  // Help exists in fewer languages than the interface, so a help page's address
+  // says nothing about the reader's language: it neither saves nor changes it.
+  const helpPage = isHelpRoutePath(pathname);
   const [locale, setLocaleState] = useState<SupportedLocale>(() => resolveLocale(i18n.resolvedLanguage, initialLocale));
   const [isSaving, setIsSaving] = useState(false);
   const preferenceRevision = useRef(0);
@@ -71,6 +74,7 @@ export function LocaleProvider({
    * server could not see unless an explicit ?lng= outranks it.
    */
   useEffect(() => {
+    if (helpPage) return;
     // react-i18next hands out a new i18n wrapper after every language change.
     // Without this guard, picking a language re-ran this effect and restored
     // the language stored when the page loaded.
@@ -101,7 +105,7 @@ export function LocaleProvider({
     } else if (initialLocaleSource === "cookie") {
       writeStoredLocaleCookie(initialLocale);
     }
-  }, [i18n, initialLocale, initialLocaleSource, storedCookieLocale, storedLocale]);
+  }, [helpPage, i18n, initialLocale, initialLocaleSource, storedCookieLocale, storedLocale]);
 
   const accountLocale = useQuery({
     queryKey: ["account", "locale-preference", publicPage],

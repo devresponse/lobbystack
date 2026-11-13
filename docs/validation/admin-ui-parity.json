@@ -31,7 +31,9 @@
     "/settings/profile",
     "/profile/[slug]",
     "/profile/[slug]/[handle]",
-    "/settings/qrcode"
+    "/settings/qrcode",
+    "/help",
+    "/help/[screen]"
   ],
   "localizedPortRoutes": [
     "/[locale]/accept-invite",
@@ -41,6 +43,8 @@
     "/[locale]/demo",
     "/[locale]/demo/[token]",
     "/[locale]/forgot-password",
+    "/[locale]/help",
+    "/[locale]/help/[screen]",
     "/[locale]/login",
     "/[locale]/oauth/consent",
     "/[locale]/reset-password",
@@ -358,6 +362,20 @@
       "comparison": "port-baseline",
       "dynamicKey": "resetToken",
       "snapshotId": "/reset-password/[token]"
+    },
+    {
+      "path": "/help",
+      "fixtureState": "public",
+      "state": "default",
+      "comparison": "excluded",
+      "reason": "New brand-neutral help center, English only, whose text changes with each article; apps/admin/e2e/help-pages.e2e.ts checks it"
+    },
+    {
+      "path": "/help/[screen]",
+      "fixtureState": "public",
+      "state": "default",
+      "comparison": "excluded",
+      "reason": "New brand-neutral help page per screen, English only, whose text changes with each article; apps/admin/e2e/help-pages.e2e.ts checks it"
     },
     {
       "path": "/onboarding/business",

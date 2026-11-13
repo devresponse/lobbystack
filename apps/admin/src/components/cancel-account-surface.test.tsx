@@ -8,7 +8,7 @@ import en from "../../public/locales/en/auth.json";
 import { CancelAccountSurface } from "./cancel-account-surface";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/cancel-account", useRouter: () => router }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); window.history.replaceState({}, "", "/"); });
 
 const copy = en.cancelAccount;

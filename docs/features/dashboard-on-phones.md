@@ -23,7 +23,7 @@ The row stays at the top while a page scrolls, with the page blurred behind it, 
 ## Know the gaps on a phone
 
 - **Wide tables scroll sideways.** The **Calls** table is at least 56rem (896 pixels) wide, so on a phone its purpose column is cut off until you swipe the table. A list of cards below `md`, with the caller, the time and the purpose stacked, would show each call without scrolling.
-- **Three buttons are computer-only.** **Test Call**, the gift that opens **Affiliate Program**, and **Feedback** sit at the top right of every page from `md` up (`DashboardUtilityBar` in `apps/admin/src/components/dashboard-utility-bar.tsx` is `hidden md:block`). A phone doesn't show them anywhere, though the menu button's row has room for them at its right.
+- **Three buttons are computer-only.** **Test Call**, the gift that opens **Affiliate Program**, and **Feedback** sit at the top right of every page from `md` up (`DashboardUtilityBar` in `apps/admin/src/components/dashboard-utility-bar.tsx` is `hidden md:block`). A phone doesn't show them anywhere, though the menu button's row has room for them at its right. The question mark that opens the screen's help is the exception: on a phone it sits in the menu button's row, beside the button ([help pages](help-pages.md#open-help-from-a-screen)).
 - **The title could share the menu button's row.** Putting each page's title beside the button, as phone apps do, would save another 48 pixels, but every page would have to hand its title to the row, so it isn't done.
 
 ## Know how it's tested

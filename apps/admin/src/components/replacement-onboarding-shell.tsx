@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { BrandMark } from "@/components/brand-mark";
+import { ScreenHelpButton } from "@/components/screen-help-button";
 import { resolveLocale } from "@/lib/locale";
 import { privacyHref, termsHref } from "@/lib/marketing-site-url";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ export function ReplacementOnboardingShell({ eyebrow, title, description, progre
   const marketingLocale = resolveLocale(i18n.resolvedLanguage, i18n.language);
   return (
     <div className="relative flex min-h-svh w-full flex-col bg-background text-foreground">
+      <ScreenHelpButton className="absolute left-6 top-7" size="icon" />
       {onSignOut ? (
         <button className="absolute right-6 top-6 rounded-full px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" onClick={onSignOut} type="button">
           {t("shell.signOut")}

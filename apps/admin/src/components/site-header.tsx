@@ -1,5 +1,6 @@
 import { useEffect, useState, type RefObject } from "react";
 
+import { ScreenHelpButton } from "@/components/screen-help-button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
@@ -40,7 +41,7 @@ export function SiteHeader({
   return (
     <header
       className={cn(
-        // Phones only: a slim row for the sidebar button, so page titles start near the top.
+        // Phones only: a slim row for the sidebar and help buttons, so page titles start near the top.
         // shrink-0 keeps it 48px tall on long pages, where the scrolling column would squeeze it.
         "z-50 h-12 shrink-0 md:hidden",
         fixed && "header-fixed peer/header sticky top-0 w-[inherit]",
@@ -58,6 +59,7 @@ export function SiteHeader({
         )}
       >
         <SidebarTrigger className="md:hidden" size="icon" type="button" variant="outline" />
+        <ScreenHelpButton size="icon" />
       </div>
     </header>
   );

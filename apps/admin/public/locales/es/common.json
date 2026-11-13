@@ -59,7 +59,6 @@
     "placeholder": "¿Tiene una idea para mejorar {{appName}}? Cuéntesela al equipo.",
     "characterCount": "{{count}} / {{max}} caracteres",
     "helpText": "¿Necesita ayuda?",
-    "helpCenter": "Centro de ayuda",
     "contactLink": "Contáctenos",
     "helpTextSeparator": "o",
     "docsLink": "consulte la documentación.",
@@ -68,6 +67,16 @@
       "sent": "Comentarios enviados.",
       "failed": "No pudimos guardar sus comentarios."
     }
+  },
+  "help": {
+    "screen": "Ayuda para esta pantalla",
+    "openPage": "Abrir en una pestaña nueva",
+    "allTopics": "Todos los temas de ayuda",
+    "back": "Volver",
+    "loading": "Cargando la ayuda…",
+    "failed": "La ayuda no se cargó. Compruebe su conexión e inténtelo de nuevo.",
+    "retry": "Intentar de nuevo",
+    "englishOnly": "Por ahora, la ayuda está en inglés."
   },
   "testCall": {
     "trigger": "Llamada de prueba",

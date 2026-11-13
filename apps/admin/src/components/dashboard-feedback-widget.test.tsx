@@ -34,7 +34,6 @@ vi.mock("react-i18next", () => ({
         "feedback.label": "Feedback message",
         "feedback.placeholder": "Have an idea to improve LobbyStack? Tell the team.",
         "feedback.helpText": "Need help?",
-        "feedback.helpCenter": "Help Center",
         "feedback.contactLink": "Contact us",
         "feedback.helpTextSeparator": "or",
         "feedback.docsLink": "see docs.",
@@ -76,9 +75,9 @@ describe("DashboardFeedbackWidget", () => {
 
     expect(screen.getByLabelText("Feedback message")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Contact us" }).getAttribute("href")).toBe("mailto:support@lobbystack.com");
-    const helpCenterLink = screen.getByRole("link", { name: "Help Center" });
-    expect(helpCenterLink.getAttribute("href")).toBe("https://docs.lobbystack.com");
-    expect(helpCenterLink.getAttribute("target")).toBe("_blank");
+    const docsLink = screen.getByRole("link", { name: "see docs." });
+    expect(docsLink.getAttribute("href")).toBe("https://docs.lobbystack.com");
+    expect(docsLink.getAttribute("target")).toBe("_blank");
   });
 
   it("links to the brand's own address and docs", () => {
@@ -90,7 +89,6 @@ describe("DashboardFeedbackWidget", () => {
 
     expect(screen.getByRole("link", { name: "Contact us" }).getAttribute("href")).toBe("mailto:support@alloplace.com");
     expect(screen.getByRole("link", { name: "see docs." }).getAttribute("href")).toBe("https://alloplace.com");
-    expect(screen.getByRole("link", { name: "Help Center" }).getAttribute("href")).toBe("https://alloplace.com");
   });
 
   it("keeps send disabled for an empty message", async () => {

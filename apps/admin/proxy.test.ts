@@ -113,6 +113,40 @@ it("redirects legacy public URLs to a canonical locale while preserving safe que
   expect(fromHeader.headers.get("location")).toBe("http://localhost:3210/fr/forgot-password");
 });
 
+it("serves help pages in the languages that have help, and sends the others to English", () => {
+  const english = proxy(new NextRequest("http://localhost:3210/en/help/rules", { headers: { cookie: "lobbystack.locale=fr" } }));
+  expect(english.status).toBe(200);
+  expect(english.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("en");
+  expect(english.headers.get("cache-control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
+  const markdown = proxy(new NextRequest("http://localhost:3210/en/help.md"));
+  expect(markdown.status).toBe(200);
+  expect(markdown.headers.get("cache-control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
+  expect(proxy(new NextRequest("http://localhost:3210/fr/help.md")).headers.get("location")).toBe("http://localhost:3210/en/help.md");
+  expect(proxy(new NextRequest("http://localhost:3210/help.md")).headers.get("location")).toBe("http://localhost:3210/en/help.md");
+
+  // Until a language has its own help, its address answers with the English page, for now.
+  const french = proxy(new NextRequest("http://localhost:3210/fr/help/rules?ref=app"));
+  expect(french.status).toBe(307);
+  expect(french.headers.get("location")).toBe("http://localhost:3210/en/help/rules?ref=app");
+  expect(french.headers.get("cache-control")).toBe("private, no-store");
+  expect(proxy(new NextRequest("http://localhost:3210/sr/help")).headers.get("location")).toBe("http://localhost:3210/en/help");
+
+  // An address without a language goes to help in a language that has it, whatever the reader's.
+  const legacy = proxy(new NextRequest("http://localhost:3210/help/rules", { headers: { "accept-language": "fr-CA,fr;q=0.9" } }));
+  expect(legacy.status).toBe(308);
+  expect(legacy.headers.get("location")).toBe("http://localhost:3210/en/help/rules");
+  const chosen = proxy(new NextRequest("http://localhost:3210/en/help?lng=es"));
+  expect(chosen.headers.get("location")).toBe("http://localhost:3210/en/help");
+
+  // A language named in a help address is never saved as the reader's own.
+  expect(chosen.headers.get("set-cookie")).toBeNull();
+  for (const url of ["/fr/help?lng=es", "/help?lng=es", "/fr/help/rules?lng=fr", "/help.md?lng=fr"]) {
+    const response = proxy(new NextRequest(`http://localhost:3210${url}`));
+    expect(response.headers.get("location"), url).toMatch(/^http:\/\/localhost:3210\/en\/help/);
+    expect(response.headers.get("set-cookie"), url).toBeNull();
+  }
+});
+
 it("keeps sensitive and dynamic responses private while caching fixed public pages", () => {
   for (const url of [
     "/en/reset-password/token-value",

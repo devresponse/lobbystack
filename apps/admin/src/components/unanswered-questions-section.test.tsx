@@ -83,6 +83,15 @@ describe("the unanswered questions list", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/knowledge/questions/parking?businessId=business", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ action: "answer", answer: "Two hours free at the front desk." }) })));
   });
 
+  it("opens an answer box twice a box's usual height, which still grows with the answer", async () => {
+    await setup();
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "Answer" })[0]!);
+    const box = screen.getByRole("textbox", { name: "Answer to: Do you validate parking?" });
+    expect(box.classList.contains("min-h-32")).toBe(true);
+    expect(box.classList.contains("min-h-16")).toBe(false);
+    expect(box.classList.contains("field-sizing-content")).toBe(true);
+  });
+
   it("dismisses a question", async () => {
     const { fetchMock } = await setup();
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Dismiss" })[1]!);

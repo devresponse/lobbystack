@@ -161,7 +161,8 @@ export function UnansweredQuestionsSection({ businessId, canManage }: { business
               </ItemActions> : null}
               {canManage && editing ? <ItemFooter className="flex-col items-stretch gap-2">
                 <form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) answer.mutate({ questionId: question.id, text: draft, audience: offerHeard ? audience : "everyone" }); }}>
-                  <Textarea aria-describedby={answerTooLong ? `answer-error-${question.id}` : undefined} aria-invalid={answerTooLong || undefined} aria-label={t("unansweredQuestions.answerLabel", { question: question.question })} maxLength={MAX_ANSWER_LENGTH} onChange={(event) => { setDraft(event.target.value); if (answerTooLong) answer.reset(); }} placeholder={t("unansweredQuestions.answerPlaceholder")} ref={focusOnOpen} rows={3} value={draft} />
+                  {/* Twice a box's usual 4rem, so a few sentences show as they're written; it still grows with a longer answer. */}
+                  <Textarea aria-describedby={answerTooLong ? `answer-error-${question.id}` : undefined} aria-invalid={answerTooLong || undefined} aria-label={t("unansweredQuestions.answerLabel", { question: question.question })} className="min-h-32" maxLength={MAX_ANSWER_LENGTH} onChange={(event) => { setDraft(event.target.value); if (answerTooLong) answer.reset(); }} placeholder={t("unansweredQuestions.answerPlaceholder")} ref={focusOnOpen} rows={3} value={draft} />
                   {answerTooLong ? <FieldError id={`answer-error-${question.id}`}>{t("unansweredQuestions.answerTooLong", { max: MAX_ANSWER_LENGTH.toLocaleString(locale) })}</FieldError> : null}
                   {offerHeard ? <FieldSet>
                     <FieldLegend variant="label">{t("unansweredQuestions.audience.label")}</FieldLegend>

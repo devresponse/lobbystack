@@ -41,8 +41,9 @@
 //   TWILIO_MAIN_ACCOUNT_SID, TWILIO_MAIN_AUTH_TOKEN   the main Twilio account, which owns the subaccounts
 //   RESEND_ADMIN_KEY        a Resend key with full access, only to make the domain and the sending key
 //   CLOUDFLARE_API_TOKEN    Zone DNS edit on the zone, and Turnstile Sites write on the account
-// In cloud mode with Polar, connect also runs pnpm billing, with a short-lived Polar setup token
-// (POLAR_SETUP_TOKEN) that it asks for and keeps only in memory.
+// In cloud mode with Polar, connect also runs pnpm billing, with the deployment's own Polar token when Polar lets
+// that token set plans up (made with the setup scopes too). Else it asks for a short-lived Polar setup token
+// (POLAR_SETUP_TOKEN), which it keeps only in memory.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -227,10 +228,11 @@ SMTP_PASSWORD=
 TURNSTILE_SITE_KEY=
 TURNSTILE_SECRET_KEY=
 # Polar, only with DEPLOYMENT_MODE=cloud: the admin's and the worker's tokens (guide 3.7, Polar, step 3).
+# One token may be both. connect sets the plans up with the worker's token when it also has organizations:write,
+# meters:write, products:write, discounts:write and webhooks:write; else it asks for a short-lived setup token
+# (POLAR_SETUP_TOKEN), which it keeps in memory only: paste it when asked rather than putting it here.
 POLAR_ADMIN_TOKEN=
 POLAR_WORKER_TOKEN=
-# connect then asks for a third Polar token, the short-lived setup token (POLAR_SETUP_TOKEN), and keeps it
-# in memory only: paste it when asked rather than putting it here.
 # Stripe, only with BILLING_PROVIDER=stripe: the admin's and the worker's restricted keys, both of
 # the deployment's account (rk_test_... in a sandbox; guide 3.7, "Selling plans (Stripe)", step 3).
 STRIPE_ADMIN_KEY=
@@ -1081,10 +1083,13 @@ async function up(run) {
         `In Polar's ${s.POLAR} organization, Settings > Developers > New Token, make two tokens (guide 3.7, "Selling plans (Polar)", step 3):`,
         `"${baseName(s)} admin" with customer_sessions:write only, and "${baseName(s)} worker" with checkouts:write,`,
         "events:write, organizations:read, meters:read, products:read, discounts:read, subscriptions:write, customers:write.",
+        `With ${SETUP_SCOPES} as well, the worker's token`,
+        "also sets the plans up in connect, which then asks for no other token (the worker can then change the plans and read",
+        "the webhook's secret too). One token with all these scopes may be both.",
       ]);
+      // One token may be both: it then has both sets of scopes.
       const admin = await secret("POLAR_ADMIN_TOKEN", "The admin's Polar token");
       const worker = await secret("POLAR_WORKER_TOKEN", "The worker's Polar token");
-      if (admin === worker) throw new Error("POLAR_ADMIN_TOKEN and POLAR_WORKER_TOKEN are the same token. Make two, each with only its own scopes (guide 3.7, \"Selling plans (Polar)\", step 3)");
       // The worker's token reads its organization (organizations:read), as Stripe's keys name their account. The
       // admin's can only open customer portals, so it isn't checked.
       const organization = await polarOrganizationOf(run, worker, "The worker's Polar token");
@@ -2361,8 +2366,8 @@ async function setAdminVariables(run, variables) {
 // ---------------------------------------------------------------- Polar billing, from connect
 
 // What the billing steps share within one run, and never save: the admin's deployment to wait for, the admin's address
-// that answers, and the operator key. The setup token is kept with the other tokens, in memory only.
-const billingRun = { redeploy: null, base: null, key: null };
+// that answers, the operator key, the Polar token pnpm billing uses (billingToken) and the tokens Polar refused it.
+const billingRun = { redeploy: null, base: null, key: null, token: null, refused: new Set() };
 const SETUP_SCOPES = "organizations:write, meters:write, products:write, discounts:write and webhooks:write";
 const pollPause = () => new Promise((resolve) => setTimeout(resolve, Number(process.env.BOOTSTRAP_POLL_MS ?? 3000)));
 const withoutTrailingSlash = (url) => String(url ?? "").replace(/\/+$/, "");
@@ -2450,29 +2455,90 @@ async function operatorKeyWorks(run, base, key) {
 }
 
 /**
- * The Polar setup token, from the environment or the secrets file, else asked for, and kept in memory only. It must be
- * a third token, of the deployment's organization.
+ * Whether Polar shows a token the organization's webhooks, as pnpm billing needs (webhooks:read or webhooks:write). The
+ * worker's token as guide 3.7 makes it can't: then the token is refused (401 or 403), and this says no.
  */
-async function setupToken(run) {
+async function listsWebhooks(run, value) {
+  try {
+    await polarList(run, value, "/v1/webhooks/endpoints");
+    return true;
+  } catch (error) {
+    if (error.status === 401 || error.status === 403) return false;
+    throw error;
+  }
+}
+
+/** Which of the deployment's own Polar tokens a token is, as words for a message, or null for another token. */
+function ownPolarToken(run, value) {
+  if (value === v(run, "POLAR_WORKER_TOKEN")) return "the worker's";
+  if (value === v(run, "POLAR_ADMIN_TOKEN")) return "the admin's";
+  return null;
+}
+
+/**
+ * Whether one of the deployment's own Polar tokens can do what pnpm billing does: it belongs to the deployment's
+ * organization, and Polar shows it the webhooks. A token Polar refuses either is one it can't.
+ */
+async function setsPlansUp(run, value, deployment) {
+  const organization = await polarOrganizationOf(run, value, "The deployment's Polar token").catch((error) => {
+    if (error.network) throw error;
+    return null;
+  });
+  return Boolean(organization && deployment && String(organization.id).toLowerCase() === deployment.toLowerCase() && (await listsWebhooks(run, value)));
+}
+
+/**
+ * The Polar token pnpm billing uses, kept in memory only: { value, own }, where own names the deployment's own token it
+ * is, or is null for a setup token. A setup token given in the environment or the secrets file comes first. Else the
+ * deployment's own token, the worker's and then the admin's, when it belongs to the deployment's organization and Polar
+ * shows it the webhooks, so a token made with the setup scopes too needs no other. Else a setup token is asked for:
+ * any token of the deployment's organization that Polar shows the webhooks will do.
+ */
+async function billingToken(run) {
+  if (billingRun.token) return billingRun.token;
   const s = run.settings;
-  if (tokens.POLAR_SETUP_TOKEN) return tokens.POLAR_SETUP_TOKEN;
-  if (!process.env.POLAR_SETUP_TOKEN?.trim() && !fromFile("POLAR_SETUP_TOKEN", { quiet: true })) {
-    console.log(`  pnpm billing needs a Polar setup token. In Polar's ${s.POLAR} organization, Settings > Developers > New Token:`);
-    console.log(`  the shortest end date offered, and ${SETUP_SCOPES}. It's used for this run only, never saved.`);
+  const deployment = polarOrganization(run);
+  const given = process.env.POLAR_SETUP_TOKEN?.trim() || fromFile("POLAR_SETUP_TOKEN", { quiet: true });
+  if (!given) {
+    const own = [...new Set([v(run, "POLAR_WORKER_TOKEN"), v(run, "POLAR_ADMIN_TOKEN")])].filter((value) => value && !billingRun.refused.has(value));
+    for (const value of own) {
+      if (!(await setsPlansUp(run, value, deployment))) continue;
+      console.log(`  pnpm billing uses ${ownPolarToken(run, value)} Polar token, which Polar lets set plans up, so no setup token is needed`);
+      return (billingRun.token = { value, own: ownPolarToken(run, value) });
+    }
+    if (own.length && !billingRun.refused.size) {
+      const them = own.length > 1 ? "them" : "it";
+      console.log(`  The deployment's own Polar ${own.length > 1 ? "tokens" : "token"} can't set plans up (Polar shows ${them} no webhooks), as guide 3.7 makes ${them}.`);
+    }
+    console.log(`  pnpm billing needs a token with ${SETUP_SCOPES}. Make one in Polar's ${s.POLAR} organization,`);
+    console.log("  Settings > Developers > New Token, with the shortest end date offered: it's used for this run only, never saved.");
   }
   const value = await token("POLAR_SETUP_TOKEN", "The Polar setup token");
   try {
-    if ([v(run, "POLAR_ADMIN_TOKEN"), v(run, "POLAR_WORKER_TOKEN")].includes(value)) throw new Error(`that's the admin's or the worker's Polar token. The setup token is a third one, with ${SETUP_SCOPES}`);
+    if (billingRun.refused.has(value)) throw new Error(`Polar refused that token for pnpm billing (above). Give a token with ${SETUP_SCOPES}`);
     const organization = await polarOrganizationOf(run, value, "The setup token");
-    const deployment = polarOrganization(run);
     if (deployment && String(organization.id).toLowerCase() !== deployment.toLowerCase()) {
       throw new Error(`the setup token belongs to Polar's ${s.POLAR} organization ${organization.name} (${organization.id}), and this deployment sells through ${deployment}. Make the setup token in that organization`);
     }
-    return value;
+    if (!(await listsWebhooks(run, value))) throw new Error(`Polar shows the setup token no webhooks, so it can't set plans up. Give a token with ${SETUP_SCOPES}`);
+    return (billingRun.token = { value, own: ownPolarToken(run, value) });
   } catch (error) {
     delete tokens.POLAR_SETUP_TOKEN;
     throw error;
   }
+}
+
+/**
+ * Whether Polar refused the token pnpm billing just used (401 or 403, as pnpm billing prints it). Then that token isn't
+ * used again in this run, and the next billingToken asks for a setup token, so the caller runs the command once more.
+ */
+function polarRefusedToken(result) {
+  if (!billingRun.token || result.status === 0 || !/Polar answered 40[13] to /.test(result.output ?? "")) return false;
+  billingRun.refused.add(billingRun.token.value);
+  delete tokens.POLAR_SETUP_TOKEN;
+  console.log(`  Polar refused ${billingRun.token.own ? `${billingRun.token.own} Polar token` : "the setup token"} for that (above).`);
+  billingRun.token = null;
+  return true;
 }
 
 /** pnpm billing's connection and token: its own, never a profile or token of the person's shell. */
@@ -2519,7 +2585,8 @@ function readVariableSections(text) {
 /**
  * Sets Polar up for the deployment as guide 3.7, "Selling plans (Polar)", steps 5 to 8 do by hand, through the same
  * pnpm billing: plan, then apply once the person types yes, then the webhook's secret on the admin, then verify. It
- * uses the operator key connect.platformKey made and one setup token, and saves neither.
+ * uses the operator key connect.platformKey made and the deployment's own Polar token, or a setup token when Polar
+ * doesn't let that one set plans up (billingToken), and saves neither.
  */
 async function polarBillingSteps(run, hosts) {
   const s = run.settings;
@@ -2531,38 +2598,46 @@ async function polarBillingSteps(run, hosts) {
     const base = await answeringAdmin(hosts);
     const key = await operatorKey(run);
     if (!(await operatorKeyWorks(run, base, key))) return {};
-    const token = await setupToken(run);
-    return inPrivateFolder(async (folder) => {
-      const env = billingEnv(base, key, token, folder);
-      const plan = await pnpmBilling(["plan", ...flags], env);
-      if (plan.status === 1) throw new Stop("pnpm billing plan refused, so nothing changed (above). Fix what it lists, then run connect again");
-      if (plan.status !== 0) throw new Error("pnpm billing plan stopped (above). Fix what it says, then run connect again");
-      if (assumeYes) console.log("  --yes: applying the plan without asking");
-      await confirm(`  Apply that plan to ${base} and Polar's ${s.POLAR} organization?`);
-      // The webhook's secret goes through a file in the private folder, never through what pnpm billing prints, all of
-      // which goes to the log.
-      const file = path.join(folder, "railway.env");
-      const apply = await pnpmBilling(["apply", ...flags, "--yes", "--railway-file", file], env);
-      const values = fs.existsSync(file) ? readVariableSections(fs.readFileSync(file, "utf8")) : {};
-      const secret = values.admin?.POLAR_WEBHOOK_SECRET;
-      if (secret) {
-        // Kept at once, so a step that fails after this one still has it. Polar lists it again to the setup token.
-        run.state.values.POLAR_WEBHOOK_SECRET = hide(secret);
-        save(run);
-        console.log("  kept the new webhook's secret, for the admin (connect.billing.secret)");
-      }
-      const organization = values.worker?.POLAR_ORGANIZATION_ID;
-      if (organization && organization.toLowerCase() !== String(polarOrganization(run)).toLowerCase()) throw new Error(`pnpm billing apply set up Polar organization ${organization}, but the deployment uses ${polarOrganization(run)}`);
-      // 1 is drift as well as a refusal: on a first run, apply's own check always finds the admin without the
-      // webhook's secret. The next steps set it, and verify decides.
-      if (apply.status !== 0 && apply.status !== 1) throw new Error("pnpm billing apply stopped (above). Run connect again: what it made in Polar is found again by its tags");
-      return {};
-    });
+    // When Polar refuses the deployment's own token a change, the plan and the apply run again with a setup token.
+    for (;;) {
+      const token = await billingToken(run);
+      const done = await inPrivateFolder(async (folder) => {
+        const env = billingEnv(base, key, token.value, folder);
+        const plan = await pnpmBilling(["plan", ...flags], env);
+        if (polarRefusedToken(plan)) return null;
+        if (plan.status === 1) throw new Stop("pnpm billing plan refused, so nothing changed (above). Fix what it lists, then run connect again");
+        if (plan.status !== 0) throw new Error("pnpm billing plan stopped (above). Fix what it says, then run connect again");
+        if (assumeYes) console.log("  --yes: applying the plan without asking");
+        await confirm(`  Apply that plan to ${base} and Polar's ${s.POLAR} organization?`);
+        // The webhook's secret goes through a file in the private folder, never through what pnpm billing prints, all of
+        // which goes to the log.
+        const file = path.join(folder, "railway.env");
+        const apply = await pnpmBilling(["apply", ...flags, "--yes", "--railway-file", file], env);
+        const values = fs.existsSync(file) ? readVariableSections(fs.readFileSync(file, "utf8")) : {};
+        const secret = values.admin?.POLAR_WEBHOOK_SECRET;
+        if (secret) {
+          // Kept at once, so a step that fails after this one still has it. Polar lists it again to a token that can
+          // read webhooks.
+          run.state.values.POLAR_WEBHOOK_SECRET = hide(secret);
+          save(run);
+          console.log("  kept the new webhook's secret, for the admin (connect.billing.secret)");
+        }
+        const organization = values.worker?.POLAR_ORGANIZATION_ID;
+        if (organization && organization.toLowerCase() !== String(polarOrganization(run)).toLowerCase()) throw new Error(`pnpm billing apply set up Polar organization ${organization}, but the deployment uses ${polarOrganization(run)}`);
+        // What the refused apply made in Polar, the next one finds again by its tags.
+        if (polarRefusedToken(apply)) return null;
+        // 1 is drift as well as a refusal: on a first run, apply's own check always finds the admin without the
+        // webhook's secret. The next steps set it, and verify decides.
+        if (apply.status !== 0 && apply.status !== 1) throw new Error("pnpm billing apply stopped (above). Run connect again: what it made in Polar is found again by its tags");
+        return {};
+      });
+      if (done) return done;
+    }
   });
   if (!dryRun && !run.state.done["connect.billing.apply"]) return;
   await step(run, "connect.billing.secret", "POLAR_WEBHOOK_SECRET on the admin: the signing secret of Polar's webhook, which redeploys it", async () => {
-    const token = await setupToken(run);
-    const endpoints = (await polarList(run, token, "/v1/webhooks/endpoints")).filter((endpoint) => withoutTrailingSlash(endpoint.url) === withoutTrailingSlash(webhookUrl));
+    const token = await billingToken(run);
+    const endpoints = (await polarList(run, token.value, "/v1/webhooks/endpoints")).filter((endpoint) => withoutTrailingSlash(endpoint.url) === withoutTrailingSlash(webhookUrl));
     if (!endpoints.length) {
       // The apply didn't make it, such as when it was refused after the plan: it runs again.
       delete run.state.done["connect.billing.apply"];
@@ -2571,7 +2646,7 @@ async function polarBillingSteps(run, hosts) {
     }
     if (endpoints.length > 1) throw new Error(`Polar has ${endpoints.length} webhooks to ${webhookUrl}. Delete all but one in Polar (Settings > Webhooks), then run connect again`);
     const secret = endpoints[0].secret;
-    if (typeof secret !== "string" || !secret) throw Object.assign(new Error("Polar didn't show the webhook's secret: the setup token needs webhooks:write"), { service: "Polar" });
+    if (typeof secret !== "string" || !secret) throw Object.assign(new Error("Polar didn't show the webhook's secret to that token: it needs webhooks:write"), { service: "Polar" });
     hide(secret);
     if (v(run, "POLAR_WEBHOOK_SECRET") && v(run, "POLAR_WEBHOOK_SECRET") !== secret) console.log("  Polar's webhook has another secret than the state file kept: Polar's is the one that counts, so it's used");
     const base = await answeringAdmin(hosts);
@@ -2603,8 +2678,11 @@ async function polarBillingSteps(run, hosts) {
   await step(run, "connect.billing.verify", "pnpm billing verify: billing.json, the admin's tables and Polar agree", async () => {
     const base = await answeringAdmin(hosts);
     const key = await operatorKey(run);
-    const token = await setupToken(run);
-    const result = await inPrivateFolder((folder) => pnpmBilling(["verify", ...flags], billingEnv(base, key, token, folder)));
+    let result;
+    do {
+      const token = await billingToken(run);
+      result = await inPrivateFolder((folder) => pnpmBilling(["verify", ...flags], billingEnv(base, key, token.value, folder)));
+    } while (polarRefusedToken(result));
     if (result.status === 1) {
       // The apply finds what exists and changes only what differs, so running it again is how a difference is fixed.
       for (const id of ["connect.billing.apply", "connect.billing.secret"]) delete run.state.done[id];
@@ -2612,7 +2690,8 @@ async function polarBillingSteps(run, hosts) {
       throw new Stop("pnpm billing verify found differences (the DRIFT lines above). Fix what they say, then run connect again: it runs the apply again, and asks for yes");
     }
     if (result.status !== 0) throw new Error("pnpm billing verify couldn't read all it checks (above). Run connect again once that's fixed");
-    console.log(`  Polar sells the plans. Delete the setup token now, in Polar's ${s.POLAR} organization (Settings > Developers).`);
+    // A token of the deployment's own stays: it's the one the admin or the worker runs with.
+    console.log(billingRun.token?.own ? `  Polar sells the plans, set up with ${billingRun.token.own} Polar token.` : `  Polar sells the plans. Delete the setup token now, in Polar's ${s.POLAR} organization (Settings > Developers).`);
   });
 }
 
@@ -2733,12 +2812,15 @@ async function connect(run) {
   const noStripeBlock = stripe && brandHasStripeBlock(s.BRAND) === false ? `
      First, brands/${s.BRAND}/billing.json needs a stripe block, which it hasn't yet: add one in a pull request
      (brands/README.md), and deploy it.` : "";
-  // With Polar, connect did the billing above, which needs the operator's account, so the sign-up is done too.
+  // With Polar, connect did the billing above, which needs the operator's account, so the sign-up is done too. A setup
+  // token goes once billing is set up: the one this run used, or one an earlier run may have asked for. A token of the
+  // deployment's own stays, as the admin or the worker runs with it.
+  const setupTokenGoes = billingRun.token?.own ? []
+    : [billingRun.token ? `In Polar's ${s.POLAR} organization, Settings > Developers, delete the setup token: billing is set up, and nothing else uses it.`
+      : `If connect asked for a setup token, delete it in Polar's ${s.POLAR} organization (Settings > Developers): billing is set up, and nothing else uses it.`];
   const steps = [
-    cloud && !stripe
-      ? `In Polar's ${s.POLAR} organization, Settings > Developers, delete the setup token: billing is set up, and nothing else uses it.`
-      : `Once the admin's new deployment is Active, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL},
-     with the 6-digit code from the email.`,
+    ...(cloud && !stripe ? setupTokenGoes : [`Once the admin's new deployment is Active, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL},
+     with the 6-digit code from the email.`]),
     `Sign the command line in with the operator key${keyFile ? ` (in ${keyFile})` : ""}:
      ${keyFile ? `PowerShell: (Get-Content "${keyFile}" -Raw | ConvertFrom-Json).key | ${login}` : login}
      ${keyFile ? `Or run ${login}, paste` : "Paste"} the key, press Enter, then Ctrl+D (in PowerShell or cmd: Ctrl+Z, then Enter).${keyFile ? `
@@ -3059,12 +3141,13 @@ async function doctor(run) {
     const worker = polarToken("POLAR_WORKER_TOKEN");
     // The admin's token can only open billing portals, so no read-only call checks it.
     (admin ? ok : note)(`Polar: POLAR_ADMIN_TOKEN ${admin ? "is set" : "isn't set, so up will ask for it"}`);
-    if (admin && admin === worker) fix("Polar: POLAR_ADMIN_TOKEN and POLAR_WORKER_TOKEN are the same token. Make two, each with only its own scopes (guide 3.7, \"Selling plans (Polar)\", step 3)");
-    // The worker's token reads its organization, which becomes POLAR_ORGANIZATION_ID; connect's setup token must be of the same one.
+    if (admin && admin === worker) note("Polar: POLAR_ADMIN_TOKEN and POLAR_WORKER_TOKEN are one token, so the admin holds the worker's scopes too");
+    // The worker's token reads its organization, which becomes POLAR_ORGANIZATION_ID; a setup token for connect must be of the same one.
     let expected = s.POLAR_ORGANIZATION_ID || v(run, "POLAR_ORGANIZATION_ID");
-    for (const [name, value, asker] of [["POLAR_WORKER_TOKEN", worker, "up"], ["POLAR_SETUP_TOKEN", process.env.POLAR_SETUP_TOKEN?.trim() || fromFile("POLAR_SETUP_TOKEN", { quiet: true }), "connect"]]) {
+    const setup = process.env.POLAR_SETUP_TOKEN?.trim() || fromFile("POLAR_SETUP_TOKEN", { quiet: true });
+    for (const [name, value] of [["POLAR_WORKER_TOKEN", worker], ["POLAR_SETUP_TOKEN", setup]]) {
       if (!value) {
-        note(`Polar: ${name} isn't set, so ${asker} will ask for it`);
+        if (name === "POLAR_WORKER_TOKEN") note("Polar: POLAR_WORKER_TOKEN isn't set, so up will ask for it");
         continue;
       }
       hide(value);
@@ -3076,6 +3159,24 @@ async function doctor(run) {
       } catch (error) {
         fix(`Polar: ${error.message}`);
         for (const tip of hints(error)) console.log(`         ${tip}`);
+      }
+    }
+    // Without a setup token, connect sets the plans up with the deployment's own token when Polar lets it, the worker's
+    // and then the admin's, as billingToken tries them.
+    const own = [...new Set([worker, admin])].filter(Boolean);
+    if (!setup && expected && own.length) {
+      try {
+        let user = null;
+        for (const value of own) {
+          if (await setsPlansUp(run, value, expected)) {
+            user = value === worker ? "POLAR_WORKER_TOKEN" : "POLAR_ADMIN_TOKEN";
+            break;
+          }
+        }
+        if (user) ok(`Polar: connect sets the plans up with ${user}, which Polar shows the webhooks, so it needs no setup token`);
+        else note(`Polar: the deployment's own ${own.length > 1 ? "tokens" : "token"} can't set plans up (Polar shows ${own.length > 1 ? "them" : "it"} no webhooks), so connect will ask for a setup token with ${SETUP_SCOPES}`);
+      } catch (error) {
+        note(`Polar: couldn't tell whether connect will need a setup token (${error.message})`);
       }
     }
   }

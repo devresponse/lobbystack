@@ -108,7 +108,13 @@ test("opens the screen's help beside it from the question mark, and closes it", 
   await page.goto("/en/login");
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Help for this screen", exact: true }).click();
+  // At the top right of the screen.
+  const help = page.getByRole("button", { name: "Help for this screen", exact: true });
+  await expect(help).toBeVisible();
+  const helpBox = await help.boundingBox();
+  expect(helpBox?.x ?? 0).toBeGreaterThan((page.viewportSize()?.width ?? Infinity) / 2);
+  expect(helpBox?.y ?? Infinity).toBeLessThan(64);
+  await help.click();
   const panel = page.getByRole("dialog");
   await expect(panel.getByRole("heading", { level: 2, name: "Log in" })).toBeVisible();
   await expect(panel.getByRole("link", { name: /Open in a new tab/ })).toHaveAttribute("href", "/en/help/log-in");
@@ -199,7 +205,7 @@ test("keeps the help panel readable on a phone", async ({ page }) => {
   await expect(panel).toBeHidden();
 });
 
-test("opens a dashboard screen's help from the question mark at its top left, on a large screen and a phone", async ({ page }, testInfo) => {
+test("opens a dashboard screen's help from the question mark at its top right, after Feedback, on a large screen and a phone", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   const database = migrator();
   const email = `help-pages-${randomUUID()}@example.invalid`;
@@ -210,10 +216,14 @@ test("opens a dashboard screen's help from the question mark at its top left, on
     await page.goto("/agent/rules");
     const help = page.getByRole("button", { name: "Help for this screen", exact: true });
     await expect(help).toBeVisible();
-    // Left of the screen's content and in its top bar, away from the business's own tools on the right.
+    // In the top bar's row of buttons at the right, the last of them, after Feedback.
+    const feedback = page.getByRole("button", { name: "Feedback", exact: true });
+    await expect(feedback).toBeVisible();
     const desktopBox = await help.boundingBox();
-    expect(desktopBox?.x ?? Infinity).toBeLessThan(1280 / 2);
-    expect(desktopBox?.y ?? Infinity).toBeLessThan(64);
+    const feedbackBox = await feedback.boundingBox();
+    expect(desktopBox?.x ?? 0).toBeGreaterThan(1280 / 2);
+    expect(desktopBox?.x ?? 0).toBeGreaterThan((feedbackBox?.x ?? Infinity) + (feedbackBox?.width ?? 0) - 1);
+    expect(Math.abs((desktopBox?.y ?? 0) + (desktopBox?.height ?? 0) / 2 - ((feedbackBox?.y ?? Infinity) + (feedbackBox?.height ?? 0) / 2))).toBeLessThan(2);
 
     await help.click();
     const panel = page.getByRole("dialog");
@@ -232,12 +242,12 @@ test("opens a dashboard screen's help from the question mark at its top left, on
     await panel.getByRole("button", { name: "Close", exact: true }).click();
     await expect(panel).toBeHidden();
 
-    // On a phone, beside the menu button.
+    // On a phone, at the right of the menu button's row.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/agent/knowledge");
     await expect(help).toBeVisible();
     const phoneBox = await help.boundingBox();
-    expect(phoneBox?.x ?? Infinity).toBeLessThan(390 / 3);
+    expect(phoneBox?.x ?? 0).toBeGreaterThan((390 * 2) / 3);
     expect(phoneBox?.y ?? Infinity).toBeLessThan(64);
     await help.click();
     await expect(panel.getByRole("heading", { level: 2, name: "Knowledge" })).toBeVisible();

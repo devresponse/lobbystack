@@ -78,7 +78,7 @@ export function DashboardFeedbackWidget({ businessId, className }: FeedbackWidge
   }
 
   return (
-    <div className={cn("-mr-1 hidden items-center gap-1 md:flex", className)}>
+    <div className={cn("hidden items-center gap-1 md:flex", className)}>
       <Tooltip>
         <Popover onOpenChange={setOpen} open={open}>
           <TooltipTrigger render={<span className="inline-flex" />}>

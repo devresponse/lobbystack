@@ -564,7 +564,7 @@ Help pages exist only in the languages that have help, English for now. A help a
 | `https://demo.alloplace.com/{locale}/claim-demo` | Turn a prospect demo into your own business | Public page; claiming needs sign-in | None yet | `apps/admin/app/(public)/[locale]/claim-demo/page.tsx` |
 | `https://demo.alloplace.com/{locale}/oauth/consent` | Connect an AI assistant (MCP client): pick the business and the permissions it gets | Signed in; approving needs Admin+ of the chosen business | `ai/mcp.mdx`, `ai/connect-claude.mdx` | `apps/admin/app/(sensitive)/[locale]/oauth/consent/page.tsx` |
 | `https://demo.alloplace.com/{locale}/help` | The help center: every screen's help page, by section. Help is in English only so far: `/fr/help`, `/es/help` and `/sr/help` answer 307 to `/en/help`. | Public | None yet | `apps/admin/app/(help)/[locale]/help/page.tsx` |
-| `https://demo.alloplace.com/{locale}/help/{screen}` | One screen's help page, such as `/en/help/rules`, which the question mark at the top left of each screen also opens in a panel. An unknown `{screen}` answers 404. | Public | None yet | `apps/admin/app/(help)/[locale]/help/[screen]/page.tsx` |
+| `https://demo.alloplace.com/{locale}/help/{screen}` | One screen's help page, such as `/en/help/rules`, which the question mark at the top right of each screen also opens in a panel. An unknown `{screen}` answers 404. | Public | None yet | `apps/admin/app/(help)/[locale]/help/[screen]/page.tsx` |
 | `https://demo.alloplace.com/{locale}/help.md` | `GET`: every help page in one Markdown file (`text/markdown`), for AI assistants and knowledge bases | Public | None yet | `apps/admin/app/(help)/[locale]/help.md/route.ts` |
 
 `/{locale}/oauth/consent` is the one page here with no language-free address: `/oauth/consent` is a redirect route instead (section 10).
@@ -711,7 +711,7 @@ Related files: `apps/admin/src/components/help/help-page-shell.tsx`, `apps/admin
 
 **`apps/admin/app/(help)/[locale]/help/[screen]/page.tsx`**
 
-One screen's help page: what the screen is for, what it shows, its fields, how to do the common jobs, notes, troubleshooting and related help. The question mark at the top left of each screen opens the same article in a panel (`apps/admin/src/components/screen-help-button.tsx`).
+One screen's help page: what the screen is for, what it shows, its fields, how to do the common jobs, notes, troubleshooting and related help. The question mark at the top right of each screen opens the same article in a panel (`apps/admin/src/components/screen-help-button.tsx`).
 
 - `GET /{locale}/help/{screen}`: Prerendered for every article of each help language; `dynamicParams = false`, so an unknown `{screen}` answers 404. Title, description and keywords come from the article. `HelpArticleView` renders it inside `HelpPageShell`. It calls no API.
 

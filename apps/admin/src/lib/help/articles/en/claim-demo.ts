@@ -15,7 +15,7 @@ const article: HelpArticle = {
     "The person who prepared the demo leaves the business's team when you claim it and can no longer open the business. You can invite your own team from the **Team** screen.",
   ],
   areas: [
-    { name: "Question mark", description: "At the top left, opens this help beside the page." },
+    { name: "Question mark", description: "At the top right, opens this help beside the page." },
     { name: "Setting up your workspace", description: "Shows with a spinning circle and **Claiming your receptionist and getting your workspace ready...** while the page checks the demo and claims it. If the demo is still being prepared, the page waits here and claims it once it's ready. When the claim is done, setup opens." },
     { name: "This demo link is unavailable", description: "Says **The demo link is missing or no longer valid.** It shows when the page has no demo to claim, for example because the claim page opened in a different browser tab from the demo, when the link isn't valid or was replaced by a newer one, or when the demo has expired, has been turned off or was claimed by another account." },
     { name: "Your account owns the most businesses it can", description: "Says **Delete one of your businesses, or sign in with another account, to claim this demo.** Claiming adds a business you own, and your account already owns as many as it may. **Try again** is below the message." },

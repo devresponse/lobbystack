@@ -19,14 +19,14 @@ type Preview = { state: "active" | "claimed" | "preparing" | "invalid" | "expire
 type ClaimStatus = "claiming" | "unavailable" | "business-limit" | "error";
 
 /**
- * The claim screen's frame, with the screen's help at the top left. Every
+ * The claim screen's frame, with the screen's help at the top right. Every
  * state renders inside the same frame, so an open help panel stays open when
  * the claim's state changes.
  */
 function ClaimFrame({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-6 py-16 text-foreground">
-      <ScreenHelpButton className="absolute left-6 top-7" size="icon" />
+      <ScreenHelpButton className="absolute right-6 top-7" size="icon" />
       {children}
     </div>
   );

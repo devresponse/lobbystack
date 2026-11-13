@@ -21,9 +21,8 @@ export function DashboardUtilityBar() {
     {business ? <DashboardAbandonIntent businessId={business.businessId} /> : null}
     <div className="pointer-events-none absolute inset-x-0 top-4 z-40 hidden md:block">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-end gap-0.5 px-6">
-        {/* The screen's help sits at the top left, the business's tools at the top right.
+        {/* The business's tools, then the screen's help, last at the top right.
             The help needs no business, so it shows while the business loads, or when it can't. */}
-        <ScreenHelpButton className="pointer-events-auto -ml-1 mr-auto" />
         {business ? (
           <>
             <DashboardTestCallWidget className="pointer-events-auto" businessId={business.businessId} businessSlug={business.slug} role={business.role} />
@@ -49,6 +48,7 @@ export function DashboardUtilityBar() {
             <DashboardFeedbackWidget className="pointer-events-auto" businessId={business.businessId} />
           </>
         ) : null}
+        <ScreenHelpButton className="pointer-events-auto -mr-1" />
       </div>
     </div>
     </>

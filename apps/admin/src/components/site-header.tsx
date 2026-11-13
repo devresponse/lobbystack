@@ -59,7 +59,7 @@ export function SiteHeader({
         )}
       >
         <SidebarTrigger className="md:hidden" size="icon" type="button" variant="outline" />
-        <ScreenHelpButton size="icon" />
+        <ScreenHelpButton className="-mr-2 ml-auto" size="icon" />
       </div>
     </header>
   );

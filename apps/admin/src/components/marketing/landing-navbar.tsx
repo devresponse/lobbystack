@@ -16,26 +16,25 @@ const labels = {
 
 type LandingNavbarProps = {
   locale?: MarketingLocale
-  /** Shown left of the logo, such as the screen's help button. */
-  start?: React.ReactNode
+  /** Shown at the header's right end, after the sign-up link, such as the screen's help button. */
+  end?: React.ReactNode
 }
 
 /**
  * Marketing header for the public demo page: logo back to the site, plus
  * sign-in and sign-up links. On a phone the sign-in link gives way, so the
- * logo keeps room beside the help button and the sign-up link; a long name
+ * logo keeps room beside the sign-up link and the help button; a long name
  * ends in an ellipsis rather than running into the links. The logo's side is
  * a container, so the name can give way to the logo where too little of it
  * would show.
  */
-export function LandingNavbar({ locale = "en", start }: LandingNavbarProps) {
+export function LandingNavbar({ locale = "en", end }: LandingNavbarProps) {
   const copy = labels[locale]
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-6">
         <div className="@container flex min-w-0 flex-1 items-center gap-2">
-          {start}
           <a
             href={localizeMarketingHref(locale, "/")}
             className="flex min-w-0 items-center overflow-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -60,6 +59,7 @@ export function LandingNavbar({ locale = "en", start }: LandingNavbarProps) {
           >
             {copy.tryFree}
           </a>
+          {end}
         </div>
       </div>
     </header>

@@ -26,9 +26,10 @@ function prefetch() {
 }
 
 /**
- * The question mark at the top left of a screen. It opens the screen's help
- * page in a panel at the right of the screen, which closes with its close
- * button, the Escape key, a click beside it or a move to another screen.
+ * The question mark at the top right of a screen, the last of the buttons
+ * there. It opens the screen's help page in a panel at the right of the
+ * screen, which closes with its close button, the Escape key, a click beside
+ * it or a move to another screen.
  */
 export function ScreenHelpButton({ className, size = "icon-xs" }: { /** Placement, for the button's wrapper. */ className?: string; size?: "icon" | "icon-sm" | "icon-xs" }) {
   const { t } = useTranslation("common");

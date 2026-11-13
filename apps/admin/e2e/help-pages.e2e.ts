@@ -112,8 +112,11 @@ test("opens the screen's help beside it from the question mark, and closes it", 
   const panel = page.getByRole("dialog");
   await expect(panel.getByRole("heading", { level: 2, name: "Log in" })).toBeVisible();
   await expect(panel.getByRole("link", { name: /Open in a new tab/ })).toHaveAttribute("href", "/en/help/log-in");
-  // About a third of a large screen, at its left edge once it has slid in.
-  await expect.poll(async () => Math.round((await panel.boundingBox())?.x ?? -1)).toBe(0);
+  // About a third of a large screen, at its right edge once it has slid in:
+  // the page's edge, short of the window's only by a scrollbar's gutter.
+  const pageEdge = await page.locator('[data-slot="sheet-overlay"]').evaluate((overlay) => Math.round(overlay.getBoundingClientRect().right));
+  expect(pageEdge).toBeGreaterThan((page.viewportSize()?.width ?? 0) - 20);
+  await expect.poll(async () => { const edge = await panel.boundingBox(); return edge ? Math.round(edge.x + edge.width) : -1; }).toBe(pageEdge);
   const box = await panel.boundingBox();
   expect(box?.width ?? 0).toBeGreaterThanOrEqual(448);
   expect(box?.width ?? 0).toBeLessThanOrEqual(640);
@@ -185,11 +188,14 @@ test("keeps the help panel readable on a phone", async ({ page }) => {
   await page.getByRole("button", { name: "Help for this screen", exact: true }).click();
   const panel = page.getByRole("dialog");
   await expect(panel.getByRole("heading", { level: 2, name: "Sign up" })).toBeVisible();
-  // All but a strip of the screen, which stays in view and closes the panel when tapped.
-  await expect.poll(async () => Math.round((await panel.boundingBox())?.x ?? -1)).toBe(0);
-  expect(Math.round((await panel.boundingBox())?.width ?? 0)).toBe(390 - 56);
+  // All but a strip at the screen's left, which stays in view and closes the
+  // panel when tapped, up to the page's right edge.
+  await expect.poll(async () => Math.round((await panel.boundingBox())?.x ?? -1)).toBe(56);
+  const pageEdge = await page.locator('[data-slot="sheet-overlay"]').evaluate((overlay) => Math.round(overlay.getBoundingClientRect().right));
+  const phoneBox = await panel.boundingBox();
+  expect(Math.round((phoneBox?.x ?? 0) + (phoneBox?.width ?? 0))).toBe(pageEdge);
   await expect(panel.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
-  await page.mouse.click(372, 422);
+  await page.mouse.click(18, 422);
   await expect(panel).toBeHidden();
 });
 

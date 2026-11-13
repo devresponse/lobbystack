@@ -136,6 +136,15 @@
     scrollbar-gutter: stable;
   }
 
+  /*
+   * Nothing paints in the scrollbar's gutter but the page's own background,
+   * so while a sheet is open at the right edge, such as the help panel, the
+   * page takes the sheet's color and no strip of another shows beside it.
+   */
+  html:has([data-slot="sheet-content"][data-side="right"]) {
+    background-color: var(--popover);
+  }
+
   body {
     @apply min-h-svh w-full antialiased bg-background text-foreground;
   }

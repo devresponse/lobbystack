@@ -94,6 +94,7 @@ The admin caches the saved row for 30 seconds, so other admin replicas pick up a
 - The picture in link previews of those pages, from the brand file's `ogImage`. A business's public profile page has its own preview, without it.
 - The logo and name above the sign-in, sign-up, password reset, invitation, email change, verification, OAuth consent, and onboarding pages.
 - The header of the public demo page.
+- The header of the help pages at `/{locale}/help`, which links to the dashboard ([help pages](features/help-pages.md)).
 - The foot of each business's [public profile page](features/public-profile-and-qr.md) at `/profile/<slug>`, after "Answered by", and of the page a visitor gets for a profile that isn't published. Both link to the website.
 - Every dashboard string in all four languages that used to say LobbyStack: 21 strings, which now use the `{{appName}}` i18n variable.
 

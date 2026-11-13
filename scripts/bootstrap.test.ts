@@ -51,7 +51,8 @@ const billingSteps = ["connect.billing.apply", "connect.billing.secret", "connec
 // platform-key:create as the real one prints, and pnpm billing plan, apply and verify as bootstrap.mjs sees them: apply
 // makes the webhook in the stand-in Polar (or finds it) and writes the --railway-file, with the secret only when it made
 // the webhook; apply and verify end 0 when the admin runs with the webhook's secret, else 1, as the real ones' drift
-// check does. FAKE_PNPM_CONTROL can make them end otherwise; FAKE_PNPM_LOG gets one line per run.
+// check does. FAKE_PNPM_CONTROL can make them end otherwise, or make apply refuse a token as Polar refuses one without
+// the setup scopes; FAKE_PNPM_LOG gets one line per run.
 const fakePnpm = `"use strict";
 const fs = require("node:fs");
 const path = require("node:path");
@@ -108,6 +109,10 @@ async function billing(command, entry) {
     if (!args.includes("--yes")) {
       console.log("Add --yes to apply without a question.");
       return 1;
+    }
+    if (control.refuseApply && control.refuseApply === process.env.POLAR_SETUP_TOKEN) {
+      console.error('Polar answered 403 to POST /v1/meters/: {"error":"insufficient_scope"}');
+      return 2;
     }
     const made = await call(process.env.BOOTSTRAP_POLAR_URL + "/__fake/webhooks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url, token: process.env.POLAR_SETUP_TOKEN }) });
     entry.madeWebhook = made.created;
@@ -168,7 +173,7 @@ type World = {
   /** A variable write Railway refuses. */
   refuse: ((service: Service, variables: Vars) => boolean) | null;
   organizations: Map<string, Organization>;
-  /** The tokens that may read webhooks (webhooks:write): setup tokens. */
+  /** The tokens that may read webhooks (webhooks:write): setup tokens, and the worker's when a test gives it the setup scopes. */
   webhookTokens: Set<string>;
   webhooks: Webhook[];
   /** How many more times the admin says the operator key's owner hasn't verified their email. */
@@ -384,7 +389,7 @@ const pnpmRuns = (): PnpmRun[] => {
   return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as PnpmRun) : [];
 };
 const billingRuns = () => pnpmRuns().filter((run) => run.command.startsWith("billing "));
-const control = (value: { planExit?: number; applyExit?: number; verifyExit?: number }) => writeFileSync(join(dir, "pnpm-control.json"), JSON.stringify(value));
+const control = (value: { planExit?: number; applyExit?: number; verifyExit?: number; refuseApply?: string }) => writeFileSync(join(dir, "pnpm-control.json"), JSON.stringify(value));
 const flagOf = (run: PnpmRun | undefined, name: string) => (run?.args?.includes(name) ? run.args[run.args.indexOf(name) + 1] : undefined);
 
 type Result = { code: number | null; out: string };
@@ -483,6 +488,21 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(world.polarVersions).toEqual([POLAR_API_VERSION]);
   });
 
+  it("takes one Polar token for both the admin and the worker in up", async () => {
+    writeSettings();
+    railwayAfterUp();
+    const state = stateAfterUp();
+    delete state.done["polar.tokens"];
+    delete state.done.variables;
+    for (const key of ["POLAR_ADMIN_TOKEN", "POLAR_WORKER_TOKEN", "POLAR_ORGANIZATION_ID"]) delete state.values[key];
+    writeState(state);
+    const result = await bootstrap(["up", settings(), "--yes"], { env: { POLAR_ADMIN_TOKEN: polarTokens.worker, POLAR_WORKER_TOKEN: polarTokens.worker } });
+    expect(result.code, result.out).toBe(0);
+    expect(readState().done["polar.tokens"]).toBeTruthy();
+    expect(world.variables.admin.POLAR_ACCESS_TOKEN).toBe(polarTokens.worker);
+    expect(world.variables.worker.POLAR_ACCESS_TOKEN).toBe(polarTokens.worker);
+  });
+
   it("refuses a worker token of another organization than POLAR_ORGANIZATION_ID", async () => {
     writeSettings({ POLAR_ORGANIZATION_ID: other.id });
     railwayAfterUp();
@@ -510,6 +530,21 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(matching.code, matching.out).toBe(0);
     expect(matching.out).toContain(`ok     Polar: POLAR_SETUP_TOKEN works (the sandbox organization Acme, ${acme.id})`);
     expect(matching.out).toContain("Nothing to fix.");
+  });
+
+  it("says in doctor whether connect sets the plans up with the deployment's own token or asks for a setup token", async () => {
+    writeSettings();
+    const minimal = await bootstrap(["doctor", settings()], { env: { POLAR_ADMIN_TOKEN: polarTokens.admin, POLAR_WORKER_TOKEN: polarTokens.worker, POLAR_SETUP_TOKEN: "" } });
+    expect(minimal.code, minimal.out).toBe(0);
+    expect(minimal.out).toContain("note   Polar: the deployment's own tokens can't set plans up (Polar shows them no webhooks), so connect will ask for a setup token with organizations:write, meters:write, products:write, discounts:write and webhooks:write");
+
+    // One token for both, made with the setup scopes too.
+    world.webhookTokens.add(polarTokens.worker);
+    const one = await bootstrap(["doctor", settings()], { env: { POLAR_ADMIN_TOKEN: polarTokens.worker, POLAR_WORKER_TOKEN: polarTokens.worker, POLAR_SETUP_TOKEN: "" } });
+    expect(one.code, one.out).toBe(0);
+    expect(one.out).toContain("note   Polar: POLAR_ADMIN_TOKEN and POLAR_WORKER_TOKEN are one token, so the admin holds the worker's scopes too");
+    expect(one.out).toContain("ok     Polar: connect sets the plans up with POLAR_WORKER_TOKEN, which Polar shows the webhooks, so it needs no setup token");
+    expect(one.out).not.toContain("FIX");
   });
 
   it("sets Polar billing up in connect: the sign-up, plan, yes, apply, the webhook's secret on the admin, verify", async () => {
@@ -557,9 +592,12 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(world.polarVersions.length).toBeGreaterThan(0);
     expect(world.polarVersions.every((version) => version === POLAR_API_VERSION)).toBe(true);
 
+    expect(result.out).toContain("  1. In Polar's sandbox organization, Settings > Developers, delete the setup token: billing is set up, and nothing else uses it.");
+
     // A second connect finds it all done, and runs nothing again.
     const again = await bootstrap(["connect", settings()]);
     expect(again.code, again.out).toBe(0);
+    expect(again.out).toContain("  1. If connect asked for a setup token, delete it in Polar's sandbox organization (Settings > Developers)");
     expect(again.out).toContain("= pnpm billing verify: billing.json, the admin's tables and Polar agree (done");
     expect(billingRuns()).toHaveLength(3);
   });
@@ -580,12 +618,60 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     const result = await bootstrap(["connect", settings()], { input: `${operator.key}\n${polarTokens.setup}\nyes\n`, env: { POLAR_SETUP_TOKEN: "" } });
     expect(result.code, result.out).toBe(0);
     expect(result.out).toContain(`${operator.file} isn't here any more, so pnpm billing needs the operator key from the password manager.`);
-    expect(result.out).toContain("pnpm billing needs a Polar setup token. In Polar's sandbox organization, Settings > Developers > New Token:");
+    expect(result.out).toContain("The deployment's own Polar tokens can't set plans up (Polar shows them no webhooks), as guide 3.7 makes them.");
+    expect(result.out).toContain("pnpm billing needs a token with organizations:write, meters:write, products:write, discounts:write and webhooks:write. Make one in Polar's sandbox organization,");
     expect(billingRuns().map((run) => run.env?.LOBBYSTACK_API_KEY)).toEqual([operator.key, operator.key, operator.key]);
     for (const value of [operator.key, polarTokens.setup]) {
       expect(stateText()).not.toContain(value);
       expect(logText()).not.toContain(value);
     }
+  });
+
+  it("sets the plans up with the worker's token when Polar lets it, and asks for no setup token", async () => {
+    readyForBilling();
+    world.webhookTokens.add(polarTokens.worker);
+    const result = await bootstrap(["connect", settings()], { input: "yes\n", env: { POLAR_SETUP_TOKEN: "" } });
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("pnpm billing uses the worker's Polar token, which Polar lets set plans up, so no setup token is needed");
+    expect(result.out).toContain("Polar sells the plans, set up with the worker's Polar token.");
+    expect(result.out).not.toContain("needs a token with");
+    expect(result.out).not.toContain("Delete the setup token");
+    expect(result.out).not.toContain("delete the setup token");
+    expect(result.out).toContain("  1. Sign the command line in with the operator key");
+    const runs = billingRuns();
+    expect(runs.map((run) => run.command)).toEqual(["billing plan", "billing apply", "billing verify"]);
+    for (const run of runs) expect(run.env).toMatchObject({ POLAR_SETUP_TOKEN: polarTokens.worker, POLAR_READ_TOKEN: polarTokens.worker });
+    const [webhook] = world.webhooks;
+    expect(world.webhooks).toHaveLength(1);
+    expect(world.running.admin.POLAR_WEBHOOK_SECRET).toBe(webhook?.secret);
+    expect(logText()).not.toContain(polarTokens.worker);
+  });
+
+  it("asks for a setup token, then plans and applies again, when Polar refuses the worker's token a change", async () => {
+    readyForBilling();
+    world.webhookTokens.add(polarTokens.worker);
+    control({ refuseApply: polarTokens.worker });
+    // yes to the plan, the setup token once Polar refused the worker's, then yes to the new plan.
+    const result = await bootstrap(["connect", settings()], { input: `yes\n${polarTokens.setup}\nyes\n`, env: { POLAR_SETUP_TOKEN: "" } });
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("Polar refused the worker's Polar token for that (above).");
+    expect(result.out).toContain("pnpm billing needs a token with organizations:write, meters:write, products:write, discounts:write and webhooks:write.");
+    expect(result.out).toContain("Polar sells the plans. Delete the setup token now, in Polar's sandbox organization (Settings > Developers).");
+    const runs = billingRuns();
+    expect(runs.map((run) => run.command)).toEqual(["billing plan", "billing apply", "billing plan", "billing apply", "billing verify"]);
+    expect(runs.map((run) => run.env?.POLAR_SETUP_TOKEN)).toEqual([polarTokens.worker, polarTokens.worker, polarTokens.setup, polarTokens.setup, polarTokens.setup]);
+    expect(world.webhooks).toHaveLength(1);
+    expect(world.running.admin.POLAR_WEBHOOK_SECRET).toBe(world.webhooks[0]?.secret);
+    for (const value of [polarTokens.setup, polarTokens.worker]) expect(logText()).not.toContain(value);
+    expect(stateText()).not.toContain(polarTokens.setup);
+  });
+
+  it("refuses a setup token Polar shows no webhooks, before pnpm billing runs", async () => {
+    readyForBilling();
+    const result = await bootstrap(["connect", settings()], { input: "yes\n", env: { POLAR_SETUP_TOKEN: polarTokens.admin } });
+    expect(result.code, result.out).toBe(1);
+    expect(result.out).toContain("Polar shows the setup token no webhooks, so it can't set plans up. Give a token with organizations:write, meters:write, products:write, discounts:write and webhooks:write");
+    expect(billingRuns()).toEqual([]);
   });
 
   it("stops when pnpm billing plan refuses, before any change", async () => {

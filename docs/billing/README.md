@@ -85,7 +85,7 @@ Every billing change follows the same four moves: change `billing.json` in a pul
 | `STRIPE_READ_KEY` | A restricted key that reads the same | `pnpm billing plan` and `verify`; the setup key works too |
 | The worker's and the admin's `STRIPE_API_KEY` | A restricted key each, with only what each service does | As Polar's two tokens |
 
-Give no service token `webhooks:read`: Polar lists each webhook with its signing secret, and whoever has the secret can put any business on any plan. For the same reason the setup and read tokens never go on Railway; make them with the shortest end date Polar offers and delete them after use. The commands never save or print a token or key, and ask for a missing one with typing hidden. On Stripe the keys' permissions are by resource, listed in [Stripe billing](../providers/stripe.md#know-the-keys).
+Give no service token `webhooks:read`: Polar lists each webhook with its signing secret, and whoever has the secret can put any business on any plan. For the same reason the setup and read tokens never go on Railway; make them with the shortest end date Polar offers and delete them after use. The one exception is a choice: `devops/bootstrap.mjs connect` sets the plans up with the worker's token, and needs no setup token, when that token was made with the setup token's five scopes too, which puts those powers on Railway ([`devops/bootstrap.md`, step 8](../../devops/bootstrap.md#8-cloud-mode-sell-plans-through-polar)). The commands never save or print a token or key, and ask for a missing one with typing hidden. On Stripe the keys' permissions are by resource, listed in [Stripe billing](../providers/stripe.md#know-the-keys).
 
 ### Sign in, preview, apply and check
 

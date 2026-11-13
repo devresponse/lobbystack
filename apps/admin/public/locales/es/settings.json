@@ -47,7 +47,7 @@
     "fields": {
       "label": "Etiqueta",
       "labelPlaceholder": "Sitio web principal",
-      "origins": "Orígenes permitidos",
+      "origins": "Orígenes permitidos (lista de sitios web autorizados para alojar un widget de chat)",
       "color": "Color de acento",
       "position": "Posición",
       "title": "Título",

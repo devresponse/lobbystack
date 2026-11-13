@@ -91,14 +91,25 @@ function appBaseOrigin(): string {
   }
 }
 
+/**
+ * The website a new widget key's allowed origins start with on the dashboard: the deployment's own address,
+ * APP_BASE_URL's origin (https://<APP_HOST> on a deployment the setup script made). Empty when APP_BASE_URL is
+ * unset or isn't a web address, which leaves the field empty.
+ */
+export function defaultWidgetKeyOrigin(): string {
+  const origin = appBaseOrigin();
+  return /^https?:\/\/[^/]+$/i.test(origin) ? origin : "";
+}
+
 export function isAllowedWidgetOrigin(origin: string, allowedOrigins: unknown, options: { allowAdminOrigin?: boolean; allowLocalhost?: boolean } = {}): boolean {
   const normalized = normalizeOrigin(origin);
   const allowlist = normalizeAllowedOrigins(allowedOrigins);
   if (allowlist.has(normalized)) return true;
   if (options.allowLocalhost !== false && isLocalhostHttp(normalized) && process.env.NODE_ENV !== "production") return true;
   const adminOrigin = appBaseOrigin();
-  if (options.allowAdminOrigin !== false && adminOrigin && normalized === adminOrigin) return true;
-  return options.allowAdminOrigin !== false && Boolean(adminOrigin) && allowlist.has(adminOrigin);
+  // A list naming the deployment's own address, as a new key's does from the start, opens that address alone.
+  // Before, without the strict options (which every widget route passes), it let every website in.
+  return options.allowAdminOrigin !== false && Boolean(adminOrigin) && normalized === adminOrigin;
 }
 
 /**

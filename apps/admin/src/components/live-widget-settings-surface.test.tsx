@@ -9,8 +9,15 @@ vi.mock("./live-notification-settings-surface", () => ({ LiveNotificationSetting
 import { LiveWidgetSettingsSurface } from "./live-widget-settings-surface";
 
 const clients: QueryClient[] = [];
+const ORIGINS_PLACEHOLDER = "https://example.com, https://www.example.com";
 
-function setup(issuanceEnabled: boolean, keys: Array<Record<string, unknown>> = []) {
+/** The JSON body of the first request sent with this method. */
+function sentBody(method: string): Record<string, unknown> {
+  const [, init] = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === method)!;
+  return JSON.parse(init!.body as string) as Record<string, unknown>;
+}
+
+function setup(issuanceEnabled: boolean, keys: Array<Record<string, unknown>> = [], defaultOrigin = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Acme", active: true }] });
@@ -21,7 +28,7 @@ function setup(issuanceEnabled: boolean, keys: Array<Record<string, unknown>> = 
     if (url.includes("/api/widget-keys")) return Response.json({ keys });
     return Response.json({ businesses: [{ businessId: "business", name: "Acme", active: true }] });
   }));
-  render(<QueryClientProvider client={client}><LiveWidgetSettingsSurface /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><LiveWidgetSettingsSurface defaultOrigin={defaultOrigin} /></QueryClientProvider>);
 }
 
 afterEach(() => {
@@ -56,6 +63,27 @@ describe("website widget issuance restriction", () => {
     expect(screen.getByText(/embed\.js\?key=wk_live_created" data-widget-key="wk_live_created"/)).toBeTruthy();
     expect((screen.getByPlaceholderText("widget.fields.titlePlaceholder") as HTMLInputElement).value).toBe("");
     expect(screen.getAllByDisplayValue("widget.positions.bottomRight").length).toBe(1);
+    // Without the deployment's address, the origins start empty again.
+    expect((screen.getByPlaceholderText(ORIGINS_PLACEHOLDER) as HTMLInputElement).value).toBe("");
+  });
+
+  it("starts a new key's allowed origins at the deployment's own address, and again after creating it", async () => {
+    setup(true, [], "https://dev2.realinfobot.example");
+    const origins = await screen.findByPlaceholderText(ORIGINS_PLACEHOLDER) as HTMLInputElement;
+    expect(origins.value).toBe("https://dev2.realinfobot.example");
+    fireEvent.click(screen.getByText("widget.create.action"));
+    expect(await screen.findByText("widget.created.title")).toBeTruthy();
+    expect(sentBody("POST").allowedOrigins).toEqual(["https://dev2.realinfobot.example"]);
+    expect((screen.getByPlaceholderText(ORIGINS_PLACEHOLDER) as HTMLInputElement).value).toBe("https://dev2.realinfobot.example");
+  });
+
+  it("lets the owner add the business's own website after the deployment's address", async () => {
+    setup(true, [], "https://dev2.realinfobot.example");
+    const origins = await screen.findByPlaceholderText(ORIGINS_PLACEHOLDER) as HTMLInputElement;
+    fireEvent.change(origins, { target: { value: `${origins.value}, https://shop.example` } });
+    fireEvent.click(screen.getByText("widget.create.action"));
+    expect(await screen.findByText("widget.created.title")).toBeTruthy();
+    expect(sentBody("POST").allowedOrigins).toEqual(["https://dev2.realinfobot.example", "https://shop.example"]);
   });
 
   it("confirms a saved key and says when its look reaches the website", async () => {

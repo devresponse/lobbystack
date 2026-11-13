@@ -47,7 +47,7 @@
     "fields": {
       "label": "Naziv",
       "labelPlaceholder": "Glavni sajt",
-      "origins": "Dozvoljeni domeni",
+      "origins": "Dozvoljeni domeni (lista sajtova koji smeju da prikazuju vidžet za ćaskanje)",
       "color": "Boja akcenta",
       "position": "Položaj",
       "title": "Naslov",

@@ -24,6 +24,8 @@ The website widget puts the receptionist on a business's own website: a chat, a 
 
 Then, in the dashboard, open **Widget** in the menu, create a key, list the websites allowed to use it, set the look (colour, position, greeting) and copy the snippet. A key's **Live chat** setting is off until the business turns it on.
 
+Since fork PR #161 on `releases/r2`, that list is the field **Allowed origins (list of websites allowed to host a chat widget)**, and on a new key it starts with the deployment's own address, `APP_BASE_URL`'s origin (`https://<APP_HOST>` on a deployment the setup script made). The owner adds the business's website after a comma, or replaces the address. The page reads `APP_BASE_URL` on the server each time it opens (`defaultWidgetKeyOrigin` in `apps/admin/src/lib/widget-keys.ts`), and without it the field starts empty, as before. Listed, the deployment's address lets the key run on the deployment's own pages and nowhere else; the business's published profile page runs the widget it shows either way.
+
 The call button shows only when the business has an active voice number, the business's saved context snapshot names that number, `LIVE_PROTOTYPE_ENABLED=true` and `OPENAI_API_KEY` are set, and the plan has minutes left. Since fork PR #30, claiming or releasing a number refreshes the snapshot. Before it, the button stayed hidden until something else refreshed it.
 
 ## Choose the widget's receptionist
@@ -143,6 +145,7 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 | #81 | The chat answers in the language the visitor writes in and keeps it, and "Visitor's language" follows the visitor's browser ([above](#know-which-language-the-chat-uses)). |
 | #82 | "Say Allo!" opens in any of the 13 languages a business can pick, and the widget's words fall back to English for a business language they aren't translated into. |
 | #84 | A line under "Say Allo!" says calls are answered by an AI assistant and are recorded and transcribed, and the call says so after its greeting. A website call can send the team an email after it ([email](email.md#email-the-team-after-each-call)). |
+| #161, on `releases/r2` | A new key's allowed origins start with the deployment's own address, and the field is labelled "Allowed origins (list of websites allowed to host a chat widget)" in all four languages ([above](#switch-it-on)). A key whose list names that address no longer passes the origin check for every website when the check isn't strict; every widget route checks strictly, so nothing changed for them. |
 
 ## Know the gaps
 

@@ -2651,8 +2651,8 @@ async function polarBillingSteps(run, hosts) {
     if (v(run, "POLAR_WEBHOOK_SECRET") && v(run, "POLAR_WEBHOOK_SECRET") !== secret) console.log("  Polar's webhook has another secret than the state file kept: Polar's is the one that counts, so it's used");
     const base = await answeringAdmin(hosts);
     const key = await operatorKey(run);
-    // The admin reports the hash of the secret it runs with, never the secret.
-    const running = async () => (await http("The admin", `${base}/api/v1/billing/catalog`, { headers: { Authorization: `Bearer ${key}` } }))?.polar?.secret_sha256 ?? null;
+    // The admin reports the hash of the secret it runs with, never the secret, inside its API's data envelope.
+    const running = async () => (await http("The admin", `${base}/api/v1/billing/catalog`, { headers: { Authorization: `Bearer ${key}` } }))?.data?.polar?.secret_sha256 ?? null;
     if ((await running()) === hashText(secret)) {
       console.log("  = the admin runs with the webhook's secret already");
       return { POLAR_WEBHOOK_SECRET: secret };
@@ -2667,8 +2667,12 @@ async function polarBillingSteps(run, hosts) {
     console.log("  waiting for the admin's new deployment (a few minutes)");
     await waitForDeployment(run, "admin", serviceId, started);
     // Railway may still send a request or two to the deployment from before.
-    for (let tries = 1; (await running().catch(() => null)) !== hashText(secret); tries += 1) {
-      if (tries >= 40) throw new Error("the admin's new deployment still doesn't run with the webhook's secret. Check its variables and deployment in Railway, then run connect again");
+    let reported;
+    for (let tries = 1; (reported = await running().catch(() => undefined)) !== hashText(secret); tries += 1) {
+      if (tries >= 40) {
+        const what = reported === undefined ? "didn't answer GET /api/v1/billing/catalog" : reported === null ? "reports no POLAR_WEBHOOK_SECRET" : "runs with another POLAR_WEBHOOK_SECRET";
+        throw new Error(`the admin's new deployment ${what}, so not the webhook's secret. Check its variables and deployment in Railway, then run connect again`);
+      }
       await pollPause();
     }
     console.log("  the admin runs with the webhook's secret");

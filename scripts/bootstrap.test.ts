@@ -169,7 +169,7 @@ type Vars = Record<string, string>;
 type Service = keyof typeof serviceIds;
 type Deployment = { id: string; status: "DEPLOYING" | "SUCCESS"; polls: number };
 type Webhook = { id: string; url: string; secret: string; organization_id: string };
-type PostHogProject = { id: number; name: string; api_token: string; is_demo: boolean; session_recording_opt_in: boolean; recording_domains: string[] };
+type PostHogProject = { id: number; name: string; api_token: string; is_demo: boolean; ingested_event: boolean; session_recording_opt_in: boolean; recording_domains: string[] };
 type World = {
   /** Each service's variables on Railway, and those its live deployment started with. */
   variables: Record<Service, Vars>;
@@ -185,8 +185,11 @@ type World = {
   ownerInactiveAnswers: number;
   /** The polar-version header of each of bootstrap.mjs's calls to Polar. */
   polarVersions: Array<string | undefined>;
-  /** PostHog's organization as the personal key sees it: its plan's project limit (undefined for the free plan's 1, null for none) and its projects. */
-  posthog: { limit: number | null | undefined; membershipLevel: number; projects: PostHogProject[]; calls: string[] };
+  /**
+   * PostHog's organization as the personal key sees it: its plan's project limit (undefined for the free plan's 1, null for none), the
+   * limit its features show when that differs, and its projects.
+   */
+  posthog: { limit: number | null | undefined; shownLimit?: number | null; membershipLevel: number; projects: PostHogProject[]; calls: string[] };
 };
 
 const services = Object.keys(serviceIds) as Service[];
@@ -291,7 +294,8 @@ function posthogAnswer(method: string, url: URL, token: string, body: PostHogBod
   world.posthog.calls.push(`${method} ${path}`);
   if (token !== posthogKey) return [401, { type: "authentication_error", code: "authentication_failed", detail: "Invalid personal API key.", attr: null }];
   const { projects } = world.posthog;
-  const features = world.posthog.limit === undefined ? [] : [{ key: "organizations_projects", name: "Projects", limit: world.posthog.limit }];
+  const shown = world.posthog.shownLimit !== undefined ? world.posthog.shownLimit : world.posthog.limit;
+  const features = shown === undefined ? [] : [{ key: "organizations_projects", name: "Projects", limit: shown }];
   if (method === "GET" && path === "/api/organizations/") {
     return [200, { count: 1, next: null, previous: null, results: [{ ...posthogOrg, membership_level: world.posthog.membershipLevel, members_can_create_projects: false, available_product_features: features }] }];
   }
@@ -299,7 +303,7 @@ function posthogAnswer(method: string, url: URL, token: string, body: PostHogBod
   if (path === base && method === "GET") {
     const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 100);
-    const results = projects.slice(offset, offset + limit).map(({ id, name, api_token, is_demo }) => ({ id, name, api_token, is_demo, organization: posthogOrg.id }));
+    const results = projects.slice(offset, offset + limit).map(({ id, name, api_token, is_demo, ingested_event }) => ({ id, name, api_token, is_demo, ingested_event, organization: posthogOrg.id }));
     return [200, { count: projects.length, next: offset + limit < projects.length ? `https://us.posthog.com${base}?limit=${limit}&offset=${offset + limit}` : null, previous: null, results }];
   }
   if (path === base && method === "POST") {
@@ -311,13 +315,18 @@ function posthogAnswer(method: string, url: URL, token: string, body: PostHogBod
     const name = String(body?.name ?? "").trim();
     if (projects.some((project) => project.name.toLowerCase() === name.toLowerCase())) return [409, { type: "invalid_request", code: "conflict", detail: `There is already a project called "${name}" in this organization. Choose a different name.`, attr: null }];
     const id = 100 + projects.length;
-    const project = { id, name, api_token: posthogToken(id), is_demo: false, session_recording_opt_in: body?.session_recording_opt_in === true, recording_domains: [] };
+    const project = { id, name, api_token: posthogToken(id), is_demo: false, ingested_event: false, session_recording_opt_in: body?.session_recording_opt_in === true, recording_domains: [] };
     projects.push(project);
     return [201, { ...project, api_host: "https://us.i.posthog.com", organization: posthogOrg.id }];
   }
   const project = projects.find((item) => path === `${base}${item.id}/`);
   if (project && method === "GET") return [200, { ...project }];
   if (project && method === "PATCH") {
+    if (body?.name !== undefined) {
+      const name = String(body.name).trim();
+      if (projects.some((other) => other !== project && other.name.toLowerCase() === name.toLowerCase())) return [409, { type: "invalid_request", code: "conflict", detail: `There is already a project called "${name}" in this organization. Choose a different name.`, attr: null }];
+      project.name = name;
+    }
     if (body?.session_recording_opt_in !== undefined) project.session_recording_opt_in = body.session_recording_opt_in;
     if (body?.recording_domains !== undefined) project.recording_domains = body.recording_domains;
     return [200, { ...project }];
@@ -871,7 +880,7 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
   }
 
   const posthogProject = (id: number, name: string, changes: Partial<PostHogProject> = {}): PostHogProject =>
-    ({ id, name, api_token: posthogToken(id), is_demo: false, session_recording_opt_in: false, recording_domains: [], ...changes });
+    ({ id, name, api_token: posthogToken(id), is_demo: false, ingested_event: false, session_recording_opt_in: false, recording_domains: [], ...changes });
 
   it("makes a PostHog project in up by default, and puts its values on the services before the admin's first build", async () => {
     // A settings file with no POSTHOG line, as one from before the PostHog step has.
@@ -927,25 +936,97 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(readState().done.variables).toBeTruthy();
   });
 
-  it("stops with the ways out when PostHog's plan allows no more projects, and doctor says so first", async () => {
-    // The free plan: one project, which the organization has.
+  it("stops with the ways out when PostHog's plan allows no more projects and the one there has events, and doctor says so first", async () => {
+    // The free plan: one project, which the organization has, and which another app sends to.
     world.posthog.limit = undefined;
-    world.posthog.projects.push(posthogProject(7, "Another app"));
+    world.posthog.projects.push(posthogProject(7, "Another app", { ingested_event: true }));
     writeSettings({ POSTHOG: "us" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
     const doctor = await bootstrap(["doctor", settings()]);
     expect(doctor.code, doctor.out).toBe(1);
     expect(doctor.out).toContain(`ok     PostHog: POSTHOG_PERSONAL_API_KEY works (the organization Acme Analytics, ${posthogOrg.id})`);
-    expect(doctor.out).toContain("FIX    PostHog: the organization Acme Analytics has 1 project, as many as its plan allows (1), so up couldn't make \"acme-test\"");
+    expect(doctor.out).toContain('FIX    PostHog: up can\'t make "acme-test": the organization Acme Analytics has 1 project, as many as its plan allows (1), and it has received events, so up won\'t take it over. Rename the project this deployment should use to "acme-test" in PostHog');
 
     readyForPostHog();
     const result = await bootstrap(["up", settings(), "--yes"]);
     expect(result.code, result.out).toBe(1);
     expect(result.out).toContain("Stopped at posthog.project: PostHog won't make another project in the organization Acme Analytics, which has 1 and whose plan allows 1");
+    expect(result.out).toContain('and it has received events, so up won\'t take it over. Either rename the project this deployment should use to "acme-test" in PostHog, which up then reuses');
     expect(result.out).toContain("move the organization to pay-as-you-go in PostHog's billing settings");
     expect(result.out).toContain("as POSTHOG_PROJECT_TOKEN, which this deployment then shares, or set POSTHOG=no in");
     expect(result.out).not.toContain("What to try");
     expect(readState().done["posthog.project"]).toBeUndefined();
-    expect(world.posthog.projects).toHaveLength(1);
+    expect(world.posthog.projects).toEqual([posthogProject(7, "Another app", { ingested_event: true })]);
+    expect(world.posthog.calls.filter((call) => call.startsWith("PATCH"))).toEqual([]);
+  });
+
+  it("takes over a full organization's only project that has never received an event, renames it, and doctor says so first", async () => {
+    // The free plan, with the project PostHog makes with a new organization, and a demo project, which doesn't count.
+    world.posthog.limit = undefined;
+    world.posthog.projects.push(posthogProject(7, "Default project"), posthogProject(8, "Hedgebox", { is_demo: true }));
+    writeSettings({ POSTHOG: "us" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain('ok     PostHog: the organization Acme Analytics has 1 project, as many as its plan allows (1), so up will take over "Default project" (7), which has never received an event, and rename it "acme-test"');
+    expect(doctor.out).not.toContain("FIX    PostHog");
+
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain('~ took over the project 7 ("Default project"), which has never received an event, since the plan of Acme Analytics allows no more projects, and renamed it "acme-test", with screen recordings on');
+    // Nothing was made: the plan's limit was known before asking.
+    expect(world.posthog.calls).not.toContain(`POST /api/organizations/${posthogOrg.id}/projects/`);
+    expect(world.posthog.projects).toEqual([
+      posthogProject(7, "acme-test", { session_recording_opt_in: true, recording_domains: [`https://${railwayHost}`] }),
+      posthogProject(8, "Hedgebox", { is_demo: true }),
+    ]);
+    expect(world.variables.admin.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN).toBe(posthogToken(7));
+    expect(readState().values).toMatchObject({ POSTHOG_PROJECT_ID: 7, POSTHOG_PROJECT_NAME: "acme-test", POSTHOG_PROJECT_TOKEN: posthogToken(7) });
+
+    // Once events come in, the project is this deployment's by its ID: the next run takes nothing over.
+    const taken = world.posthog.projects.find((item) => item.id === 7);
+    if (taken) taken.ingested_event = true;
+    const again = await bootstrap(["up", settings(), "--yes"]);
+    expect(again.code, again.out).toBe(0);
+    expect(again.out).toContain('= PostHog project "acme-test" in PostHog\'s US cloud, with screen recordings on (done');
+    const redo = await bootstrap(["redo", settings(), "posthog.project"]);
+    expect(redo.code, redo.out).toBe(0);
+    const rerun = await bootstrap(["up", settings(), "--yes"]);
+    expect(rerun.code, rerun.out).toBe(0);
+    expect(rerun.out).toContain('= 7 ("acme-test")');
+    expect(rerun.out).not.toContain("took over");
+  });
+
+  it("takes over the unused project when PostHog refuses another one that the plan's features didn't count, and leaves recordings off when asked", async () => {
+    // The features show no limit, but PostHog counts one when asked to make a project.
+    world.posthog.limit = 1;
+    world.posthog.shownLimit = null;
+    world.posthog.projects.push(posthogProject(7, "Default project"));
+    writeSettings({ POSTHOG: "us", POSTHOG_RECORDINGS: "no" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain('ok     PostHog: up will make the project "acme-test" (the organization has 1)');
+
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(world.posthog.calls).toContain(`POST /api/organizations/${posthogOrg.id}/projects/`);
+    expect(result.out).toContain('~ took over the project 7 ("Default project"), which has never received an event, since the plan of Acme Analytics allows no more projects, and renamed it "acme-test"\n');
+    expect(world.posthog.projects).toEqual([posthogProject(7, "acme-test")]);
+    expect(readState().values).toMatchObject({ POSTHOG_PROJECT_ID: 7, POSTHOG_PROJECT_NAME: "acme-test" });
+  });
+
+  it("won't choose between a full organization's projects when several have never received an event", async () => {
+    world.posthog.limit = 2;
+    world.posthog.projects.push(posthogProject(7, "Default project"), posthogProject(8, "Staging"));
+    writeSettings({ POSTHOG: "us" }, { POSTHOG_PERSONAL_API_KEY: posthogKey });
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.code, doctor.out).toBe(1);
+    expect(doctor.out).toContain('FIX    PostHog: up can\'t make "acme-test": the organization Acme Analytics has 2 projects, as many as its plan allows (2), and 2 of them have never received an event, so up won\'t choose one.');
+
+    readyForPostHog();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(1);
+    expect(result.out).toContain("which has 2 and whose plan allows 2");
+    expect(result.out).toContain("and 2 of them have never received an event, so up won't choose one. Either rename the project this deployment should use");
+    expect(world.posthog.projects).toEqual([posthogProject(7, "Default project"), posthogProject(8, "Staging")]);
   });
 
   it("says how to make a personal API key, and stops, when none is given", async () => {

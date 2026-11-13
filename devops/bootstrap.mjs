@@ -1296,13 +1296,41 @@ function posthogProjectLimit(organization) {
   return feature ? (feature.limit ?? null) : 1;
 }
 
+/** An organization's projects, demo ones aside, that have never received an event, such as the one PostHog makes with a new organization. */
+const posthogUnused = (projects) => projects.filter((item) => !item.is_demo && item.ingested_event === false);
+
+/**
+ * The project up takes over when the organization's plan allows no more: its only unused one. With several, up won't
+ * choose, and one that has received events is in use somewhere, so neither is taken.
+ */
+function posthogSpareProject(projects) {
+  const unused = posthogUnused(projects);
+  return unused.length === 1 ? unused[0] : null;
+}
+
+/** Why up won't take over a project of a full organization, in the words of doctor's FIX and up's stop. */
+function posthogNoSpare(projects) {
+  const unused = posthogUnused(projects).length;
+  if (unused > 1) return `${unused} of them have never received an event, so up won't choose one`;
+  return projects.filter((item) => !item.is_demo).length === 1 ? "it has received events, so up won't take it over" : "each has received events, so up won't take one over";
+}
+
+/** Takes over a full organization's unused project for this deployment: renamed after it, with screen recordings on. */
+async function posthogTakeOver(run, key, organization, spare, name) {
+  const body = { name, ...(run.settings.POSTHOG_RECORDINGS ? { session_recording_opt_in: true } : {}) };
+  const project = await posthogCall(run, key, `/api/organizations/${organization.id}/projects/${spare.id}/`, { method: "PATCH", body });
+  console.log(`  ~ took over the project ${spare.id} ("${spare.name}"), which has never received an event, since the plan of ${organization.name} allows no more projects, and renamed it "${name}"${body.session_recording_opt_in ? ", with screen recordings on" : ""}`);
+  return { ...spare, ...project };
+}
+
 const sameName = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
 
 /**
  * The deployment's PostHog project, before the Railway steps: the admin's first build needs its token. Found by the ID
  * an earlier run kept, else by the token the admin has already (such as one set by hand), else by name (PostHog's
- * names are unique in an organization), else made. A token in the secrets file is used as it is. When the step is new to
- * a deployment whose variables are done, they run again below to bring the values to the services.
+ * names are unique in an organization), else made, or, when the plan allows no more projects, the organization's only
+ * project that has never received an event is taken over and renamed. A token in the secrets file is used as it is.
+ * When the step is new to a deployment whose variables are done, they run again below to bring the values to the services.
  */
 async function posthogSteps(run) {
   const s = run.settings;
@@ -1354,20 +1382,25 @@ async function posthogSteps(run) {
       if (project) console.log(`  = ${project.id}`);
     }
     if (!project) {
-      try {
-        project = await posthogCall(run, key, `/api/organizations/${organization.id}/projects/`, { method: "POST", body: { name, ...(s.POSTHOG_RECORDINGS ? { session_recording_opt_in: true } : {}) } });
-      } catch (error) {
-        const made = projects.filter((item) => !item.is_demo).length;
-        const limit = posthogProjectLimit(organization);
-        if (error.status === 403 && /limit/i.test(error.message)) {
-          throw new Error(`PostHog won't make another project in the organization ${organization.name}, which has ${made}${limit ? ` and whose plan allows ${limit}` : ""} ("${error.message.replace(/^PostHog refused [A-Z]+ \S+: /, "")}"). Either move the organization to pay-as-you-go in PostHog's billing settings (no monthly fee, up to 6 projects), put an existing project's token (phc_...) in ${config?.file ?? "the secrets file"} as POSTHOG_PROJECT_TOKEN, which this deployment then shares, or set POSTHOG=no in ${run.file}. Then run up again`);
+      // Made, or, when the plan allows no more projects, the organization's one unused project taken over.
+      const made = projects.filter((item) => !item.is_demo).length;
+      const limit = posthogProjectLimit(organization);
+      const spare = posthogSpareProject(projects);
+      if (spare && limit !== null && made >= limit) project = await posthogTakeOver(run, key, organization, spare, name);
+      else {
+        try {
+          project = await posthogCall(run, key, `/api/organizations/${organization.id}/projects/`, { method: "POST", body: { name, ...(s.POSTHOG_RECORDINGS ? { session_recording_opt_in: true } : {}) } });
+          console.log(`  made the project, ${project.id}, in the organization ${organization.name}`);
+        } catch (error) {
+          // PostHog counts the limit itself, which the organization's features may not show.
+          if (error.status === 403 && /limit/i.test(error.message) && spare) project = await posthogTakeOver(run, key, organization, spare, name);
+          else if (error.status === 403 && /limit/i.test(error.message)) {
+            throw new Error(`PostHog won't make another project in the organization ${organization.name}, which has ${made}${limit ? ` and whose plan allows ${limit}` : ""} ("${error.message.replace(/^PostHog refused [A-Z]+ \S+: /, "")}"), and ${posthogNoSpare(projects)}. Either rename the project this deployment should use to "${name}" in PostHog, which up then reuses, move the organization to pay-as-you-go in PostHog's billing settings (no monthly fee, up to 6 projects), put an existing project's token (phc_...) in ${config?.file ?? "the secrets file"} as POSTHOG_PROJECT_TOKEN, which this deployment then shares, or set POSTHOG=no in ${run.file}. Then run up again`);
+          } else if (error.status === 403 && /admin/i.test(error.message)) {
+            throw new Error(`your PostHog user isn't an admin of the organization ${organization.name}, which making a project takes. Ask an admin to make you one, or to make the project "${name}" and give you its token (phc_...) for ${config?.file ?? "the secrets file"} as POSTHOG_PROJECT_TOKEN, then run up again`);
+          } else throw error;
         }
-        if (error.status === 403 && /admin/i.test(error.message)) {
-          throw new Error(`your PostHog user isn't an admin of the organization ${organization.name}, which making a project takes. Ask an admin to make you one, or to make the project "${name}" and give you its token (phc_...) for ${config?.file ?? "the secrets file"} as POSTHOG_PROJECT_TOKEN, then run up again`);
-        }
-        throw error;
       }
-      console.log(`  made the project, ${project.id}, in the organization ${organization.name}`);
     } else if (s.POSTHOG_RECORDINGS) {
       // Screen recordings start off in a project PostHog's API makes, and the dashboard's recorder then never starts.
       const detail = await posthogCall(run, key, where(project.id));
@@ -3451,7 +3484,8 @@ async function doctor(run) {
     });
     if (found) {
       // Whether up can make the project: PostHog's plan limits the projects of an organization, and only its admins make them.
-      // As up does, an earlier run's project comes first, then the one whose token the admin has already, then the name.
+      // As up does, an earlier run's project comes first, then the one whose token the admin has already, then the name,
+      // and a full organization's only unused project is taken over.
       const { organization, projects } = found;
       const name = nameFor(run, "POSTHOG_PROJECT_NAME");
       const id = v(run, "POSTHOG_PROJECT_ID");
@@ -3461,9 +3495,11 @@ async function doctor(run) {
       if (!existing && !onAdmin) existing = projects.find((item) => !item.is_demo && sameName(item.name, name));
       const made = projects.filter((item) => !item.is_demo).length;
       const limit = posthogProjectLimit(organization);
+      const spare = posthogSpareProject(projects);
       if (onAdmin && !existing) note(`PostHog: the admin has a token whose project isn't in the organization ${organization.name}, so up keeps it as it is, with the admin's address, and makes no project`);
       else if (existing) ok(`PostHog: the project "${existing.name}" (${existing.id})${onAdmin ? ", whose token the admin has," : ""} exists${run.state.done["posthog.project"] ? "" : " and will be reused"}`);
-      else if (limit !== null && made >= limit) fix(`PostHog: the organization ${organization.name} has ${made} project${made === 1 ? "" : "s"}, as many as its plan allows (${limit}), so up couldn't make "${name}". Move it to pay-as-you-go in PostHog's billing settings (no monthly fee, up to 6 projects), put an existing project's token in the secrets file as POSTHOG_PROJECT_TOKEN, or set POSTHOG=no`);
+      else if (limit !== null && made >= limit && spare) ok(`PostHog: the organization ${organization.name} has ${made} project${made === 1 ? "" : "s"}, as many as its plan allows (${limit}), so up will take over "${spare.name}" (${spare.id}), which has never received an event, and rename it "${name}"`);
+      else if (limit !== null && made >= limit) fix(`PostHog: up can't make "${name}": the organization ${organization.name} has ${made} project${made === 1 ? "" : "s"}, as many as its plan allows (${limit}), and ${posthogNoSpare(projects)}. Rename the project this deployment should use to "${name}" in PostHog, which up then reuses, move the organization to pay-as-you-go in PostHog's billing settings (no monthly fee, up to 6 projects), put an existing project's token in the secrets file as POSTHOG_PROJECT_TOKEN, or set POSTHOG=no`);
       else if ((organization.membership_level ?? 0) < 8 && !organization.members_can_create_projects) fix(`PostHog: your user isn't an admin of the organization ${organization.name}, which making the project "${name}" takes. Ask an admin to make you one, or to make the project and give you its token for the secrets file (POSTHOG_PROJECT_TOKEN)`);
       else ok(`PostHog: up will make the project "${name}" (the organization has ${made}${limit === null ? "" : `, and its plan allows ${limit}`})`);
     }

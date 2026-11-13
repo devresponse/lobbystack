@@ -119,7 +119,7 @@ export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent
         <section aria-labelledby="profile-name" className={stage ? "grid grid-cols-1 pt-1 lg:grid-cols-[minmax(0,540fr)_minmax(0,580fr)] lg:grid-rows-[auto_1fr] lg:gap-x-16 lg:gap-y-5 lg:pt-4 lg:pb-24" : "grid max-w-[760px] grid-cols-1 pt-1 pb-12 lg:gap-y-5 lg:pt-4 lg:pb-24"}>
           <div className="flex min-w-0 flex-col gap-3 pb-7 lg:col-start-1 lg:row-start-1 lg:gap-5 lg:pb-0">
             {eyebrow ? <p className="text-[13px] leading-[18px] font-[650] tracking-[0.06em] uppercase lg:text-sm lg:leading-5">{eyebrow}</p> : null}
-            <h1 id="profile-name" className="text-[48px] leading-[0.95] font-[780] tracking-[-0.035em] text-balance [overflow-wrap:anywhere] lg:text-[clamp(56px,6.4vw,88px)]">{profile.name}</h1>
+            <h1 id="profile-name" className="text-[40px] leading-[0.95] font-[780] tracking-[-0.035em] text-balance [overflow-wrap:anywhere] lg:text-[clamp(48px,5vw,68px)]">{profile.name}</h1>
             {status ? (
               <p className="text-base leading-[22px] lg:text-[17px] lg:leading-6">
                 <strong className="font-bold">{status.label}</strong>

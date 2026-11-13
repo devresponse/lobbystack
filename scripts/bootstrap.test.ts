@@ -90,7 +90,7 @@ function platformKey() {
 
 async function result(secret) {
   const catalog = await call(process.env.LOBBYSTACK_URL + "/api/v1/billing/catalog", { headers: { authorization: "Bearer " + process.env.LOBBYSTACK_API_KEY } });
-  if (secret && catalog.polar.secret_sha256 === sha256(secret)) {
+  if (secret && catalog.data.polar.secret_sha256 === sha256(secret)) {
     console.log("Result: in sync (exit 0)");
     return 0;
   }
@@ -289,7 +289,8 @@ function adminAnswer(path: string, key: string): [number, unknown] {
   if (path === "/api/v1/me") return [200, { data: { email: "ops@example.com" } }];
   if (path === "/api/v1/billing/catalog") {
     const secret = running.POLAR_WEBHOOK_SECRET;
-    return [200, { brand: "acme", polar: { env: "sandbox", org: running.POLAR_ORGANIZATION_ID ?? null, secret_sha256: secret ? sha256(secret) : null } }];
+    // Inside the data envelope every /api/v1 answer of the admin has (apps/admin/src/lib/public-api/http.ts).
+    return [200, { data: { brand: "acme", polar: { env: "sandbox", org: running.POLAR_ORGANIZATION_ID ?? null, secret_sha256: secret ? sha256(secret) : null } } }];
   }
   return [404, { error: { code: "not_found", message: `the stand-in has no ${path}` } }];
 }

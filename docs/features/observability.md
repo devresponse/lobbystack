@@ -1,6 +1,6 @@
 # Follow logs, errors and alerts
 
-Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call or a sign-in, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `1a2c81b`; sign-in lines, against the code of fork PR #104; receptionist lines, against the code of fork PR #129.
+Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call or a sign-in, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `1a2c81b`; sign-in lines, against the code of fork PR #104; receptionist lines, against the code of fork PR #129; the bootstrap script's PostHog values and the dashboard's EU link, against fork PR #165.
 
 ## Set the variables
 
@@ -10,9 +10,9 @@ Every service writes one JSON line per log event to standard output, which Railw
 | Worker | `POSTHOG_API_KEY` | Product and system events (`ops.*`), and the worker's errors and warnings |
 | Admin, worker | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` | Logs, traces and metrics over OTLP, to PostHog (`https://us.i.posthog.com/i` with `Authorization=Bearer <project token>`) or any OTLP service |
 
-All three take a PostHog project token (`phc_...`). The exporter sends JSON, so traces may not show in PostHog.
+All three take a PostHog project token (`phc_...`). The exporter sends JSON, so traces may not show in PostHog. `devops/bootstrap.mjs` finds or makes the project and sets all of these, with the hosts below, on the environments it sets up, unless its settings say `POSTHOG=no` ([its PostHog section](../../devops/bootstrap.md#posthog), fork PR #165).
 
-Leave `NEXT_PUBLIC_POSTHOG_HOST` unset on Railway, where the dashboard then uses PostHog's US host. In Docker Compose, set it: `docker-compose.yml` and `.env.example` default it to the original project's own PostHog relay. The website widget loads no analytics at all (fork PR #22).
+On Railway, `NEXT_PUBLIC_POSTHOG_HOST` may stay unset for PostHog's US region, where the dashboard then uses PostHog's US host. For the EU region, set it and the worker's `POSTHOG_HOST` to `https://eu.i.posthog.com`; since fork PR #165 the dashboard's links into PostHog then open PostHog's EU app. In Docker Compose, set it: `docker-compose.yml` and `.env.example` default it to the original project's own PostHog relay. The website widget loads no analytics at all (fork PR #22).
 
 ## Follow one call
 

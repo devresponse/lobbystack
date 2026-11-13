@@ -41,6 +41,8 @@
 //   TWILIO_MAIN_ACCOUNT_SID, TWILIO_MAIN_AUTH_TOKEN   the main Twilio account, which owns the subaccounts
 //   RESEND_ADMIN_KEY        a Resend key with full access, only to make the domain and the sending key
 //   CLOUDFLARE_API_TOKEN    Zone DNS edit on the zone, and Turnstile Sites write on the account
+//   POSTHOG_PERSONAL_API_KEY  a PostHog personal API key with organization:read, project:read and project:write
+//                           (us.posthog.com/settings/user-api-keys, or eu.), unless POSTHOG=no
 // In cloud mode with Polar, connect also runs pnpm billing, with the deployment's own Polar token when Polar lets
 // that token set plans up (made with the setup scopes too). Else it asks for a short-lived Polar setup token
 // (POLAR_SETUP_TOKEN), which it keeps only in memory.
@@ -63,6 +65,8 @@ const URLS = {
   stripe: process.env.BOOTSTRAP_STRIPE_URL ?? "https://api.stripe.com/v1",
   // Polar's sandbox and live are separate servers (POLAR_SERVERS), so this one only replaces both in tests.
   polar: process.env.BOOTSTRAP_POLAR_URL ?? null,
+  // PostHog's address comes from POSTHOG (us, eu or a self-hosted instance), so this one only replaces it in tests.
+  posthog: process.env.BOOTSTRAP_POSTHOG_URL ?? null,
 };
 // The BOOTSTRAP_*_URL variables, BOOTSTRAP_APP_URL and BOOTSTRAP_RAILWAY_CLI exist for tests against stand-ins.
 const RAILWAY_CLI = process.env.BOOTSTRAP_RAILWAY_CLI ?? "railway";
@@ -191,6 +195,21 @@ POLAR=sandbox
 # belong to (STRIPE_ADMIN_KEY and STRIPE_WORKER_KEY, in the secrets file).
 STRIPE=sandbox
 
+# PostHog: the dashboard's analytics, screen recordings and error reports, the worker's events, and
+# every service's logs (guide 3.7, PostHog). us or eu, the region your PostHog organization is in,
+# a self-hosted instance's address (https://...), or no for none. up finds or makes a project named
+# like the others with POSTHOG_PERSONAL_API_KEY (in the secrets file), unless POSTHOG_PROJECT_TOKEN
+# there names a project to use. POSTHOG_ORGANIZATION_ID: only if the key reaches several organizations.
+POSTHOG=us
+POSTHOG_ORGANIZATION_ID=
+# Optional: a reverse proxy's address (https://...) for the dashboard's events, such as PostHog's managed
+# proxy, which ad blockers don't stop (guide 3.7). Empty: PostHog's own address.
+POSTHOG_PROXY=
+# Screen recordings of the dashboard, from its own addresses only: yes or no.
+POSTHOG_RECORDINGS=yes
+# migrate's, the admin's and the worker's logs, traces and metrics to PostHog too: yes or no.
+POSTHOG_LOGS=yes
+
 # Turn steps off with no (each then takes its values from the secrets file, or asks you).
 STEP_GITHUB=yes
 STEP_OPENAI=yes
@@ -212,6 +231,7 @@ TWILIO_MAIN_ACCOUNT_SID=
 TWILIO_MAIN_AUTH_TOKEN=
 RESEND_ADMIN_KEY=
 CLOUDFLARE_API_TOKEN=
+POSTHOG_PERSONAL_API_KEY=
 
 # Things you already have. Each one given here is used instead of creating a new one,
 # and the token above for that service is then not needed for it.
@@ -237,6 +257,8 @@ POLAR_WORKER_TOKEN=
 # the deployment's account (rk_test_... in a sandbox; guide 3.7, "Selling plans (Stripe)", step 3).
 STRIPE_ADMIN_KEY=
 STRIPE_WORKER_KEY=
+# PostHog: a project's token (phc_...), to use that project as it is instead of finding or making one.
+POSTHOG_PROJECT_TOKEN=
 # For connect: the incoming-call webhook's signing secret (whsec_...), once it exists.
 OPENAI_WEBHOOK_SECRET=
 
@@ -261,11 +283,11 @@ const REDIS_START = "sh -c 'exec redis-server --bind :: 0.0.0.0 --appendonly yes
 let logPath = null;
 let verbose = false;
 const hiddenValues = new Set();
-const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9+/=_-]{16,}|re_[A-Za-z0-9_]{16,}|lsp_[A-Za-z0-9_]{16,}|polar_[a-z]{2,4}_[A-Za-z0-9_]{16,})/g;
+const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9+/=_-]{16,}|re_[A-Za-z0-9_]{16,}|lsp_[A-Za-z0-9_]{16,}|polar_[a-z]{2,4}_[A-Za-z0-9_]{16,}|phx_[A-Za-z0-9_]{16,})/g;
 const SECRET_KEYS = new Set(["OPENAI_API_KEY", "TWILIO_AUTH_TOKEN", "SMTP_PASSWORD", "TURNSTILE_SECRET_KEY", "POLAR_ADMIN_TOKEN",
   "POLAR_WORKER_TOKEN", "OPENAI_WEBHOOK_SECRET", "RAILWAY_API_TOKEN", "OPENAI_ADMIN_KEY", "TWILIO_MAIN_AUTH_TOKEN", "RESEND_ADMIN_KEY",
   "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY", "STRIPE_ADMIN_KEY", "STRIPE_WORKER_KEY", "STRIPE_API_KEY",
-  "POLAR_SETUP_TOKEN", "POLAR_WEBHOOK_SECRET"]);
+  "POLAR_SETUP_TOKEN", "POLAR_WEBHOOK_SECRET", "POSTHOG_PERSONAL_API_KEY"]);
 
 function hide(value) {
   if (typeof value === "string" && value.length >= 8) hiddenValues.add(value);
@@ -426,6 +448,7 @@ const NAMES = {
   TWILIO_TOLLFREE_NAME: (base) => `${base} shared texts`,
   RESEND_KEY_NAME: (base) => base,
   TURNSTILE_WIDGET_NAME: (base) => base,
+  POSTHOG_PROJECT_NAME: (base) => base,
 };
 const nameFor = (run, key) => v(run, key) ?? NAMES[key](baseName(run.settings));
 
@@ -434,6 +457,8 @@ function notNamed(run) {
   const s = run.settings;
   const file = (...keys) => keys.some((key) => fromFile(key, { quiet: true }));
   return {
+    posthog: !s.POSTHOG ? "off (POSTHOG=no)" : !posthogOn(run) ? "not added (no POSTHOG line)" : file("POSTHOG_PROJECT_TOKEN") ? "from the secrets file"
+      : v(run, "POSTHOG_PROJECT_KEPT") ? "kept from the admin's variables" : null,
     openai: !s.STEP_OPENAI ? "typed in" : file("OPENAI_PROJECT_ID", "OPENAI_API_KEY") ? "from the secrets file" : null,
     twilio: !s.STEP_TWILIO ? "typed in" : file("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SIP_TRUNK_SID") ? "from the secrets file" : null,
     trunk: !s.STEP_TWILIO ? "typed in" : file("TWILIO_SIP_TRUNK_SID") ? "from the secrets file" : null,
@@ -478,6 +503,7 @@ function nameLines(run) {
     ["Twilio subaccount", "TWILIO_SUBACCOUNT_NAME", not.twilio],
     ["Turnstile widget", "TURNSTILE_WIDGET_NAME", not.turnstile],
     ["Resend key", "RESEND_KEY_NAME", not.resend],
+    ["PostHog project", "POSTHOG_PROJECT_NAME", not.posthog],
   ];
   const lines = [`names: ${shown.map(([label, key, how]) => (how ? `${label} ${how}` : `${label} "${nameFor(run, key)}"`)).join(", ")}`];
   const kept = shown.filter(([, key, how]) => !how && v(run, key) && v(run, key) !== NAMES[key](base));
@@ -516,13 +542,23 @@ function loadRun(file, { log = true } = {}) {
     settings[key] = value;
   });
   // A setting left empty, such as BRANCH=, takes its default rather than an empty value.
-  const defaults = { ENVIRONMENT: "test", BRANCH: "main", DEPLOYMENT_MODE: "self_hosted_standard", BUCKET_REGION: "iad", RESEND_REGION: "us-east-1", BILLING_PROVIDER: "polar", POLAR: "sandbox", STRIPE: "sandbox" };
+  const defaults = { ENVIRONMENT: "test", BRANCH: "main", DEPLOYMENT_MODE: "self_hosted_standard", BUCKET_REGION: "iad", RESEND_REGION: "us-east-1", BILLING_PROVIDER: "polar", POLAR: "sandbox", STRIPE: "sandbox", POSTHOG: "us" };
   const s = { ...defaults, ...Object.fromEntries(Object.entries(settings).filter(([key, value]) => value !== "" || !(key in defaults))) };
-  for (const step of ["GITHUB", "OPENAI", "TWILIO", "RESEND", "TURNSTILE"]) {
-    const word = String(s[`STEP_${step}`] || "yes").toLowerCase();
-    if (!["yes", "no", "true", "false", "on", "off", "1", "0"].includes(word)) problems.push(`STEP_${step} is yes or no`);
-    s[`STEP_${step}`] = !["no", "false", "off", "0"].includes(word);
+  for (const key of ["STEP_GITHUB", "STEP_OPENAI", "STEP_TWILIO", "STEP_RESEND", "STEP_TURNSTILE", "POSTHOG_RECORDINGS", "POSTHOG_LOGS"]) {
+    const word = String(s[key] || "yes").toLowerCase();
+    if (!["yes", "no", "true", "false", "on", "off", "1", "0"].includes(word)) problems.push(`${key} is yes or no`);
+    s[key] = !["no", "false", "off", "0"].includes(word);
   }
+  // PostHog: us, eu or a self-hosted instance's address, else off (empty). A settings file without a POSTHOG line counts
+  // as us, but sets PostHog up for a deployment made before the PostHog step only once it has the line (see posthogOn).
+  s.POSTHOG_ASKED = Boolean(settings.POSTHOG);
+  const posthogWord = String(s.POSTHOG).toLowerCase().replace(/\/+$/, "");
+  if (["no", "false", "off", "0"].includes(posthogWord)) s.POSTHOG = "";
+  else if (["us", "eu"].includes(posthogWord) || /^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(:\d+)?$/.test(posthogWord)) s.POSTHOG = posthogWord;
+  else problems.push("POSTHOG is us, eu, a self-hosted PostHog's https:// address with no path, or no");
+  if (s.POSTHOG_ORGANIZATION_ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.POSTHOG_ORGANIZATION_ID)) problems.push("POSTHOG_ORGANIZATION_ID is the PostHog organization's ID, a UUID (doctor lists the ones the key reaches), or empty");
+  s.POSTHOG_PROXY = String(s.POSTHOG_PROXY ?? "").trim().replace(/\/+$/, "");
+  if (s.POSTHOG_PROXY && !/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(:\d+)?$/i.test(s.POSTHOG_PROXY)) problems.push("POSTHOG_PROXY is a reverse proxy's https:// address with no path, or empty");
   for (const key of ["BRAND", "REPO", "OPERATOR_EMAIL", "EMAIL_FROM"]) if (!s[key]) problems.push(`${key} is empty`);
   if (s.NAME && !/^[a-z0-9][a-z0-9-]*$/.test(s.NAME)) problems.push("NAME is lower case letters, digits and dashes, such as acme-test");
   if (s.STEP_RESEND && !s.EMAIL_DOMAIN) problems.push("EMAIL_DOMAIN is empty (or set STEP_RESEND=no)");
@@ -652,6 +688,7 @@ const CONFIG_ALIASES = {
   POLAR_WORKER_TOKEN: [["worker", "POLAR_ACCESS_TOKEN"]],
   STRIPE_ADMIN_KEY: [["admin", "STRIPE_API_KEY"]],
   STRIPE_WORKER_KEY: [["worker", "STRIPE_API_KEY"]],
+  POSTHOG_PROJECT_TOKEN: [["", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]],
 };
 
 /** A value from the secrets file only, or undefined. */
@@ -904,6 +941,8 @@ const looksLike = {
   project: (answer) => /^proj_\w+$/.test(answer),
   account: (answer) => /^AC\w{32}$/.test(answer),
   trunk: (answer) => /^TK\w{32}$/.test(answer),
+  posthogKey: (answer) => /^phx_\w{16,}$/.test(answer),
+  posthogToken: (answer) => /^phc_\w{16,}$/.test(answer),
 };
 
 async function confirm(question) {
@@ -1062,7 +1101,8 @@ async function up(run) {
   console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${baseName(s)}: ${s.ENVIRONMENT}, ${s.DEPLOYMENT_MODE}, brand ${s.BRAND}, from ${s.REPO}@${s.BRANCH}`);
   for (const line of nameLines(run)) console.log(line.charAt(0).toUpperCase() + line.slice(1));
   console.log(`${config ? `Keys from ${config.file}, the environment, or asked for.` : "No secrets file: keys come from the environment or are asked for."}\n`);
-  const providers = ["Railway", s.STEP_OPENAI && "OpenAI", s.STEP_TWILIO && "Twilio", s.STEP_RESEND && "Resend", (s.CLOUDFLARE_ZONE || (s.STEP_TURNSTILE && s.CLOUDFLARE_ACCOUNT_ID)) && "Cloudflare"].filter(Boolean);
+  const providers = ["Railway", s.STEP_OPENAI && "OpenAI", s.STEP_TWILIO && "Twilio", s.STEP_RESEND && "Resend", (s.CLOUDFLARE_ZONE || (s.STEP_TURNSTILE && s.CLOUDFLARE_ACCOUNT_ID)) && "Cloudflare",
+    posthogOn(run) && !fromFile("POSTHOG_PROJECT_TOKEN", { quiet: true }) && "PostHog"].filter(Boolean);
   if (!dryRun) await confirm(`This sets up ${baseName(s)} at ${providers.slice(0, -1).join(", ")}${providers.length > 1 ? " and " : ""}${providers.at(-1)}, which bill your accounts.`);
 
   console.log("\nGitHub");
@@ -1100,6 +1140,9 @@ async function up(run) {
       return { POLAR_ADMIN_TOKEN: admin, POLAR_WORKER_TOKEN: worker, POLAR_ORGANIZATION_ID: organization.id };
     });
   }
+  // Before Railway: the admin's first build takes the project's token and address (NEXT_PUBLIC_POSTHOG_*).
+  console.log("\nPostHog");
+  await posthogSteps(run);
   console.log("\nRailway");
   await railwaySteps(run);
   console.log("\nAddress");
@@ -1179,6 +1222,169 @@ async function stripeKeysStep(run) {
     console.log(`  both keys belong to Stripe account ${admin}, in its ${s.STRIPE === "live" ? "live mode" : "sandbox"}`);
     return { ...keys, STRIPE_ACCOUNT_ID: admin };
   });
+}
+
+// ---------------------------------------------------------------- PostHog
+
+/** PostHog's app and API address for the POSTHOG setting, and the one events go to. A self-hosted instance has one for both. */
+function posthogHosts(where) {
+  return where === "us" || where === "eu" ? { app: `https://${where}.posthog.com`, ingest: `https://${where}.i.posthog.com` } : { app: where, ingest: where };
+}
+
+/**
+ * Whether this run sets PostHog up. POSTHOG is on unless it says no, and a settings file without the line counts as us.
+ * A deployment up deployed before the PostHog step existed gets it only once its settings file has the line, since
+ * that redeploys migrate, the admin and the worker.
+ */
+function posthogOn(run) {
+  const s = run.settings;
+  return Boolean(s.POSTHOG) && (s.POSTHOG_ASKED || !run.state.done["deploy.admin"] || Boolean(run.state.done["posthog.project"]));
+}
+
+/** A call to PostHog's API with a personal API key. */
+function posthogCall(run, key, pathname, options = {}) {
+  return http("PostHog", `${URLS.posthog ?? posthogHosts(run.settings.POSTHOG).app}${pathname}`, { ...options, headers: { Authorization: `Bearer ${key}` } });
+}
+
+/** The personal API key, asked for once, after saying how to make one: PostHog makes them only on its own pages. */
+async function posthogKey(run) {
+  if (tokens.POSTHOG_PERSONAL_API_KEY) return tokens.POSTHOG_PERSONAL_API_KEY;
+  const { app } = posthogHosts(run.settings.POSTHOG);
+  if (!given("POSTHOG_PERSONAL_API_KEY")) {
+    console.log(`  PostHog makes personal API keys only on its own pages. At ${app}/settings/user-api-keys, Create personal API key:
+  name it bootstrap, limit it to your organization, and give it organization:read, project:read and project:write
+  (guide 3.7, PostHog). Put it in the secrets file as POSTHOG_PERSONAL_API_KEY, or paste it below.
+  To set up without PostHog, set POSTHOG=no in ${run.file} instead.`);
+  }
+  try {
+    tokens.POSTHOG_PERSONAL_API_KEY = hide(await secret("POSTHOG_PERSONAL_API_KEY", "PostHog personal API key (phx_...)", looksLike.posthogKey));
+  } catch (error) {
+    if (/^no valid value given/.test(error.message)) throw new Stop(`no PostHog personal API key (phx_...) given. Make one as above and put it in ${config?.file ?? "the secrets file"} as POSTHOG_PERSONAL_API_KEY, or set POSTHOG=no in ${run.file}, then run up again`);
+    throw error;
+  }
+  return tokens.POSTHOG_PERSONAL_API_KEY;
+}
+
+/** The PostHog organization to work in: POSTHOG_ORGANIZATION_ID (or the one an earlier run used), else the only one the key reaches. */
+async function posthogOrganization(run, key) {
+  const wanted = run.settings.POSTHOG_ORGANIZATION_ID || v(run, "POSTHOG_ORGANIZATION_ID");
+  const list = (await posthogCall(run, key, "/api/organizations/?limit=100"))?.results ?? [];
+  const named = list.map((organization) => `${organization.id} (${organization.name})`).join(", ");
+  if (wanted) {
+    const found = list.find((organization) => String(organization.id).toLowerCase() === wanted.toLowerCase());
+    if (found) return found;
+    throw Object.assign(new Error(`the PostHog personal API key doesn't reach the organization ${wanted}${run.settings.POSTHOG_ORGANIZATION_ID ? " that POSTHOG_ORGANIZATION_ID names" : " an earlier run used"}, only ${named || "none"}. Make the key as a member of it, with it in the key's organizations`), { service: "PostHog" });
+  }
+  if (list.length === 1) return list[0];
+  if (!list.length) throw Object.assign(new Error("the PostHog personal API key reaches no organization: give it organization:read, with your organization in its scope"), { service: "PostHog" });
+  throw Object.assign(new Error(`the PostHog personal API key reaches ${list.length} organizations. Put the one to use in ${run.file} as POSTHOG_ORGANIZATION_ID: ${named}`), { service: "PostHog" });
+}
+
+/** Every project of a PostHog organization, 100 a page. */
+async function posthogProjects(run, key, organization) {
+  const projects = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await posthogCall(run, key, `/api/organizations/${organization.id}/projects/?limit=100&offset=${offset}`);
+    projects.push(...(page?.results ?? []));
+    if (!page?.next || !page?.results?.length) return projects;
+  }
+}
+
+/** How many projects a PostHog organization's plan allows: 1 on the free plan, null when the plan sets no limit. */
+function posthogProjectLimit(organization) {
+  const feature = (organization.available_product_features ?? []).find((item) => item?.key === "organizations_projects");
+  return feature ? (feature.limit ?? null) : 1;
+}
+
+const sameName = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+
+/**
+ * The deployment's PostHog project, before the Railway steps: the admin's first build needs its token. Found by the ID
+ * an earlier run kept, else by the token the admin has already (such as one set by hand), else by name (PostHog's
+ * names are unique in an organization), else made. A token in the secrets file is used as it is. When the step is new to
+ * a deployment whose variables are done, they run again below to bring the values to the services.
+ */
+async function posthogSteps(run) {
+  const s = run.settings;
+  if (!s.POSTHOG) return console.log("  skipped (POSTHOG=no)");
+  if (!posthogOn(run)) {
+    return console.log(`  not added: this deployment was set up before bootstrap made PostHog projects, and ${run.file} has no POSTHOG line.
+  To add one, put POSTHOG=us there (or eu, or your instance's address) and run up again, which redeploys the services
+  with the PostHog values. POSTHOG=no hides this line.`);
+  }
+  const hosts = posthogHosts(s.POSTHOG);
+  const wasDone = Boolean(run.state.done["posthog.project"]);
+  const name = nameFor(run, "POSTHOG_PROJECT_NAME");
+  const title = fromFile("POSTHOG_PROJECT_TOKEN", { quiet: true }) ? "The PostHog project whose token the secrets file gives"
+    : `PostHog project "${name}" in ${s.POSTHOG === "us" || s.POSTHOG === "eu" ? `PostHog's ${s.POSTHOG.toUpperCase()} cloud` : s.POSTHOG}${s.POSTHOG_RECORDINGS ? ", with screen recordings on" : ""}`;
+  await step(run, "posthog.project", title, async () => {
+    const none = { POSTHOG_PROJECT_ID: undefined, POSTHOG_PROJECT_NAME: undefined, POSTHOG_PROJECT_KEPT: undefined };
+    const inFile = fromFile("POSTHOG_PROJECT_TOKEN");
+    if (inFile) {
+      if (!looksLike.posthogToken(inFile)) throw new Error(`POSTHOG_PROJECT_TOKEN in ${config.file} isn't a PostHog project token (phc_...)`);
+      console.log("  a project the script didn't make, so its settings, such as screen recordings, stay as they are");
+      return { ...none, POSTHOG_PROJECT_TOKEN: inFile, POSTHOG_HOST: hosts.ingest, POSTHOG_ORGANIZATION_ID: undefined };
+    }
+    const key = await posthogKey(run);
+    const organization = await posthogOrganization(run, key);
+    const projects = await posthogProjects(run, key, organization);
+    const where = (id) => `/api/organizations/${organization.id}/projects/${id}/`;
+    let host = hosts.ingest;
+    let project = v(run, "POSTHOG_PROJECT_ID") && projects.find((item) => String(item.id) === String(v(run, "POSTHOG_PROJECT_ID")));
+    if (project) console.log(`  = ${project.id} ("${project.name}")`);
+    else {
+      // A token on the admin that this script didn't put there, such as one set by hand, is kept with its address: the
+      // deployment's analytics stay where they are.
+      const onAdmin = await railwayVariable(run, "admin", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN");
+      if (onAdmin && onAdmin !== v(run, "POSTHOG_PROJECT_TOKEN")) {
+        const adminHost = await railwayVariable(run, "admin", "NEXT_PUBLIC_POSTHOG_HOST");
+        project = projects.find((item) => item.api_token === onAdmin);
+        if (!project) {
+          console.log(`  kept as it is: its project isn't in the organization ${organization.name}, so its settings stay as they are. To give this
+  deployment a project of its own, delete NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN from the admin in Railway, then redo posthog.project.`);
+          // With its address too: the dashboard sends to PostHog's US address when the admin names none.
+          return { ...none, POSTHOG_PROJECT_TOKEN: onAdmin, POSTHOG_HOST: adminHost ?? posthogHosts("us").ingest, POSTHOG_PROJECT_KEPT: true, POSTHOG_ORGANIZATION_ID: organization.id };
+        }
+        host = adminHost ?? host;
+        console.log(`  = the admin's, ${project.id} ("${project.name}")`);
+      }
+    }
+    if (!project) {
+      project = projects.find((item) => !item.is_demo && sameName(item.name, name));
+      if (project) console.log(`  = ${project.id}`);
+    }
+    if (!project) {
+      try {
+        project = await posthogCall(run, key, `/api/organizations/${organization.id}/projects/`, { method: "POST", body: { name, ...(s.POSTHOG_RECORDINGS ? { session_recording_opt_in: true } : {}) } });
+      } catch (error) {
+        const made = projects.filter((item) => !item.is_demo).length;
+        const limit = posthogProjectLimit(organization);
+        if (error.status === 403 && /limit/i.test(error.message)) {
+          throw new Error(`PostHog won't make another project in the organization ${organization.name}, which has ${made}${limit ? ` and whose plan allows ${limit}` : ""} ("${error.message.replace(/^PostHog refused [A-Z]+ \S+: /, "")}"). Either move the organization to pay-as-you-go in PostHog's billing settings (no monthly fee, up to 6 projects), put an existing project's token (phc_...) in ${config?.file ?? "the secrets file"} as POSTHOG_PROJECT_TOKEN, which this deployment then shares, or set POSTHOG=no in ${run.file}. Then run up again`);
+        }
+        if (error.status === 403 && /admin/i.test(error.message)) {
+          throw new Error(`your PostHog user isn't an admin of the organization ${organization.name}, which making a project takes. Ask an admin to make you one, or to make the project "${name}" and give you its token (phc_...) for ${config?.file ?? "the secrets file"} as POSTHOG_PROJECT_TOKEN, then run up again`);
+        }
+        throw error;
+      }
+      console.log(`  made the project, ${project.id}, in the organization ${organization.name}`);
+    } else if (s.POSTHOG_RECORDINGS) {
+      // Screen recordings start off in a project PostHog's API makes, and the dashboard's recorder then never starts.
+      const detail = await posthogCall(run, key, where(project.id));
+      if (detail?.session_recording_opt_in === true) console.log("  = screen recordings on");
+      else {
+        await posthogCall(run, key, where(project.id), { method: "PATCH", body: { session_recording_opt_in: true } });
+        console.log("  ~ screen recordings turned on");
+      }
+    }
+    if (!looksLike.posthogToken(String(project.api_token ?? ""))) throw Object.assign(new Error(`PostHog didn't send the token of the project ${project.id}`), { service: "PostHog" });
+    return { ...none, POSTHOG_PROJECT_TOKEN: project.api_token, POSTHOG_HOST: host, POSTHOG_PROJECT_ID: project.id, POSTHOG_PROJECT_NAME: project.name ?? name, POSTHOG_ORGANIZATION_ID: organization.id };
+  });
+  if (!dryRun && !wasDone && run.state.done["posthog.project"] && run.state.done.variables) {
+    delete run.state.done.variables;
+    save(run);
+    console.log("  The variables are done already, so they run again below, to bring the PostHog values to the services.");
+  }
 }
 
 // The workflows a deployment needs. CodeQL and the landing link check are optional on a fork.
@@ -2037,6 +2243,15 @@ function variableSections(run) {
   const stripe = cloud && s.BILLING_PROVIDER === "stripe";
   const production = s.ENVIRONMENT === "production";
   const role = (name, variable) => `postgresql://${name}:\${{Postgres.${variable}}}@\${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack`;
+  // PostHog: the admin holds the project's token, and the worker refers to it. The dashboard's events go to POSTHOG_PROXY
+  // when it's set, else to the address the step found (a reverse proxy set by hand on the admin stays); the worker's
+  // events and every service's logs go straight to PostHog's own ingestion address.
+  const posthog = posthogOn(run) && !run.template;
+  const posthogToken = x("POSTHOG_PROJECT_TOKEN");
+  const direct = /^https:\/\/(us|eu)\.i\.posthog\.com$/.test(x("POSTHOG_HOST") ?? "") ? x("POSTHOG_HOST") : s.POSTHOG && posthogHosts(s.POSTHOG).ingest;
+  const logs = posthog && s.POSTHOG_LOGS ? [["migrate, admin, worker", {
+    OTEL_EXPORTER_OTLP_ENDPOINT: `${direct}/i`, OTEL_EXPORTER_OTLP_HEADERS: posthogToken && `Authorization=Bearer ${posthogToken}`,
+  }]] : [];
   return [
     ["Postgres", {
       PGDATA: "/var/lib/postgresql/data/pgdata", POSTGRES_DB: "lobbystack", POSTGRES_USER: "postgres",
@@ -2079,6 +2294,7 @@ function variableSections(run) {
       TWILIO_SMS_WEBHOOK_URL: "${{APP_BASE_URL}}/api/webhooks/twilio/sms", TWILIO_STATUS_CALLBACK_URL: "${{APP_BASE_URL}}/api/webhooks/twilio/status",
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: x("TURNSTILE_SITE_KEY"), TURNSTILE_SECRET_KEY: x("TURNSTILE_SECRET_KEY"),
       ...(polar ? { POLAR_ACCESS_TOKEN: x("POLAR_ADMIN_TOKEN") } : {}), ...(stripe ? { STRIPE_API_KEY: x("STRIPE_ADMIN_KEY") } : {}),
+      ...(posthog ? { NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: posthogToken, NEXT_PUBLIC_POSTHOG_HOST: s.POSTHOG_PROXY || x("POSTHOG_HOST") } : {}),
     }],
     ["worker", {
       RAILWAY_DOCKERFILE_PATH: "Dockerfile.worker", PORT: "3002", RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "1860",
@@ -2089,7 +2305,9 @@ function variableSections(run) {
       TWILIO_STATUS_CALLBACK_URL: "${{admin.TWILIO_STATUS_CALLBACK_URL}}", TWILIO_SIP_TRUNK_SID: x("TWILIO_SIP_TRUNK_SID"),
       SMTP_HOST: "smtp.resend.com", SMTP_PORT: "587", SMTP_SECURE: "false", SMTP_USERNAME: "resend", SMTP_PASSWORD: x("SMTP_PASSWORD"),
       EMAIL_FROM: s.EMAIL_FROM, ...(polar ? { POLAR_ACCESS_TOKEN: x("POLAR_WORKER_TOKEN") } : {}), ...(stripe ? { STRIPE_API_KEY: x("STRIPE_WORKER_KEY") } : {}),
+      ...(posthog ? { POSTHOG_API_KEY: "${{admin.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN}}", POSTHOG_HOST: direct } : {}),
     }],
+    ...logs,
   ];
 }
 
@@ -2317,6 +2535,22 @@ async function postDeploySteps(run) {
       await byHandHosts();
     }
   });
+  // Only now are both of the admin's addresses known. A project given in the secrets file isn't changed.
+  if (posthogOn(run) && s.POSTHOG_RECORDINGS && !fromFile("POSTHOG_PROJECT_TOKEN", { quiet: true })) {
+    await step(run, "post.posthog", "The PostHog project takes screen recordings only from this deployment's addresses", async () => {
+      const id = v(run, "POSTHOG_PROJECT_ID");
+      if (!id) return console.log("  = the admin's PostHog project isn't one the script found in your organization, so its settings stay as they are");
+      const origins = [...new Set([appHost(run), v(run, "RAILWAY_HOST")].filter(Boolean))].map((host) => `https://${host}`);
+      const key = await posthogKey(run);
+      const where = `/api/organizations/${v(run, "POSTHOG_ORGANIZATION_ID")}/projects/${id}/`;
+      const domains = ((await posthogCall(run, key, where))?.recording_domains ?? []).filter(Boolean);
+      const missing = origins.filter((origin) => !domains.includes(origin));
+      if (!missing.length) return console.log(`  = it lists ${origins.join(" and ")}`);
+      // Added to what's there, so an address added by hand stays.
+      await posthogCall(run, key, where, { method: "PATCH", body: { recording_domains: [...domains, ...missing] } });
+      console.log(`  ~ it now also lists ${missing.join(" and ")}`);
+    });
+  }
 }
 
 // ---------------------------------------------------------------- connect
@@ -2884,6 +3118,7 @@ const PASSED_ON = {
   "turnstile": ["variables"],
   "polar.tokens": ["variables"],
   "stripe.keys": ["variables"],
+  "posthog.project": ["variables", "post.posthog"],
   "twilio.tollfree": ["variables"],
   "secrets": ["variables"],
   "connect.webhook": ["connect.variables"],
@@ -2943,6 +3178,8 @@ const PROVIDERS = {
     needs: "a restricted key of the deployment's own account and mode, with the permissions docs/providers/stripe.md lists" },
   Polar: { token: "the Polar token named above", make: "Polar: the organization's Settings > Developers > New Token", status: "https://status.polar.sh",
     needs: "an organization token of the deployment's organization, made in Polar's sandbox or live as POLAR says (each knows only its own tokens), with the scopes guide 3.7 lists" },
+  PostHog: { token: "POSTHOG_PERSONAL_API_KEY", make: "PostHog: Settings > Personal API keys (https://us.posthog.com/settings/user-api-keys, or eu.posthog.com)", status: "https://www.posthogstatus.com",
+    needs: "a personal API key made in the region POSTHOG names (each region knows only its own keys), with organization:read, project:read and project:write, and your organization in its scope" },
 };
 
 /** Suggestions for an error, from what failed and how. */
@@ -3182,6 +3419,53 @@ async function doctor(run) {
       } catch (error) {
         note(`Polar: couldn't tell whether connect will need a setup token (${error.message})`);
       }
+    }
+  }
+  const posthogToken = fromFile("POSTHOG_PROJECT_TOKEN", { quiet: true });
+  // The PostHog token on the admin that the script didn't put there, such as one set by hand, read only when Railway's
+  // token and the deployment's IDs are known. A failed read counts as none: doctor changes nothing either way.
+  const adminPostHogToken = async () => {
+    const token = quietGiven("RAILWAY_API_TOKEN");
+    const where = { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: v(run, "RAILWAY_SERVICE_IDS")?.admin };
+    if (!token || !where.projectId || !where.environmentId || !where.serviceId) return undefined;
+    try {
+      const value = (await http("Railway", URLS.railway, { method: "POST", headers: bearer(token), body: { query: Q.readVariables, variables: where } }))?.data?.variables?.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN;
+      return typeof value === "string" && value && !value.includes("${{") && value !== v(run, "POSTHOG_PROJECT_TOKEN") ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  if (!s.POSTHOG) note("PostHog: off (POSTHOG=no)");
+  else if (!posthogOn(run)) note(`PostHog: not added, since up deployed this before bootstrap made PostHog projects and ${run.file} has no POSTHOG line. POSTHOG=us there adds it at the next up, which redeploys the services`);
+  else if (posthogToken) {
+    (looksLike.posthogToken(posthogToken) ? ok : fix)(looksLike.posthogToken(posthogToken) ? "PostHog: POSTHOG_PROJECT_TOKEN in the secrets file names the project, so no personal API key is needed" : "PostHog: POSTHOG_PROJECT_TOKEN in the secrets file isn't a PostHog project token (phc_...)");
+  } else if (run.state.done["posthog.project"] && (run.state.done["post.posthog"] || !s.POSTHOG_RECORDINGS) && !quietGiven("POSTHOG_PERSONAL_API_KEY")) {
+    note(`PostHog: no personal API key needed (the project is set up${v(run, "POSTHOG_PROJECT_NAME") ? `: "${v(run, "POSTHOG_PROJECT_NAME")}"` : ""})`);
+  } else {
+    let found = null;
+    await check("PostHog", "POSTHOG_PERSONAL_API_KEY", async (value) => {
+      if (!looksLike.posthogKey(value)) throw Object.assign(new Error("it isn't a PostHog personal API key (phx_...)"), { service: "PostHog" });
+      const organization = await posthogOrganization(run, value);
+      found = { organization, projects: await posthogProjects(run, value, organization) };
+      return `the organization ${organization.name}, ${organization.id}`;
+    });
+    if (found) {
+      // Whether up can make the project: PostHog's plan limits the projects of an organization, and only its admins make them.
+      // As up does, an earlier run's project comes first, then the one whose token the admin has already, then the name.
+      const { organization, projects } = found;
+      const name = nameFor(run, "POSTHOG_PROJECT_NAME");
+      const id = v(run, "POSTHOG_PROJECT_ID");
+      let existing = id && projects.find((item) => String(item.id) === String(id));
+      const onAdmin = existing ? undefined : await adminPostHogToken();
+      if (onAdmin) existing = projects.find((item) => item.api_token === onAdmin);
+      if (!existing && !onAdmin) existing = projects.find((item) => !item.is_demo && sameName(item.name, name));
+      const made = projects.filter((item) => !item.is_demo).length;
+      const limit = posthogProjectLimit(organization);
+      if (onAdmin && !existing) note(`PostHog: the admin has a token whose project isn't in the organization ${organization.name}, so up keeps it as it is, with the admin's address, and makes no project`);
+      else if (existing) ok(`PostHog: the project "${existing.name}" (${existing.id})${onAdmin ? ", whose token the admin has," : ""} exists${run.state.done["posthog.project"] ? "" : " and will be reused"}`);
+      else if (limit !== null && made >= limit) fix(`PostHog: the organization ${organization.name} has ${made} project${made === 1 ? "" : "s"}, as many as its plan allows (${limit}), so up couldn't make "${name}". Move it to pay-as-you-go in PostHog's billing settings (no monthly fee, up to 6 projects), put an existing project's token in the secrets file as POSTHOG_PROJECT_TOKEN, or set POSTHOG=no`);
+      else if ((organization.membership_level ?? 0) < 8 && !organization.members_can_create_projects) fix(`PostHog: your user isn't an admin of the organization ${organization.name}, which making the project "${name}" takes. Ask an admin to make you one, or to make the project and give you its token for the secrets file (POSTHOG_PROJECT_TOKEN)`);
+      else ok(`PostHog: up will make the project "${name}" (the organization has ${made}${limit === null ? "" : `, and its plan allows ${limit}`})`);
     }
   }
   const host = v(run, "APP_HOST") && appHost(run);

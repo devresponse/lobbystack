@@ -1,8 +1,8 @@
 # Set up a LobbyStack environment with `devops/bootstrap.mjs`
 
-`bootstrap.mjs` sets up one LobbyStack environment on Railway, with the outside services it needs: an OpenAI project and key, a Twilio subaccount and SIP trunk, a Resend sending domain, Cloudflare DNS records and a Turnstile widget, and in cloud mode the Polar tokens and the plans Polar sells, or the Stripe keys. You describe the environment in one small settings file, and what it makes is named after the dashboard's address (`APP_BASE_URL`), or after `NAME` without one. The script does the rest through each provider's API, records every finished step, and stops with exact instructions where only a person can act.
+`bootstrap.mjs` sets up one LobbyStack environment on Railway, with the outside services it needs: an OpenAI project and key, a Twilio subaccount and SIP trunk, a Resend sending domain, Cloudflare DNS records and a Turnstile widget, a PostHog project unless you turn it off, and in cloud mode the Polar tokens and the plans Polar sells, or the Stripe keys. You describe the environment in one small settings file, and what it makes is named after the dashboard's address (`APP_BASE_URL`), or after `NAME` without one. The script does the rest through each provider's API, records every finished step, and stops with exact instructions where only a person can act.
 
-**Status:** `connect`'s Polar billing is new on 12 November 2026 (`releases/r2` at `4711924` plus fork PR #157). `scripts/bootstrap.test.ts`, which `pnpm test:scripts` runs, runs `up`, `doctor`, `status` and `connect` through their Polar steps, against one local stand-in for Railway's API, Polar's API and the admin, and a stand-in for `pnpm billing`. Its first run against Polar's sandbox and a real admin, on Windows on 13 November 2026, set the plans up, then stopped at the admin's webhook secret, which it misread; fork PR #160 fixes that ([What isn't confirmed](#what-isnt-confirmed)). The rest was checked on 2 November 2026 against `main` at `df0a0ed`: a test harness, not kept in the repository, ran every command against stand-ins for each API, 67 checks covering a fresh run named after `APP_BASE_URL` or after `NAME`, an older state file, a changed `APP_BASE_URL`, reruns, `--yes`, `redo`, a deleted project, duplicate names, a running deployment's variables, the lock and the state-file guard. Before that, on 1 and 2 November 2026, the script set up a real test environment several times, from a private template and with its own address, and on 2 November that environment answered a phone call. The parts not yet run against a real service are listed in [What isn't confirmed](#what-isnt-confirmed). Set up a test environment first.
+**Status:** the PostHog step is new on 13 November 2026 (fork PR #165). `scripts/bootstrap.test.ts` runs it against a stand-in for PostHog's API, written from PostHog's published API schema and its code; it hasn't run against PostHog itself yet. `connect`'s Polar billing is new on 12 November 2026 (`releases/r2` at `4711924` plus fork PR #157). `scripts/bootstrap.test.ts`, which `pnpm test:scripts` runs, runs `up`, `doctor`, `status` and `connect` through their Polar steps, against one local stand-in for Railway's API, Polar's API and the admin, and a stand-in for `pnpm billing`. Its first run against Polar's sandbox and a real admin, on Windows on 13 November 2026, set the plans up, then stopped at the admin's webhook secret, which it misread; fork PR #160 fixes that ([What isn't confirmed](#what-isnt-confirmed)). The rest was checked on 2 November 2026 against `main` at `df0a0ed`: a test harness, not kept in the repository, ran every command against stand-ins for each API, 67 checks covering a fresh run named after `APP_BASE_URL` or after `NAME`, an older state file, a changed `APP_BASE_URL`, reruns, `--yes`, `redo`, a deleted project, duplicate names, a running deployment's variables, the lock and the state-file guard. Before that, on 1 and 2 November 2026, the script set up a real test environment several times, from a private template and with its own address, and on 2 November that environment answered a phone call. The parts not yet run against a real service are listed in [What isn't confirmed](#what-isnt-confirmed). Set up a test environment first.
 
 Section numbers such as "guide 3.2" in this page and in the script's messages are those of the [deployment guide](../docs/deployment/guide/README.md): mainly [Part 3](../docs/deployment/guide/part-3-outside-services.md) (outside services), [Part 4](../docs/deployment/guide/part-4-test-environment.md) (a test environment), [Part 5](../docs/deployment/guide/part-5-production.md) (production) and [Appendix A](../docs/deployment/guide/appendix-a-variables.md) (variables). The script does most of Parts 3 and 4.
 
@@ -32,16 +32,17 @@ Every setting, secret and Railway variable the script reads, keeps or writes, wi
 | OpenAI | Creates the project and its API key, owned by a service account | Make sure the project takes GPT-Live SIP calls, set its spending limit, and create the incoming-call webhook |
 | Twilio | Creates the subaccount, the SIP trunk (Secure Trunking, transfers) and its one origination URI, to the OpenAI project. In cloud mode it buys or reuses the shared toll-free number | Geo permissions, the business profile, texting registration and toll-free verification |
 | Email | Creates the Resend domain, its DNS records, a DMARC record if there's none, and a key that can only send from that domain | Nothing, if the domain's DNS is at Cloudflare |
-| Railway | Creates the project, the five services, both volumes, the bucket, each service's settings, the admin's address, the 13 platform secrets and about 90 variables. It deploys Postgres and Redis, waits for migrate to pass, then connects the admin and the worker, which Railway builds | Nothing |
+| Railway | Creates the project, the five services, both volumes, the bucket, each service's settings, the admin's address, the 13 platform secrets and about 100 variables. It deploys Postgres and Redis, waits for migrate to pass, then connects the admin and the worker, which Railway builds | Nothing |
 | The admin's own address (`APP_BASE_URL`) | Adds it to the admin as a custom domain, writes its CNAME and Railway's TXT check in Cloudflare, and makes it the admin's `APP_BASE_URL`. It checks all of it again after the deploy | Nothing, if the domain's DNS is at Cloudflare |
 | Turnstile | Creates the widget, or adds this deployment's addresses to the widget whose keys you gave | Nothing, if the Cloudflare token can edit Turnstile |
 | `connect` | Checks the admin's health, takes the webhook's secret, makes the operator's platform key, and sets both on the admin | Create the webhook in OpenAI first |
 | Polar, in cloud mode | `up` takes the admin's and the worker's tokens, and reads the organization from the worker's, which becomes `POLAR_ORGANIZATION_ID`. `connect` then sells the plans: `pnpm billing plan`, `apply` once you type `yes`, the Polar webhook's secret on the admin, and `verify` | Make the two tokens, or one for both, and sign up as `OPERATOR_EMAIL`. Unless the worker's token has the setup scopes too, give `connect` a setup token and delete it afterwards ([step 8](#8-cloud-mode-sell-plans-through-polar)) |
 | Stripe, in cloud mode with `BILLING_PROVIDER=stripe` | Takes the admin's and the worker's restricted keys, checks that each is of the deployment's mode and that both belong to one account, and puts that account on both services as `STRIPE_ACCOUNT_ID`, with `BILLING_PROVIDER` | Make those keys, and later run `pnpm billing --stripe` ([on Stripe](#on-stripe)) |
+| PostHog, unless `POSTHOG=no` | Finds or makes the deployment's project, turns its screen recordings on and limits them to the deployment's addresses, and puts its token and address on the admin, the worker and migrate, logs included, before the admin's first build ([PostHog](#posthog)) | Sign up at PostHog, and make one personal API key. On PostHog's free plan, which allows one project, move to pay-as-you-go before the second |
 
 ## Before you start
 
-**Accounts:** Railway on a paid plan, OpenAI with prepaid credit, Twilio upgraded from trial (a trial account has no SIP trunking), Resend, Cloudflare holding the domain's DNS, and Polar or Stripe for cloud mode ([guide 1.1](../docs/deployment/guide/part-1-prepare.md#11-accounts-youll-need)).
+**Accounts:** Railway on a paid plan, OpenAI with prepaid credit, Twilio upgraded from trial (a trial account has no SIP trunking), Resend, Cloudflare holding the domain's DNS, PostHog unless you set `POSTHOG=no`, and Polar or Stripe for cloud mode ([guide 1.1](../docs/deployment/guide/part-1-prepare.md#11-accounts-youll-need)).
 
 **Your computer:**
 
@@ -64,6 +65,7 @@ Every setting, secret and Railway variable the script reads, keeps or writes, wi
 | `TWILIO_MAIN_ACCOUNT_SID`, `TWILIO_MAIN_AUTH_TOKEN` | The main account's SID and Auth Token, which own the subaccounts | Twilio's console, **Account Info** |
 | `RESEND_ADMIN_KEY` | A **Full access** key, used only to create the domain and the sending key. Delete it afterwards | `resend.com/api-keys` |
 | `CLOUDFLARE_API_TOKEN` | **Zone > DNS > Edit** on the zone, and **Account > Turnstile > Edit** on the account | `dash.cloudflare.com/profile/api-tokens` |
+| `POSTHOG_PERSONAL_API_KEY` | A personal API key (`phx_…`) made in the region `POSTHOG` names, with `organization:read`, `project:read` and `project:write`, limited to your organization. Your PostHog user must be an admin of it to make a project. Not needed with `POSTHOG=no`, or with `POSTHOG_PROJECT_TOKEN` in the secrets file | `us.posthog.com/settings/user-api-keys` (or `eu.`), **Create personal API key**. PostHog's API can't make one |
 
 In cloud mode with Polar, `connect` sets the plans up with the worker's token when Polar lets that token do it, that is when it was made with the setup scopes too. Otherwise it asks for one more, a short-lived **Polar setup token** (`POLAR_SETUP_TOKEN`), keeps it in memory only, and checks that it belongs to the deployment's organization ([step 8](#8-cloud-mode-sell-plans-through-polar)). With Stripe, two more come later, and the script never sees them: a **Stripe setup key** for `pnpm billing --stripe`, and a **Railway project token** for `node devops/railway-vars.mjs` ([on Stripe](#on-stripe)).
 
@@ -94,6 +96,11 @@ This writes `.env.bootstrap-<name>` for the settings and `.env.bootstrap-<name>.
 | `BILLING_PROVIDER` | `polar` | Cloud mode only: `polar` or `stripe`, who sells the plans. A deployment keeps its provider ([Stripe billing](../docs/providers/stripe.md)) |
 | `POLAR`, `POLAR_ORGANIZATION_ID` | `sandbox`, empty | With `BILLING_PROVIDER=polar` only. `POLAR` is `sandbox` or `live`. `POLAR_ORGANIZATION_ID` may stay empty: `up` reads the organization from the worker's token. Set, it must be that organization's ID, a UUID, or `up` stops |
 | `STRIPE` | `sandbox` | With `BILLING_PROVIDER=stripe` only: `sandbox` or `live`. The account is the one the keys belong to |
+| `POSTHOG` | `us` | `us` or `eu`, the PostHog cloud region your organization is in, a self-hosted instance's `https://` address, or `no` for no PostHog. Empty or missing means `us`, except on a deployment `up` deployed before the PostHog step ([PostHog](#posthog)) |
+| `POSTHOG_ORGANIZATION_ID` | empty | Only when the personal key reaches several organizations: the one to use, a UUID. `doctor` and the step list the ones the key reaches |
+| `POSTHOG_PROXY` | empty | Optional: a reverse proxy's `https://` address for the dashboard's events, such as PostHog's managed proxy, which ad blockers don't stop ([guide 3.7](../docs/deployment/guide/part-3-outside-services.md#37-optional-services)). The worker's events and the logs still go straight to PostHog |
+| `POSTHOG_RECORDINGS` | `yes` | `yes` turns the project's screen recordings on and limits them to the deployment's addresses; `no` leaves the project's setting as it is (off in a new one). The dashboard records only operators whose business has telemetry on |
+| `POSTHOG_LOGS` | `yes` | `yes` sends migrate's, the admin's and the worker's logs, traces and metrics to the project too (`OTEL_EXPORTER_OTLP_*`) |
 | `STEP_GITHUB` … `STEP_TURNSTILE` | `yes` | `no` skips that service's API, and its values then come from the secrets file, or are asked for |
 | `RAILWAY_TEMPLATE` | the code `template` printed | Optional: make the Railway layout from your private template in one call ([below](#optional-a-private-railway-template)) |
 | `TEMPLATE_PROJECT`, `TEMPLATE_REPO` | `lobbystack-template`, `your-org/lobbystack` | Optional, read only by `template` |
@@ -117,7 +124,7 @@ What the script makes at the providers is named after `APP_BASE_URL`'s address, 
 
 | Thing | Name |
 | --- | --- |
-| The Railway project, the OpenAI project, the Twilio subaccount, the Turnstile widget and the Resend key | `demo.example.com` |
+| The Railway project, the OpenAI project, the Twilio subaccount, the Turnstile widget, the Resend key and the PostHog project | `demo.example.com` |
 | The OpenAI service account that owns the key | `demo.example.com platform` |
 | The Twilio trunk | `demo.example.com to OpenAI` |
 | The shared toll-free number (cloud mode) | `demo.example.com shared texts` |
@@ -127,7 +134,7 @@ An address longer than 50 characters leaves the names to `NAME`, since Twilio's 
 
 - **Names are kept once used.** Each step records the name it gave or found in the state file, and later runs look for that name, or for the thing's ID. Changing `APP_BASE_URL` or `NAME` afterwards renames nothing and makes nothing new. `status`, `doctor` and `up` show each name in use. When the settings would name new things otherwise, they also print one line saying the names stay as recorded. To use new names everywhere, start a new settings file, which sets up a new environment.
 - **A state file from before names were recorded** was named after `NAME`, so the script records those names: on screen with `status` and `doctor`, and in the file at the next `up`, `connect` or `redo`. Keep `NAME` in such a settings file.
-- **Names aren't unique at most providers.** When a name matches two OpenAI projects, Twilio subaccounts, trunks, Turnstile widgets or Resend keys, the run stops and lists their IDs rather than pick one. Delete or rename the extra one, or give the one to use in the secrets file.
+- **Names aren't unique at most providers.** When a name matches two OpenAI projects, Twilio subaccounts, trunks, Turnstile widgets or Resend keys, the run stops and lists their IDs rather than pick one. Delete or rename the extra one, or give the one to use in the secrets file. PostHog's project names are unique within an organization, ignoring case, so there the name finds one project at most.
 - Things given in the secrets file keep whatever names they have.
 
 ### The secrets file
@@ -142,6 +149,7 @@ It holds keys, one `KEY=value` per line. Fill in only what you have: an empty li
   - `TURNSTILE_SITE_KEY` with `TURNSTILE_SECRET_KEY`;
   - `POLAR_ADMIN_TOKEN` with `POLAR_WORKER_TOKEN`, in cloud mode;
   - `STRIPE_ADMIN_KEY` with `STRIPE_WORKER_KEY`, in cloud mode with `BILLING_PROVIDER=stripe`, or as `STRIPE_API_KEY` under each service's `[...]` line of a `railway-vars.mjs` file;
+  - `POSTHOG_PROJECT_TOKEN`, a PostHog project's token (`phc_…`), to use that project as it is, with no personal key: its settings, such as screen recordings, stay as they are. Two deployments can share a project this way. A `railway-vars.mjs` file gives it as the admin's `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`;
   - `OPENAI_WEBHOOK_SECRET`, for `connect`;
   - any of the 13 platform secrets, such as `ENCRYPTION_KEY`, to reuse ones already made: at least 32 letters, digits, dashes or underscores each.
 
@@ -160,7 +168,8 @@ node devops/bootstrap.mjs up .env.bootstrap-<name> --dry-run
 - Node.js, pnpm, the Railway CLI and the GitHub CLI;
 - that Git ignores the files that hold secrets, and on Windows whether other accounts can read them;
 - every token it finds, with a read-only call, saying what already exists and will be reused;
-- in cloud mode with Polar, the organization that the worker's token and, when given, the setup token belong to: both must be the same one, and `POLAR_ORGANIZATION_ID` when it's set. Without a setup token, it says whether `connect` can set the plans up with the deployment's own token or will ask for one. One token for both the admin and the worker is a note, not a **FIX**.
+- in cloud mode with Polar, the organization that the worker's token and, when given, the setup token belong to: both must be the same one, and `POLAR_ORGANIZATION_ID` when it's set. Without a setup token, it says whether `connect` can set the plans up with the deployment's own token or will ask for one. One token for both the admin and the worker is a note, not a **FIX**;
+- with PostHog, the organization the personal key reaches, whether `up` will reuse a project (an earlier run's, the one whose token the admin has already, or one with the deployment's name), and otherwise whether it can make one: a **FIX** when the organization's plan allows no more projects, or when your user isn't an admin of it.
 
 Each problem is marked **FIX**. The dry run lists every step in order and calls nothing.
 
@@ -172,7 +181,7 @@ node devops/bootstrap.mjs up .env.bootstrap-<name>
 
 It asks you to type `yes`, since the services bill your accounts. Then it works through the steps, one line each: `+` runs a step, and `=` skips one that's already done.
 
-1. **GitHub, OpenAI, Twilio, email, then Polar or Stripe:** the outside services, in that order. On Polar, `polar.tokens` reads the organization the worker's token belongs to, records it as `POLAR_ORGANIZATION_ID`, and stops when the setting names another. On Stripe, `stripe.keys` reads each key's account from Stripe and stops when the two differ, or when a key is of the other mode.
+1. **GitHub, OpenAI, Twilio, email, Polar or Stripe, then PostHog:** the outside services, in that order. On Polar, `polar.tokens` reads the organization the worker's token belongs to, records it as `POLAR_ORGANIZATION_ID`, and stops when the setting names another. On Stripe, `stripe.keys` reads each key's account from Stripe and stops when the two differ, or when a key is of the other mode. `posthog.project` finds or makes the PostHog project ([PostHog](#posthog)).
 2. **Railway:** the project, found by name or made in `RAILWAY_WORKSPACE_ID`. Then the services, volumes and bucket, from your template or one by one, and each service's settings and migrate's pre-deploy command.
 3. **Address:** the admin's Railway address; with `APP_BASE_URL`, the custom domain and its DNS records; then the Turnstile widget.
 4. **Variables:** the 13 platform secrets (kept, given, read back from Railway, or new), then every service's variables, without deploying yet. They're also written to `.env.bootstrap-<name>.vars`. On a deployment that's already running, this step sets only the values that differ, and Railway deploys each service that changed again; the worker deploys again too when an admin value it refers to changed. It never changes a running database's settings.
@@ -186,6 +195,7 @@ It asks you to type `yes`, since the services bill your accounts. Then it works 
    - `post.dns`, with `APP_BASE_URL`: the custom domain is on the admin and its records are in Cloudflare, DNS only. It says whether Railway has verified the domain and issued its certificate.
    - `post.urls`: the admin's `APP_BASE_URL`, `SITE_URL` and `AUTH_TRUSTED_ORIGINS`, and the worker's `APP_BASE_URL`, match the settings. With `APP_BASE_URL`, `AUTH_TRUSTED_ORIGINS` lists both addresses, so signing in works on either.
    - `post.turnstile`: the widget lists the Railway address and `APP_BASE_URL`.
+   - `post.posthog`, with PostHog and `POSTHOG_RECORDINGS=yes`: the project takes screen recordings from the Railway address and `APP_BASE_URL`, added to any it lists already.
 
 It ends with the address, and with any step still waiting for you. In cloud mode with Polar, it also says to sign up as `OPERATOR_EMAIL` before `connect` ([step 8](#8-cloud-mode-sell-plans-through-polar)). A **BY HAND** step says exactly what to do and waits for Enter. The admin answers at `https://<address>/api/health/ready` once its build finishes. With `APP_BASE_URL`, the Railway address answers first, while DNS spreads and Railway issues the certificate.
 
@@ -196,6 +206,24 @@ It ends with the address, and with any step still waiting for you. In cloud mode
 - `--dry-run` shows the steps and calls nothing.
 
 **One run at a time.** While `up`, `connect`, `redo` or `template` runs, it holds a lock beside the state file, and a second run on the same file stops at once, naming the first. A run that was killed leaves its lock behind, and the next run takes it over. As well, a run never saves over a state file that something else changed after it started: it stops instead, saving nothing.
+
+### PostHog
+
+PostHog gets the dashboard's analytics, screen recordings and error reports, the worker's call events and errors, and with `POSTHOG_LOGS=yes` every service's logs ([guide 3.7](../docs/deployment/guide/part-3-outside-services.md#37-optional-services), PostHog). It's on unless `POSTHOG=no`. `posthog.project` runs before Railway, since the admin's first build takes the project's token and address. It works in the one organization the personal key reaches, or in `POSTHOG_ORGANIZATION_ID`, and takes the first of these:
+
+1. `POSTHOG_PROJECT_TOKEN` from the secrets file, as it is. Nothing is asked of PostHog, so no personal key is needed, and the project's settings stay as they are;
+2. the project an earlier run recorded;
+3. the project whose token the admin has already, such as one set by hand, with the admin's `NEXT_PUBLIC_POSTHOG_HOST`. When that project isn't in the organization, its token and address are kept as they are, PostHog's US address when the admin names none, and its settings aren't touched;
+4. the project with the deployment's name ([what things are named](#what-things-are-named));
+5. a new project with that name, with screen recordings on when `POSTHOG_RECORDINGS=yes`. A project PostHog's API makes has them off, and the dashboard's recorder then never starts.
+
+`variables` then puts the values on the services: the token and the address the dashboard sends to (`POSTHOG_PROXY`, else PostHog's, such as `https://us.i.posthog.com`) on the admin, the token by reference and PostHog's own address on the worker, and with `POSTHOG_LOGS=yes` the two `OTEL_EXPORTER_OTLP_*` values, PostHog's logs address and the token, on migrate, the admin and the worker. After the deploy, `post.posthog` lets the project take recordings only from the deployment's addresses.
+
+- **PostHog's plans limit projects.** The free plan allows one project per organization, pay-as-you-go six, with no monthly fee, and the Boost add-on ($250 a month) any number. When the organization has as many as its plan allows, PostHog refuses the new project and the step stops with three ways out: move the organization to pay-as-you-go in PostHog's billing settings, put an existing project's token in the secrets file as `POSTHOG_PROJECT_TOKEN`, which the deployments then share, or set `POSTHOG=no`. `doctor` says so before `up`.
+- **Only an admin of the organization can make a project,** unless the organization lets members make them. Otherwise the step stops and says so; an admin can make the project and give you its token for `POSTHOG_PROJECT_TOKEN`.
+- **A deployment `up` deployed before the PostHog step** has no `POSTHOG` line, and `up` leaves it without PostHog, saying how to add it. To add it, put `POSTHOG=us` (or `eu`, or your instance's address) in its settings file and run `up`: `posthog.project` runs, `variables` runs again, and Railway deploys migrate, the admin and the worker again with the new values. A token already on the admin is kept (3 above).
+- **Self-hosted PostHog** has the same API at its own address, which `POSTHOG` then names, and which serves both the app and the events. PostHog supports only its cloud, and keeps some features there. If the instance doesn't take logs at `/i/v1/logs`, set `POSTHOG_LOGS=no`. The dashboard's links into PostHog's app still open PostHog's US cloud (`apps/admin/src/lib/client-analytics.ts`).
+- **The personal key** is read from the environment or the secrets file, never kept in the state file or put on Railway. Delete it from the secrets file once the environment works, as with the other tokens.
 
 ## 5. The steps only a person can do
 
@@ -342,7 +370,7 @@ Every command can run again: finished steps show `=`, and every step finds what 
 
 - **What exists is found, not made twice:**
   - the Railway project (by its ID, else by its recorded name, never one that's being deleted), its services, volumes, bucket, addresses and custom domain;
-  - the OpenAI project, the Twilio subaccount and trunk, and the Turnstile widget, by the IDs an earlier run recorded, else by their names; the toll-free number and the Resend domain;
+  - the OpenAI project, the Twilio subaccount and trunk, the Turnstile widget and the PostHog project, by the IDs an earlier run recorded, else by their names; the toll-free number and the Resend domain;
   - the DNS records, by their full names, so a record Railway names relative to the zone is found again.
 - **Values are never replaced by mistake.** The 13 platform secrets come from the state file, then the secrets file, then the values already on Railway, and only then are new ones made, so a lost state file can't change the database's passwords. Keys a provider shows once (OpenAI's, Resend's) are read back from Railway; if they never got there, the script asks before replacing them. `connect` keeps the admin's other platform keys. A failed read from Railway stops the run, rather than counting as "not set".
 - **Variables are upserted:** each run sets the values it knows and leaves the others alone.
@@ -354,6 +382,8 @@ Every command can run again: finished steps show `=`, and every step finds what 
 | Rebuild in a new Railway project, such as after deleting the old one | Delete the old project in Railway, then `redo … railway.project`, `up` and `connect`. The new project gets the old one's name |
 | Give the admin another `APP_BASE_URL` | Change the setting, then `redo … railway.domain railway.custom turnstile variables "post.*"`, `up` and `connect`. `connect` asks you to change the webhook's URL. The projects keep their names. Remove the old domain and its CNAME by hand once you no longer want them |
 | Move to another OpenAI project, such as one that already has the webhook | Put its `OPENAI_PROJECT_ID` and `OPENAI_API_KEY` in the secrets file, then `redo … openai.project` and `up`: the trunk's address, the admin's key and the worker follow. If its webhook's secret differs, put that in the secrets file too, then `redo … connect.webhook` and `connect` |
+| Add PostHog to a deployment `up` deployed before the PostHog step | Put `POSTHOG=us` (or `eu`, or your instance's address) in the settings file, then `up`. Railway deploys migrate, the admin and the worker again ([PostHog](#posthog)) |
+| Use another PostHog project | Put its token in the secrets file as `POSTHOG_PROJECT_TOKEN`, then `redo … posthog.project` and `up`: `variables` and `post.posthog` run again |
 | Sell changed plans, once a change to `billing.json` is deployed (cloud mode with Polar) | `redo … connect.billing.apply`, then `connect`. It asks for `yes` again, and for a setup token unless the deployment's own token can set the plans up, then puts any new webhook secret on the admin and checks |
 | Recover a state file that names an old project, while the live one has the same name | `redo … railway.project`, then `up --yes`, then `connect`: it finds the live project by name and sets it up again, which redeploys its services once. The data and passwords stay |
 
@@ -369,7 +399,11 @@ The script stops at the failing step, names it, and lists **What to try**. Finis
 | `Warning: … settings the script doesn't read` | Usually a misspelled setting: check its name against [step 2](#2-write-the-settings-and-secrets-files) |
 | `Warning: … more than once, to different values` | Delete the line you don't want: the last one is used |
 | `RAILWAY_WORKSPACE_ID is empty`, or `You must specify a workspaceId` | Put the workspace's ID in the settings. The error and `doctor` list the ones the token reaches |
-| `didn't accept <TOKEN>` | Run `doctor`, and copy the token again in full. Railway needs an account or workspace token, OpenAI an admin key, Resend a Full access key, and Twilio the main account's Auth Token |
+| `didn't accept <TOKEN>` | Run `doctor`, and copy the token again in full. Railway needs an account or workspace token, OpenAI an admin key, Resend a Full access key, Twilio the main account's Auth Token, and PostHog a personal API key made in `POSTHOG`'s region |
+| `PostHog won't make another project in the organization …` | The organization has as many projects as its PostHog plan allows. Move it to pay-as-you-go, give an existing project's token as `POSTHOG_PROJECT_TOKEN`, or set `POSTHOG=no` ([PostHog](#posthog)) |
+| `your PostHog user isn't an admin of the organization …` | Ask an admin to make you one, or to make the project and give you its token for `POSTHOG_PROJECT_TOKEN` |
+| `the PostHog personal API key reaches 2 organizations` | Put the one to use in the settings file as `POSTHOG_ORGANIZATION_ID`: the message lists them |
+| `no PostHog personal API key (phx_…) given` | Make one ([before you start](#before-you-start)) and put it in the secrets file, or set `POSTHOG=no` |
 | `isn't allowed to do this` | The token lacks a permission, such as Cloudflare's **DNS Edit** or **Turnstile Edit**, or Twilio is still a trial |
 | `STRIPE_ADMIN_KEY is a live key, and STRIPE is sandbox`, or the reverse | Make the key in the deployment's mode: a sandbox's keys start with `rk_test_` |
 | `the admin's key belongs to Stripe account …, and the worker's to …` | Make both keys in the deployment's own account or sandbox, put them in the secrets file, and run `up` again |
@@ -414,7 +448,7 @@ The script stops at the failing step, names it, and lists **What to try**. Finis
 | --- | --- |
 | `.env.bootstrap-<name>` | The settings. Nothing secret |
 | `.env.bootstrap-<name>.secrets` | Your keys. The script only reads it |
-| `.env.bootstrap-<name>.state.json` | Each step's result: the 13 platform secrets, the provider keys made or given, the IDs, and with Polar the webhook's signing secret. Never the setup token, nor the operator key itself |
+| `.env.bootstrap-<name>.state.json` | Each step's result: the 13 platform secrets, the provider keys made or given, the IDs, and with Polar the webhook's signing secret. Never the setup token, the operator key itself, nor the PostHog personal key |
 | `.env.bootstrap-<name>.state.json.lock` | Only while a run is going. Delete it only if no run is left |
 | `.env.bootstrap-<name>.vars` | Every service's variables, in the format `node devops/railway-vars.mjs` reads |
 | `.env.bootstrap-<name>.log` | What each run printed, and each API call, with secrets hidden |
@@ -433,7 +467,8 @@ Git ignores all of them. Once the environment works, copy the state and variable
 - **Selling plans through Stripe.** It's still `pnpm billing --stripe`, run by you after `connect` and signing the command line in, and `railway-vars.mjs` puts Stripe's secrets on the admin ([on Stripe](#on-stripe)).
 - **Signing up, the command-line login, and phone numbers.** Signing up needs the code emailed to a person, and each business buys its own number from the dashboard (in cloud mode, once its plan includes one).
 - **DNS outside Cloudflare.** The script prints the records for you to add.
-- **The optional services:** Google Calendar, the map, website import, PostHog, Zapier and Make ([guide 3.7](../docs/deployment/guide/part-3-outside-services.md#37-optional-services)), and telemetry (`OTEL_EXPORTER_OTLP_*`). Add their variables by hand.
+- **PostHog's personal API key, its plan, and a managed reverse proxy.** PostHog makes personal keys only on its settings page, and moving to a paid plan is a billing decision. Its managed proxy needs a DNS record and a domain name ad blockers don't know; once it works, put its address in `POSTHOG_PROXY` ([guide 3.7](../docs/deployment/guide/part-3-outside-services.md#37-optional-services)).
+- **The other optional services:** Google Calendar, the map, website import, Zapier and Make ([guide 3.7](../docs/deployment/guide/part-3-outside-services.md#37-optional-services)). Add their variables by hand.
 - **What production adds** ([guide 5.2](../docs/deployment/guide/part-5-production.md#52-production-on-railway)): the `production` branch (set `BRANCH`), Postgres backups and a copy outside Railway, Railway's notifications, an outside uptime check, and the workspace's spending alert. Run the script with a separate settings file, `ENVIRONMENT=production` and `POLAR=live`, then do those steps.
 - **Cleaning up.** Old custom domains, old Railway addresses on the Turnstile widget, and deleted Railway projects (Railway removes them a couple of days later) stay until you remove them.
 
@@ -441,6 +476,7 @@ Git ignores all of them. Once the environment works, copy the state and variable
 
 The real runs on 1 and 2 November 2026 settled how Railway behaves (templates, volumes that appear a few seconds late, the admin's address, custom domains and their records, variables that apply at once with no **Deploy** banner), Cloudflare's DNS and Turnstile updates, OpenAI's project and key, Twilio's subaccount and trunk, Resend's domain, `connect`, `pnpm billing` against Polar's sandbox, and a phone call answered through the trunk and the webhook. A fresh run on 5 November 2026 settled names taken from `APP_BASE_URL`, including the first Railway project with a dot in its name, and creating a Turnstile widget through Cloudflare's API. On 7 November 2026 that environment's number answered 10 scripted calls through the OpenAI project the script made, with the webhook made by hand in that project and no request to OpenAI support. Not yet run against a real service:
 
+- **The PostHog steps,** new on 13 November 2026. They follow PostHog's published API schema and its code, as read that day: finding the organization and its projects, making a project with screen recordings on, the plan's and the admin's refusals, and `recording_domains`. Still to see on a real run: each of those calls against PostHog's cloud, and the admin's first build taking the project's values.
 - **`connect`'s Polar billing,** new on 12 November 2026. Its first real run, on Windows on 13 November 2026 against Polar's sandbox and a real admin, set the plans up with the worker's own token (it asked for no setup token), showed the plan, applied it after `yes`, and set the admin's `POLAR_WEBHOOK_SECRET`, whose deployment took about 3 minutes (a redeploy with unchanged variables about 5). It then stopped at `connect.billing.secret`: that step read the admin's answer without the `data` envelope every `/api/v1` answer has, so it never saw the secret's hash, and the stand-in of `scripts/bootstrap.test.ts` had answered without the envelope too. Fork PR #160 reads the envelope, and the stand-in now answers in it. Still to see on a real run: `connect.billing.secret` and `connect.billing.verify` finishing, the sign-up `connect` asks for while the operator's account is inactive, and a setup token, including one from Polar's command line ([step 8](#8-cloud-mode-sell-plans-through-polar)).
 - **The checks added on 2 November 2026,** against the real services rather than stand-ins: the deployment-trigger warning (Railway's `deploymentTriggers` query was read once against a real project), the lock, the deleted-project stop, and the full names given to DNS records that Railway names relative to the zone.
 - **The variables step on a running deployment,** which sets only what differs and deploys the worker again for the admin's values. It uses the same two Railway calls as the one-off move of that environment to another OpenAI project on 2 November 2026, where the admin and the worker deployed again with the new key.

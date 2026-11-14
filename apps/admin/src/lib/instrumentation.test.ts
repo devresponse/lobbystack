@@ -98,6 +98,42 @@ describe("production database role startup validation", () => {
   });
 });
 
+describe("email verification startup warning", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+    for (const name of ["BETTER_AUTH_SECRET", "INTERNAL_SERVICE_SECRET", "INTERNAL_SERVICE_TOKEN", "WIDGET_SESSION_SECRET", "ENCRYPTION_KEY", "OTP_HASH_SECRET", "LOCAL_STORAGE_SIGNING_SECRET"]) {
+      vi.stubEnv(name, "strong-production-fixture-secret-12345");
+    }
+    vi.stubEnv("STORAGE_PROVIDER", "local");
+    mocks.getDatabase.mockImplementation((role: DatabaseRole) => ownRole(role));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  function verificationWarnings(warn: { mock: { calls: unknown[][] } }): string[] {
+    return warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("auth.email_verification_off"));
+  }
+
+  it("warns as a production server starts with the email code turned off", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("REQUIRE_EMAIL_VERIFICATION", "false");
+    await expect(register()).resolves.toBeUndefined();
+    expect(verificationWarnings(warn)).toHaveLength(1);
+    expect(JSON.parse(verificationWarnings(warn)[0]!)).toMatchObject({ level: "warn", message: "auth.email_verification_off" });
+  });
+
+  it.each([undefined, "true"])("stays quiet while the email code is required (%s)", async (value) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("REQUIRE_EMAIL_VERIFICATION", value);
+    await expect(register()).resolves.toBeUndefined();
+    expect(verificationWarnings(warn)).toHaveLength(0);
+  });
+});
+
 describe("billing provider startup validation", () => {
   beforeEach(() => {
     vi.stubEnv("NEXT_RUNTIME", "nodejs");

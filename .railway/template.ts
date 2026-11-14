@@ -117,7 +117,8 @@ export default defineRailway((ctx) => {
       SITE_URL: "${{APP_BASE_URL}}",
       AUTH_TRUSTED_ORIGINS: "${{APP_BASE_URL}}",
       BETTER_AUTH_USE_SECURE_COOKIES: "true",
-      REQUIRE_EMAIL_VERIFICATION: "false",
+      // Sign-in needs the emailed code; the admin also defaults to it when this is unset.
+      REQUIRE_EMAIL_VERIFICATION: "true",
       SEND_VERIFICATION_EMAIL_ON_SIGNUP: "false",
       WIDGET_KEY_ISSUANCE_ENABLED: "false",
       // GPT-Live answers browser and phone calls; the worker runs each call.

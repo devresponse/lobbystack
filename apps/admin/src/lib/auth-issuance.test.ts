@@ -67,6 +67,16 @@ it("passes wildcard trusted origins through to Better Auth next to APP_BASE_URL"
   expect(mocks.config.trustedOrigins).toEqual(["https://app.example.test", "*.example.test", "myapp://callback", "not a url"]);
 });
 
+it.each([
+  [undefined, true],
+  ["true", true],
+  ["false", false],
+])("requires the emailed code unless REQUIRE_EMAIL_VERIFICATION is false (%s)", async (value, required) => {
+  vi.stubEnv("REQUIRE_EMAIL_VERIFICATION", value);
+  const { getAuth } = await import("./auth"); getAuth();
+  expect(mocks.config.emailAndPassword.requireEmailVerification).toBe(required);
+});
+
 it("sends a localized sign-in reminder for a verified duplicate signup", async () => {
   const { getAuth } = await import("./auth"); getAuth();
   mocks.select.mockResolvedValue([{ preferredLocale: "fr" }]);

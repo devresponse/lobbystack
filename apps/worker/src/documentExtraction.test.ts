@@ -40,11 +40,12 @@ const pdf = "application/pdf";
 const fixture = (name: string) => new Uint8Array(readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url)));
 
 // A PDF whose pages each hold one line of Helvetica, or nothing, with a cross-reference table so pdf.js reads it as written.
-function pdfFile(pages: Array<string | null>): Uint8Array {
+// Pages are US Letter unless a size in points is given.
+function pdfFile(pages: Array<string | null>, [width, height]: [number, number] = [612, 792]): Uint8Array {
   const objects = ["", "<< /Type /Catalog /Pages 2 0 R >>", `<< /Type /Pages /Kids [${pages.map((_, index) => `${4 + index * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
   pages.forEach((text, index) => {
     const stream = text === null ? "" : `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + index * 2} 0 R >>`, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + index * 2} 0 R >>`, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
   });
   let file = "%PDF-1.4\n";
   const offsets: number[] = [];
@@ -187,7 +188,8 @@ describe("knowledge document extraction", () => {
   it("reads every page of a scan as long as the OCR page limit", async () => {
     mocks.recognize.mockResolvedValue(ocrLine(["Scanned", "page"]));
 
-    const text = await extractDocumentText({ body: pdfFile(Array.from({ length: 25 }, () => null)), contentType: pdf });
+    // Two-inch pages: OCR renders each page first, and 25 letter-size ones took about 2 seconds alone and over 5 in CI.
+    const text = await extractDocumentText({ body: pdfFile(Array.from({ length: 25 }, () => null), [144, 144]), contentType: pdf });
 
     expect(mocks.recognize).toHaveBeenCalledTimes(25);
     expect(text).toMatch(/^\[Page 25 of 25, read by OCR\]\nScanned page$/mu);

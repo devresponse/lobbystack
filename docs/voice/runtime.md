@@ -217,7 +217,9 @@ The replay window also limits how late the worker can attach. The admin gives a 
 
 If the worker can't attach, the admin ends the session and records the call as `setup_failed`, so nothing talks or bills without the worker. A browser session that never started still costs OpenAI's 15-second setup charge, so the admin records those 15 seconds. The admin has no sideband, so it asks the worker to close browser sessions at `/internal/live/end`.
 
-A worker that is shutting down answers the attach with HTTP 503 and closes the connection, so the admin's retry doesn't reach it again over a kept-alive connection. The admin waits 250 ms and retries, then waits 750 ms and retries once more, all within the same 10-second timeout. That gives the deploy's new instance a chance to take the call.
+A worker that is shutting down answers the attach with HTTP 503 and closes the connection, so the admin's retry doesn't reach it again over a kept-alive connection.
+
+The admin picks a copy of the worker for each request (since fork PR #168). Railway's private name for the worker, in `WORKER_INTERNAL_URL`, lists one address for each running copy, but Node's `fetch` connects to the first address and keeps that connection, so every call went to one copy, the one shutting down included. So the admin looks the name up itself for each attach, end and greeting request, and tries the addresses in a new random order each time: the family `fetch` would pick first (the first address's, IPv4 or IPv6), then the other. A copy that answers 503 or can't be reached passes the request to the next at once. When every copy refused an attach, the admin waits 250 ms, looks the name up again so a copy that has just started is found, and tries them all again, then waits 750 ms for a last round, all within the same 10-second timeout. That gives the deploy's new instance a chance to take the call. An end or a greeting isn't retried once every copy has refused, nor is any request every copy failed to reach without a refusal. The requests are safe to repeat on another copy: the attach lock below lets one worker answer each session, ending a session twice does nothing, and a recording already under way isn't started again. A name with one address or none, an IP address, and an `https://` address, which needs its name for the certificate check, are used as they are (`apps/admin/src/lib/live-prototype.ts`).
 
 Only one worker answers each session. The worker takes a lock in Redis, `live-attach:<session id>`, when it attaches and renews it every 10 seconds while the call runs. The lock expires 30 seconds after the last renewal. If Redis loses the lock while its worker is alive, for example after a Redis restart, the worker takes it back at its next renewal.
 
@@ -227,7 +229,7 @@ Each renewal checks that the worker still holds the lock. A worker that couldn't
 
 When the worker gets SIGTERM or SIGINT, it drains instead of hanging up:
 
-1. `/health/ready` and new attaches return HTTP 503. The admin retries a refused attach, which gives the new deployment a chance to take the call.
+1. `/health/ready` and new attaches return HTTP 503. The admin sends a refused attach to another copy, or retries it, which gives the new deployment a chance to take the call.
 2. The worker stops taking background jobs. Calls in progress go on until they end, up to the drain timeout.
 3. At the drain timeout, GPT-Live tells each remaining caller that the service is restarting, apologizes and asks them to call back. The worker hangs up once that goodbye has played. The call record gets the disposition `service_restart`, and billing counts the call like any other. An attach that was still taking its lock at the timeout becomes active after it, and gets the same goodbye. The recovery job takes no calls while the worker drains.
 4. The worker waits until every call record is finalized, then closes its database pools and exits.
@@ -289,12 +291,12 @@ The admin and worker read these variables:
 | `OPENAI_API_KEY` | admin, worker | Creates, accepts, and ends sessions, and downloads recordings. |
 | `OPENAI_WEBHOOK_SECRET` | admin | Verifies OpenAI's incoming-call webhook. Phone path only. |
 | `INTERNAL_SERVICE_TOKEN` | admin, worker | Authenticates the admin's attach request to the worker. |
-| `WORKER_INTERNAL_URL` | admin | Private URL of the worker's HTTP port, for example `http://worker:3002`. |
+| `WORKER_INTERNAL_URL` | admin | Private URL of the worker's HTTP port, for example `http://worker:3002`. When its name lists several addresses, one per copy of the worker, the admin spreads calls over them (see the attach above). |
 | `TWILIO_SIP_TRUNK_SID` | worker | Adds new phone numbers to the SIP trunk. The worker refuses to provision a number without it. |
 | `WEB_CALL_MAX_DURATION_MS` | admin | Optional. How long a browser call can last, in milliseconds. The default and the most is `1800000` (30 minutes). Set it lower to shorten website widget, dashboard and demo calls. |
 | `LIVE_RECORDED_GREETING` | admin, worker | On unless set to `false` (since fork PR #139; before, only `true` turned it on). On the admin, calls open with a recording of the greeting; on the worker, every active receptionist's opening is recorded before its calls. The admin and worker need the same `REDIS_URL` and `REDIS_PREFIX`. See [Open calls with a recording](#open-calls-with-a-recording). |
 | `LIVE_RECORDED_GREETING_PHONE` | admin | Optional. Set to `false` to keep phone calls on the greeting command while browser calls open with the recording. |
-| `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | worker | Railway's time between SIGTERM and SIGKILL. Set it to `1860` so calls can finish during a deploy. See [Deploy the worker during calls](#deploy-the-worker-during-calls). |
+| `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | worker, admin | Railway's time between SIGTERM and SIGKILL. Set it to `1860` on the worker so calls can finish during a deploy (see [Deploy the worker during calls](#deploy-the-worker-during-calls)), and to `60` on the admin so a deploy doesn't stop it while it connects a call to a worker. |
 | `LIVE_DRAIN_TIMEOUT_MS` | worker | Optional. How long a shutdown lets calls finish on their own before it ends them with a goodbye. Overrides the timeout derived from `RAILWAY_DEPLOYMENT_DRAINING_SECONDS`. |
 | `WEB_CALL_PUBLIC_BUSINESS_SLUG`, `WEB_CALL_ALLOWED_ORIGINS` | admin | The business the landing demo calls, and the sites allowed to start it. |
 | `AI_CHAT_MODEL`, `AI_CHAT_REASONING_EFFORT` | admin, worker | The agent's model and, on OpenAI, its reasoning effort. Leave both blank for `gpt-6-luna` on `high`. |

@@ -1,6 +1,6 @@
 # Know what limits scale, 2026-10-18
 
-On 2026-10-18 the whole system was read for what stops it growing, from `main` at `160b18a`. The answer: the single database isn't the first limit. Database connections, the one admin process, background jobs that run per business, and the shared provider accounts bite first. This page keeps the limits, the options for each part, and the roadmap. It is analysis only: nothing here has been built, apart from the billing fixes noted below. Numbers are marked measured (local load tests on 2026-10-15, with the AI replaced by a 4-second stand-in), computed (from constants in the code) or inferred (estimates). Nothing was measured on Railway.
+On 2026-10-18 the whole system was read for what stops it growing, from `main` at `160b18a`. The answer: the single database isn't the first limit. Database connections, the one admin process, background jobs that run per business, and the shared provider accounts bite first. This page keeps the limits, the options for each part, and the roadmap. It is analysis only: nothing here has been built, apart from the billing fixes noted below, and since fork PR #168, limit 1 for two or three copies of the admin with two workers: smaller pools on each copy and a database made with room for 200 connections ([replicas review](replicas-2026-11-13.md)). Numbers are marked measured (local load tests on 2026-10-15, with the AI replaced by a 4-second stand-in), computed (from constants in the code) or inferred (estimates). Nothing was measured on Railway.
 
 ## Know what breaks first
 

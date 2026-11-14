@@ -2,7 +2,7 @@
 
 The scalability review of 2026-10-18 found that the single database isn't the first limit: database connections, the one admin process, background jobs that run for each business, and the shared provider accounts bite first ([scalability](../reviews/scalability-2026-10-18.md)). Its roadmap hardens one stack, then makes it survive a failure, then splits businesses into cells.
 
-- **Status:** not started, apart from billing fixes. Phase 1 holds most of the near-term value and needs no new service except PgBouncer.
+- **Status:** started. Apart from billing fixes, fork PR #168 made two admins and two workers possible: smaller connection pools on each copy, a database made with room for 200 connections, a minute for the old admin to finish at a release, and new calls spread over the worker's copies ([replicas review](../reviews/replicas-2026-11-13.md)). Phase 1 holds most of the near-term value and needs no new service except PgBouncer.
 - **Effort:** not estimated in days; each item is a pull request or a setting of its own.
 - **Measured:** one admin process served about 400 people chatting at once in a local test, slowed at 600 and failed at 800 ([widget scalability](../reviews/widget-scalability-2026-10-15.md#know-the-answer)).
 
@@ -18,11 +18,11 @@ The scalability review of 2026-10-18 found that the single database isn't the fi
 
 ## Start with phase 1
 
-- **PgBouncer** in transaction mode, logging in as each runtime role, since the security functions check `session_user`; or smaller pools through `LOBBYSTACK_*_POOL_MAX`. Postgres allows 100 connections, and a second admin copy during a worker deploy would need 112.
+- **PgBouncer** in transaction mode, logging in as each runtime role, since the security functions check `session_user`. Smaller pools and a limit of 200 (fork PR #168) hold up to three admins with two workers; three of each need PgBouncer ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)).
 - **An index on `transcripts (business_id, expires_at)`,** which the hourly clean-up scans once for each business, and indexes for the other lookups that read whole tables.
 - **One job per type** that pages through businesses, in place of about 192 scheduled runs an hour for each active business.
 - **A Redis memory ceiling with an alert,** keeping `noeviction`, which the job queues need, and one shared subscriber per process for dashboards.
-- **Two admin copies** once connections are pooled, with a drain on shutdown.
+- **Two admin copies** once connections are pooled, with a drain on shutdown. Possible since fork PR #168, after a rehearsal on a test environment ([replicas review](../reviews/replicas-2026-11-13.md#know-the-recommendations)).
 - **Cloudflare caching** `/embed.js` and the public profile pages ([protect the widget](protect-the-deployment.md)).
 - **Running usage counters** in place of replaying a business's month for each reservation, and batched Polar events.
 

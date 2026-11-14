@@ -252,7 +252,7 @@ A value written `${{…}}` is a Railway reference, resolved when the service sta
 | `APP_BASE_URL` | worker | `${{admin.APP_BASE_URL}}` | Must match the admin's |
 | `SITE_URL` | admin | `${{APP_BASE_URL}}` | Follows `APP_BASE_URL` |
 | `AUTH_TRUSTED_ORIGINS` | admin | `${{APP_BASE_URL}}`, plus `https://` and the Railway address (state: `railway.domain`) when `APP_BASE_URL` is set | Sign-in works on both addresses |
-| `TRUSTED_CLIENT_IP_HEADER` | admin | `x-real-ip` | Leave it |
+| `TRUSTED_CLIENT_IP_HEADER` | admin | `x-real-ip` | Leave it: since fork PR #174, a production admin on Railway doesn't start without it |
 | `WORKER_INTERNAL_URL` | admin | `http://${{worker.RAILWAY_PRIVATE_DOMAIN}}:3002` | Leave it |
 | `TWILIO_SMS_WEBHOOK_URL` | admin | `${{APP_BASE_URL}}/api/webhooks/twilio/sms` | Follows `APP_BASE_URL` |
 | `TWILIO_STATUS_CALLBACK_URL` | admin, and the worker refers to it | `${{APP_BASE_URL}}/api/webhooks/twilio/status` | Follows `APP_BASE_URL` |
@@ -308,7 +308,7 @@ A value written `${{…}}` is a Railway reference, resolved when the service sta
 | Variable | On | Value | Rule |
 | --- | --- | --- | --- |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | admin | State: `turnstile` | Built into the admin. Not secret |
-| `TURNSTILE_SECRET_KEY` | admin | State: `turnstile` | The widget must list the address in use, or sign-up fails its check |
+| `TURNSTILE_SECRET_KEY` | admin | State: `turnstile` | The widget must list the address in use, or sign-up fails its check, and since fork PR #174 the website chat's too |
 | `REQUIRE_EMAIL_VERIFICATION` | admin | `true`, production only | Sign-in needs the emailed code. Unset on test, where the admin asks for it anyway since fork PR #171 |
 | `WIDGET_KEY_ISSUANCE_ENABLED` | admin | `true` | Lets businesses create website chat keys |
 

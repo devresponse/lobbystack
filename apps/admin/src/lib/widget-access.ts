@@ -29,6 +29,8 @@ export type WidgetSession = {
   receptionistId: string | null;
   /** The receptionist the key names, null for the default one: the key's greeting is written for it. */
   keyReceptionistId: string | null;
+  /** When the session's visitor passed the chat's Turnstile check, in seconds since the epoch; absent when they haven't. */
+  verifiedAt?: number;
 };
 
 export type WidgetAccessSuccess = { ok: true; session: WidgetSession };
@@ -99,7 +101,7 @@ export async function resolveWidgetSessionAccess(request: Request): Promise<Widg
   const loaded = await loadWidgetSession(payload.businessId, payload.widgetKeyId);
   if (!loaded) return { ok: false, response: jsonError("The widget session is invalid.", 401, "widget_session_invalid") };
   // The receptionist the page named when the session started wins over the key's.
-  const session = { ...loaded.session, keyHash: "", origin: payload.origin, visitorId: payload.visitorId, receptionistId: payload.receptionistId ?? loaded.session.receptionistId };
+  const session = { ...loaded.session, keyHash: "", origin: payload.origin, visitorId: payload.visitorId, receptionistId: payload.receptionistId ?? loaded.session.receptionistId, ...(payload.verifiedAt !== undefined ? { verifiedAt: payload.verifiedAt } : {}) };
   if (session.key.status !== "active") return { ok: false, response: jsonError("The widget is disabled.", 403, "widget_disabled") };
   if (!isAllowedOrigin(payload.origin, loaded, { strictOrigin: true })) {
     return { ok: false, response: jsonError("This website is not authorized to load this widget.", 403, "widget_origin_denied") };

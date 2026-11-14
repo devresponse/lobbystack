@@ -2,8 +2,10 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-type TurnstileWidgetOptions = {
+export type TurnstileWidgetOptions = {
   sitekey: string;
+  /** A name Turnstile reports back to the server with the token, such as which form the check guarded. */
+  action?: string;
   callback: (token: string) => void;
   "expired-callback": () => void;
   "timeout-callback": () => void;
@@ -13,15 +15,20 @@ type TurnstileWidgetOptions = {
   appearance?: "always" | "execute" | "interaction-only";
   execution?: "render" | "execute";
   "response-field"?: boolean;
+  /** What happens when a token ages out unused: Turnstile gets a new one ("auto"), or waits to be asked. */
+  "refresh-expired"?: "auto" | "manual" | "never";
+  /** Whether Turnstile tries again by itself after a failed check ("auto"), or leaves that to the page. */
+  retry?: "auto" | "never";
   size?: "normal" | "flexible" | "compact";
   tabindex?: number;
   theme?: "auto" | "light" | "dark";
 };
 
-type TurnstileApi = {
+export type TurnstileApi = {
   ready: (callback: () => void) => void;
   render: (container: HTMLElement, options: TurnstileWidgetOptions) => string;
   execute: (container: HTMLElement | string) => void;
+  reset: (widgetId: string) => void;
   remove: (widgetId: string) => void;
 };
 
@@ -60,7 +67,8 @@ function waitForTurnstileApi(): Promise<void> {
   });
 }
 
-function loadTurnstileScript(): Promise<void> {
+/** Loads Turnstile's script once per page; a failed load can be tried again. */
+export function loadTurnstileScript(): Promise<void> {
   if (typeof window === "undefined") {
     return Promise.resolve();
   }

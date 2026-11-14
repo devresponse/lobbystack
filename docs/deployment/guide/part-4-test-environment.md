@@ -280,7 +280,7 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    - `APP_BASE_URL` takes the admin's Railway address. `SITE_URL`, `AUTH_TRUSTED_ORIGINS` and the two Twilio addresses follow it, so when the address changes ([4.7](#47-use-your-own-domain-optional)), one edit changes them all.
    - `HOSTNAME=::` lets Railway's private network reach the admin over IPv6 as well as IPv4.
    - With `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60`, the old admin gets a minute to finish what it has started when a deploy replaces it, such as connecting a new call to a worker, instead of being stopped at once ([7.4](part-7-operations.md#74-deploy-without-cutting-off-calls)).
-   - `TRUSTED_CLIENT_IP_HEADER` tells the admin where Railway puts each visitor's IP address ([3.1](part-3-outside-services.md#31-choose-your-addresses)).
+   - `TRUSTED_CLIENT_IP_HEADER` tells the admin where Railway puts each visitor's IP address ([3.1](part-3-outside-services.md#31-choose-your-addresses)). Since fork PR #174, a production admin on Railway doesn't start without it.
    - `LIVE_PROTOTYPE_ENABLED` turns calls on. `WIDGET_KEY_ISSUANCE_ENABLED` lets businesses create website chat widgets, which are refused without it.
    - `WORKER_INTERNAL_URL` is the worker's private address, where the admin hands it each call.
    - The admin signs in to the database as `lobbystack_app`. At start, it also checks that it can sign in as the auth, worker and dispatcher roles, with the three passwords below that line.

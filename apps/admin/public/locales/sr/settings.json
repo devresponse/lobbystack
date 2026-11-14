@@ -1344,6 +1344,10 @@
         "title": "Nova poruka u ćaskanju na sajtu",
         "description": "Kada posetilac pošalje poruku preko vidžeta na Vašem sajtu. Dobijate najviše jedno upozorenje po razgovoru dnevno."
       },
+      "widgetChatLimit": {
+        "title": "Ćaskanje na sajtu je dostiglo dnevni limit",
+        "description": "Kada AI recepcioner započne onoliko razgovora na sajtu koliko sme u jednom danu. Novi razgovori čekaju Vaš tim u Porukama do ponoći po UTC-u."
+      },
       "liveChatRequest": {
         "title": "Posetilac traži osobu",
         "description": "Kada posetilac Vašeg sajta zatraži razgovor sa nekim iz Vašeg tima. Odgovorite iz Poruka u roku od 3 minuta da biste se pridružili razgovoru."

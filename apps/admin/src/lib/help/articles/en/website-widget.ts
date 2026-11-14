@@ -21,7 +21,7 @@ const article: HelpArticle = {
     { name: "Widget card", description: "Each card shows the widget's label, or **Untitled widget**, and its status: **Active**, **Paused** or **Revoked**. Below are the widget's settings, with a reminder that color and position changes take about two minutes to reach your website, then its **Embed snippet** with **Copy embed snippet**, **Save**, and, once the widget has been used, **Last used** with the date a visitor last opened its chat." },
     { name: "Pause, Resume and Revoke", description: "The buttons at the top of each card. **Pause** turns a widget off for now and **Resume** turns it back on. **Revoke** turns it off for good, after you confirm. A revoked widget keeps its card, without a snippet or these buttons." },
     { name: "Channels", description: "Your own **Email** and **SMS** switches, the same ones as on the **Notifications** screen. While a channel is off, its column disappears from the table below and you get nothing that way." },
-    { name: "Communication", description: "Your alerts about website chats: **New website chat message** and **Visitor asking for a person**. Tick the box in the **Email** or **SMS** column to get an alert that way." },
+    { name: "Communication", description: "Your alerts about website chats: **New website chat message**, **Website chat reached its daily limit** and **Visitor asking for a person**. Tick the box in the **Email** or **SMS** column to get an alert that way." },
   ],
   fields: [
     {
@@ -61,9 +61,10 @@ const article: HelpArticle = {
     },
     {
       title: "Communication",
-      description: "Tick the box in the **Email** or **SMS** column to get an alert that way. Each column shows only while its channel is on. Both alerts start ticked in the **Email** column and not in the **SMS** column.",
+      description: "Tick the box in the **Email** or **SMS** column to get an alert that way. Each column shows only while its channel is on. All three alerts start ticked in the **Email** column and not in the **SMS** column.",
       fields: [
         { name: "New website chat message", description: "When a visitor sends a message through your website widget. You get at most one alert per chat each day." },
+        { name: "Website chat reached its daily limit", description: "When the AI receptionist has started as many new website chats as it may in one day. Until midnight UTC, new visitors' messages wait for your team in **Messages**. You get at most one alert each day." },
         { name: "Visitor asking for a person", description: "When a website visitor asks to talk with someone from your team. Reply from **Messages** within 3 minutes to join the chat." },
       ],
     },
@@ -142,7 +143,7 @@ const article: HelpArticle = {
       title: "Get alerts for website chats",
       steps: [
         "At the bottom of the screen, under **Channels**, turn on **Email**, **SMS** or both.",
-        "Under **Communication**, tick **New website chat message**, **Visitor asking for a person** or both, in the **Email** or **SMS** column.",
+        "Under **Communication**, tick the alerts you want, **New website chat message**, **Website chat reached its daily limit** or **Visitor asking for a person**, in the **Email** or **SMS** column.",
         "Each change saves as soon as you make it.",
       ],
     },
@@ -157,6 +158,8 @@ const article: HelpArticle = {
     "When a visitor's contact details include an email address or phone number, the chat is added to a contact on the **Contacts** screen: a new one, or the contact that already has that email or phone number. An existing contact isn't changed by what the visitor typed. A name alone doesn't make a contact.",
     "The chat offers a call from the browser when the business has a phone number, calls from the browser are available for your account and the business has voice minutes left. These calls use voice minutes like phone calls do. A line under the call button says calls are answered by an AI assistant and are recorded and transcribed, unless **Tell callers about AI and recording** is turned off on the **AI settings** screen.",
     "When the business has used all the website chats its plan or packs include, chats the receptionist already answers keep getting replies, but it doesn't answer new ones, and those visitors are told your team will reply. Their messages still reach **Messages** and still send alerts.",
+    "In one day, the receptionist starts at most a quarter of the website chats your plan or packs include, and never fewer than 10, so a program sending messages through your widget can't use them all at once. Past that, new visitors are told your team will reply, their messages still reach **Messages**, and chats the receptionist already answers keep getting replies. It starts again at midnight UTC.",
+    "Before the receptionist answers, the chat quietly checks that the visitor is a person and not a program. Most visitors never notice it. Now and then it asks them to tick a box above the message field.",
     "With several AI agents, the widget's receptionist answers chats on your website. Your business page is answered by the default receptionist, and choosing another one under **You're talking to** opens that receptionist's own page, where it answers. A widget's **Greeting** shows only when the widget's own receptionist answers.",
     "This screen is also the **Website widget** tab in **Settings**.",
   ],
@@ -196,6 +199,14 @@ const article: HelpArticle = {
     {
       question: "Visitors see \"This month's chat session limit has been reached.\" What does it mean?",
       answer: "The business has used all the website chats its plan or packs include, so the receptionist isn't answering more of them. Visitors' messages still reach **Messages**, so reply from there. On a plan, website chats start again on the first day of each month, with the other allowances, and with packs they last until each pack ends. Neither the **Usage** screen nor **What's included** on the **Plan** screen lists website chats.",
+    },
+    {
+      question: "Visitors see \"Today's chat limit has been reached.\" What does it mean?",
+      answer: "The receptionist has started as many new website chats today as it may in one day, a quarter of the chats your plan or packs include, and at least 10. Visitors' messages still reach **Messages**, so reply from there, and people who ticked **Website chat reached its daily limit** got an alert. It starts again at midnight UTC. If today wasn't unusually busy, someone may be sending messages through your widget with a program.",
+    },
+    {
+      question: "A visitor saw \"Your browser couldn't be checked, so the message wasn't sent.\" What can they do?",
+      answer: "The chat couldn't finish its check that the visitor is a person, as can happen with some privacy extensions or a weak connection. Their message stays in the box, so they can send it again, or reload the page and try once more. If many visitors see it, contact support.",
     },
     {
       question: "A widget's card has a note instead of its snippet. Why?",

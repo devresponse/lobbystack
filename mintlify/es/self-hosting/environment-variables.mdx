@@ -26,7 +26,7 @@ Cloudflare Turnstile comprueba que quien completa el formulario de registro es u
 
 | Variable | Función |
 | --- | --- |
-| `TURNSTILE_SECRET_KEY` | La clave secreta de su widget de Turnstile. El servicio de administración la usa para verificar cada registro con correo electrónico. Sin ella, todo registro con correo electrónico falla, a menos que `APP_BASE_URL` empiece por `http://localhost:` o `http://127.0.0.1:`. El formulario muestra entonces "No pudimos crear su cuenta. Inténtelo de nuevo.", y la respuesta del servicio de administración indica `Turnstile is not configured.` |
+| `TURNSTILE_SECRET_KEY` | La clave secreta de su widget de Turnstile. El servicio de administración la usa para verificar cada registro con correo electrónico, y a cada visitante del chat del sitio web antes de que la recepcionista responda. Sin ella, todo registro con correo electrónico falla, a menos que `APP_BASE_URL` empiece por `http://localhost:` o `http://127.0.0.1:`. El formulario muestra entonces "No pudimos crear su cuenta. Inténtelo de nuevo.", y la respuesta del servicio de administración indica `Turnstile is not configured.` |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | La clave del sitio del widget. El navegador la lee para mostrar la verificación en el formulario de registro. Next.js la escribe en el código del navegador al compilar el servicio de administración, así que esa compilación la necesita como argumento de compilación de Docker. Vuelva a compilar el servicio de administración después de cambiarla. Compose la pasa a la compilación desde `.env`. Si la compilación no tiene clave del sitio y la clave secreta está configurada, el formulario no muestra ninguna verificación y todos los registros fallan con el mismo mensaje. |
 
 ## Imagen de marca
@@ -124,6 +124,8 @@ Un endpoint OTLP vacío no desactiva los registros stdout de los contenedores, l
 | `AI_CHAT_PRICING_VERSION`, `AI_CHAT_PRICING_SOURCE`, `AI_CHAT_PRICING_EFFECTIVE_DATE` | Una etiqueta, una URL de origen y la fecha de esos precios. LobbyStack registra un costo solo si las tres están definidas. |
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_BASE_URL`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_PROVIDER_NAME`, `AI_EMBEDDING_REVISION` | Embeddings de 1536 dimensiones compatibles con OpenAI. |
 | `WIDGET_SESSION_SECRET` | Firma las sesiones de origen cruzado del widget del sitio web. |
+| `WIDGET_TURNSTILE` | Déjela sin definir. Con las dos claves de Turnstile configuradas, el chat del sitio web pasa la verificación de Turnstile antes de que la recepcionista responda, para que un script no pueda gastar los chats de una empresa con la clave pública del widget. `false` desactiva esa verificación y mantiene la del registro; el servicio de administración escribe entonces `widget.turnstile_off` al iniciar. |
+| `WIDGET_CHAT_DAILY_PERCENT` | La parte de los chats del mes de una empresa, o de los de su paquete prepago, que la recepcionista puede empezar en un día UTC: 25 si no se define, y nunca menos de 10 chats. Un número entero de 1 a 99; `100` u `off` desactiva el límite diario. |
 | `FIRECRAWL_*` | Importación de conocimiento desde el sitio web. |
 | `GOOGLE_*` | OAuth de Google Calendar. |
 | `SMTP_*`, `EMAIL_*` | Correo electrónico transaccional. |

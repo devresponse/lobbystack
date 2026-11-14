@@ -85,16 +85,16 @@ Two settings that only the repository's owner can change finish what fork PR #16
 
 **Stripe billing's technical debt** ([the list](../billing/stripe-history.md#technical-debt)): a promo plan bought as an upgrade that waits for 3-D Secure loses its coupon on Stripe directly, affiliate payouts pay only US dollar commissions while both brands bill in Canadian dollars, and smaller clean-ups.
 
-**Protect the widget and the deployment.** None of these is started ([widget scalability](../reviews/widget-scalability-2026-10-15.md#do-these-in-order), [roadmap](../roadmap/protect-the-deployment.md)):
+**Protect the widget and the deployment.** Fork PR #174 on `releases/r2` put Turnstile's check before the receptionist answers a website chat, a daily chat limit on each business, and a refused start on Railway without `TRUSTED_CLIENT_IP_HEADER` ([website widget](../features/website-widget.md#stop-scripts-from-spending-a-businesss-chats)). None of the rest is started ([widget scalability](../reviews/widget-scalability-2026-10-15.md#do-these-in-order), [roadmap](../roadmap/protect-the-deployment.md)):
 
 - Cloudflare in front of the dashboard's domain with a rate-limit rule, as the only way in, then `TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip` on the admin, which turns on the per-IP limits.
-- Turnstile before a widget session and before a call; rate limits checked before any database work; an early 503 under overload; a per-business call concurrency cap below the GPT-Live session limit; caps on operator alert emails.
+- Turnstile before a call and the lead form; rate limits checked before any database work; an early 503 under overload; a per-business call concurrency cap below the GPT-Live session limit; caps on operator alert emails.
 - `AI_CHAT_REASONING_EFFORT=low` on the admin.
 - A sign-up allowlist or invite-only mode: sign-up is open to anyone who passes Turnstile ([multitenancy](../features/multitenancy.md)).
 
 **Scale one stack** ([scalability](../reviews/scalability-2026-10-18.md#follow-the-roadmap), [roadmap](../roadmap/scale-past-one-stack.md)): PgBouncer, an index on `transcripts (business_id, expires_at)`, one job per type instead of per business, a Redis memory ceiling, two admin copies, Cloudflare caching the loader and profile pages, usage counters and batched Polar events. Ask Polar to confirm in writing that an AI receptionist that rents phone numbers is accepted under its acceptable use policy before revenue depends on it.
 
-**Finish the widget** ([website widget](../features/website-widget.md#know-the-gaps), [widget review](../reviews/widget-2026-10-15.md#follow-the-code-improvements)): improvements 5, 6 and 8 to 11 (stop the history poll while live updates are up, time to first word for chats, loader caching, a panel-only layout, Turnstile, a spending cap per website), and the realtime leftovers listed there.
+**Finish the widget** ([website widget](../features/website-widget.md#know-the-gaps), [widget review](../reviews/widget-2026-10-15.md#follow-the-code-improvements)): improvements 5, 6 and 8 to 11 (stop the history poll while live updates are up, time to first word for chats, loader caching, a panel-only layout, and a spending cap per website rather than per business; Turnstile's check came with fork PR #174), and the realtime leftovers listed there.
 
 **Serve callers in more languages** ([calls](../features/calls.md#know-which-language-a-call-uses)): since fork PR #82 calls can open in 13 languages. Still open: Serbian, which the dashboard has and calls can't open in; a starter greeting in the business's language; texts to callers in the 10 of the 13 that texts have no wording for; saving the language a caller spoke on the contact, so texts after the call follow it; a voice per business or per language ([custom voices](../roadmap/custom-voices.md)); and GPT-Live 1.1 once OpenAI's API offers it (`LIVE_MODEL`).
 

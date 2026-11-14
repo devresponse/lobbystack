@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { renderSafeMarkdown } from "@/lib/widget-markdown";
 import { useWebVoiceCall, type WebVoiceErrorKey, type WebVoiceTranscriptTurn } from "@lobbystack/web-voice";
 
+import { useWidgetChallenge } from "./widget-challenge";
+
 type WidgetConfigPayload = {
   key: string;
   business: { id: string; name: string; defaultLocale: RuntimeLocale };
@@ -72,15 +74,40 @@ function messageText(message: WidgetMessage): string {
  */
 type SubmitError = string | { key: string; errorId: string };
 
+// What the visitor reads for each refusal the server names. The two limits
+// come after the message was saved, so the team still has it.
+const CHAT_ERROR_KEYS: Record<string, string> = {
+  chat_ai_limit_reached: "chat.limitReached",
+  chat_daily_limit_reached: "chat.dailyLimitReached",
+  widget_rate_limited: "chat.rateLimited",
+  widget_challenge_required: "chat.challengeFailed",
+};
+
+/** The code the server's refusal names, from the error the chat's request ended with. */
+function chatErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  try {
+    const parsed = JSON.parse(error.message) as { code?: unknown };
+    return typeof parsed.code === "string" ? parsed.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function chatError(error: unknown): SubmitError {
   if (!(error instanceof Error)) return "chat.sendingFailed";
   try {
     const parsed = JSON.parse(error.message) as { code?: unknown; errorId?: unknown };
-    const key = parsed.code === "chat_ai_limit_reached" ? "chat.limitReached" : "chat.sendingFailed";
+    const key = (typeof parsed.code === "string" ? CHAT_ERROR_KEYS[parsed.code] : undefined) ?? "chat.sendingFailed";
     return typeof parsed.errorId === "string" && parsed.errorId ? { key, errorId: parsed.errorId } : key;
   } catch {
     return "chat.sendingFailed";
   }
+}
+
+/** Between half and all of `ms`, at random, so chats that failed together don't all come back together. */
+function jittered(ms: number): number {
+  return Math.round(ms / 2 + Math.random() * (ms / 2));
 }
 
 
@@ -137,8 +164,12 @@ function localVisitorId(widgetKey: string): string {
   return id;
 }
 
-/** How a live update stream ended: on its own, on an error worth retrying, for good, or because the visitor has no open chat. */
-type WidgetStreamOutcome = "ended" | "failed" | "stopped" | "no_chat";
+/**
+ * How a live update stream ended: on its own, on an error worth retrying, for
+ * good, because the visitor has no open chat, or because the server no longer
+ * takes the session.
+ */
+type WidgetStreamOutcome = "ended" | "failed" | "stopped" | "no_chat" | "expired";
 
 // The server writes to the stream every 15 seconds. One silent for longer than
 // this died without the browser noticing, as behind a proxy that lost the server.
@@ -154,7 +185,8 @@ async function readWidgetStream(input: { token: string; parentOrigin: string; si
   });
   if (response.status === 404) return "no_chat";
   // A session the server turns down stays turned down until the loader sends a new one.
-  if (!response.ok) return [400, 401, 403].includes(response.status) ? "stopped" : "failed";
+  if (response.status === 401) return "expired";
+  if (!response.ok) return [400, 403].includes(response.status) ? "stopped" : "failed";
   if (!response.body || !response.headers.get("content-type")?.startsWith("text/event-stream")) return "stopped";
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -181,7 +213,7 @@ async function readWidgetStream(input: { token: string; parentOrigin: string; si
   }
 }
 
-export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: string; initialColor?: string | undefined }) {
+export function WidgetChatClient({ widgetKey, initialColor, challengeSiteKey }: { widgetKey: string; initialColor?: string | undefined; challengeSiteKey?: string | null | undefined }) {
   const { t, i18n } = useTranslation("widget");
   const visitorIdRef = useRef<string>("");
   const [parentVisitorId, setParentVisitorId] = useState<string | null>(null);
@@ -220,13 +252,33 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
 
   const visitorId = useMemo(() => (parentVisitorId ?? visitorIdRef.current) || "", [parentVisitorId]);
 
+  // The server turned the session down, as when the visitor's clock ran slow
+  // or the laptop slept through a renewal: the loader gets a new one, which
+  // the chat then uses. At most every half minute, and a loader from before
+  // this asks nothing of it.
+  const lastSessionAskRef = useRef(0);
+  const askForNewSession = useCallback(() => {
+    if (Date.now() - lastSessionAskRef.current < 30_000) return;
+    lastSessionAskRef.current = Date.now();
+    window.parent?.postMessage({ type: "session-expired" }, "*");
+  }, []);
+
+  // Turnstile's check, which a session passes before the receptionist answers it (AUDIT-004).
+  const challenge = useWidgetChallenge({ siteKey: challengeSiteKey, sessionToken, parentOrigin, onSessionRejected: askForNewSession });
+  // The session the next message goes with: the checked one when the deployment has the check.
+  const chatTokenRef = useRef<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
   const transport = useMemo(() => new DefaultChatTransport<WidgetMessage>({
     api: "/api/widget/chat",
     credentials: "include",
-    headers: () => ({
-      ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
-      ...(parentOrigin ? { "x-widget-parent-origin": parentOrigin } : {}),
-    }),
+    headers: () => {
+      const token = chatTokenRef.current ?? sessionToken;
+      return {
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(parentOrigin ? { "x-widget-parent-origin": parentOrigin } : {}),
+      };
+    },
     prepareSendMessagesRequest: ({ messages }) => {
       const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
       // The receptionist replies in the language the widget shows.
@@ -252,7 +304,10 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     id: `widget:${widgetKey}`,
     generateId: () => crypto.randomUUID(),
     transport,
-    onError: (error) => setSubmitError(chatError(error)),
+    onError: (error) => {
+      setSubmitError(chatError(error));
+      if (chatErrorCode(error) === "widget_session_invalid") askForNewSession();
+    },
     onFinish: ({ message }) => {
       setChatSaved(true);
       const metadata = message.metadata;
@@ -296,6 +351,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       const url = new URL("/api/widget/config", window.location.origin);
       const response = await fetch(url, { headers: { authorization: `Bearer ${sessionToken}`, "x-widget-parent-origin": parentOrigin ?? "" }, credentials: "include" });
       if (!response.ok) {
+        if (response.status === 401) askForNewSession();
         const body = await response.json().catch(() => null) as { code?: string } | null;
         if (body?.code === "widget_origin_denied") throw new Error("originDenied");
         if (body?.code === "widget_key_invalid") throw new Error("invalidKey");
@@ -330,7 +386,10 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     if (shownChatRef.current) url.searchParams.set("chat", shownChatRef.current);
     try {
       const response = await fetch(url, { headers: { authorization: `Bearer ${sessionToken}`, "x-widget-parent-origin": parentOrigin ?? "" }, credentials: "include", signal: signal ?? null });
-      if (!response.ok) return;
+      if (!response.ok) {
+        if (response.status === 401) askForNewSession();
+        return;
+      }
       const data = await response.json() as HistoryPayload;
       if (signal?.aborted) return;
       setHandling(data.automationState === "human_handoff" ? { handoff: true, waitingForTeam: data.waitingForTeam === true, teamMemberName: data.teamMemberName ?? null } : RECEPTIONIST_HANDLING);
@@ -354,7 +413,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     } catch {
       /* transcript resume is best effort */
     }
-  }, [parentOrigin, sessionToken, setMessages]);
+  }, [askForNewSession, parentOrigin, sessionToken, setMessages]);
 
   // The history loads at the same time as the settings, as soon as the loader's
   // session arrives. After that the live updates and the reloads below keep it
@@ -444,13 +503,20 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
         outcome = "failed";
       }
       if (controller.signal.aborted || outcome === "stopped") return;
+      // The loader's new session opens the stream again.
+      if (outcome === "expired") {
+        askForNewSession();
+        return;
+      }
       if (outcome === "no_chat") {
         // The visitor's next answered message opens the stream again.
         setChatSaved(false);
         return;
       }
-      // A stream that ran its course reopens at once; failures back off, up to a minute.
-      const delay = outcome === "ended" ? 1_000 : Math.min(60_000, 2_000 * 2 ** failures++);
+      // A stream that ran its course reopens within a second or two; failures
+      // back off, up to a minute. Both wait a random part of that, so the
+      // chats a deploy cut off don't all come back at the same moment.
+      const delay = outcome === "ended" ? 1_000 + Math.round(Math.random() * 1_000) : jittered(Math.min(60_000, 2_000 * 2 ** failures++));
       timer = window.setTimeout(() => void connect(), delay);
     };
     void connect();
@@ -458,7 +524,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [chatSaved, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken, streamGeneration]);
+  }, [askForNewSession, chatSaved, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken, streamGeneration]);
 
   // New messages and each streamed piece of a reply scroll the thread to the
   // bottom, unless the visitor scrolled up to reread something. This runs
@@ -488,9 +554,20 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   async function submitChat(event: FormEvent) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || sending) return;
+    if (!content || sending || checking) return;
     if (!visitorIdRef.current) return;
     setSubmitError(null);
+    // The receptionist answers only a session that passed the check, which
+    // has usually finished while the visitor typed. The message stays in the
+    // box until it has.
+    setChecking(true);
+    const token = await challenge.ensure();
+    setChecking(false);
+    if (!token) {
+      setSubmitError("chat.challengeFailed");
+      return;
+    }
+    chatTokenRef.current = token;
     setDraft("");
     followThreadRef.current = true;
     if (chatIdleRef.current) {
@@ -630,6 +707,14 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
         <LeadForm className="shrink-0 border-t p-4" lead={lead} setLead={setLead} onSubmit={submitLead} submitting={leadSubmitting} onSkip={() => { setLeadDone(true); setLeadOpen(false); }} t={t} />
       ) : null}
 
+      {challengeSiteKey ? (
+        // Turnstile's box takes no room unless Cloudflare wants the visitor to tick it.
+        <div className={cn("shrink-0", challenge.state === "interactive" ? "flex flex-col items-center gap-2 border-t px-3 pt-3" : "h-0 overflow-hidden")}>
+          {challenge.state === "interactive" ? <p className="text-center text-xs text-zinc-600">{t("chat.challengePrompt")}</p> : null}
+          <div ref={challenge.containerRef} className="w-full" />
+        </div>
+      ) : null}
+
       <form className="flex shrink-0 flex-col gap-2 border-t p-3" onSubmit={(event) => void submitChat(event)}>
         <div className="flex items-end gap-2">
           <Input
@@ -640,7 +725,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
             disabled={!chatLoaded || sending || leadOpen}
             aria-label={t("chat.composerPlaceholder")}
           />
-          <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color, color: onColor }}><SendHorizontal /></Button>
+          <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || checking || leadOpen} loading={sending || checking} size="icon-lg" type="submit" style={{ backgroundColor: color, color: onColor }}><SendHorizontal /></Button>
         </div>
         {/* This row is always there, so the visitor ID arriving doesn't push the composer up. */}
         <div className="flex min-h-8 items-center gap-2">

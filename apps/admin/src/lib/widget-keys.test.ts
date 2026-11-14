@@ -19,7 +19,7 @@ vi.mock("@lobbystack/db", async (importOriginal) => {
   };
 });
 
-import { createReceptionistPageToken, createWidgetSessionToken, defaultWidgetKeyOrigin, hashWidgetKey, isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyReceptionistPageToken, verifyWidgetSessionToken } from "./widget-keys";
+import { createReceptionistPageToken, createWidgetSessionToken, defaultWidgetKeyOrigin, hashWidgetKey, isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyReceptionistPageToken, verifyWidgetSessionToken, WIDGET_SESSION_TTL_SECONDS } from "./widget-keys";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -148,6 +148,29 @@ describe("widget key hashing and origin policy", () => {
     });
     expect(verifyWidgetSessionToken(expired.token)).toBeNull();
     expect(verifyWidgetSessionToken(`${expired.token.slice(0, -1)}x`)).toBeNull();
+  });
+
+  // The loader times its renewal by these seconds, so a visitor's slow clock can't let the session lapse first.
+  it("says how many seconds a new session lasts, next to when it ends", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("WIDGET_SESSION_SECRET", "session-secret");
+    vi.useFakeTimers({ now: new Date("2026-11-14T12:00:00Z"), toFake: ["Date"] });
+    try {
+      const created = createWidgetSessionToken({ widgetKeyId: "00000000-0000-4000-8000-000000000010", businessId: "00000000-0000-4000-8000-000000000011", visitorId: "00000000-0000-4000-8000-000000000012", origin: "https://example.com" });
+      expect(created.expiresIn).toBe(WIDGET_SESSION_TTL_SECONDS);
+      expect(created.expiresAt).toBe("2026-11-14T13:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // AUDIT-004: only the check's route signs a session as checked, and the chat route reads it back.
+  it("carries when the visitor passed the chat's check, and nothing on a session that didn't", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("WIDGET_SESSION_SECRET", "session-secret");
+    const session = { widgetKeyId: "00000000-0000-4000-8000-000000000010", businessId: "00000000-0000-4000-8000-000000000011", visitorId: "00000000-0000-4000-8000-000000000012", origin: "https://example.com" };
+    expect(verifyWidgetSessionToken(createWidgetSessionToken({ ...session, verifiedAt: 1_794_000_000 }).token)).toMatchObject({ ...session, verifiedAt: 1_794_000_000 });
+    expect(verifyWidgetSessionToken(createWidgetSessionToken(session).token)).not.toHaveProperty("verifiedAt");
   });
 });
 

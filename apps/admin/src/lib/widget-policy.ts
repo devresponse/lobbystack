@@ -17,7 +17,8 @@ export function buildWidgetRateLimits(input: {
   widgetKeyId: string;
   ipHash?: string | undefined;
   visitorId?: string | undefined;
-  operation: "config" | "chat" | "lead" | "history" | "session" | "stream";
+  /** "verify" is the chat's Turnstile check, which each session passes once. */
+  operation: "config" | "chat" | "lead" | "history" | "session" | "stream" | "verify";
 }): FixedWindowLimit[] {
   const limits: FixedWindowLimit[] = [];
   if (input.ipHash) {
@@ -38,4 +39,24 @@ export async function enforceWidgetRateLimits(input: Parameters<typeof buildWidg
   const result = await enforceFixedWindow(buildWidgetRateLimits(input));
   if (result.allowed) return result;
   return { ...result, code: result.status === 429 ? "widget_rate_limited" : "widget_rate_limit_unavailable" };
+}
+
+type Environment = Readonly<Record<string, string | undefined>>;
+
+const DEFAULT_DAILY_PERCENT = 25;
+
+/**
+ * The share of a business's chats for the month, or of its packs' chats, that
+ * the receptionist may start answering in one UTC day, in percent (AUDIT-004):
+ * 25 unless WIDGET_CHAT_DAILY_PERCENT names a whole number from 1 to 99. 100
+ * or more, or "off", turns the daily limit off (null). Each business's limit
+ * follows its own plan, and is never under 10 chats a day.
+ */
+export function widgetChatDailyPercent(env: Environment = process.env): number | null {
+  const raw = env.WIDGET_CHAT_DAILY_PERCENT?.trim().toLowerCase();
+  if (!raw) return DEFAULT_DAILY_PERCENT;
+  if (raw === "off" || raw === "false") return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) return DEFAULT_DAILY_PERCENT;
+  return value >= 100 ? null : value;
 }

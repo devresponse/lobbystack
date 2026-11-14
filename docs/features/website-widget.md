@@ -6,7 +6,7 @@ The website widget puts the receptionist on a business's own website: a chat, a 
 
 1. The site adds one script tag, which the dashboard's Widget page shows: `<script src="https://<dashboard domain>/embed.js?key=<key>" data-widget-key="<key>" defer></script>` (`packages/shared/src/widget.ts`). The loader is built from `packages/embed` and served at `/embed.js`.
 2. The loader opens an iframe panel at `/embed/<key>`, the widget app in `apps/admin/app/(app)/embed`.
-3. The panel talks to `/api/widget/*`: `session`, `config`, `history`, `chat`, `lead` and `stream`. Each request checks the key, the website's origin against the key's allowed websites, and the rate limits below.
+3. The panel talks to `/api/widget/*`: `session`, `session/verify`, `config`, `history`, `chat`, `lead` and `stream`. Each request checks the key, the website's origin against the key's allowed websites, and the rate limits below. On a deployment with Turnstile's keys, the panel passes Cloudflare Turnstile's check before the receptionist answers it ([below](#stop-scripts-from-spending-a-businesss-chats)).
 4. A chat message runs the receptionist agent from `packages/agent-core` on the `web_chat` channel. The conversation keys on the widget visitor's ID, so no phone number is needed.
 5. "Say Allo!" starts a browser WebRTC call to GPT-Live through `/api/voice/live/session`, the same route as the dashboard's test call, on the `web_voice` channel. No Twilio or SIP is involved. The worker attaches to the call as it does for phone calls ([voice runtime](../voice/runtime.md)). Since fork PR #84, a line under the button says calls are answered by an AI assistant and are recorded and transcribed, as the call says after its greeting, unless the business turned that off ([calls](calls.md#tell-callers-theyre-speaking-with-an-ai-and-the-call-is-recorded)).
 6. Team replies, take-overs and new messages reach the panel through `/api/widget/stream` (server-sent events) and the dashboard's Messages page through `/api/realtime`. Both read one Redis channel per business that the worker publishes to.
@@ -17,7 +17,10 @@ The website widget puts the receptionist on a business's own website: a chat, a 
 | --- | --- | --- |
 | `WIDGET_KEY_ISSUANCE_ENABLED=true` | Admin, then redeploy | Lets the dashboard create widget keys. Without it, the Widget page says new widgets aren't available yet. |
 | `WIDGET_SESSION_SECRET` | Admin | Signs widget sessions. Set a long random value. |
-| `TRUSTED_CLIENT_IP_HEADER` | Admin | The header that holds the visitor's real IP, such as `x-real-ip` on Railway or `cf-connecting-ip` behind Cloudflare. Without it, no per-IP limit runs. |
+| `TRUSTED_CLIENT_IP_HEADER` | Admin | The header that holds the visitor's real IP, such as `x-real-ip` on Railway or `cf-connecting-ip` behind Cloudflare. Without it, no per-IP limit runs. Since fork PR #174, a production admin on Railway doesn't start without it ([below](#stop-scripts-from-spending-a-businesss-chats)). |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Admin | The Turnstile keys sign-up uses. With both, the chat runs Turnstile's check before the receptionist answers (fork PR #174). |
+| `WIDGET_TURNSTILE=false` | Admin | Turns the chat's check off while keeping it on sign-up. The admin then logs `widget.turnstile_off` as it starts. |
+| `WIDGET_CHAT_DAILY_PERCENT` | Admin | The share of a business's chats for the month that the receptionist may start in one UTC day, from 1 to 99. Unset, 25; `100` or `off` turns the daily limit off. |
 | `LIVE_PROTOTYPE_ENABLED=true`, `OPENAI_API_KEY` | Admin and worker | Needed for "Say Allo!". |
 | `WEB_CALL_MAX_DURATION_MS` | Admin | Shortens website calls below the 30-minute default. |
 | `LIVE_RECORDED_GREETING` | Admin | Unset or anything but `false` (since fork PR #139; before, `true`): opens browser calls, and phone calls, with a recording of the greeting ([calls](calls.md#open-calls-with-a-recorded-greeting)). |
@@ -62,6 +65,25 @@ With **Live chat** on, the agent's `requestTeamMember` tool lets a visitor ask f
 
 A chat whose last message is a day old closes, and the visitor's next message starts a new one (`WIDGET_CHAT_IDLE_CLOSE_MS`). Live updates and the 3-minute hand-back need the worker running, with the same `REDIS_URL` and `REDIS_PREFIX` on the admin and the worker.
 
+## Stop scripts from spending a business's chats
+
+The widget's key is public: it's in the snippet on the business's website. Since fork PR #174 on `releases/r2` (AUDIT-004 in the [technical audit of 2026-11-14](https://claude.ai/artifact/PQtmhN2AjwNtjxcRh7e8uR)), three things stop a script that uses it from spending the business's chats.
+
+1. **Turnstile's check before the receptionist answers.** On a deployment with both Turnstile keys, the chat window runs Cloudflare Turnstile as soon as the loader's session arrives, invisibly unless Cloudflare wants the visitor to tick a box. It sends Turnstile's token with the session to `POST /api/widget/session/verify`, which asks Cloudflare and signs the same session again, marked as checked. The chat route answers only a checked session; any other gets 403 `widget_challenge_required` before anything is saved. Each new session from the loader gets its own check, which has usually passed by the time the visitor sends a message. Until it has, the Send button spins and the message stays in the box; when it can't pass, the widget says so and keeps the message.
+2. **A daily limit for each business.** The receptionist starts at most a quarter of the business's chats for the month in one UTC day, rounded up and never fewer than 10: 13 a day on Starter's 50, 50 a day on Pro's 200. On a pack, it's a quarter of the pack's chats. A plan without a chat limit has no daily limit. Past it, the visitor's message still reaches **Messages**, where the team can answer, but the receptionist doesn't reply, and the widget says "Today's chat limit has been reached. Our team will reply shortly." The team gets one "Your website chat reached today's limit" email a day, the **Website chat reached its daily limit** notification. A chat that started before the limit keeps its receptionist.
+3. **The limits per IP address always run on Railway.** A production admin on Railway doesn't start without `TRUSTED_CLIENT_IP_HEADER` set to `x-real-ip` or `cf-connecting-ip`, and Railway keeps the running version until a deploy has it. The Railway template, `.railway/railway.ts` and the setup script set `x-real-ip`. Off Railway, the admin can't tell which proxy is in front of it, so the setting stays optional there.
+
+The check runs in the chat's own frame, on the dashboard's address, so the Turnstile widget's hostname list needs only the dashboard's domain, never the businesses' websites, and a loader a website cached keeps working. The other widget requests, the settings, history, live updates and lead form, keep the loader's session. A chat window open when the deploy that brought the check lands can't send until the visitor reloads the page.
+
+What to look for when it goes wrong:
+
+| What happens | Why | What to do |
+| --- | --- | --- |
+| The admin's log has `widget.turnstile_off` at startup | The deployment has no Turnstile keys (`keys_missing`), or `WIDGET_TURNSTILE=false` (`turned_off`), so the chat answers without the check | Add both keys ([guide, 3.5](../deployment/guide/part-3-outside-services.md#35-cloudflare-turnstile)), or remove `WIDGET_TURNSTILE` |
+| Visitors see "Your browser couldn't be checked" | `widget.verify_refused` lines say why: `widget_challenge_failed` (Cloudflare turned the token down), `widget_challenge_unavailable` (Cloudflare couldn't be asked) or a rate limit | Check that the Turnstile widget lists the dashboard's domain. To let chats through while you look, set `WIDGET_TURNSTILE=false` |
+| A deploy on Railway fails with `[trusted-client-ip] TRUSTED_CLIENT_IP_HEADER is not set` | The admin has no trusted IP header | Set `TRUSTED_CLIENT_IP_HEADER=x-real-ip` on the admin, or `cf-connecting-ip` when Cloudflare's proxy is in front, and deploy again |
+| A business's chats stop answering with `chat_daily_limit_reached` in `widget.chat_refused` | It started as many chats today as its daily limit allows | The line's `dailyLimit` and `plan` say which limit. A busy but genuine day needs a bigger plan or a higher `WIDGET_CHAT_DAILY_PERCENT` |
+
 ## Know the limits
 
 Limits are fixed windows in Redis, checked before the request does its work. A refused request uses no quota. When Redis is down, every widget route answers 503.
@@ -70,13 +92,15 @@ Each count's Redis key names what it counts by its id, such as the business, the
 
 **Chat and the other widget requests** (`apps/admin/src/lib/widget-policy.ts`):
 
-| Count | Chat messages | Other requests (session, history, config, lead) |
+| Count | Chat messages | Other requests (session, the chat's check, history, config, lead, live updates) |
 | --- | --- | --- |
 | Per key, each minute | 60 | 180 |
 | Per key, each hour | 600 | 1,000 |
 | Per business, new sessions each minute | | 60 |
 | Per visitor, hour and day | 60 and 300 | 120 and 600 |
 | Per IP, hour and day (only with `TRUSTED_CLIENT_IP_HEADER`) | 60 and 300 | 120 and 600 |
+
+Each kind of request has counts of its own, so opening the widget doesn't spend the chat's. On top of these, the receptionist starts at most the business's daily share of its chats each UTC day ([above](#stop-scripts-from-spending-a-businesss-chats)), and one admin process keeps at most 1,000 live update streams open; past that, a chat falls back to its slower history check. Since fork PR #174 the stream is counted before its first wait, so a burst can't open more, and each one ends after 9 to 10 minutes, at random, so the streams a deploy cut off don't all come back at the same moment.
 
 **Browser calls** (`apps/admin/src/lib/web-voice-policy.ts`):
 
@@ -123,7 +147,7 @@ When the receptionist can't answer, the widget says "Your message couldn't be se
 | `no_reply` | The model stopped without writing anything | The reply's AI trace |
 | `generation_failed` | Anything else, such as a tool that threw, or the database while the chat loaded | `stage`, and the error's stack in PostHog |
 
-A message turned away before the reply starts shows the same words without an Error ID. The admin's `widget.chat_refused` line has its `status` and `code`, and for a rate limit the `reason`, which names the count that ran out, such as `rate_limit_visitor_hour`. When the admin fails before the reply starts, such as while saving the message, the widget shows an Error ID, and the report's operation is `widget.chat`.
+A message turned away before the reply starts shows the same words without an Error ID, or, since fork PR #174, words of its own for the day's limit, a visitor sending too fast, and a session that didn't pass Turnstile's check. The admin's `widget.chat_refused` line has its `status` and `code`, and for a rate limit the `reason`, which names the count that ran out, such as `rate_limit_visitor_hour`. The codes are `widget_challenge_required` (403, a session without Turnstile's check), `widget_rate_limited` (429), `chat_daily_limit_reached` (429, with the business's `dailyLimit`) and `chat_ai_limit_reached` (402, the month's chats). The check itself logs `widget.verify_refused` with its `status` and `code`. When the admin fails before the reply starts, such as while saving the message, the widget shows an Error ID, and the report's operation is `widget.chat`.
 
 Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `modelSteps`, `tools`, `finishReason` and the token counts. A visitor's request for a person logs `widget.team_request` with its `outcome`: `requested`, `closed` (outside opening hours), `team_has_chat` or `not_found`. These lines carry `businessId` and `conversationId`, and never the chat's words.
 
@@ -145,13 +169,15 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 | #81 | The chat answers in the language the visitor writes in and keeps it, and "Visitor's language" follows the visitor's browser ([above](#know-which-language-the-chat-uses)). |
 | #82 | "Say Allo!" opens in any of the 13 languages a business can pick, and the widget's words fall back to English for a business language they aren't translated into. |
 | #84 | A line under "Say Allo!" says calls are answered by an AI assistant and are recorded and transcribed, and the call says so after its greeting. A website call can send the team an email after it ([email](email.md#email-the-team-after-each-call)). |
+| #174, on `releases/r2` | AUDIT-004: Turnstile's check before the receptionist answers, a daily chat limit for each business with an email to its team, and no production start on Railway without `TRUSTED_CLIENT_IP_HEADER` ([above](#stop-scripts-from-spending-a-businesss-chats)). Reliability: the loader tries a failed first session again three times, renews its session when the page wakes, comes back online or returns from the back button, times its renewal by the seconds the server gives rather than the visitor's clock, and asks for a new session when the chat finds its own turned down; streams reopen at random moments and are counted before their first wait. |
 | #161, on `releases/r2` | A new key's allowed origins start with the deployment's own address, and the field is labelled "Allowed origins (list of websites allowed to host a chat widget)" in all four languages ([above](#switch-it-on)). A key whose list names that address no longer passes the origin check for every website when the check isn't strict; every widget route checks strictly, so nothing changed for them. |
 
 ## Know the gaps
 
-- Bots: nothing but rate limits stops a script from opening sessions or starting calls. One script can use a business's hourly session allowance, and a business with a phone number can be called for about $75 a day. Turnstile before opening and before a call, Cloudflare in front, and a per-business call concurrency cap are recommended and not built ([widget scalability](../reviews/widget-scalability-2026-10-15.md), [roadmap](../roadmap/protect-the-deployment.md)).
+- Bots: since fork PR #174 the receptionist answers a website chat only after Turnstile's check, and starts at most the business's daily share of its chats. Nothing but rate limits stops a script from opening sessions, sending the lead form or starting calls: one script can use a business's hourly session allowance, and a business with a phone number can be called for about $75 a day. Turnstile before a call, Cloudflare in front, and a per-business call concurrency cap are recommended and not built ([widget scalability](../reviews/widget-scalability-2026-10-15.md), [roadmap](../roadmap/protect-the-deployment.md)).
+- Turnstile's check inside the widget's frame, on a customer's website, hasn't been tried in a real browser with real keys. Its tests use a stand-in for Turnstile. Safari and Firefox may ask visitors to tick the box more often in a frame from another site.
 - Capacity: one admin process handled about 400 people chatting at once in a local test. Past that, add admin replicas, which first needs connection pooling ([scalability](../reviews/scalability-2026-10-18.md)).
-- Left from the review's improvement list: stop the 45-second fallback poll and add jitter, measure time to the first word, cache the loader with an ETag, a panel-only layout, Turnstile, and a spending cap per website.
+- Left from the review's improvement list: stop the 45-second fallback poll, measure time to the first word, cache the loader with an ETag, a panel-only layout, and a spending cap per website rather than per business.
 - Left from the realtime work: hand back an overdue team request when the visitor writes, keep polling whenever live updates are down, link a website call to its widget visitor, and show who replied on Messages.
 - When only the reply fails, the widget still says "Your message couldn't be sent. Please try again.", though the message was saved and the team alerted, and sending it again saves it twice.
 - A real GPT-Live call through the widget on a website hasn't been run since fork PRs #18, #52, #54 and #84. `pnpm voice:eval --browser --recorded-greeting` ran on 2026-11-07 and passed 23 of 24 ([calls](calls.md#know-what-hasnt-been-tried)).

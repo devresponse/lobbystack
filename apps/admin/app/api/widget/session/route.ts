@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       }),
     ]);
     const token = createWidgetSessionToken({ widgetKeyId, businessId, visitorId, origin, ...(receptionistId ? { receptionistId } : {}) });
-    return NextResponse.json(widgetSessionResponseSchema.parse({ token: token.token, expiresAt: token.expiresAt, visitorId }), { headers: corsHeaders(request) });
+    return NextResponse.json(widgetSessionResponseSchema.parse({ token: token.token, expiresAt: token.expiresAt, ...(token.expiresIn ? { expiresIn: token.expiresIn } : {}), visitorId }), { headers: corsHeaders(request) });
   } catch (error) {
     if (error instanceof Response) {
       return withCors(error, request);

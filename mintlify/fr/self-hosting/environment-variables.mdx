@@ -26,7 +26,7 @@ Cloudflare Turnstile vérifie qu'une personne, et non un robot, remplit le formu
 
 | Variable | Rôle |
 | --- | --- |
-| `TURNSTILE_SECRET_KEY` | La clé secrète de votre widget Turnstile. L'admin s'en sert pour vérifier chaque inscription par courriel. Sans elle, toute inscription par courriel échoue, sauf si `APP_BASE_URL` commence par `http://localhost:` ou `http://127.0.0.1:`. Le formulaire affiche alors "Impossible de créer votre compte. Veuillez réessayer.", et la réponse de l'admin indique `Turnstile is not configured.` |
+| `TURNSTILE_SECRET_KEY` | La clé secrète de votre widget Turnstile. L'admin s'en sert pour vérifier chaque inscription par courriel, et chaque visiteur du clavardage du site Web avant que la réceptionniste réponde. Sans elle, toute inscription par courriel échoue, sauf si `APP_BASE_URL` commence par `http://localhost:` ou `http://127.0.0.1:`. Le formulaire affiche alors "Impossible de créer votre compte. Veuillez réessayer.", et la réponse de l'admin indique `Turnstile is not configured.` |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | La clé de site du widget. Le navigateur la lit pour afficher la vérification sur le formulaire d'inscription. Next.js l'écrit dans le code du navigateur à la compilation de l'admin, qui en a donc besoin comme argument de compilation Docker. Recompilez l'admin après l'avoir changée. Compose la passe à la compilation à partir de `.env`. Si la compilation n'a pas de clé de site alors que la clé secrète est définie, le formulaire n'affiche aucune vérification et chaque inscription échoue avec le même message. |
 
 ## Image de marque
@@ -124,6 +124,8 @@ Un point de terminaison OTLP vide ne désactive ni les journaux stdout des conte
 | `AI_CHAT_PRICING_VERSION`, `AI_CHAT_PRICING_SOURCE`, `AI_CHAT_PRICING_EFFECTIVE_DATE` | Une étiquette, une URL source et la date de ces prix. LobbyStack n'enregistre un coût que si les trois sont définies. |
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_BASE_URL`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_PROVIDER_NAME`, `AI_EMBEDDING_REVISION` | Embeddings compatibles OpenAI de 1536 dimensions. |
 | `WIDGET_SESSION_SECRET` | Signe les sessions cross-origin du widget du site Web. |
+| `WIDGET_TURNSTILE` | Laissez-la vide. Quand les deux clés Turnstile sont définies, le clavardage du site Web passe la vérification Turnstile avant que la réceptionniste réponde, pour qu'un script ne puisse pas dépenser les sessions de clavardage d'une entreprise avec la clé publique du widget. `false` désactive cette vérification et garde celle de l'inscription ; l'admin écrit alors `widget.turnstile_off` au démarrage. |
+| `WIDGET_CHAT_DAILY_PERCENT` | La part des sessions de clavardage du mois d'une entreprise, ou de celles de son forfait prépayé, que la réceptionniste peut commencer en un jour UTC : 25 si elle est vide, et jamais moins de 10 sessions. Un nombre entier de 1 à 99 ; `100` ou `off` désactive la limite quotidienne. |
 | `FIRECRAWL_*` | Importation des connaissances à partir du site Web. |
 | `GOOGLE_*` | OAuth de Google Calendar. |
 | `SMTP_*`, `EMAIL_*` | Courriels transactionnels. |

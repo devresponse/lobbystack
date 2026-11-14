@@ -27,6 +27,12 @@ Since fork PR #41, `withCallContext`, `logEvent`, `reportError` and `reportWarni
 
 The website chat isn't a call, but since fork PR #79 its lines carry `businessId`, and those about one chat its `conversationId`: `widget.chat_reply` for each answer (`durationMs`, `timeToFirstTokenMs`, `modelSteps`, `tools`, `finishReason` and token counts), `widget.chat_refused` with the `status` and `code`, and `widget.team_request` with its `outcome`. A failed answer is an `[admin] exception:` line, and a PostHog error, with the `errorId` the widget shows and a `category` that says why ([website widget](website-widget.md#find-out-why-a-reply-failed)).
 
+Since fork PR #174, three more lines watch the website chat's protection against scripts ([website widget](website-widget.md#stop-scripts-from-spending-a-businesss-chats)):
+
+- `widget.turnstile_off`, a warning as a production admin starts and the chat would answer without Turnstile's check, with the `reason`: `keys_missing` (no `NEXT_PUBLIC_TURNSTILE_SITE_KEY` or `TURNSTILE_SECRET_KEY`) or `turned_off` (`WIDGET_TURNSTILE=false`).
+- `widget.verify_refused`, a warning: a visitor's Turnstile check didn't pass, with the `status` and `code`, `widget_challenge_failed` (Cloudflare turned the token down), `widget_challenge_unavailable` (Cloudflare couldn't be asked) or a rate limit's, and its `reason`. A failure of our own is an `[admin] exception:` line with the operation `widget_session_verify`.
+- `widget.chat_refused` with the code `widget_challenge_required` (a session that didn't pass the check) or `chat_daily_limit_reached` (the business's daily limit, with its `dailyLimit` and `plan`). A daily limit alert that couldn't be queued is reported with the operation `widget.chat_limit_alert`.
+
 Since fork PR #129 a business can have several receptionists ([receptionists](receptionists.md)). These lines say when the receptionist a visitor's page named didn't answer the chat; the one the widget key names answered instead, or the default one:
 
 - `widget.receptionist_token_rejected`, a warning: the page's signed token didn't check out, with the `businessId`, the `widgetKeyId` and a `reason`. `invalid` is a token this deployment didn't sign, one past its 30 days, or one signed before the widget's secret changed (`WIDGET_SESSION_SECRET`, or `BETTER_AUTH_SECRET` when it's unset); `other_widget` is one signed for another business or widget key.

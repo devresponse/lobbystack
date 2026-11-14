@@ -401,9 +401,17 @@ export type WidgetSessionRequest = z.infer<typeof widgetSessionRequestSchema>;
 export const widgetSessionResponseSchema = z.object({
   token: z.string().min(1),
   expiresAt: z.iso.datetime(),
+  /** Seconds until expiresAt. A loader times its renewal by this, not by its own clock, which may be wrong. */
+  expiresIn: z.number().int().positive().optional(),
   visitorId: z.guid(),
 });
 export type WidgetSessionResponse = z.infer<typeof widgetSessionResponseSchema>;
+
+/** What the chat's frame sends /api/widget/session/verify: the token Turnstile gave it, which Cloudflare caps at 2,048 characters. */
+export const widgetSessionVerifyRequestSchema = z.object({
+  turnstileToken: z.string().min(1).max(2048),
+});
+export type WidgetSessionVerifyRequest = z.infer<typeof widgetSessionVerifyRequestSchema>;
 
 export const widgetChatRequestSchema = z.object({
   visitorId: z.guid(),

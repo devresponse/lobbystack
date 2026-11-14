@@ -157,3 +157,67 @@ describe("billing provider startup validation", () => {
     await expect(register()).resolves.toBeUndefined();
   });
 });
+
+// AUDIT-004: the website chat's limits per IP address always run on Railway, and its check's absence is said out loud.
+describe("website chat startup checks", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+    for (const name of ["BETTER_AUTH_SECRET", "INTERNAL_SERVICE_SECRET", "INTERNAL_SERVICE_TOKEN", "WIDGET_SESSION_SECRET", "ENCRYPTION_KEY", "OTP_HASH_SECRET", "LOCAL_STORAGE_SIGNING_SECRET"]) {
+      vi.stubEnv(name, "strong-production-fixture-secret-12345");
+    }
+    vi.stubEnv("STORAGE_PROVIDER", "local");
+    for (const name of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_ID", "TRUSTED_CLIENT_IP_HEADER", "NEXT_PUBLIC_TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "WIDGET_TURNSTILE"]) vi.stubEnv(name, undefined);
+    mocks.getDatabase.mockImplementation((role: DatabaseRole) => ownRole(role));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  function turnstileWarnings(warn: { mock: { calls: unknown[][] } }): Array<Record<string, unknown>> {
+    return warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("widget.turnstile_off")).map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+
+  it("refuses to start on Railway without the trusted IP header, before opening database clients", async () => {
+    vi.stubEnv("RAILWAY_SERVICE_ID", "service");
+    await expect(register()).rejects.toThrow("TRUSTED_CLIENT_IP_HEADER is not set");
+    expect(mocks.getDatabase).not.toHaveBeenCalled();
+    vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", "x-real-ip");
+    await expect(register()).resolves.toBeUndefined();
+  });
+
+  it("builds on Railway without the header, since a build serves no one", async () => {
+    vi.stubEnv("RAILWAY_SERVICE_ID", "service");
+    vi.stubEnv("NEXT_PHASE", "phase-production-build");
+    await expect(register()).resolves.toBeUndefined();
+  });
+
+  it("starts off Railway without the header, where it can't tell which proxy is in front", async () => {
+    await expect(register()).resolves.toBeUndefined();
+  });
+
+  it("warns when a production server answers website chats without Turnstile's keys", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(register()).resolves.toBeUndefined();
+    expect(turnstileWarnings(warn)).toEqual([expect.objectContaining({ level: "warn", message: "widget.turnstile_off", reason: "keys_missing" })]);
+  });
+
+  it("warns when the check is turned off on purpose", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret-key");
+    vi.stubEnv("WIDGET_TURNSTILE", "false");
+    await expect(register()).resolves.toBeUndefined();
+    expect(turnstileWarnings(warn)).toEqual([expect.objectContaining({ reason: "turned_off" })]);
+  });
+
+  it("stays quiet when the website chat has its check", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret-key");
+    await expect(register()).resolves.toBeUndefined();
+    expect(turnstileWarnings(warn)).toEqual([]);
+  });
+});

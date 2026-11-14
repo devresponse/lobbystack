@@ -1344,6 +1344,10 @@
         "title": "Nouveau message sur le clavardage du site",
         "description": "Lorsqu’un visiteur envoie un message via le widget de votre site. Vous recevez au plus une alerte par conversation chaque jour."
       },
+      "widgetChatLimit": {
+        "title": "Le clavardage du site a atteint sa limite quotidienne",
+        "description": "Lorsque la réceptionniste IA a commencé autant de conversations sur votre site qu’elle le peut en une journée. Les nouvelles conversations attendent votre équipe dans Messages jusqu’à minuit UTC."
+      },
       "liveChatRequest": {
         "title": "Visiteur qui demande une personne",
         "description": "Lorsqu'un visiteur de votre site demande à parler à quelqu'un de votre équipe. Répondez depuis Messages dans les 3 minutes pour rejoindre le clavardage."

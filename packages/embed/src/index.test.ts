@@ -426,3 +426,136 @@ it("leaves the receptionist to the key when the snippet carries no token", async
   const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
   expect(JSON.parse(String(init.body))).not.toHaveProperty("receptionistToken");
 });
+
+it("tries a first session again shortly when the server fails for a moment, before the chat shows an error", async () => {
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(async () => new Response("Application failed to respond", { status: 502 }))
+    .mockImplementationOnce(async () => Response.json({ code: "widget_rate_limited" }, { status: 429 }))
+    .mockImplementationOnce(async () => Response.json({ token: "late-session", expiresIn: 3600, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
+  vi.stubGlobal("fetch", fetchMock);
+  const frame = mountWidget();
+  window.LobbyStack!.open();
+  const post = vi.spyOn(frame.contentWindow!, "postMessage");
+  await flush();
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "ready" } }));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  // About a second, then about two: never more than the full wait.
+  await vi.advanceTimersByTimeAsync(1_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(2_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "session-error" }), expect.anything());
+  expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "session", token: "late-session" }), "https://admin.example.test");
+});
+
+it("waits at least half of each retry's time, so browsers that failed together don't all come back together", async () => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(async () => new Response("Bad gateway", { status: 502 }))
+    .mockImplementationOnce(async () => Response.json({ token: "late-session", expiresAt: "2099-01-01T00:00:00Z" }));
+  vi.stubGlobal("fetch", fetchMock);
+  mountWidget();
+  window.LobbyStack!.open();
+  await flush();
+  await vi.advanceTimersByTimeAsync(499);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("tells the chat after three quick retries fail, and tries again with each new open", async () => {
+  const fetchMock = vi.fn().mockImplementation(async () => new Response("Service unavailable", { status: 503 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const frame = mountWidget();
+  window.LobbyStack!.open();
+  const post = vi.spyOn(frame.contentWindow!, "postMessage");
+  await flush();
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "ready" } }));
+  for (const wait of [1_000, 2_000, 4_000]) {
+    await vi.advanceTimersByTimeAsync(wait);
+    await flush();
+  }
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+  expect(post).toHaveBeenCalledWith({ type: "session-error", code: "widget_session_failed" }, "https://admin.example.test");
+  await vi.advanceTimersByTimeAsync(60_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+  window.LobbyStack!.close();
+  window.LobbyStack!.open();
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(5);
+});
+
+it("times the renewal by the seconds the server gives, even when the visitor's clock is an hour slow", async () => {
+  const fetchMock = vi.fn().mockImplementation(async () => Response.json({ token: "session", expiresIn: 3600, expiresAt: new Date(Date.now() + 2 * 3_600_000).toISOString() }));
+  vi.stubGlobal("fetch", fetchMock);
+  mountWidget();
+  window.LobbyStack!.open();
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  // By the visitor's clock the session lasts two hours, by the server's one: it renews five minutes before the server's hour.
+  await vi.advanceTimersByTimeAsync(55 * 60_000 - 1_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("renews at once when the page wakes after sleeping through its renewal", async () => {
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(async () => Response.json({ token: "first-session", expiresIn: 3600, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }))
+    .mockImplementationOnce(async () => Response.json({ token: "awake-session", expiresIn: 3600, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
+  vi.stubGlobal("fetch", fetchMock);
+  // The widgets earlier tests made listen on the same document, so this one's listener is called directly.
+  const listening = vi.spyOn(document, "addEventListener");
+  const frame = mountWidget();
+  const shown = listening.mock.calls.find(([type]) => type === "visibilitychange")![1] as () => void;
+  window.LobbyStack!.open();
+  const post = vi.spyOn(frame.contentWindow!, "postMessage");
+  await flush();
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "ready" } }));
+  // Shown again a minute later, the page has nothing to renew.
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  vi.setSystemTime(Date.now() + 60_000);
+  shown();
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  // A laptop slept two hours: the clock moved on, but no timer ran.
+  vi.setSystemTime(Date.now() + 2 * 3_600_000);
+  shown();
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "session", token: "awake-session" }), "https://admin.example.test");
+});
+
+it("gets a new session when the chat says the server turned its session down, at most every half minute", async () => {
+  const fetchMock = vi.fn().mockImplementation(async () => Response.json({ token: `session-${fetchMock.mock.calls.length}`, expiresIn: 3600, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
+  vi.stubGlobal("fetch", fetchMock);
+  const frame = mountWidget();
+  window.LobbyStack!.open();
+  const post = vi.spyOn(frame.contentWindow!, "postMessage");
+  await flush();
+  const expired = () => window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "session-expired" } }));
+  frame.dispatchEvent(new Event("load"));
+  expired();
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "session", token: "session-2" }), "https://admin.example.test");
+  expired();
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expired();
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  // Another page's frame can't ask.
+  await vi.advanceTimersByTimeAsync(30_000);
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://elsewhere.example.test", source: window, data: { type: "session-expired" } }));
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});

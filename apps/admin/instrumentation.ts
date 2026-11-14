@@ -10,6 +10,12 @@ export async function register(): Promise<void> {
     "OTP_HASH_SECRET",
     ...(process.env.STORAGE_PROVIDER === "s3" ? [] : ["LOCAL_STORAGE_SIGNING_SECRET"]),
   ]);
+  // On Railway the limits per IP address always run (AUDIT-004): without the
+  // header that names the visitor's address, the admin doesn't start, and
+  // Railway keeps the running version until a deploy has it.
+  const { trustedClientIpStartupError } = await import("./src/lib/trusted-client-ip");
+  const clientIpError = trustedClientIpStartupError(process.env);
+  if (clientIpError) throw new Error(clientIpError);
   // A BILLING_PROVIDER the worker refuses stops the admin too, which would otherwise show Polar's plans.
   const { readBillingProviderId } = await import("@lobbystack/providers/billing/factory");
   readBillingProviderId(process.env);
@@ -31,6 +37,16 @@ export async function register(): Promise<void> {
   if (emailVerificationOffInProduction(process.env)) {
     logEvent("warn", "auth.email_verification_off", {
       detail: "REQUIRE_EMAIL_VERIFICATION is false, so anyone can sign up with an email address they don't own. Once email works, remove it or set it to true.",
+    });
+  }
+  const { widgetChallengeOffReason } = await import("./src/lib/widget-challenge");
+  const challengeOff = widgetChallengeOffReason(process.env);
+  if (challengeOff) {
+    logEvent("warn", "widget.turnstile_off", {
+      reason: challengeOff,
+      detail: challengeOff === "turned_off"
+        ? "WIDGET_TURNSTILE is false, so the receptionist answers website chats without Turnstile's check, and a script can spend the businesses' chats. Remove it once the check works."
+        : "NEXT_PUBLIC_TURNSTILE_SITE_KEY or TURNSTILE_SECRET_KEY is missing, so the receptionist answers website chats without Turnstile's check, and a script can spend the businesses' chats.",
     });
   }
   const { assertAdminDatabaseRoles } = await import("./src/lib/startup-role-assertion");

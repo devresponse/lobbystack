@@ -95,6 +95,13 @@ describe("widget session admission", () => {
     expect(mocks.register).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(mocks.report).toHaveBeenCalledExactlyOnceWith(failure, { operation: "widget_key_last_used", route: "/api/widget/session" }));
   });
+  // The loader times its renewal by these seconds rather than by the visitor's clock.
+  it("says how many seconds the session lasts", async () => {
+    mocks.limit.mockResolvedValue({ allowed: true });
+    mocks.mint.mockReturnValue({ token: "signed", expiresAt: "2026-10-01T00:00:00.000Z", expiresIn: 3600 });
+    const response = await POST(request());
+    expect(await response.json()).toEqual({ token: "signed", expiresAt: "2026-10-01T00:00:00.000Z", expiresIn: 3600, visitorId });
+  });
   describe("the receptionist a page names", () => {
     const kitsilano = "00000000-0000-4000-8000-0000000000a2";
     beforeEach(() => mocks.limit.mockResolvedValue({ allowed: true }));

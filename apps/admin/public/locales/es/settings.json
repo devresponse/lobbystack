@@ -1344,6 +1344,10 @@
         "title": "Nuevo mensaje del chat del sitio web",
         "description": "Cuando un visitante envía un mensaje desde el widget de su sitio web. Recibe como máximo una alerta por conversación al día."
       },
+      "widgetChatLimit": {
+        "title": "El chat del sitio web alcanzó su límite diario",
+        "description": "Cuando la recepcionista de IA ya empezó tantos chats del sitio web como puede en un día. Los chats nuevos esperan a su equipo en Mensajes hasta la medianoche UTC."
+      },
       "liveChatRequest": {
         "title": "Visitante que pide una persona",
         "description": "Cuando un visitante de su sitio pide hablar con alguien de su equipo. Responda desde Mensajes en 3 minutos para unirse al chat."

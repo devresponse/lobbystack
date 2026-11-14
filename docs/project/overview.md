@@ -48,10 +48,11 @@ The old `production` branch was rewritten on 2026-10-09 and deleted on 2026-10-1
 
 [Development](../development/README.md) has the checks to run before you push, and what trips them up.
 
-Two CI checks fail a pull request on things it didn't change:
+Three CI checks fail a pull request on things it didn't change:
 
 - Trivy fails it on any critical advisory in an image, even one published that day. Bump the package.
 - CodeQL fails it on any new high alert. Keep backtracking regular expressions, such as `/\/+$/`, away from request values.
+- Since fork PR #170, the checks job's dependency audit fails it on any High or Critical advisory in what the admin and the worker run, the workspace packages they use included (`pnpm audit --prod`). Raise the package's override in `pnpm-workspace.yaml` to the first fixed version, with a comment naming the advisory, and change only that package in `pnpm-lock.yaml` ([guide 7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions)).
 
 If GitHub never starts a pull request's CI because it never works out whether the pull request can merge, dispatch the `replacement-platform.yml` workflow on the branch with the target `replacement-validate`. It runs `main`'s validation on the branch in about 20 minutes, without staging secrets or image pushes. Merging on that run instead of the pull request's own CI needs the maintainer's word each time.
 

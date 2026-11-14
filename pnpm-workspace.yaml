@@ -40,7 +40,8 @@ overrides:
   fast-uri: ^3.1.8
   "fflate@>=0.4.5 <0.4.9": ^0.4.9
   "fflate@>=0.7.0 <0.7.5": ^0.7.5
-  follow-redirects: ^1.16.0
+  # GHSA-8r9p-f939-6h3c, GHSA-q3jh-wrc6-jgq8 (1.16.1), GHSA-mrwp-f3q8-3g9p (1.16.2): credential headers on redirects. Review 2027-02.
+  follow-redirects: ^1.16.2
   form-data: ^4.0.6
   hono: ^4.13.8
   http-cache-semantics: ^4.3.0
@@ -59,7 +60,8 @@ overrides:
   proxy-addr: ^2.0.8
   puppeteer: ^25.10.0
   puppeteer-core: ^25.10.0
-  qs: ^6.16.0
+  # GHSA-6pq8-jhm2-2vcw (6.16.1): stringify crash on crafted arrays. Review 2027-02.
+  qs: ^6.16.1
   react-router: ^7.17.0
   react-router-dom: ^7.17.0
   sharp: ^0.35.5
@@ -69,7 +71,8 @@ overrides:
   source-map-js: ^1.2.2
   svgo: ^4.1.0
   tar: ^7.5.21
-  undici: ^7.29.1
+  # GHSA-2m5v-pch6-74hx, GHSA-4w7w-5xrc-9h26, GHSA-qrxm-fqhp-jwvm, GHSA-xjj6-f33q-929c and four Moderate (7.30.1). Review 2027-02.
+  undici: ^7.30.1
   uuid: ^14.0.0
   ws: ^8.22.0
   yaml: ^2.9.0

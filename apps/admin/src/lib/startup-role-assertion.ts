@@ -1,4 +1,4 @@
-import { assertDatabaseRole, type DatabaseClient, type DatabaseRole } from "@lobbystack/db";
+import { assertDatabaseRole, type AdminDatabaseRole, type DatabaseClient } from "@lobbystack/db";
 import { isMaintenanceMode } from "@lobbystack/shared";
 
 import { getDatabase } from "./databases";
@@ -8,7 +8,7 @@ export const ADMIN_RUNTIME_DATABASE_ROLES = [
   "lobbystack_auth",
   "lobbystack_worker",
   "lobbystack_dispatcher",
-] as const satisfies readonly DatabaseRole[];
+] as const satisfies readonly AdminDatabaseRole[];
 
 export type AdminStartupContext = {
   runtime: string | undefined;
@@ -31,7 +31,7 @@ export async function assertAdminDatabaseRoles(
     phase: process.env.NEXT_PHASE,
     environment: process.env,
   },
-  resolveClient: (role: DatabaseRole) => DatabaseClient = getDatabase,
+  resolveClient: (role: AdminDatabaseRole) => DatabaseClient = getDatabase,
 ): Promise<void> {
   if (!shouldAssertAdminDatabaseRoles(context)) return;
   await Promise.all(

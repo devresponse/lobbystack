@@ -44,7 +44,7 @@ Each feature has a status:
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
 | [Protect the widget and the deployment](protect-the-deployment.md) | Floods and scripts stopped before they reach the app, and no business able to use up what all share | Four settings, then about nine code changes, not estimated | Ready when needed | [2026-10-15](../reviews/widget-scalability-2026-10-15.md) |
-| [Grow past one stack](scale-past-one-stack.md) | More people at once, then surviving a failed machine, then cells | Phase 1 first; not estimated in days | Ready when needed | [2026-10-18](../reviews/scalability-2026-10-18.md) |
+| [Grow past one stack](scale-past-one-stack.md) | More people at once, then surviving a failed machine, then cells | Phase 1 first; not estimated in days | Started: two admins and two workers possible since fork PR #168 | [2026-10-18](../reviews/scalability-2026-10-18.md), [2026-11-13](../reviews/replicas-2026-11-13.md) |
 | [Remove a Railway deployment's last manual steps](railway-bootstrap.md) | No sign-up before onboarding, numbers bought ahead, one admin image for every deployment, and a sign-up allowlist, on top of the bootstrap script | Not estimated | The script is built; the rest waits on a decision | [2026-10-14](../research/railway-automation.md) |
 
 **Integrations and a new product**

@@ -11,3 +11,4 @@ Each review looked at part of the system on a given date and listed what it foun
 | 2026-10-18 | [What limits scale](scalability-2026-10-18.md) | Connections, the single admin process, per-business jobs and shared provider accounts break before the database | Analysis only, apart from billing fixes |
 | 2026-10-23 | [The billing code](../billing/design-history.md#review-the-billing-code-2026-10-23) | 33 fixes and five decisions | Fork PRs #67 to #70 |
 | 2026-10-23 | [Billing, a second pass](../billing/design-history.md#make-a-second-pass-2026-10-23) | Findings on Polar, calls, security, deployments and four instances | Five fixes, fork PRs #71 to #75 |
+| 2026-11-13 | [Two or more copies](replicas-2026-11-13.md) | Most of the system was safe with copies; connections, the admin's drain and how the admin reached the worker weren't | The three blockers fixed in fork PR #168; the rehearsal and later fixes not started |

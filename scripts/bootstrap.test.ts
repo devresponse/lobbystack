@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { connectionBudget } from "../packages/db/src/pool-budget";
 import { POLAR_API_VERSION } from "../packages/shared/src/billing";
 
 // devops/bootstrap.mjs end to end, run as a person runs it: against one local server that stands in for Railway's API,
@@ -246,6 +247,11 @@ function railwayAnswer(body: GraphQL | null): unknown {
   if (operation === "serviceInstanceRedeploy") {
     deploy(service);
     return { data: { serviceInstanceRedeploy: true } };
+  }
+  // Deploys an image service, such as Postgres in deploy.databases, and answers with the new deployment's ID.
+  if (operation === "serviceInstanceDeployV2") {
+    deploy(service);
+    return { data: { serviceInstanceDeployV2: world.deployments[service][0]?.id } };
   }
   if (operation === "deployments") {
     const latest = world.deployments[service][0];
@@ -1054,5 +1060,69 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(redo.code, redo.out).toBe(0);
     const after = readState();
     for (const id of ["posthog.project", "variables", "post.posthog"]) expect(after.done[id], id).toBeUndefined();
+  });
+
+  // Room for two or more copies of the admin and the worker (guide 7.24, the 2026-11-13 replicas review).
+  const adminPools = { LOBBYSTACK_APP_POOL_MAX: "8", LOBBYSTACK_AUTH_POOL_MAX: "4", LOBBYSTACK_WORKER_POOL_MAX: "8", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2" };
+  const workerPools = { LOBBYSTACK_WORKER_POOL_MAX: "10", LOBBYSTACK_DISPATCHER_POOL_MAX: "2" };
+
+  it("gives a new deployment room for copies: a database with 200 connections, smaller pools, and a minute for the old admin to finish", async () => {
+    writeSettings();
+    // Up with everything made, but no variables set and nothing deployed yet.
+    const state = stateAfterUp();
+    for (const id of ["variables", "deploy.databases", "deploy.migrate", "deploy.admin", "deploy.worker"]) delete state.done[id];
+    writeState(state);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    // Postgres reads POSTGRES_INITDB_ARGS when it makes its database, at its first deploy, which had it.
+    expect(world.variables.Postgres.POSTGRES_INITDB_ARGS).toBe("-c max_connections=200");
+    expect(world.running.Postgres.POSTGRES_INITDB_ARGS).toBe("-c max_connections=200");
+    // At a release Railway gives the old admin a minute to finish the requests it holds, such as connecting a call to
+    // a worker; the old worker keeps its 31 minutes for the calls it carries. Both had them before their first deploy.
+    expect(world.variables.admin.RAILWAY_DEPLOYMENT_DRAINING_SECONDS).toBe("60");
+    expect(world.variables.worker.RAILWAY_DEPLOYMENT_DRAINING_SECONDS).toBe("1860");
+    expect(world.variables.admin).toMatchObject(adminPools);
+    expect(world.variables.worker).toMatchObject(workerPools);
+    expect(world.deployments.admin[0]?.id).toBe("admin-deployment-2");
+    expect(world.deployments.worker[0]?.id).toBe("worker-deployment-2");
+    // The admin and the worker read those as 24 and 12 connections a copy (packages/db/src/pool-budget.ts). While a
+    // release replaces two admins and two workers, the old copies still hold theirs: 144, within the 197 of 200 that
+    // Postgres doesn't keep for superusers, and so are three admins and two workers (192).
+    const admin = connectionBudget("admin", world.variables.admin);
+    const worker = connectionBudget("worker", world.variables.worker);
+    expect([admin, worker]).toEqual([24, 12]);
+    expect(2 * (2 * admin + 2 * worker)).toBe(144);
+    expect(2 * (3 * admin + 2 * worker)).toBeLessThanOrEqual(200 - 3);
+    // The file for devops/railway-vars.mjs has them too.
+    const vars = readFileSync(`${settings()}.vars`, "utf8");
+    expect(vars).toContain("[Postgres]\nPGDATA=/var/lib/postgresql/data/pgdata\nPOSTGRES_DB=lobbystack\nPOSTGRES_USER=postgres\nPOSTGRES_INITDB_ARGS=-c max_connections=200\n");
+    expect(vars).toContain("RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60");
+    expect(vars).toContain("LOBBYSTACK_FINANCE_EXPORT_POOL_MAX=2");
+  });
+
+  it("brings an existing deployment's admin and worker their pools and the admin's minute, and leaves its running database alone", async () => {
+    writeSettings();
+    // A deployment up made before these settings: its database runs with Postgres's own 100 connections.
+    railwayAfterUp();
+    writeState(stateAfterUp());
+    const redo = await bootstrap(["redo", settings(), "variables"]);
+    expect(redo.code, redo.out).toBe(0);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    // A database that exists ignores POSTGRES_INITDB_ARGS, and the script changes no running database's settings, so
+    // it isn't set and Postgres doesn't deploy again; raising its limit is ALTER SYSTEM and a restart (guide 7.24).
+    expect(world.variables.Postgres.POSTGRES_INITDB_ARGS).toBeUndefined();
+    expect(result.out).toContain("= Postgres: unchanged");
+    expect(world.deployments.Postgres).toHaveLength(1);
+    expect(world.deployments.Redis).toHaveLength(1);
+    expect(readFileSync(`${settings()}.vars`, "utf8")).not.toContain("POSTGRES_INITDB_ARGS");
+    // The admin and the worker get the new values, and Railway deploys each again with them.
+    expect(world.variables.admin).toMatchObject({ RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "60", ...adminPools });
+    expect(world.variables.worker).toMatchObject({ RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "1860", ...workerPools });
+    expect(world.deployments.admin[0]?.status).toBe("DEPLOYING");
+    expect(world.deployments.worker[0]?.status).toBe("DEPLOYING");
+    // With the smaller pools one admin and one worker fit Postgres's 97 even while a release replaces them both and the
+    // old admin takes its minute, so the deployment needn't wait for the higher limit.
+    expect(2 * (connectionBudget("admin", world.variables.admin) + connectionBudget("worker", world.variables.worker))).toBeLessThanOrEqual(100 - 3);
   });
 });

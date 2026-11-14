@@ -2,6 +2,7 @@
 // transactional outbox and the row-level security helpers.
 export * from "./client";
 export * from "./outbox";
+export * from "./pool-budget";
 export * from "./rls/context";
 export * from "./schema";
 

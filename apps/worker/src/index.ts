@@ -122,6 +122,7 @@ async function main(): Promise<void> {
   for (const warning of brand.warnings) console.warn(warning);
   if (brand.error) throw new Error(brand.error);
   await initializeTelemetry({ serviceName: "lobbystack-worker" });
+  // The worker's two pools, as SERVICE_DATABASE_ROLES.worker (@lobbystack/db) lists them for the connection budget.
   const database = createDatabaseClient("lobbystack_worker");
   const dispatcherDatabase = createDatabaseClient("lobbystack_dispatcher");
   await Promise.all([assertDatabaseRole(database), assertDatabaseRole(dispatcherDatabase)]);

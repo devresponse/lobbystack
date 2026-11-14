@@ -273,6 +273,16 @@ const SECRETS = ["POSTGRES_PASSWORD", "LOBBYSTACK_AUTH_PASSWORD", "LOBBYSTACK_AP
 const MIGRATE_PRE_DEPLOY = "sh -c 'node_modules/.bin/tsx dist/cli.js migrate && node_modules/.bin/tsx dist/cli.js bootstrap && node_modules/.bin/tsx dist/cli.js check && VERIFY_RLS_BEHAVIOR=true node_modules/.bin/tsx dist/cli.js verify-rls'";
 const REDIS_START = "sh -c 'exec redis-server --bind :: 0.0.0.0 --appendonly yes --maxmemory-policy noeviction --requirepass \"$REDIS_PASSWORD\"'";
 
+// Connections. Postgres accepts 100 by default (3 kept for superusers), and every copy of the admin and the worker opens
+// its own pools, old copies included while a release replaces them. So a new database starts with room for 200, and
+// each copy gets a smaller share than the code's defaults (12 per pool, 4 for the dispatcher): an admin 24, a worker 12.
+// Two admins and two workers then need at most 144 while a release replaces them all at once (guide 7.24).
+const POSTGRES_MAX_CONNECTIONS = 200;
+const POOLS = {
+  admin: { LOBBYSTACK_APP_POOL_MAX: "8", LOBBYSTACK_AUTH_POOL_MAX: "4", LOBBYSTACK_WORKER_POOL_MAX: "8", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2" },
+  worker: { LOBBYSTACK_WORKER_POOL_MAX: "10", LOBBYSTACK_DISPATCHER_POOL_MAX: "2" },
+};
+
 // ---------------------------------------------------------------- command line
 
 // ---------------------------------------------------------------- log file and hidden secrets
@@ -2255,6 +2265,9 @@ function variableSections(run) {
   return [
     ["Postgres", {
       PGDATA: "/var/lib/postgresql/data/pgdata", POSTGRES_DB: "lobbystack", POSTGRES_USER: "postgres",
+      // Read only when the database is first made, so only until then: a running database keeps its own limit, and
+      // raising it there takes ALTER SYSTEM and a restart (guide 7.24).
+      ...(run.state?.done?.["deploy.databases"] ? {} : { POSTGRES_INITDB_ARGS: `-c max_connections=${POSTGRES_MAX_CONNECTIONS}` }),
       POSTGRES_PASSWORD: x("POSTGRES_PASSWORD"), LOBBYSTACK_AUTH_PASSWORD: x("LOBBYSTACK_AUTH_PASSWORD"), LOBBYSTACK_APP_PASSWORD: x("LOBBYSTACK_APP_PASSWORD"),
       LOBBYSTACK_WORKER_PASSWORD: x("LOBBYSTACK_WORKER_PASSWORD"), LOBBYSTACK_DISPATCHER_PASSWORD: x("LOBBYSTACK_DISPATCHER_PASSWORD"),
     }],
@@ -2277,7 +2290,8 @@ function variableSections(run) {
       ...(stripe ? { BILLING_PROVIDER: "stripe", STRIPE_ACCOUNT_ID: x("STRIPE_ACCOUNT_ID") } : {}),
     }],
     ["admin", {
-      RAILWAY_DOCKERFILE_PATH: "Dockerfile.admin", PORT: "3000", HOSTNAME: "::",
+      // At a release the old copy gets a minute to finish the requests it holds, such as connecting a call to a worker.
+      RAILWAY_DOCKERFILE_PATH: "Dockerfile.admin", PORT: "3000", HOSTNAME: "::", RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "60", ...POOLS.admin,
       APP_BASE_URL: s.CUSTOM_HOST ? `https://${s.CUSTOM_HOST}` : "https://${{RAILWAY_PUBLIC_DOMAIN}}",
       // With its own address, sign-in also works on Railway's, which answers first while DNS spreads.
       SITE_URL: "${{APP_BASE_URL}}", AUTH_TRUSTED_ORIGINS: s.CUSTOM_HOST && x("RAILWAY_HOST") ? `\${{APP_BASE_URL}},https://${x("RAILWAY_HOST")}` : "${{APP_BASE_URL}}",
@@ -2297,7 +2311,7 @@ function variableSections(run) {
       ...(posthog ? { NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: posthogToken, NEXT_PUBLIC_POSTHOG_HOST: s.POSTHOG_PROXY || x("POSTHOG_HOST") } : {}),
     }],
     ["worker", {
-      RAILWAY_DOCKERFILE_PATH: "Dockerfile.worker", PORT: "3002", RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "1860",
+      RAILWAY_DOCKERFILE_PATH: "Dockerfile.worker", PORT: "3002", RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "1860", ...POOLS.worker,
       APP_BASE_URL: "${{admin.APP_BASE_URL}}", DATABASE_URL: role("lobbystack_worker", "LOBBYSTACK_WORKER_PASSWORD"),
       LOBBYSTACK_DISPATCHER_PASSWORD: "${{Postgres.LOBBYSTACK_DISPATCHER_PASSWORD}}", ENCRYPTION_KEY: "${{admin.ENCRYPTION_KEY}}",
       OTP_HASH_SECRET: "${{admin.OTP_HASH_SECRET}}", INTERNAL_SERVICE_TOKEN: "${{admin.INTERNAL_SERVICE_TOKEN}}",

@@ -124,6 +124,7 @@ These three hold the data, so they go first.
    PGDATA=/var/lib/postgresql/data/pgdata
    POSTGRES_DB=lobbystack
    POSTGRES_USER=postgres
+   POSTGRES_INITDB_ARGS=-c max_connections=200
    POSTGRES_PASSWORD=<value 1>
    LOBBYSTACK_AUTH_PASSWORD=<value 2>
    LOBBYSTACK_APP_PASSWORD=<value 3>
@@ -133,6 +134,7 @@ These three hold the data, so they go first.
 
    - `PGDATA` keeps the database in a folder inside the volume. PostgreSQL won't start in a folder that already holds something, and a new volume holds a `lost+found` folder.
    - PostgreSQL reads `POSTGRES_PASSWORD` only on its very first start, while the volume is empty. Changing it afterwards doesn't change the database's password; it only breaks the migrate service, and the nightly copy once you have one ([5.2](part-5-production.md#52-production-on-railway), step 20). To change it, follow [7.18](part-7-operations.md#718-rotate-secrets-and-keys).
+   - `POSTGRES_INITDB_ARGS` makes the database with room for 200 connections instead of PostgreSQL's 100, so that two or more copies of the admin and the worker fit later ([7.24](part-7-operations.md#724-scale-up)). Like the password, it's read only on the very first start: a database that already exists keeps its limit, and 7.24 says how to raise it.
    - PostgreSQL itself ignores the four `LOBBYSTACK_` passwords. They're kept here so the other services all refer to one copy, and the migrate service hands them to the database's roles ([4.5](#45-add-the-migrate-service-and-set-up-the-database)). It does so on every run, so a changed value takes effect at the next deploy ([7.18](part-7-operations.md#718-rotate-secrets-and-keys)).
 6. Leave the start command empty, so the image starts PostgreSQL its own way.
 
@@ -233,6 +235,7 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    DEPLOYMENT_MODE=self_hosted_standard
    PORT=3000
    HOSTNAME=::
+   RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60
    APP_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
    SITE_URL=${{APP_BASE_URL}}
    AUTH_TRUSTED_ORIGINS=${{APP_BASE_URL}}
@@ -244,6 +247,11 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    LOBBYSTACK_AUTH_PASSWORD=${{Postgres.LOBBYSTACK_AUTH_PASSWORD}}
    LOBBYSTACK_WORKER_PASSWORD=${{Postgres.LOBBYSTACK_WORKER_PASSWORD}}
    LOBBYSTACK_DISPATCHER_PASSWORD=${{Postgres.LOBBYSTACK_DISPATCHER_PASSWORD}}
+   LOBBYSTACK_APP_POOL_MAX=8
+   LOBBYSTACK_AUTH_POOL_MAX=4
+   LOBBYSTACK_WORKER_POOL_MAX=8
+   LOBBYSTACK_DISPATCHER_POOL_MAX=2
+   LOBBYSTACK_FINANCE_EXPORT_POOL_MAX=2
    REDIS_URL=redis://default:${{Redis.REDIS_PASSWORD}}@${{Redis.RAILWAY_PRIVATE_DOMAIN}}:6379
    STORAGE_PROVIDER=s3
    S3_BUCKET=${{Bucket.BUCKET}}
@@ -271,10 +279,12 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    What the less obvious lines do:
    - `APP_BASE_URL` takes the admin's Railway address. `SITE_URL`, `AUTH_TRUSTED_ORIGINS` and the two Twilio addresses follow it, so when the address changes ([4.7](#47-use-your-own-domain-optional)), one edit changes them all.
    - `HOSTNAME=::` lets Railway's private network reach the admin over IPv6 as well as IPv4.
+   - With `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60`, the old admin gets a minute to finish what it has started when a deploy replaces it, such as connecting a new call to a worker, instead of being stopped at once ([7.4](part-7-operations.md#74-deploy-without-cutting-off-calls)).
    - `TRUSTED_CLIENT_IP_HEADER` tells the admin where Railway puts each visitor's IP address ([3.1](part-3-outside-services.md#31-choose-your-addresses)).
    - `LIVE_PROTOTYPE_ENABLED` turns calls on. `WIDGET_KEY_ISSUANCE_ENABLED` lets businesses create website chat widgets, which are refused without it.
    - `WORKER_INTERNAL_URL` is the worker's private address, where the admin hands it each call.
    - The admin signs in to the database as `lobbystack_app`. At start, it also checks that it can sign in as the auth, worker and dispatcher roles, with the three passwords below that line.
+   - The five `…_POOL_MAX` lines cap the database connections the admin opens for each role, 24 in all, so that copies of the admin and the worker stay within the database's limit ([7.24](part-7-operations.md#724-scale-up)). Without them each role takes up to 12, and the dispatcher 4.
 
 **The worker's variables**
 
@@ -290,6 +300,8 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    APP_BASE_URL=${{admin.APP_BASE_URL}}
    DATABASE_URL=postgresql://lobbystack_worker:${{Postgres.LOBBYSTACK_WORKER_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack
    LOBBYSTACK_DISPATCHER_PASSWORD=${{Postgres.LOBBYSTACK_DISPATCHER_PASSWORD}}
+   LOBBYSTACK_WORKER_POOL_MAX=10
+   LOBBYSTACK_DISPATCHER_POOL_MAX=2
    REDIS_URL=redis://default:${{Redis.REDIS_PASSWORD}}@${{Redis.RAILWAY_PRIVATE_DOMAIN}}:6379
    STORAGE_PROVIDER=s3
    S3_BUCKET=${{Bucket.BUCKET}}
@@ -316,6 +328,7 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
 
    - The worker takes each value it shares with the admin from the admin, as in `${{admin.ENCRYPTION_KEY}}`, so the two can never differ.
    - With `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=1860`, calls in progress get up to about 30 minutes to finish when a deploy replaces the worker, instead of being cut off. Railway reads the same line as its own draining time. It costs nothing when no call is active (`apps/worker/src/liveCalls.ts:156-162`, `docs/voice/runtime.md:196`).
+   - The two `…_POOL_MAX` lines cap the worker's database connections at 12, as the admin's lines do for the admin ([7.24](part-7-operations.md#724-scale-up)).
    - With an email service other than Resend, use its values from [3.4](part-3-outside-services.md#34-email).
 
 **Lines to add or change in some cases**

@@ -7,6 +7,7 @@ import { getMeter, getTracer, recordException } from "@lobbystack/telemetry/node
 import { rlsContextStatement, type RlsContext } from "./rls/context";
 import { schema } from "./schema";
 import { instrumentPool } from "./instrumentation";
+import { poolMax } from "./pool-budget";
 
 export type Database = NodePgDatabase<typeof schema>;
 export type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -67,7 +68,7 @@ function poolConfig(role: DatabaseRole, source: Record<string, string | undefine
   return {
     connectionString: roleDatabaseUrl(role, source),
     application_name: `lobbystack:${role}`,
-    max: Number(source[`${role.toUpperCase()}_POOL_MAX`] ?? (role === "lobbystack_dispatcher" ? 4 : 12)),
+    max: poolMax(role, source),
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
     keepAlive: true,

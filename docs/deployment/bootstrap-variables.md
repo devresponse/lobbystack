@@ -225,7 +225,7 @@ The state file holds each finished step's result, so a later run reuses it inste
 
 ## Railway variables by service
 
-The `variables` step writes these onto the five services before their first deploy, and the same lines into the `.vars` file. On a running deployment it sets only the values that differ, and Railway redeploys each service that changed. A cloud test deployment on the Polar sandbox, on its brand's own domain, without a toll-free number and with PostHog as by default, gets 8 on Postgres, 1 on Redis, 9 on migrate, 46 on the admin and 39 on the worker. `POSTHOG=no` takes 2 from migrate and 4 each from the admin and the worker.
+The `variables` step writes these onto the five services before their first deploy, and the same lines into the `.vars` file. On a running deployment it sets only the values that differ, and Railway redeploys each service that changed. A cloud test deployment on the Polar sandbox, on its brand's own domain, without a toll-free number and with PostHog as by default, gets 9 on Postgres (8 once the database is running), 1 on Redis, 9 on migrate, 52 on the admin and 41 on the worker. `POSTHOG=no` takes 2 from migrate and 4 each from the admin and the worker.
 
 A value written `${{…}}` is a Railway reference, resolved when the service starts: `${{admin.X}}` copies the admin's value, so the two can't differ. "State" means the value the named step kept in the state file. The step refuses to set any variable that has no value yet.
 
@@ -242,6 +242,7 @@ A value written `${{…}}` is a Railway reference, resolved when the service sta
 | `PORT` | admin, worker | `3000`, `3002` | Leave it |
 | `HOSTNAME` | admin | `::` | Lets Railway's private network reach the admin |
 | `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | worker | `1860` | Lets calls finish when a deploy replaces the worker |
+| `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | admin | `60` | At a release the old admin gets a minute to finish what it has started, such as connecting a call to a worker ([guide 7.4](guide/part-7-operations.md#74-deploy-without-cutting-off-calls)) |
 
 ### Addresses
 
@@ -270,6 +271,9 @@ A value written `${{…}}` is a Railway reference, resolved when the service sta
 | Variable | On | Value | Rule |
 | --- | --- | --- | --- |
 | `PGDATA`, `POSTGRES_DB`, `POSTGRES_USER` | Postgres | `/var/lib/postgresql/data/pgdata`, `lobbystack`, `postgres` | Never change them |
+| `POSTGRES_INITDB_ARGS` | Postgres | `-c max_connections=200` | Only until `deploy.databases` is done: PostgreSQL reads it only when it makes the database, so a running database never gets it, and its `.vars` file leaves it out. Raising a running database's limit is `alter system` and a restart ([guide 7.24](guide/part-7-operations.md#724-scale-up)) |
+| `LOBBYSTACK_APP_POOL_MAX`, `LOBBYSTACK_AUTH_POOL_MAX`, `LOBBYSTACK_WORKER_POOL_MAX`, `LOBBYSTACK_DISPATCHER_POOL_MAX`, `LOBBYSTACK_FINANCE_EXPORT_POOL_MAX` | admin | `8`, `4`, `8`, `2`, `2` | 24 connections a copy. With the worker's, two admins and two workers need at most 144 while a release replaces them, within the 200 the database is made with ([guide 7.24](guide/part-7-operations.md#724-scale-up)) |
+| `LOBBYSTACK_WORKER_POOL_MAX`, `LOBBYSTACK_DISPATCHER_POOL_MAX` | worker | `10`, `2` | 12 connections a copy |
 | `POSTGRES_PASSWORD` and the four `LOBBYSTACK_…_PASSWORD` | Postgres | State: `secrets` | The `variables` step refuses to change them on a running database |
 | `LOBBYSTACK_AUTH_PASSWORD`, `LOBBYSTACK_APP_PASSWORD`, `LOBBYSTACK_WORKER_PASSWORD`, `LOBBYSTACK_DISPATCHER_PASSWORD` | migrate (all four), admin (auth, worker, dispatcher), worker (dispatcher) | `${{Postgres.LOBBYSTACK_…_PASSWORD}}` | migrate gives the roles these passwords on every run |
 | `DATABASE_URL` | migrate | `postgresql://postgres:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack` | Signs in as the administrator |
@@ -372,7 +376,6 @@ These optional variables are added by hand in Railway, or with `railway-vars.mjs
 | `FEEDBACK_TO_EMAIL` | admin | Dashboard feedback isn't emailed | An address |
 | `EMAIL_REPLY_TO` | worker | Replies go to `EMAIL_FROM` | An address |
 | `PUBLIC_API_RATE_LIMIT_PER_MINUTE` | admin | 120 requests a minute per API key | A number |
-| `LOBBYSTACK_APP_POOL_MAX` and the other `…_POOL_MAX` | admin, worker | 12 connections per role, 4 for the dispatcher | Change before adding copies of a service |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | admin, and the worker refers to them | No Google Calendar | Redirect: `${{APP_BASE_URL}}/api/calendar/google/callback`. Never make a new client: connected calendars would be cut off |
 | `GOOGLE_MAPS_EMBED_API_KEY` | admin | No map on public profile pages | `AIza…`, not secret |
 | `FIRECRAWL_API_KEY` | worker | No website import | `fc-…` |

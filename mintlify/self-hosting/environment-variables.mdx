@@ -26,7 +26,7 @@ Cloudflare Turnstile checks that a person, not a bot, fills in the sign-up form.
 
 | Variable | Purpose |
 | --- | --- |
-| `TURNSTILE_SECRET_KEY` | The secret key of your Turnstile widget. The admin uses it to check each email sign-up. Without it, every email sign-up fails unless `APP_BASE_URL` starts with `http://localhost:` or `http://127.0.0.1:`. The form then says "We couldn't create your account. Please try again.", and the admin's response says `Turnstile is not configured.` |
+| `TURNSTILE_SECRET_KEY` | The secret key of your Turnstile widget. The admin uses it to check each email sign-up, and each website chat visitor before the receptionist answers. Without it, every email sign-up fails unless `APP_BASE_URL` starts with `http://localhost:` or `http://127.0.0.1:`. The form then says "We couldn't create your account. Please try again.", and the admin's response says `Turnstile is not configured.` |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | The widget's site key. The browser reads it to show the challenge on the sign-up form. Next.js writes it into the browser code when the admin is built, so the admin build needs it as a Docker build argument. Rebuild the admin after you change it. Compose passes it to the build from `.env`. If the build has no site key while the secret key is set, the form shows no challenge and every sign-up fails with the same message. |
 
 ## Branding
@@ -124,6 +124,8 @@ An empty OTLP endpoint does not disable container stdout logs, application healt
 | `AI_CHAT_PRICING_VERSION`, `AI_CHAT_PRICING_SOURCE`, `AI_CHAT_PRICING_EFFECTIVE_DATE` | A label, a source URL and the date for those prices. LobbyStack records a cost only when all three are set. |
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_BASE_URL`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_PROVIDER_NAME`, `AI_EMBEDDING_REVISION` | OpenAI-compatible 1536-dimensional embeddings. |
 | `WIDGET_SESSION_SECRET` | Signs cross-origin website-widget sessions. |
+| `WIDGET_TURNSTILE` | Leave it unset. With both Turnstile keys set, the website chat runs Turnstile's check before the receptionist answers, so a script can't spend a business's chats with the widget's public key. `false` turns that check off and keeps the one on sign-up; the admin then logs `widget.turnstile_off` as it starts. |
+| `WIDGET_CHAT_DAILY_PERCENT` | The share of a business's chats for the month, or of its pack's, that the receptionist may start in one UTC day: 25 when unset, and never fewer than 10 chats. A whole number from 1 to 99; `100` or `off` turns the daily limit off. |
 | `FIRECRAWL_*` | Website knowledge ingestion. |
 | `GOOGLE_*` | Google Calendar OAuth. |
 | `SMTP_*`, `EMAIL_*` | Transactional email. |

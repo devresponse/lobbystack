@@ -18,6 +18,7 @@ function installTurnstileMock() {
       return "widget-id";
     }),
     execute: vi.fn(),
+    reset: vi.fn(),
     remove: vi.fn(),
     getRenderOptions: () => renderOptions,
   };

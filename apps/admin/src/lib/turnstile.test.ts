@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { verifyTurnstile } from "./turnstile";
+import { TurnstileError, verifyTurnstile } from "./turnstile";
 
 const originalBaseUrl = process.env.APP_BASE_URL;
 const originalSecret = process.env.TURNSTILE_SECRET_KEY;
@@ -37,5 +37,49 @@ describe("replacement Turnstile verification", () => {
 
     await expect(verifyTurnstile({ token: "token", remoteIp: "203.0.113.10" })).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith("https://challenges.cloudflare.com/turnstile/v0/siteverify", expect.objectContaining({ method: "POST" }));
+  });
+
+  // The website chat's check (AUDIT-004) tries again only when Cloudflare couldn't be asked.
+  describe("why a token didn't pass", () => {
+    async function failure(): Promise<TurnstileError> {
+      const error = await verifyTurnstile({ token: "token" }).then(() => null, (caught: unknown) => caught);
+      expect(error).toBeInstanceOf(TurnstileError);
+      return error as TurnstileError;
+    }
+
+    it("has no secret to check with", async () => {
+      vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+      vi.stubEnv("TURNSTILE_SECRET_KEY", "");
+      expect((await failure()).reason).toBe("not_configured");
+    });
+
+    it("got no token", async () => {
+      vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+      vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
+      const error = await verifyTurnstile({ token: "  " }).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ reason: "missing" });
+    });
+
+    it.each([
+      ["a token Cloudflare turned down", () => new Response(JSON.stringify({ success: false, "error-codes": ["invalid-input-response"] }), { status: 200 }), "rejected"],
+      ["a token used before", () => new Response(JSON.stringify({ success: false, "error-codes": ["timeout-or-duplicate"] }), { status: 200 }), "rejected"],
+      ["a request Cloudflare refused", () => new Response("Bad request", { status: 400 }), "rejected"],
+      ["Cloudflare's own failure", () => new Response(JSON.stringify({ success: false, "error-codes": ["internal-error"] }), { status: 200 }), "unavailable"],
+      ["a server error", () => new Response("Unavailable", { status: 503 }), "unavailable"],
+      ["too many requests", () => new Response("Slow down", { status: 429 }), "unavailable"],
+      ["an answer that isn't JSON", () => new Response("<html>", { status: 200 }), "unavailable"],
+    ] as const)("tells %s apart", async (_label, answer, reason) => {
+      vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+      vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => answer()));
+      expect((await failure()).reason).toBe(reason);
+    });
+
+    it("counts a request that never reached Cloudflare as unavailable", async () => {
+      vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+      vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+      expect((await failure()).reason).toBe("unavailable");
+    });
   });
 });

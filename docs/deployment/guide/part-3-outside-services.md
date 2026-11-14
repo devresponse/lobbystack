@@ -322,7 +322,7 @@ One sending domain can serve both environments, with a key for each.
 
 ## 3.5 Cloudflare Turnstile
 
-Turnstile checks that a person, not a program, is filling in the sign-up form. Anywhere but on your own computer, sign-up doesn't work without it.
+Turnstile checks that a person, not a program, is filling in the sign-up form. Anywhere but on your own computer, sign-up doesn't work without it. Since fork PR #174, the same keys also check website chat visitors before the receptionist answers them, so a script can't spend a business's chats with the widget's public key ([website widget](../../features/website-widget.md#stop-scripts-from-spending-a-businesss-chats)).
 
 1. Create a free Cloudflare account at `dash.cloudflare.com/sign-up`. You don't need to move a domain to Cloudflare.
 2. Open Turnstile (`dash.cloudflare.com/?to=/:account/turnstile`) and click **Add widget**.
@@ -342,7 +342,8 @@ You can add host names later, under the widget's **Settings**, without changing 
 | Secret Key | `TURNSTILE_SECRET_KEY` | admin | No |
 
 - Set both before the admin is first built. Without the secret key, or with it but without a site key in the build, every sign-up says "We couldn't create your account. Please try again."
-- Only sign-up and **Send a new code** use Turnstile (right after sign-up, the code screen skips the check for 10 minutes). Sign-in and password resets don't.
+- Sign-up and **Send a new code** use Turnstile (right after sign-up, the code screen skips the check for 10 minutes), and so does the website chat, before the receptionist answers. Sign-in and password resets don't.
+- The website chat runs Turnstile inside its own window, on the dashboard's address, so the widget's host names need only the dashboard's, never the businesses' websites. `WIDGET_TURNSTILE=false` on the admin turns the chat's check off and keeps sign-up's. Without both keys, a production admin logs `widget.turnstile_off` as it starts, and the chat answers without the check.
 
 **Not yet confirmed:** the exact screen where the keys appear after **Create**.
 

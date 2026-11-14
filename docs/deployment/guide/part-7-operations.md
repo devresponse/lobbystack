@@ -584,7 +584,8 @@ The website chat logs `widget.chat_reply` for each answer, with its time to the 
 **Lines that mean a setting is missing**
 
 - The worker, when it starts without email: "SMTP_HOST is missing. Authentication email jobs will fail until email delivery is configured." ([7.17](#717-emails-or-texts-not-going-out)).
-- The admin, without `TRUSTED_CLIENT_IP_HEADER`: "[trusted-client-ip] TRUSTED_CLIENT_IP_HEADER is not configured; …". The chat's and browser calls' limits per visitor's IP address then don't apply (`apps/admin/src/lib/widget-policy.ts:23-26`).
+- The admin, without `TRUSTED_CLIENT_IP_HEADER`: "[trusted-client-ip] TRUSTED_CLIENT_IP_HEADER is not configured; …". The chat's and browser calls' limits per visitor's IP address then don't apply (`apps/admin/src/lib/widget-policy.ts:23-26`). On Railway, since fork PR #174, a production admin without it doesn't start ([8.2](part-8-troubleshooting.md#82-builds-and-start-up)).
+- The admin, without Turnstile's keys or with `WIDGET_TURNSTILE=false`: a `widget.turnstile_off` line as it starts. The receptionist then answers website chats without Turnstile's check ([website widget](../../features/website-widget.md#stop-scripts-from-spending-a-businesss-chats)).
 
 **PostHog**
 

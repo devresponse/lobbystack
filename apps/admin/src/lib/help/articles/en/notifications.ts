@@ -123,7 +123,7 @@ const article: HelpArticle = {
     "Alert texts come from the business's own phone number when it has one that can send texts. Otherwise they come from a number the app uses for alerts, when there is one.",
     "Your confirmed mobile number belongs to your account. In another business, turning on **SMS** only asks you to agree to alert texts and select **Turn on**, unless you choose **Use a different number**.",
     "Turning on text alerts means you agree to get them. As the dialog says, how often they come varies, message and data rates may apply, and you can reply `STOP` to opt out or `HELP` for help. You can also turn off **SMS** here at any time.",
-    "Alerts about website chats, **New website chat message** and **Visitor asking for a person**, are set on the **Website widget** screen. Its **Email** and **SMS** switches are the same ones as here.",
+    "Alerts about website chats, **New website chat message**, **Website chat reached its daily limit** and **Visitor asking for a person**, are set on the **Website widget** screen. Its **Email** and **SMS** switches are the same ones as here.",
     "The email after each call is written in each reader's dashboard language, which they choose on the **Preferences** tab, and it needs the **Email** channel on.",
     "Replying to the email after each call writes to an owner of the business, not to the caller.",
   ],

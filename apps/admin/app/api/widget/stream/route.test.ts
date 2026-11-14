@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   configured: true,
   conversationId: null as string | null,
   rateAllowed: true,
+  // While set, finding the visitor's chat waits for it, as a slow database would.
+  lookup: null as Promise<void> | null,
 }));
 
 vi.mock("@/lib/widget-access", () => ({
@@ -23,7 +25,7 @@ vi.mock("@/lib/widget-policy", () => ({
 }));
 vi.mock("@/lib/widget-keys", () => ({ requestIpHash: () => "ip-hash" }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
-vi.mock("@lobbystack/domain", () => ({ findWidgetConversationId: async () => mocks.conversationId }));
+vi.mock("@lobbystack/domain", () => ({ findWidgetConversationId: async () => { await mocks.lookup; return mocks.conversationId; } }));
 vi.mock("@/lib/widget-receptionist", () => ({ loadWidgetReceptionist: async () => ({ snapshot: null, receptionistId: undefined }) }));
 vi.mock("@/lib/realtime-hub", () => ({
   realtimeConfigured: () => mocks.configured,
@@ -63,6 +65,7 @@ beforeEach(() => {
   mocks.configured = true;
   mocks.conversationId = conversationId;
   mocks.rateAllowed = true;
+  mocks.lookup = null;
 });
 
 afterEach(() => {
@@ -120,6 +123,49 @@ describe("website chat live updates", () => {
     expect(rest).toContain(": keepalive");
     await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
     expect(mocks.unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends each stream up to a minute before the ten minutes, so streams closed together don't all come back together", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.spyOn(Math, "random").mockReturnValue(0.999);
+    const response = await GET(request());
+    const reader = response.body!.getReader();
+    await readUntil(reader, "event: ready");
+    vi.mocked(Math.random).mockRestore();
+    await vi.advanceTimersByTimeAsync(9 * 60_000 + 1_000);
+    await readUntil(reader, "never");
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
+  });
+
+  it("holds no more streams than its limit when a burst of them arrives at once", async () => {
+    let finishLookups!: () => void;
+    mocks.lookup = new Promise((resolve) => { finishLookups = resolve; });
+    // A thousand streams are still looking up their chats when one more arrives.
+    const opening = Array.from({ length: 1_000 }, () => GET(request()));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const extra = await GET(request());
+    expect(extra.status).toBe(503);
+    finishLookups();
+    const opened = await Promise.all(opening);
+    expect(opened.every((response) => response.status === 200)).toBe(true);
+    await Promise.all(opened.map((response) => response.body!.cancel()));
+    // Closed streams give their places back.
+    const reader = (await GET(request())).body!.getReader();
+    expect(await readUntil(reader, "event: ready")).toContain("event: ready");
+    await reader.cancel();
+  });
+
+  it("gives back the place of a request that found no chat or failed", async () => {
+    mocks.conversationId = null;
+    for (let index = 0; index < 1_001; index += 1) expect((await GET(request())).status).toBe(404);
+    mocks.conversationId = conversationId;
+    mocks.lookup = Promise.reject(new Error("database unavailable"));
+    mocks.lookup.catch(() => undefined);
+    for (let index = 0; index < 1_001; index += 1) await expect(GET(request())).rejects.toThrow("database unavailable");
+    mocks.lookup = null;
+    const reader = (await GET(request())).body!.getReader();
+    expect(await readUntil(reader, "event: ready")).toContain("event: ready");
+    await reader.cancel();
   });
 
   it("turns the widget away when there is no chat to follow, live updates are off, or it asks too often", async () => {

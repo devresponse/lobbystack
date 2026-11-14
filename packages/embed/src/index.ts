@@ -245,9 +245,36 @@ export function initWidget(): boolean {
   let frameLoaded = false;
   let sessionMessage: WidgetMessage | null = null;
   let sessionRefreshTimer: number | undefined;
-  let sessionState: "idle" | "pending" | "ready" | "error" = "idle";
+  // "retrying": a first session failed for a reason that may pass, and the loader tries again shortly.
+  let sessionState: "idle" | "pending" | "retrying" | "ready" | "error" = "idle";
   let sessionExpiresAtMs = 0;
   let renewalFailures = 0;
+  let startFailures = 0;
+  // Whether the last failure may pass by itself, as a deploy's 502 does, unlike a revoked key.
+  let lastFailureRetryable = false;
+  // When the chat last asked for a new session, so a chat that keeps asking can't flood the server.
+  let lastSessionAskAt = 0;
+
+  /** A refusal that may pass: no answer at all, a limit for now, or the server's own failure. */
+  function retryable(status: number): boolean {
+    return status === 0 || status === 429 || status >= 500;
+  }
+
+  /**
+   * Between half and all of `ms`, at random: browsers that failed together,
+   * as when a deploy restarted the server, don't all try again together.
+   */
+  function jittered(ms: number): number {
+    return Math.round(ms / 2 + Math.random() * (ms / 2));
+  }
+
+  function scheduleRefresh(delay: number): void {
+    if (sessionRefreshTimer !== undefined) window.clearTimeout(sessionRefreshTimer);
+    sessionRefreshTimer = window.setTimeout(() => {
+      sessionRefreshTimer = undefined;
+      void refreshSession(visitorId);
+    }, delay);
+  }
 
   /**
    * Tries a failed renewal again a little later while the current session
@@ -256,17 +283,46 @@ export function initWidget(): boolean {
    * would expire first.
    */
   function retryRenewal(status: number): boolean {
-    const delay = Math.min(60_000, 2_000 * 2 ** renewalFailures);
-    if (!(status === 0 || status === 429 || status >= 500) || Date.now() + delay >= sessionExpiresAtMs) return false;
+    const delay = jittered(Math.min(60_000, 2_000 * 2 ** renewalFailures));
+    if (!retryable(status) || Date.now() + delay >= sessionExpiresAtMs) return false;
     renewalFailures += 1;
     sessionState = "ready";
-    sessionRefreshTimer = window.setTimeout(() => void refreshSession(visitorId), delay);
+    scheduleRefresh(delay);
     return true;
   }
 
+  /**
+   * Tries a failed first session again about one, two and four seconds
+   * later, as through a deploy or a moment without network, before the chat
+   * says it can't load. Opening the chat again meanwhile tries at once.
+   */
+  function retryStart(status: number): boolean {
+    if (!retryable(status) || startFailures >= 3) return false;
+    const delay = jittered(1_000 * 2 ** startFailures);
+    startFailures += 1;
+    sessionState = "retrying";
+    scheduleRefresh(delay);
+    return true;
+  }
+
+  function sessionFailed(status: number, code: string): void {
+    sessionState = "error";
+    lastFailureRetryable = retryable(status);
+    sessionMessage = { type: "session-error", code };
+    if (frameLoaded) postToFrame(sessionMessage);
+  }
+
   async function refreshSession(nextVisitorId: string): Promise<void> {
+    // One request at a time: a renewal the page's waking started may meet the one its timer did.
+    if (sessionState === "pending") return;
+    if (sessionRefreshTimer !== undefined) {
+      window.clearTimeout(sessionRefreshTimer);
+      sessionRefreshTimer = undefined;
+    }
     visitorId = nextVisitorId;
     const renewing = sessionState === "ready" && Date.now() < sessionExpiresAtMs;
+    // A first try, or one after the chat showed an error, gets its few quick retries again.
+    if (sessionState === "idle" || sessionState === "error") startFailures = 0;
     sessionState = "pending";
     // 0 until the server answers, as when the network is down.
     let status = 0;
@@ -277,30 +333,42 @@ export function initWidget(): boolean {
         body: JSON.stringify({ widgetKey, visitorId, ...(receptionistToken ? { receptionistToken } : {}) }),
       });
       status = response.status;
-      const payload = await response.json() as { token?: string; expiresAt?: string; code?: string };
+      const payload = await response.json() as { token?: string; expiresAt?: string; expiresIn?: number; code?: string };
       if (!response.ok || !payload.token) {
-        if (renewing && retryRenewal(status)) return;
-        sessionState = "error";
-        sessionMessage = { type: "session-error", code: payload.code ?? "widget_session_failed" };
-        if (frameLoaded) postToFrame(sessionMessage);
+        if (renewing ? retryRenewal(status) : retryStart(status)) return;
+        sessionFailed(status, payload.code ?? "widget_session_failed");
         return;
       }
       sessionState = "ready";
       renewalFailures = 0;
+      startFailures = 0;
       sessionMessage = { type: "session", token: payload.token, expiresAt: payload.expiresAt, visitorId, parentOrigin: window.location.origin };
       if (frameLoaded) postToFrame(sessionMessage);
-      if (sessionRefreshTimer !== undefined) window.clearTimeout(sessionRefreshTimer);
-      const expiresAtMs = payload.expiresAt ? Date.parse(payload.expiresAt) : Date.now() + 3_600_000;
-      sessionExpiresAtMs = expiresAtMs;
+      // The server says how many seconds the session has, so a visitor's clock that runs slow can't let it
+      // lapse before the renewal. An older server only gives the time it ends.
+      const lifetimeMs = typeof payload.expiresIn === "number" && payload.expiresIn > 0
+        ? payload.expiresIn * 1_000
+        : payload.expiresAt ? Date.parse(payload.expiresAt) - Date.now() : 3_600_000;
+      sessionExpiresAtMs = Date.now() + (Number.isFinite(lifetimeMs) ? lifetimeMs : 3_600_000);
       // Renewing five minutes early leaves time to try again through an outage.
-      sessionRefreshTimer = window.setTimeout(() => void refreshSession(visitorId), Math.max(30_000, expiresAtMs - Date.now() - 5 * 60_000));
+      scheduleRefresh(Math.max(30_000, sessionExpiresAtMs - Date.now() - 5 * 60_000));
     } catch {
       // An error page, such as a deploy's 502, isn't JSON and lands here with its status.
-      if (renewing && retryRenewal(status)) return;
-      sessionState = "error";
-      sessionMessage = { type: "session-error", code: "widget_session_failed" };
-      if (frameLoaded) postToFrame(sessionMessage);
+      if (renewing ? retryRenewal(status) : retryStart(status)) return;
+      sessionFailed(status, "widget_session_failed");
     }
+  }
+
+  /**
+   * Browsers hold timers while a laptop sleeps, so a page that slept, or lost
+   * its connection, may have missed its renewal. When it wakes it renews at
+   * once if the session ends within five minutes or already has, and tries
+   * again after a failure that may have passed, rather than leave the chat to
+   * fail the visitor's next message.
+   */
+  function renewIfStale(): void {
+    if (sessionState === "ready" && Date.now() >= sessionExpiresAtMs - 5 * 60_000) void refreshSession(visitorId);
+    else if (sessionState === "error" && lastFailureRetryable) void refreshSession(visitorId);
   }
 
   function syncBubbleIcon(): void {
@@ -313,7 +381,7 @@ export function initWidget(): boolean {
       started = true;
       frame.setAttribute("src", frameSrc);
     }
-    if (sessionState === "idle" || sessionState === "error") {
+    if (sessionState === "idle" || sessionState === "error" || sessionState === "retrying") {
       void refreshSession(visitorId);
     }
   }
@@ -377,7 +445,18 @@ export function initWidget(): boolean {
     // A chat in the page's own element stays where it is.
     if (data.type === "close" && !inlineContainer) setOpen(false);
     if (data.type === "leave-warning") setWarnOnLeave(data.enabled === true);
+    // The chat's server turned its session down, as when the visitor's clock
+    // ran slow or a renewal never came. A new one at most every half minute.
+    if (data.type === "session-expired" && (sessionState === "ready" || sessionState === "error") && Date.now() - lastSessionAskAt >= 30_000) {
+      lastSessionAskAt = Date.now();
+      void refreshSession(visitorId);
+    }
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") renewIfStale();
+  });
+  window.addEventListener("online", renewIfStale);
+  window.addEventListener("pageshow", renewIfStale);
 
   // A snippet in the page's <head> without defer runs before <body> exists, and
   // a chat's element may not be read yet either, so the widget joins the page

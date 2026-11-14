@@ -382,10 +382,10 @@ describe("a website chat after a day without messages", () => {
     expect(screen.getByText(answer.content)).toBeTruthy();
     expect(streams[0]!.signal?.aborted).toBe(false);
 
-    // The stream runs its course and the widget opens the next one, as it does every ten minutes.
+    // The stream runs its course and the widget opens the next one within two seconds, as it does every ten minutes.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     await act(async () => { streams[0]!.end(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
     vi.useRealTimers();
     await vi.waitFor(() => expect(streams).toHaveLength(2));
 
@@ -961,6 +961,27 @@ describe("widget chat errors", () => {
     expect(screen.queryByText(/chat\.errorId/)).toBeNull();
     client.clear();
   });
+
+  it.each([
+    [429, "chat_daily_limit_reached", "chat.dailyLimitReached"],
+    [429, "widget_rate_limited", "chat.rateLimited"],
+    [403, "widget_challenge_required", "chat.challengeFailed"],
+  ])("tells the visitor why a %s %s refusal stopped their message", async (status, code, key) => {
+    const client = await sendTo(() => Response.json({ error: "Refused.", code }, { status }));
+
+    expect(await screen.findByText(key)).toBeTruthy();
+    expect(screen.queryByText(/chat\.errorId/)).toBeNull();
+    client.clear();
+  });
+
+  it("asks the loader for a new session when the server no longer takes this one", async () => {
+    const posted = vi.spyOn(window, "postMessage");
+    const client = await sendTo(() => Response.json({ error: "The widget session is invalid or expired.", code: "widget_session_invalid" }, { status: 401 }));
+
+    await vi.waitFor(() => expect(posted).toHaveBeenCalledWith({ type: "session-expired" }, "*"));
+    posted.mockRestore();
+    client.clear();
+  });
 });
 
 describe("links in chat replies", () => {
@@ -1025,6 +1046,180 @@ describe("links in chat replies", () => {
     const content = screen.getByText("our booking page").closest(".widget-message-content")!;
     expect(content.className).toContain("[&_a]:underline");
     expect(content.closest("div")?.className).toContain("wrap-anywhere");
+    client.clear();
+  });
+});
+
+describe("the chat's Turnstile check (AUDIT-004)", () => {
+  type TurnstileOptions = Parameters<NonNullable<Window["turnstile"]>["render"]>[1];
+
+  /** Turnstile as the chat's frame meets it: each run ends as `outcome` says. */
+  function fakeTurnstile(outcome: (options: TurnstileOptions, run: number) => void) {
+    let options: TurnstileOptions | undefined;
+    let runs = 0;
+    const api = {
+      ready: (callback: () => void) => callback(),
+      render: vi.fn((_container: HTMLElement, given: TurnstileOptions) => { options = given; return "widget-1"; }),
+      execute: vi.fn(() => { runs += 1; const run = runs; queueMicrotask(() => act(() => outcome(options!, run))); }),
+      reset: vi.fn(),
+      remove: vi.fn(),
+    };
+    vi.stubGlobal("turnstile", api);
+    return api;
+  }
+
+  type Sent = { path: string; init: RequestInit | undefined };
+
+  function openChat(respond: (path: string) => Response | Promise<Response> | undefined) {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const requests: Sent[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const path = String(url);
+      requests.push({ path, init });
+      const answer = await respond(path);
+      if (answer) return answer;
+      if (path.includes("/api/widget/history")) return Response.json({ automationState: "ai_active", messages: [] });
+      if (path.includes("/api/widget/stream")) return new Response(null, { status: 404 });
+      return Response.json(config);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" challengeSiteKey="site-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+    return { client, requests, sentTo: (route: string) => requests.filter((request) => new URL(request.path, "https://admin.test").pathname === route) };
+  }
+
+  async function send(text: string) {
+    const composer = await screen.findByRole("textbox", { name: "chat.composerPlaceholder" });
+    await vi.waitFor(() => expect((composer as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(composer, { target: { value: text } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+    return composer as HTMLInputElement;
+  }
+
+  const header = (request: Sent | undefined, name: string) => new Headers(request?.init?.headers).get(name);
+  const checked = () => Response.json({ token: "checked-session", expiresAt: "2030-01-01T00:00:00.000Z", expiresIn: 3600, visitorId });
+
+  it("checks the visitor as the session arrives, and sends messages with the session the check signed", async () => {
+    const turnstile = fakeTurnstile((options) => options.callback("turnstile-token"));
+    const { client, sentTo } = openChat((path) => {
+      if (path.includes("/api/widget/session/verify")) return checked();
+      if (path.includes("/api/widget/chat")) return streamedReply("We open at ten.");
+      return undefined;
+    });
+
+    // The check runs while the visitor reads and types.
+    await vi.waitFor(() => expect(sentTo("/api/widget/session/verify")).toHaveLength(1));
+    const verify = sentTo("/api/widget/session/verify")[0];
+    expect(header(verify, "authorization")).toBe("Bearer token");
+    expect(header(verify, "x-widget-parent-origin")).toBe("https://business.test");
+    expect(JSON.parse(String(verify?.init?.body))).toEqual({ turnstileToken: "turnstile-token" });
+    expect(turnstile.render).toHaveBeenCalledExactlyOnceWith(expect.any(HTMLElement), expect.objectContaining({ sitekey: "site-key", action: "widget_chat", appearance: "interaction-only", execution: "execute" }));
+
+    await send("When do you open?");
+    expect(await screen.findByText("We open at ten.")).toBeTruthy();
+    expect(header(sentTo("/api/widget/chat")[0], "authorization")).toBe("Bearer checked-session");
+    // The settings and history keep the loader's session; the session needed one check.
+    expect(header(sentTo("/api/widget/config")[0], "authorization")).toBe("Bearer token");
+    expect(turnstile.execute).toHaveBeenCalledTimes(1);
+
+    await send("And on Sundays?");
+    await vi.waitFor(() => expect(sentTo("/api/widget/chat")).toHaveLength(2));
+    expect(header(sentTo("/api/widget/chat")[1], "authorization")).toBe("Bearer checked-session");
+    expect(turnstile.execute).toHaveBeenCalledTimes(1);
+    client.clear();
+  });
+
+  it("keeps the message in the box, and says why, when the check can't pass", async () => {
+    fakeTurnstile((options) => options.callback("turnstile-token"));
+    // A refusal for good, as for a website taken off the key's list.
+    const { client, sentTo } = openChat((path) => path.includes("/api/widget/session/verify") ? Response.json({ error: "Refused.", code: "widget_origin_denied" }, { status: 403 }) : undefined);
+    await vi.waitFor(() => expect(sentTo("/api/widget/session/verify")).toHaveLength(1));
+
+    const composer = await send("Hi");
+    expect(await screen.findByText("chat.challengeFailed")).toBeTruthy();
+    expect(composer.value).toBe("Hi");
+    expect(sentTo("/api/widget/chat")).toHaveLength(0);
+    // Sending tried the check again, once.
+    expect(sentTo("/api/widget/session/verify")).toHaveLength(2);
+    client.clear();
+  });
+
+  it("tries again with a new token when Cloudflare turned the first one down", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const turnstile = fakeTurnstile((options, run) => options.callback(`turnstile-token-${run}`));
+    let verifies = 0;
+    const { client, sentTo } = openChat((path) => {
+      if (!path.includes("/api/widget/session/verify")) return undefined;
+      verifies += 1;
+      return verifies === 1 ? Response.json({ error: "The check didn't pass.", code: "widget_challenge_failed" }, { status: 403 }) : checked();
+    });
+
+    await vi.waitFor(() => expect(sentTo("/api/widget/session/verify")).toHaveLength(2), { timeout: 5_000 });
+    expect(JSON.parse(String(sentTo("/api/widget/session/verify")[1]?.init?.body))).toEqual({ turnstileToken: "turnstile-token-2" });
+    // A widget that ran before starts over for its new token.
+    expect(turnstile.reset).toHaveBeenCalledWith("widget-1");
+    vi.mocked(Math.random).mockRestore();
+    client.clear();
+  });
+
+  it("shows Turnstile's box, with a line asking the visitor to tick it, only when Cloudflare wants that", async () => {
+    let tick: () => void = () => {};
+    fakeTurnstile((options) => {
+      options["before-interactive-callback"]?.();
+      tick = () => {
+        options["after-interactive-callback"]?.();
+        options.callback("turnstile-token");
+      };
+    });
+    const { client, sentTo } = openChat((path) => path.includes("/api/widget/session/verify") ? checked() : undefined);
+
+    expect(await screen.findByText("chat.challengePrompt")).toBeTruthy();
+    expect(sentTo("/api/widget/session/verify")).toHaveLength(0);
+    act(() => tick());
+    await vi.waitFor(() => expect(sentTo("/api/widget/session/verify")).toHaveLength(1));
+    await vi.waitFor(() => expect(screen.queryByText("chat.challengePrompt")).toBeNull());
+    client.clear();
+  });
+
+  it("asks the loader for a new session when the check finds this one expired", async () => {
+    const posted = vi.spyOn(window, "postMessage");
+    fakeTurnstile((options) => options.callback("turnstile-token"));
+    const { client, sentTo } = openChat((path) => path.includes("/api/widget/session/verify") ? Response.json({ error: "The widget session is invalid or expired.", code: "widget_session_invalid" }, { status: 401 }) : undefined);
+
+    await vi.waitFor(() => expect(posted).toHaveBeenCalledWith({ type: "session-expired" }, "*"));
+    // The loader's new session brings its own check, so this one stops.
+    expect(sentTo("/api/widget/session/verify")).toHaveLength(1);
+    posted.mockRestore();
+    client.clear();
+  });
+
+  it("sends with the loader's session, and loads no Turnstile, on a deployment without the check", async () => {
+    const turnstile = fakeTurnstile((options) => options.callback("turnstile-token"));
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const requests: Sent[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const path = String(url);
+      requests.push({ path, init });
+      if (path.includes("/api/widget/history")) return Response.json({ automationState: "ai_active", messages: [] });
+      if (path.includes("/api/widget/chat")) return streamedReply("Hello!");
+      if (path.includes("/api/widget/stream")) return new Response(null, { status: 404 });
+      return Response.json(config);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" challengeSiteKey={null} /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    await send("Hi");
+    expect(await screen.findByText("Hello!")).toBeTruthy();
+    expect(header(requests.find((request) => request.path.includes("/api/widget/chat")), "authorization")).toBe("Bearer token");
+    expect(requests.some((request) => request.path.includes("/api/widget/session/verify"))).toBe(false);
+    expect(turnstile.render).not.toHaveBeenCalled();
     client.clear();
   });
 });

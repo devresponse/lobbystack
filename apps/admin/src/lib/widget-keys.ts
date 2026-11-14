@@ -134,6 +134,12 @@ type WidgetSessionTokenPayload = {
   exp: number;
   /** The receptionist a business or receptionist page named with its signed token; it answers instead of the key's. */
   receptionistId?: string;
+  /**
+   * When the visitor passed the chat's Turnstile check, in seconds since the
+   * epoch. Only /api/widget/session/verify signs it, and the chat route wants
+   * it before the receptionist answers (AUDIT-004).
+   */
+  verifiedAt?: number;
 };
 
 function widgetSessionSecret(): string {
@@ -180,17 +186,26 @@ function verifiedPayload(token: string, purpose: TokenPurpose): Record<string, u
   }
 }
 
-export function createWidgetSessionToken(input: Omit<WidgetSessionTokenPayload, "v" | "exp"> & { ttlSeconds?: number }): { token: string; expiresAt: string } {
+/** How long a widget session lasts. The loader renews it five minutes early. */
+export const WIDGET_SESSION_TTL_SECONDS = 3600;
+
+/**
+ * A signed session, when it ends, and how many seconds that is from now. The
+ * loader and the chat time their renewals by the seconds, so a visitor's clock
+ * that runs slow doesn't let the session lapse first.
+ */
+export function createWidgetSessionToken(input: Omit<WidgetSessionTokenPayload, "v" | "exp"> & { ttlSeconds?: number }): { token: string; expiresAt: string; expiresIn: number } {
   const payload: WidgetSessionTokenPayload = {
     v: 1,
     widgetKeyId: input.widgetKeyId,
     businessId: input.businessId,
     visitorId: input.visitorId,
     origin: normalizeOrigin(input.origin),
-    exp: Math.floor(Date.now() / 1000) + (input.ttlSeconds ?? 3600),
+    exp: Math.floor(Date.now() / 1000) + (input.ttlSeconds ?? WIDGET_SESSION_TTL_SECONDS),
     ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}),
+    ...(input.verifiedAt !== undefined ? { verifiedAt: input.verifiedAt } : {}),
   };
-  return { token: signToken(payload, "session"), expiresAt: new Date(payload.exp * 1000).toISOString() };
+  return { token: signToken(payload, "session"), expiresAt: new Date(payload.exp * 1000).toISOString(), expiresIn: payload.exp - Math.floor(Date.now() / 1000) };
 }
 
 export function verifyWidgetSessionToken(token: string): WidgetSessionTokenPayload | null {
@@ -206,6 +221,7 @@ export function verifyWidgetSessionToken(token: string): WidgetSessionTokenPaylo
     origin: normalizeOrigin(parsed.origin),
     exp: parsed.exp,
     ...(typeof parsed.receptionistId === "string" ? { receptionistId: parsed.receptionistId.toLowerCase() } : {}),
+    ...(typeof parsed.verifiedAt === "number" && Number.isFinite(parsed.verifiedAt) ? { verifiedAt: parsed.verifiedAt } : {}),
   };
 }
 

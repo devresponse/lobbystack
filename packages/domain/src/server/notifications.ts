@@ -409,7 +409,7 @@ export async function saveNotificationPreferencesInTransaction(tx: DatabaseTrans
 }
 
 /** The alerts: each tells the team something happened, and the daily summary counts them. */
-export const operatorAlertEventKeys = ["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "widgetChat", "liveChatRequest", "webhookDisabled"] as const;
+export const operatorAlertEventKeys = ["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "widgetChat", "widgetChatLimit", "liveChatRequest", "webhookDisabled"] as const;
 export type OperatorAlertEventKey = (typeof operatorAlertEventKeys)[number];
 /** Everything a person turns on or off for themselves: the alerts, and the email after each call (callTranscripts.ts). */
 export const operatorNotificationEventKeys = [...operatorAlertEventKeys, "callTranscript"] as const;
@@ -440,6 +440,7 @@ const dailySummaryLabels: Record<OperatorAlertEventKey, string> = {
   transferFailed: "Transfer failures",
   aiReplyFailed: "AI reply failures",
   widgetChat: "Website chat messages",
+  widgetChatLimit: "Days the website chat reached its limit",
   liveChatRequest: "Website visitors asking for a person",
   webhookDisabled: "Webhook endpoints turned off",
 };

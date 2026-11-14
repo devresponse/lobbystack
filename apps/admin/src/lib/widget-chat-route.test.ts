@@ -125,6 +125,7 @@ vi.mock("@/lib/widget-keys", () => ({
 
 vi.mock("@/lib/widget-policy", () => ({
   enforceWidgetRateLimits: mocks.enforceWidgetRateLimits,
+  widgetChatDailyPercent: () => 25,
 }));
 
 import { POST } from "../../app/api/widget/chat/route";
@@ -200,6 +201,9 @@ function streamParts(body: string): Array<Record<string, unknown>> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The deployment has no Turnstile keys, so the chat's check is off, unless a test turns it on.
+  vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "");
+  vi.stubEnv("TURNSTILE_SECRET_KEY", "");
   mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session });
   mocks.enforceWidgetRateLimits.mockResolvedValue({ allowed: true });
   mocks.requestIpHash.mockReturnValue("ip-hash");
@@ -327,6 +331,93 @@ describe("POST /api/widget/chat", () => {
     expect(response.status).toBe(402);
     expect(await response.json()).toMatchObject({ code: "chat_ai_limit_reached" });
     expect(mocks.createAgentModel).toHaveBeenCalled();
+  });
+
+  it("spends the business's daily share of chats along with its month's", async () => {
+    await readSse(await POST(widgetRequest()));
+    expect(mocks.reserveWidgetChatUsageInTransaction).toHaveBeenCalledWith(expect.anything(), { businessId, conversationId, dailyPercent: 25 });
+  });
+
+  describe("today's chat limit (AUDIT-004)", () => {
+    const dailyRefusal = { allowed: false, plan: "starter", errorCode: "chat_daily_limit_reached", dailyLimit: 12 };
+
+    it("answers 429 without the model, keeps the visitor's message for the team, and alerts the owner once a day", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-14T15:00:00Z"));
+      mocks.reserveWidgetChatUsageInTransaction.mockResolvedValue(dailyRefusal);
+      const response = await POST(widgetRequest());
+      vi.useRealTimers();
+      expect(response.status).toBe(429);
+      expect(await response.json()).toMatchObject({ code: "chat_daily_limit_reached" });
+      expect(mocks.appendMessage).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({ direction: "inbound", channel: "web_chat" }));
+      expect(mocks.createReceptionistAgent).not.toHaveBeenCalled();
+      expect(mocks.queueOperatorAlert).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        businessId,
+        eventKind: "widgetChatLimit",
+        eventKey: `widget-chat-limit:${businessId}:2026-11-14`,
+        body: expect.stringContaining("12 website chats today"),
+      }));
+    });
+
+    it("logs the business's limit with the refusal", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      mocks.reserveWidgetChatUsageInTransaction.mockResolvedValue(dailyRefusal);
+      await POST(widgetRequest());
+      expect(logLines(warn, "widget.chat_refused")).toEqual([expect.objectContaining({ status: 429, code: "chat_daily_limit_reached", plan: "starter", dailyLimit: "12", conversationId })]);
+    });
+
+    it("still answers 429 when the alert can't be queued, and reports that", async () => {
+      const failure = new Error("outbox unavailable");
+      mocks.queueOperatorAlert.mockImplementation(async (_context: unknown, input: { eventKind: string }) => { if (input.eventKind === "widgetChatLimit") throw failure; });
+      mocks.reserveWidgetChatUsageInTransaction.mockResolvedValue(dailyRefusal);
+      const response = await POST(widgetRequest());
+      expect(response.status).toBe(429);
+      await vi.waitFor(() => expect(mocks.reportServerError).toHaveBeenCalledWith(failure, expect.objectContaining({ operation: "widget.chat_limit_alert" })));
+    });
+
+    it("keeps the month's 402 apart from the day's 429", async () => {
+      mocks.reserveWidgetChatUsageInTransaction.mockResolvedValue({ allowed: false, plan: "starter", errorCode: "chat_ai_limit_reached" });
+      const response = await POST(widgetRequest());
+      expect(response.status).toBe(402);
+      expect(mocks.queueOperatorAlert).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ eventKind: "widgetChatLimit" }));
+    });
+  });
+
+  describe("the chat's Turnstile check (AUDIT-004)", () => {
+    beforeEach(() => {
+      vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+      vi.stubEnv("TURNSTILE_SECRET_KEY", "secret-key");
+    });
+
+    it("refuses a session that didn't pass it, before saving anything or spending the visitor's messages", async () => {
+      const response = await POST(widgetRequest());
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ code: "widget_challenge_required" });
+      expect(mocks.enforceWidgetRateLimits).not.toHaveBeenCalled();
+      expect(mocks.getOrCreateWidgetConversation).not.toHaveBeenCalled();
+      expect(mocks.appendMessage).not.toHaveBeenCalled();
+      expect(mocks.reserveWidgetChatUsageInTransaction).not.toHaveBeenCalled();
+    });
+
+    it("answers a session that passed it", async () => {
+      mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, verifiedAt: 1_794_000_000 } });
+      const response = await POST(widgetRequest());
+      expect(response.status).toBe(200);
+      expect(await readSse(response)).toContain("Thanks");
+    });
+
+    it("answers without it when the deployment turned it off", async () => {
+      vi.stubEnv("WIDGET_TURNSTILE", "false");
+      const response = await POST(widgetRequest());
+      expect(response.status).toBe(200);
+      await readSse(response);
+    });
+
+    it("still refuses another visitor's session first", async () => {
+      const response = await POST(widgetRequest({ visitorId: "00000000-0000-4000-8000-0000000000ff" }));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ code: "widget_visitor_mismatch" });
+    });
   });
 
   it("returns a configuration error before reserving chat allowance", async () => {

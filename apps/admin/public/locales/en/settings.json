@@ -1322,6 +1322,10 @@
         "title": "New website chat message",
         "description": "When a visitor sends a message through your website widget. You get at most one alert per chat each day."
       },
+      "widgetChatLimit": {
+        "title": "Website chat reached its daily limit",
+        "description": "When the AI receptionist has started as many website chats as it may in one day. New chats wait for your team in Messages until midnight UTC."
+      },
       "liveChatRequest": {
         "title": "Visitor asking for a person",
         "description": "When a website visitor asks to talk with someone from your team. Reply from Messages within 3 minutes to join the chat."

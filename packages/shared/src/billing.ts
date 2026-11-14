@@ -192,6 +192,8 @@ export const billingErrorCodes = {
   aiSmsNotEnabled: "ai_sms_not_enabled",
   dedicatedNumberRequiresPaidPlan: "dedicated_number_requires_paid_plan",
   chatAiLimitReached: "chat_ai_limit_reached",
+  /** The receptionist started as many website chats today as one day allows (AUDIT-004). */
+  chatDailyLimitReached: "chat_daily_limit_reached",
 } as const;
 
 export type BillingErrorCode =

@@ -15,8 +15,11 @@ import { loadWidgetReceptionist } from "@/lib/widget-receptionist";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// A stream ends after this long and the widget opens a new one, so it never outlives its session by much.
+// A stream ends after about this long and the widget opens a new one, so it never outlives its session by much.
 const STREAM_LIFETIME_MS = 10 * 60_000;
+// Each stream ends up to a minute early, at random, so the streams a deploy or
+// an outage closed all at once don't all come back at the same moment again.
+const STREAM_LIFETIME_JITTER_MS = 60_000;
 // Past this many open streams in one process, chats fall back to their slower history check.
 const MAX_OPEN_STREAMS = 1_000;
 let openStreams = 0;
@@ -44,22 +47,41 @@ export async function GET(request: Request): Promise<Response> {
     const rate = await enforceWidgetRateLimits({ businessId: session.businessId, widgetKeyId: session.widgetKeyId, visitorId, ...(ipHash ? { ipHash } : {}), operation: "stream" });
     if (!rate.allowed) return NextResponse.json({ error: "Rate limit reached.", code: rate.code }, { status: rate.status });
     if (!realtimeConfigured() || openStreams >= MAX_OPEN_STREAMS) return jsonError("Live chat updates are unavailable.", 503, "widget_stream_unavailable");
-    const context = createWorkerDomainContext();
-    const { receptionistId } = await loadWidgetReceptionist(context, session);
-    const conversationId = await findWidgetConversationId(context, { businessId: session.businessId, widgetVisitorId: visitorId, ...(receptionistId ? { receptionistId } : {}) });
-    if (!conversationId) return jsonError("This visitor has no open chat.", 404, "widget_conversation_not_found");
+    // The place is taken before the awaits below. Counting the stream only
+    // once it opened let a burst of requests all pass the check above first,
+    // and one process held twice the streams it should.
+    openStreams += 1;
+    let placeHeld = true;
+    const release = () => {
+      if (!placeHeld) return;
+      placeHeld = false;
+      openStreams -= 1;
+    };
+    let conversationId: string | null;
+    try {
+      const context = createWorkerDomainContext();
+      const { receptionistId } = await loadWidgetReceptionist(context, session);
+      conversationId = await findWidgetConversationId(context, { businessId: session.businessId, widgetVisitorId: visitorId, ...(receptionistId ? { receptionistId } : {}) });
+    } catch (error) {
+      release();
+      throw error;
+    }
+    if (!conversationId) {
+      release();
+      return jsonError("This visitor has no open chat.", 404, "widget_conversation_not_found");
+    }
+    const chatId = conversationId;
 
     const encoder = new TextEncoder();
-    let stop: () => void = () => undefined;
+    let stop: () => void = release;
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        openStreams += 1;
         let closed = false;
         let unlisten: (() => void) | undefined;
         const finish = (closeController: boolean) => {
           if (closed) return;
           closed = true;
-          openStreams -= 1;
+          release();
           clearInterval(heartbeat);
           clearTimeout(lifetime);
           request.signal.removeEventListener("abort", onAbort);
@@ -76,14 +98,14 @@ export async function GET(request: Request): Promise<Response> {
         stop = () => finish(false);
         const heartbeat = setInterval(() => send(": keepalive\n\n"), 15_000);
         heartbeat.unref?.();
-        const lifetime = setTimeout(() => finish(true), STREAM_LIFETIME_MS);
+        const lifetime = setTimeout(() => finish(true), STREAM_LIFETIME_MS - Math.floor(Math.random() * STREAM_LIFETIME_JITTER_MS));
         lifetime.unref?.();
         request.signal.addEventListener("abort", onAbort, { once: true });
         if (request.signal.aborted) return finish(true);
         try {
           const listening = await listenToBusinessRealtime(session.businessId, {
             event: (event) => {
-              const kind = widgetEvent(event, conversationId);
+              const kind = widgetEvent(event, chatId);
               if (kind) send(`event: ${kind}\ndata: {}\n\n`);
             },
             // Redis dropped and events may be lost: the widget reconnects and reloads its history.

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingPackCheckouts, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isReplacedSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
@@ -84,9 +84,51 @@ export async function finalizeWebVoiceUsageInTransaction(
 
 export type WidgetChatBillingAllowance = {
   allowed: boolean;
-  errorCode: typeof billingErrorCodes.chatAiLimitReached | null;
+  errorCode: typeof billingErrorCodes.chatAiLimitReached | typeof billingErrorCodes.chatDailyLimitReached | null;
   plan: BillingPlanSlug;
+  /** The day's limit that a chat_daily_limit_reached refusal met. */
+  dailyLimit?: number;
 };
+
+/** The fewest new website chats the daily limit allows in a day, so the owner of a small plan testing the chat never meets it. */
+export const WIDGET_CHAT_DAILY_MINIMUM = 10;
+
+/**
+ * How many website chats the receptionist may start in one UTC day
+ * (AUDIT-004): `percent` of the chats the business has for the month, or of
+ * its packs' chats on a pack, rounded up and never under ten. A script that
+ * gets past the other limits then spends at most that much of the allowance a
+ * day, and the team hears about it the first day. Null without a number of
+ * chats to take a share of, as on an unlimited plan, or without a percent,
+ * when the deployment turned the limit off.
+ */
+export function widgetChatDailyLimit(allowance: number | null | undefined, percent: number | null | undefined): number | null {
+  if (allowance === null || allowance === undefined || !Number.isFinite(allowance) || percent === null || percent === undefined || percent >= 100) return null;
+  return Math.max(WIDGET_CHAT_DAILY_MINIMUM, Math.ceil((allowance * percent) / 100));
+}
+
+/**
+ * The day's limit when this chat would start past it, else null. A chat that
+ * already has its reservation keeps going: the limit only stops new ones. The
+ * lock, held to the end of the transaction, makes two chats that start at once
+ * count one after the other, so the day never goes past its limit.
+ */
+async function widgetChatDailyLimitReachedInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; sourceKey: string; plan: BillingPlanSlug; included: number | null; percent: number | null },
+): Promise<number | null> {
+  if (input.percent === null) return null;
+  const started = (await tx.select({ id: billingUsageEvents.id }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey), gt(billingUsageEvents.quantity, 0))).limit(1))[0];
+  if (started) return null;
+  const allowance = input.plan === "prepaid" ? (await readUsageStatusInTransaction(tx, { businessId: input.businessId })).pack?.chatAiUnits.total ?? null : input.included;
+  const limit = widgetChatDailyLimit(allowance, input.percent);
+  if (limit === null) return null;
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`widget-chat-day:${input.businessId}`}, 0))`);
+  const dayStart = new Date();
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const startedToday = (await tx.select({ count: sql<number>`count(*)::int` }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.usageKind, "chat_ai_tokens"), gt(billingUsageEvents.quantity, 0), gte(billingUsageEvents.createdAt, dayStart))))[0]?.count ?? 0;
+  return startedToday >= limit ? limit : null;
+}
 
 export async function getWidgetChatAllowance(
   context: DomainContext,
@@ -109,14 +151,22 @@ export async function getWidgetChatAllowance(
   });
 }
 
+/**
+ * Reserves a website chat's one unit of the allowance before the receptionist
+ * answers it. `dailyPercent` caps the chats it starts in a UTC day at that
+ * share of the allowance (widgetChatDailyLimit); null leaves the day uncapped.
+ */
 export async function reserveWidgetChatUsageInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; conversationId: string },
+  input: { businessId: string; conversationId: string; dailyPercent?: number | null },
 ): Promise<WidgetChatBillingAllowance> {
   const { plan, limits } = await loadBusinessPlanLimits(tx, input.businessId);
   // A pack has no monthly chats: each chat draws one of its chats, for its whole length.
   if (plan === "prepaid" || limits.chatAiTokensIncluded !== null) {
-    const reservation = await reserveUsageInTransaction(tx, { businessId: input.businessId, usageKind: "chat_ai_tokens", sourceKey: `chat:${input.conversationId}`, quantity: 1 });
+    const sourceKey = `chat:${input.conversationId}`;
+    const dailyLimit = await widgetChatDailyLimitReachedInTransaction(tx, { businessId: input.businessId, sourceKey, plan, included: limits.chatAiTokensIncluded, percent: input.dailyPercent ?? null });
+    if (dailyLimit !== null) return { allowed: false, errorCode: billingErrorCodes.chatDailyLimitReached, plan, dailyLimit };
+    const reservation = await reserveUsageInTransaction(tx, { businessId: input.businessId, usageKind: "chat_ai_tokens", sourceKey, quantity: 1 });
     if (!reservation.allowed) return { allowed: false, errorCode: billingErrorCodes.chatAiLimitReached, plan };
   }
   return { allowed: true, errorCode: null, plan };

@@ -6,9 +6,9 @@ import { NextResponse } from "next/server";
 import { createReceptionistAgent, receptionistInstructions, toAiTraceSteps, type ReceptionistStreamOptions } from "@lobbystack/agent-core/agent";
 import { describeAgentFailure, EmptyReplyError } from "@lobbystack/agent-core/failure";
 import { createAgentModel, describeAgentUsage } from "@lobbystack/agent-core/model";
-import { announceLateWidgetReply, appendMessage, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, recordAiTrace, reserveWidgetChatUsageInTransaction, returnQuietTeamChat, snapshotForReceptionist, type AiTraceInput } from "@lobbystack/domain";
+import { announceLateWidgetReply, appendMessage, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, recordAiTrace, reserveWidgetChatUsageInTransaction, returnQuietTeamChat, snapshotForReceptionist, type AiTraceInput, type DomainContext } from "@lobbystack/domain";
 import { withBusinessTransaction } from "@lobbystack/db";
-import { normalizeInterfaceLocale, widgetChatRequestSchema, type BusinessContextSnapshot, type InterfaceLocale } from "@lobbystack/shared";
+import { billingErrorCodes, normalizeInterfaceLocale, widgetChatRequestSchema, type BusinessContextSnapshot, type InterfaceLocale } from "@lobbystack/shared";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
 
 import { runAfterResponse } from "@/lib/after-response";
@@ -16,8 +16,9 @@ import { getWorkerDatabase, readJson } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
 import { reportServerError } from "@/lib/error-reporting";
 import { resolveWidgetSessionAccess, type WidgetSession } from "@/lib/widget-access";
+import { widgetChallengeRequired } from "@/lib/widget-challenge";
 import { requestIpHash } from "@/lib/widget-keys";
-import { enforceWidgetRateLimits } from "@/lib/widget-policy";
+import { enforceWidgetRateLimits, widgetChatDailyPercent } from "@/lib/widget-policy";
 import { loadWidgetReceptionist } from "@/lib/widget-receptionist";
 
 export const runtime = "nodejs";
@@ -54,6 +55,27 @@ function replyFailedText(errorId: string): string {
 // logged: a database error can carry the values it was given.
 function logUnsaved(message: string) {
   return (cause: unknown) => logEvent("warn", message, { errorType: cause instanceof Error ? cause.name : typeof cause });
+}
+
+/**
+ * Tells the business's team, once a day, that the receptionist has started
+ * as many chats today as one day allows, and why that may matter. The
+ * visitor's answer doesn't wait on it or change with it.
+ */
+async function alertDailyChatLimit(context: DomainContext, businessId: string, dailyLimit: number | undefined): Promise<void> {
+  try {
+    const { queueOperatorAlert } = await import("@lobbystack/domain");
+    await queueOperatorAlert(context, {
+      businessId,
+      eventKind: "widgetChatLimit",
+      // One alert a day: the unique event key drops the rest.
+      eventKey: `widget-chat-limit:${businessId}:${new Date().toISOString().slice(0, 10)}`,
+      subject: "Your website chat reached today's limit",
+      body: `The AI receptionist has started ${dailyLimit ?? "as many"} website chats today, the most it starts in one day. Until midnight UTC, new visitors' messages still reach Messages, where your team can answer them, but the receptionist won't reply to them. If today wasn't unusually busy, someone may be using the chat on your website to spend your plan's chats.`,
+    });
+  } catch (error) {
+    runAfterResponse(() => reportServerError(error, { operation: "widget.chat_limit_alert", route: ROUTE }));
+  }
 }
 
 function toolNames(steps: ReadonlyArray<StepResult<ToolSet>>): string[] {
@@ -105,6 +127,10 @@ async function answerChat(request: Request) {
     const { session } = access;
     addToCallContext({ businessId: session.businessId });
     if (session.visitorId !== body.visitorId) return refused(403, "widget_visitor_mismatch", "The visitor does not match the widget session.");
+    // Only a session that passed the chat's Turnstile check gets an answer
+    // (AUDIT-004). Checked first, so a script without one saves nothing and
+    // spends none of the visitor's message count.
+    if (widgetChallengeRequired() && session.verifiedAt === undefined) return refused(403, "widget_challenge_required", "Confirm you're a person before chatting.");
     const rate = await enforceWidgetRateLimits({ businessId: session.businessId, widgetKeyId: session.widgetKeyId, visitorId: body.visitorId, ...(requestIpHash(request) ? { ipHash: requestIpHash(request) } : {}), operation: "chat" });
     if (!rate.allowed) return refused(rate.status, rate.code, "Chat rate limit reached.", { reason: rate.reason });
 
@@ -133,7 +159,12 @@ async function answerChat(request: Request) {
       return refused(503, "ai_provider_unavailable", "The AI chat provider is not configured.", { conversationId });
     }
     if (automationState === "ai_active") {
-      const reservation = await withBusinessTransaction(getWorkerDatabase().db, { businessId: session.businessId, actorType: "worker" }, async (tx) => await reserveWidgetChatUsageInTransaction(tx, { businessId: session.businessId, conversationId }));
+      const reservation = await withBusinessTransaction(getWorkerDatabase().db, { businessId: session.businessId, actorType: "worker" }, async (tx) => await reserveWidgetChatUsageInTransaction(tx, { businessId: session.businessId, conversationId, dailyPercent: widgetChatDailyPercent() }));
+      // The visitor's message is saved, so the team still sees it and can answer.
+      if (!reservation.allowed && reservation.errorCode === billingErrorCodes.chatDailyLimitReached) {
+        await alertDailyChatLimit(context, session.businessId, reservation.dailyLimit);
+        return refused(429, "chat_daily_limit_reached", "Today's chat limit has been reached.", { conversationId, plan: reservation.plan, dailyLimit: reservation.dailyLimit === undefined ? undefined : String(reservation.dailyLimit) });
+      }
       if (!reservation.allowed) return refused(402, "chat_ai_limit_reached", "This month's chat session limit has been reached.", { conversationId, plan: reservation.plan });
     }
     const assistantMessageId = randomUUID();

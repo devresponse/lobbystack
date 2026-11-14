@@ -16,12 +16,12 @@ import { SmsPhoneVerificationDialog } from "@/components/sms-phone-verification-
 import { CallTranscriptSettingsCard, type CallTranscriptState } from "@/components/call-transcript-settings-card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type EventKey = "voiceMessage" | "pausedSms" | "widgetChat" | "liveChatRequest" | "smsFailed" | "calendarSync" | "transferFailed" | "aiReplyFailed" | "webhookDisabled" | "callTranscript";
+type EventKey = "voiceMessage" | "pausedSms" | "widgetChat" | "widgetChatLimit" | "liveChatRequest" | "smsFailed" | "calendarSync" | "transferFailed" | "aiReplyFailed" | "webhookDisabled" | "callTranscript";
 type Preferences = { emailEnabled: boolean; smsEnabled: boolean; smsConsent: boolean; eventPreferences: Record<EventKey, { email: boolean; sms: boolean }>; dailySummaryEnabled: boolean; dailySummarySendTime: string | null; canUseSms: boolean; smsUnavailableReason: "phone_unverified" | "sender_missing" | null; callTranscript?: CallTranscriptState };
 // The email after each call goes by email only, and only when the business sends it to this person.
 const communicationEvents: EventKey[] = ["voiceMessage", "pausedSms", "callTranscript"];
 const issueEvents: EventKey[] = ["smsFailed", "calendarSync", "transferFailed", "webhookDisabled"];
-const widgetEvents: EventKey[] = ["widgetChat", "liveChatRequest"];
+const widgetEvents: EventKey[] = ["widgetChat", "liveChatRequest", "widgetChatLimit"];
 
 export function LiveNotificationSettingsSurface({ widgetOnly = false }: { widgetOnly?: boolean }) {
   const { t } = useTranslation("settings");

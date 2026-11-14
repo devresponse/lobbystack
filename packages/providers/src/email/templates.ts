@@ -759,6 +759,7 @@ const ALERTS: Record<string, { path: string; label: string; about: string }> = {
   smsFailed: { path: "/messages", label: "Open Messages", about: "failed customer texts" },
   aiReplyFailed: { path: "/messages", label: "Open Messages", about: "failed AI replies" },
   widgetChat: { path: "/messages", label: "Open Messages", about: "website chat messages" },
+  widgetChatLimit: { path: "/messages", label: "Open Messages", about: "the website chat's daily limit" },
   liveChatRequest: { path: "/messages", label: "Open Messages", about: "visitors asking for a person" },
   transferFailed: { path: "/calls", label: "Open Calls", about: "failed call transfers" },
   calendarSync: { path: "/integrations", label: "Open Integrations", about: "calendar sync issues" },

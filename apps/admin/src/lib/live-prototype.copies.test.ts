@@ -18,7 +18,7 @@ function standInWorker(host: string, port: number): Promise<Copy> {
   copy.server.on("request", (request, response) => {
     request.resume();
     request.on("end", () => {
-      // As apps/worker/src/liveCalls.ts answers: a draining copy refuses a new call and closes the connection.
+      // As the worker's liveCalls.ts answers: a draining copy refuses a new call and closes the connection.
       if (copy.draining && request.url === "/internal/live/attach") {
         copy.refused += 1;
         response.writeHead(503, { "content-type": "application/json", connection: "close" }).end(JSON.stringify({ error: "This worker is shutting down." }));

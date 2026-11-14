@@ -52,7 +52,7 @@ describe("connectionBudget", () => {
   const RAISED_USABLE = 200 - 3;
   // The pool sizes devops/bootstrap.mjs gives each copy (POOLS there; scripts/bootstrap.test.ts checks they match).
   const SMALLER = {
-    LOBBYSTACK_APP_POOL_MAX: "8", LOBBYSTACK_AUTH_POOL_MAX: "4", LOBBYSTACK_WORKER_POOL_MAX: "8", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2",
+    LOBBYSTACK_APP_POOL_MAX: "6", LOBBYSTACK_AUTH_POOL_MAX: "2", LOBBYSTACK_WORKER_POOL_MAX: "12", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2",
   };
   const SMALLER_WORKER = { LOBBYSTACK_WORKER_POOL_MAX: "10", LOBBYSTACK_DISPATCHER_POOL_MAX: "2" };
   // While a release replaces every copy, the old ones keep their pools as they finish: the admin's for up to a
@@ -66,6 +66,16 @@ describe("connectionBudget", () => {
     expect(connectionBudget("worker", {})).toBe(16);
     expect(connectionBudget("admin", SMALLER)).toBe(24);
     expect(connectionBudget("worker", SMALLER_WORKER)).toBe(12);
+  });
+
+  it("keeps the admin's pool for outside traffic at the code's size, so one admin serves it as before", () => {
+    // The admin's lobbystack_worker pool serves the widget, calls, the providers' webhooks and the public API, and
+    // in the 2026-10-15 load test one admin had all 12 of its connections busy at 400 people chatting at once. The
+    // dashboard's and sign-in's pools, whose requests hold a connection only for short queries, give up the rest.
+    expect(poolMax("lobbystack_worker", SMALLER)).toBe(DEFAULT_POOL_MAX);
+    for (const role of ["lobbystack_app", "lobbystack_auth", "lobbystack_dispatcher", "lobbystack_finance_export"] as const) {
+      expect(poolMax(role, SMALLER), role).toBeLessThan(poolMax("lobbystack_worker", SMALLER));
+    }
   });
 
   it("shows why copies need smaller pools and a higher limit", () => {

@@ -247,9 +247,9 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    LOBBYSTACK_AUTH_PASSWORD=${{Postgres.LOBBYSTACK_AUTH_PASSWORD}}
    LOBBYSTACK_WORKER_PASSWORD=${{Postgres.LOBBYSTACK_WORKER_PASSWORD}}
    LOBBYSTACK_DISPATCHER_PASSWORD=${{Postgres.LOBBYSTACK_DISPATCHER_PASSWORD}}
-   LOBBYSTACK_APP_POOL_MAX=8
-   LOBBYSTACK_AUTH_POOL_MAX=4
-   LOBBYSTACK_WORKER_POOL_MAX=8
+   LOBBYSTACK_APP_POOL_MAX=6
+   LOBBYSTACK_AUTH_POOL_MAX=2
+   LOBBYSTACK_WORKER_POOL_MAX=12
    LOBBYSTACK_DISPATCHER_POOL_MAX=2
    LOBBYSTACK_FINANCE_EXPORT_POOL_MAX=2
    REDIS_URL=redis://default:${{Redis.REDIS_PASSWORD}}@${{Redis.RAILWAY_PRIVATE_DOMAIN}}:6379
@@ -284,7 +284,7 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    - `LIVE_PROTOTYPE_ENABLED` turns calls on. `WIDGET_KEY_ISSUANCE_ENABLED` lets businesses create website chat widgets, which are refused without it.
    - `WORKER_INTERNAL_URL` is the worker's private address, where the admin hands it each call.
    - The admin signs in to the database as `lobbystack_app`. At start, it also checks that it can sign in as the auth, worker and dispatcher roles, with the three passwords below that line.
-   - The five `…_POOL_MAX` lines cap the database connections the admin opens for each role, 24 in all, so that copies of the admin and the worker stay within the database's limit ([7.24](part-7-operations.md#724-scale-up)). Without them each role takes up to 12, and the dispatcher 4.
+   - The five `…_POOL_MAX` lines cap the database connections the admin opens for each role, 24 in all, so that copies of the admin and the worker stay within the database's limit ([7.24](part-7-operations.md#724-scale-up)). The worker role's 12 serve everything that comes from outside: the website chat, calls, the providers' webhooks and the public API. The dashboard's 6 and sign-in's 2 are enough because their requests hold a connection only for short queries. Without these lines each role takes up to 12, and the dispatcher 4.
 
 **The worker's variables**
 

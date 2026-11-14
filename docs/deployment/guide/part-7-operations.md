@@ -1351,6 +1351,8 @@ One admin and one worker are enough for most instances. In a load test on a comp
 | The admin's single thread | Past about 400 people chatting at once, every page and chat slows down | A second copy of the admin (below) |
 | Memory and disk | A service or a server that runs out stops | Watch them ([5.2](part-5-production.md#52-production-on-railway), step 25), and grow them (below) |
 
+With one admin and one worker, the shares change little. The admin's pool for everything that comes from outside, the website chat, calls, the providers' webhooks and the public API, keeps the code's 12. The dashboard gets 6 and sign-in 2 instead of 12 each, and the worker's jobs and calls share 10 instead of 12. A request holds a connection only while its queries run, not while it waits for OpenAI, so the pools rarely fill: in the load test, one admin had at most 5 connections busy at 200 people chatting at once, and all 12 of its outside pool at 400. When a pool is full, a request waits up to 5 seconds for a connection, then fails.
+
 **On Railway**
 
 - **Memory and processors:** each service grows by itself, up to 24 GB of memory and 24 virtual processors on Pro, and Railway bills what it uses (Railway's docs). There's nothing to choose. Don't set a limit under **Replica Limits** on the worker or Postgres: a service that reaches it is stopped, and the worker's calls with it.

@@ -275,11 +275,15 @@ const REDIS_START = "sh -c 'exec redis-server --bind :: 0.0.0.0 --appendonly yes
 
 // Connections. Postgres accepts 100 by default (3 kept for superusers), and every copy of the admin and the worker opens
 // its own pools, old copies included while a release replaces them. So a new database starts with room for 200, and
-// each copy gets a smaller share than the code's defaults (12 per pool, 4 for the dispatcher): an admin 24, a worker 12.
-// Two admins and two workers then need at most 144 while a release replaces them all at once (guide 7.24).
+// each copy gets a share, smaller than the code's defaults (12 per pool, 4 for the dispatcher): an admin 24, a worker 12.
+// The admin's lobbystack_worker pool keeps its 12: it serves everything from outside (the widget, calls, the providers'
+// webhooks, the public API), and one admin had all 12 busy at 400 people chatting at once in the 2026-10-15 load test.
+// The dashboard's and sign-in's pools give up the rest; their requests hold a connection only for short queries, and
+// sign-in reads sessions from Redis. Two admins and two workers then need at most 144 while a release replaces them all
+// at once (guide 7.24).
 const POSTGRES_MAX_CONNECTIONS = 200;
 const POOLS = {
-  admin: { LOBBYSTACK_APP_POOL_MAX: "8", LOBBYSTACK_AUTH_POOL_MAX: "4", LOBBYSTACK_WORKER_POOL_MAX: "8", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2" },
+  admin: { LOBBYSTACK_APP_POOL_MAX: "6", LOBBYSTACK_AUTH_POOL_MAX: "2", LOBBYSTACK_WORKER_POOL_MAX: "12", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2" },
   worker: { LOBBYSTACK_WORKER_POOL_MAX: "10", LOBBYSTACK_DISPATCHER_POOL_MAX: "2" },
 };
 

@@ -1063,7 +1063,7 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
   });
 
   // Room for two or more copies of the admin and the worker (guide 7.24, the 2026-11-13 replicas review).
-  const adminPools = { LOBBYSTACK_APP_POOL_MAX: "8", LOBBYSTACK_AUTH_POOL_MAX: "4", LOBBYSTACK_WORKER_POOL_MAX: "8", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2" };
+  const adminPools = { LOBBYSTACK_APP_POOL_MAX: "6", LOBBYSTACK_AUTH_POOL_MAX: "2", LOBBYSTACK_WORKER_POOL_MAX: "12", LOBBYSTACK_DISPATCHER_POOL_MAX: "2", LOBBYSTACK_FINANCE_EXPORT_POOL_MAX: "2" };
   const workerPools = { LOBBYSTACK_WORKER_POOL_MAX: "10", LOBBYSTACK_DISPATCHER_POOL_MAX: "2" };
 
   it("gives a new deployment room for copies: a database with 200 connections, smaller pools, and a minute for the old admin to finish", async () => {

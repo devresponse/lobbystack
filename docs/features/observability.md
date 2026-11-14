@@ -55,6 +55,7 @@ Since fork PR #104, the admin writes one line for each sign-in and account step.
 | `auth.email_verified`, `auth.email_verification_failed` | An address is confirmed by code or link (`method`), or the code or link is refused, with `emailChange` true during a change |
 | `auth.verification_code_sent`, `auth.verification_code_skipped` | A sign-up code is queued for email, or isn't, with the `reason`: `no_account` or `already_verified` |
 | `auth.verification_code_request_failed` | A request for a sign-up code is refused: `INVALID_REQUEST` or `CHALLENGE_FAILED` |
+| `auth.email_verification_off` | A warning as the admin starts in production with `REQUIRE_EMAIL_VERIFICATION=false`, which lets anyone sign up with an address they don't own (fork PR #171) |
 | `auth.better_auth_error`, `auth.better_auth_warning` | Better Auth itself complains, with its words in `error`. Most errors are requests it refuses, such as one from an untrusted origin. Its warnings that repeat a line above, such as a wrong password, are left out |
 
 When the sign-in service breaks, error tracking gets it with an `errorId`. A dashboard request whose session check fails answers 503 with the `errorId` (`auth.session_check`), and so does a sign-up code that can't be sent (`auth.verification_code`). An exception inside Better Auth, such as a database outage behind a sign-in, is reported as `auth.better_auth`.

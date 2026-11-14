@@ -309,7 +309,7 @@ A value written `${{…}}` is a Railway reference, resolved when the service sta
 | --- | --- | --- | --- |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | admin | State: `turnstile` | Built into the admin. Not secret |
 | `TURNSTILE_SECRET_KEY` | admin | State: `turnstile` | The widget must list the address in use, or sign-up fails its check |
-| `REQUIRE_EMAIL_VERIFICATION` | admin | `true`, production only | Sign-in needs the emailed code |
+| `REQUIRE_EMAIL_VERIFICATION` | admin | `true`, production only | Sign-in needs the emailed code. Unset on test, where the admin asks for it anyway since fork PR #171 |
 | `WIDGET_KEY_ISSUANCE_ENABLED` | admin | `true` | Lets businesses create website chat keys |
 
 ### Billing, cloud mode only

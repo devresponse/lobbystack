@@ -25,8 +25,14 @@ export async function register(): Promise<void> {
   if (running.id !== brand.id || running.appName !== brand.appName) {
     console.error(`[brand] brand.build_mismatch: this build shows ${brand.appName} (${brand.id}), but APP_BASE_URL and BRAND_PRESET now pick ${running.appName} (${running.id}). Rebuild the admin to show it.`);
   }
-  const { initializeTelemetry } = await import("@lobbystack/telemetry/node");
+  const { initializeTelemetry, logEvent } = await import("@lobbystack/telemetry/node");
   await initializeTelemetry({ serviceName: "lobbystack-admin" });
+  const { emailVerificationOffInProduction } = await import("./src/lib/email-verification-setting");
+  if (emailVerificationOffInProduction(process.env)) {
+    logEvent("warn", "auth.email_verification_off", {
+      detail: "REQUIRE_EMAIL_VERIFICATION is false, so anyone can sign up with an email address they don't own. Once email works, remove it or set it to true.",
+    });
+  }
   const { assertAdminDatabaseRoles } = await import("./src/lib/startup-role-assertion");
   await assertAdminDatabaseRoles();
 }

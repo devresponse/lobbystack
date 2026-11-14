@@ -14,6 +14,7 @@ import { accounts, sessions, users, verifications } from "@lobbystack/db";
 import { configuredAppOrigins } from "./app-origins";
 import { authPath, betterAuthLogger, logAuthEvent, logAuthOutcome, logRateLimited, logRefusals, routeFields } from "./auth-events";
 import { getDatabase } from "./databases";
+import { emailVerificationRequired } from "./email-verification-setting";
 import { SUPPORTED_LOCALES, resolveLocale, type SupportedLocale } from "./locale";
 import { ensureMcpResource, isDisabledOAuthEndpoint, mcpOAuthPlugins, needsMcpResource, oauthProviderSchema, registrationWithApplicationType } from "./oauth-provider";
 import { hashReplacementPassword, isLegacyScryptHash, meetsPasswordRequirements, verifyLegacyPassword } from "./password";
@@ -297,7 +298,8 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
     emailAndPassword: {
       enabled: true,
       autoSignIn: false,
-      requireEmailVerification: process.env.REQUIRE_EMAIL_VERIFICATION === "true",
+      // On unless REQUIRE_EMAIL_VERIFICATION is "false"; instrumentation.ts warns when production turns it off.
+      requireEmailVerification: emailVerificationRequired(),
       onExistingUserSignUp: async ({ user }, request) => {
         const { assertEmailVerificationSendAllowed, EmailVerificationRateLimitError } = await import("./email-verification-policy");
         logAuthEvent("info", "auth.sign_up_existing_account", { userId: user.id, verified: user.emailVerified }, request?.headers);

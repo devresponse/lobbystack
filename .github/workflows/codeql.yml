@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - main
+      - "releases/**"
   pull_request:
     branches:
       - main
+      - "releases/**"
+  # GitHub runs schedules only from the default branch, so this weekly scan
+  # covers that branch alone; release branches are scanned on every push.
   schedule:
     - cron: "27 8 * * 2"
 

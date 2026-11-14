@@ -97,7 +97,7 @@ Then carry on from step 16 below.
 **Point production at the `production` branch**
 
 7. On `migrate`, `admin` and `worker`, open **Settings**, and in the source settings *(**Service Source**; the branch field's name not confirmed)* change the branch from `main` to `production`. Otherwise production's first deploy builds `main`.
-   - Leave **Wait for CI** off, as on test. You move `production` only to a commit whose checks have passed, and pushes to `production` start no checks of their own (`.github/workflows/ci.yml:3-9`).
+   - Leave **Wait for CI** off, as on test. You move `production` only to a commit whose checks have passed, and pushes to `production` start no checks of their own (`.github/workflows/ci.yml:3-12`).
 8. Open `admin` > **Settings** > **Networking**. If it lists the test environment's address or domain, remove it from production *(whether a copy brings addresses along: not confirmed)*. An address that's new to production, ending in `.up.railway.app`, can stay: LobbyStack answers only at `APP_BASE_URL`.
 
 **Replace the copied values**

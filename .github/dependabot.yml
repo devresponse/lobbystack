@@ -1,4 +1,9 @@
 version: 2
+# Dependabot reads this file only from the default branch, main. Entries
+# without target-branch update main; the releases/r2 entries update the
+# release branch that deployments build from. If releases/r2 becomes the
+# default branch, give the first three entries target-branch: main, or they
+# would update releases/r2 a second time.
 updates:
   - package-ecosystem: npm
     directory: /
@@ -24,6 +29,38 @@ updates:
         patterns: ["*"]
   - package-ecosystem: docker
     directory: /
+    schedule:
+      interval: weekly
+    groups:
+      runtime-images:
+        patterns: ["node"]
+  - package-ecosystem: npm
+    directory: /
+    target-branch: releases/r2
+    schedule:
+      interval: weekly
+    # Matches minimumReleaseAge in pnpm-workspace.yaml, which pnpm 12 also checks against the lockfile.
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    groups:
+      development:
+        dependency-type: development
+        update-types: [minor, patch]
+      production-patches:
+        dependency-type: production
+        update-types: [patch]
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: releases/r2
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /
+    target-branch: releases/r2
     schedule:
       interval: weekly
     groups:

@@ -32,6 +32,11 @@ jobs:
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # What the admin and the worker run, with the workspace packages they use.
+      # The landing site and the docs tooling aren't deployed, so they're left out.
+      # A new advisory fails every pull request until its override is raised.
+      - name: Fail on High advisories in the services' production dependencies
+        run: pnpm --filter "@lobbystack/admin..." --filter "@lobbystack/worker..." audit --prod --audit-level high
       - run: pnpm test:build-config
       - run: pnpm typecheck
       - run: pnpm --filter @lobbystack/admin --filter @lobbystack/landing lint

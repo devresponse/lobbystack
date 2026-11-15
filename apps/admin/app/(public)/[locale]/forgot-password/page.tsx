@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
 import { ForgotPasswordForm } from "@/components/forgot-password-form";
-import { ReplacementOnboardingShell } from "@/components/replacement-onboarding-shell";
+import { AuthShell } from "@/components/auth-shell";
 import { resolveLocale } from "@/lib/locale";
 import { localizePublicPath } from "@/lib/locale-path";
 
@@ -51,7 +51,7 @@ export default function ForgotPasswordPage() {
     } finally { if (!signingIn) setIsSubmitting(false); }
   }
 
-  return <ReplacementOnboardingShell description={step === "verify" ? t("forgotPassword.verifySubtitle", { email }) : t("forgotPassword.subtitle")} progress={null} title={step === "verify" ? t("forgotPassword.verifyTitle") : t("forgotPassword.title")} width="sm">
+  return <AuthShell description={step === "verify" ? t("forgotPassword.verifySubtitle", { email }) : t("forgotPassword.subtitle")} title={step === "verify" ? t("forgotPassword.verifyTitle") : t("forgotPassword.title")}>
     <ForgotPasswordForm step={step} email={email} code={code} newPassword={newPassword} isSubmitting={isSubmitting} errorMessage={errorMessage} onEmailChange={setEmail} onCodeChange={setCode} onNewPasswordChange={setNewPassword} onSubmit={submit} onBackToRequest={() => { setStep("request"); setCode(""); setNewPassword(""); setErrorMessage(null); }} />
-  </ReplacementOnboardingShell>;
+  </AuthShell>;
 }

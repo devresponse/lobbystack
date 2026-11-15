@@ -15,6 +15,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { brandButton, brandInput, brandLink } from "@/components/auth-shell";
 
 type ForgotPasswordFormProps = {
   className?: string;
@@ -60,7 +61,7 @@ export function ForgotPasswordForm({
                 <Input
                   id="reset-code"
                   autoComplete="one-time-code"
-                  className="h-11"
+                  className={brandInput}
                   inputMode="numeric"
                   onChange={(event) => onCodeChange(event.target.value)}
                   placeholder={t("forgotPassword.codePlaceholder")}
@@ -77,7 +78,7 @@ export function ForgotPasswordForm({
                 <Input
                   id="reset-new-password"
                   autoComplete="new-password"
-                  className="h-11"
+                  className={brandInput}
                   onChange={(event) => onNewPasswordChange(event.target.value)}
                   placeholder={t("forgotPassword.newPasswordPlaceholder")}
                   required
@@ -92,7 +93,7 @@ export function ForgotPasswordForm({
               <Input
                 id="reset-email"
                 autoComplete="email"
-                className="h-11"
+                className={brandInput}
                 onChange={(event) => onEmailChange(event.target.value)}
                 placeholder={t("forgotPassword.emailPlaceholder")}
                 required
@@ -110,7 +111,7 @@ export function ForgotPasswordForm({
 
           <div className="mt-2 flex flex-col gap-3">
             <Button
-              className="h-11 w-full"
+              className={brandButton}
               loading={isSubmitting}
               loadingLabel={
                 isVerifyStep
@@ -137,8 +138,8 @@ export function ForgotPasswordForm({
         </FieldGroup>
       </form>
 
-      <p className="text-center text-sm text-muted-foreground">
-        <Link className="font-medium text-foreground underline-offset-4 hover:underline" href={loginPath}>
+      <p className="text-sm text-muted-foreground">
+        <Link className={brandLink} href={loginPath}>
           {t("forgotPassword.backToLogin")}
         </Link>
       </p>

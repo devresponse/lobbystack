@@ -78,7 +78,7 @@ describe("branding on an address no brand claims, with AlloPlace and RealInfoBot
     fixture.preset = "realinfobot";
     const branding = await loadBranding();
     expect(branding).toMatchObject({ appName: "RealInfoBot", sources: { appName: "file", logoUrl: "file" } });
-    expect(branding.logoUrl).toMatch(/^\/brand\/realinfobot\/logo\.svg\?v=/);
+    expect(branding.logoUrl).toMatch(/^\/brand\/realinfobot\/logo\.png\?v=/);
     expect(buildTimeBrandingSnapshot()).toMatchObject({ appName: "RealInfoBot", final: true });
     expect(fixture.saved).not.toHaveBeenCalled();
   });

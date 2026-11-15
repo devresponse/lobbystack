@@ -33,9 +33,11 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
 
 `brands/brand.schema.json` and `brands/index.schema.json` give editors completion and checks.
 
-After changing anything under `brands/`, run `pnpm brands:build`. It checks every brand, then writes `packages/shared/src/brands/generated.ts`, copies each image to `apps/admin/public/brand/<id>/`, and refreshes the schemas. `scripts/brands.test.ts` fails when any of them falls behind `brands/`, and the build refuses a brand with a problem, listing every one.
+After changing anything under `brands/`, run `pnpm brands:build`. It checks every brand, then writes `packages/shared/src/brands/generated.ts`, copies each image to `apps/admin/public/brand/<id>/`, and refreshes the schemas. `scripts/brands.test.ts` fails when any of them falls behind `brands/`, and the build refuses a brand with a problem, listing every one. The build never deletes a file, so when `brand.json` stops naming an image, as when a logo changes from `.svg` to `.png`, delete its old copy under `apps/admin/public/brand/<id>/` too.
 
 The build reads only the images `brand.json` names, so a folder can also keep images used elsewhere. AlloPlace's holds `logo-zapier.png`, the 256×256 logo uploaded by hand in Zapier's developer dashboard ([`integrations/zapier/README.md`](../integrations/zapier/README.md)).
+
+RealInfoBot's three images share one icon, its sign with a QR code and an orange pointer. `logo.png` is that sign on a white tile with rounded corners, 256 pixels square, so it still shows on a dark tab strip or in dark mode. `logo-email.png` is the same tile at 96 pixels, and `og.png` shows the sign beside the words REAL INFO BOT. They were made from the brand's original artwork, which isn't in the repository.
 
 The repository is public, so everything in a brand folder is public too.
 
@@ -90,7 +92,7 @@ The admin caches the saved row for 30 seconds, so other admin replicas pick up a
 
 ## Where the name and logo appear
 
-- The browser tab's title and icon on every admin page: the dashboard, sign-in and sign-up, onboarding, and the website widget's frame. The logo is the tab icon, so a square logo works best.
+- The browser tab's title and icon on every admin page: the dashboard, sign-in and sign-up, onboarding, and the website widget's frame. The logo is the tab icon, so a square logo works best. Give a dark logo a light tile of its own, because a dark tab strip or the dashboard's dark mode hides a dark logo on a transparent background.
 - The picture in link previews of those pages, from the brand file's `ogImage`. A business's public profile page has its own preview, without it.
 - The logo and name above the sign-in, sign-up, password reset, invitation, email change, verification, OAuth consent, and onboarding pages.
 - The header of the public demo page.

@@ -20,7 +20,7 @@ Calls find their business by the dialled number, texts by the number they were s
 
 ## Know what the audit log says about the team
 
-Every change to a business's team leaves a row in its audit log (`audit_logs`), written in the same transaction as the change by the function that makes it in `packages/domain/src/server/tenancy.ts`, so the dashboard and the v1 API, which the command line uses, record it once and the same way:
+Since fork PR #180, on `develop/r2`, every change to a business's team leaves a row in its audit log (`audit_logs`), written in the same transaction as the change by the function that makes it in `packages/domain/src/server/tenancy.ts`, so the dashboard and the v1 API, which the command line uses, record it once and the same way:
 
 | Event | Written when | Payload, besides who acted |
 | --- | --- | --- |

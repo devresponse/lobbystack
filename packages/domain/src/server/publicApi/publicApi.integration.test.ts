@@ -1697,7 +1697,12 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       // Roles change once, and the last owner stays.
       expect(await updateTeamMemberForApi(context, platform, viewer.id, { role: "scheduler" })).toMatchObject({ id: viewer.id, role: "scheduler" });
       await updateTeamMemberForApi(context, platform, viewer.id, { role: "scheduler" });
-      expect(await audited("api.team.member_updated")).toBe(1);
+      expect(await audited("team.member_updated")).toBe(1);
+      // The domain writes the API's team rows as it writes the dashboard's, naming the key that acted.
+      expect(await audited("team.invitation_created")).toBe(1);
+      expect(await audited("team.invitation_revoked")).toBe(1);
+      const [updated] = await admin!.db.select({ actorUserId: auditLogs.actorUserId, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "team.member_updated")));
+      expect(updated).toEqual({ actorUserId: null, entityId: viewer.id, payload: { actor: "platform_key", platformKeyId: platform.platformKeyId, partnerId: "lobbystack", actingUserId: ownerId, memberUserId: viewerId, role: "scheduler", previousRole: "viewer", apiKeysRevoked: 0 } });
       await expectApiError(updateTeamMemberForApi(context, platform, owner.id, { role: "viewer" }), 409, "conflict");
       await expectApiError(removeTeamMemberForApi(context, platform, owner.id), 409, "conflict");
       await expectApiError(updateTeamMemberForApi(context, platform, randomUUID(), { role: "viewer" }), 404, "not_found");

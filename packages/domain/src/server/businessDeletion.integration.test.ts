@@ -301,7 +301,7 @@ describe.skipIf(!client)("a business that pays for a plan", () => {
 });
 
 describe.skipIf(!client)("deleting a business", () => {
-  it("erases it and everything that names it, queues its numbers and files for the worker, and moves its people elsewhere", async () => {
+  it("erases it and everything that names it but its audit log, queues its numbers and files for the worker, and moves its people elsewhere", async () => {
     await rollbackTest(async (tx) => {
       const { db, ownerId, adminId, rootId, studioId, as, remove, exists } = await seed(tx);
       const sharedSender = randomE164();
@@ -344,9 +344,16 @@ describe.skipIf(!client)("deleting a business", () => {
       expect(await remove(ownerId, studioId, "Studio")).toEqual({ releasedNumbers: 2, storedFiles: 2 });
       expect(await exists(studioId)).toBe(false);
 
-      for (const table of [businessMemberships, services, contacts, conversations, calls, auditLogs, phoneNumbers, storageObjects, providerEvents, productEvents, feedbackSubmissions]) {
+      for (const table of [businessMemberships, services, contacts, conversations, calls, phoneNumbers, storageObjects, providerEvents, productEvents, feedbackSubmissions]) {
         expect(await tx.select({ businessId: table.businessId }).from(table).where(eq(table.businessId, studioId))).toEqual([]);
       }
+      // Its audit log stays under its ID, ending with who deleted it and what it was called.
+      const audit = await tx.select({ eventType: auditLogs.eventType, actorUserId: auditLogs.actorUserId, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(eq(auditLogs.businessId, studioId));
+      expect(audit).toHaveLength(2);
+      expect(audit).toEqual(expect.arrayContaining([
+        { eventType: "business.updated", actorUserId: ownerId, entityId: studioId, payload: null },
+        { eventType: "business.deleted", actorUserId: ownerId, entityId: studioId, payload: { name: "Studio", releasedNumbers: 2, storedFiles: 2 } },
+      ]));
       // Nothing that named it stays unlinked: not its feedback, events or jobs.
       expect(await tx.select({ message: feedbackSubmissions.message }).from(feedbackSubmissions).where(and(isNull(feedbackSubmissions.businessId), eq(feedbackSubmissions.businessName, "Studio")))).toEqual([]);
       for (const table of [oauthConsents, oauthRefreshTokens, oauthAccessTokens]) {

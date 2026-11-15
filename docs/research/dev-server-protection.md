@@ -44,7 +44,7 @@ The maintainer took the study's recommendation on each of its five questions the
 | Answer strangers 404 or 401? | 404, so an address looks empty rather than locked, and no browser shows a password box |
 | How long does the cookie last? | 30 days |
 | Build it on `releases/r2` only, or on `main` too? | `releases/r2` only, which the test deployments build from |
-| Should the bootstrap script protect every deployment that isn't production? | No: only with `PROTECT=yes` |
+| Should the bootstrap script protect every deployment that isn't production? | No: only with `PROTECT=yes`, or, since fork PR #178, with a `PROTECTION_TOKEN` in its secrets file |
 
 ## Know the limits it found
 
@@ -59,6 +59,7 @@ The maintainer took the study's recommendation on each of its five questions the
 
 - **Built on 2026-11-15** as fork PR #176 on `releases/r2`, with the study's design: the gate, its start-up check, the bootstrap script's `PROTECT=yes`, and the docs ([close a test deployment to strangers](../features/access-gate.md)).
 - **Two things differ from the study's to-do list.** The bootstrap script keeps the token it makes in its state file, with the platform secrets, instead of writing it into the secrets file, which the script only reads. And it refuses `PROTECT=yes` with `ENVIRONMENT=production`.
+- **One rule for the admin and the script, on 2026-11-15** as fork PR #178, the maintainer's follow-up: having a `PROTECTION_TOKEN` means protected. A token in the bootstrap script's secrets file closes the deployment by itself, as the variable does on the admin, so `PROTECT=yes` is needed only to have the script make the token ([devops/bootstrap.md](../../devops/bootstrap.md#close-the-deployment-to-strangers)).
 - **Two things the study didn't see, found while building.** The sign-in pages asked `/api/branding` for the deployment's name and logo without cookies, which the gate would have answered with the 404, so that request now carries them. And Next.js's image optimizer, which the proxy doesn't see, fetches a local address through the proxy with no cookie, so it can't tell a closed page from a made-up one; a browser test holds it to that.
 - **Not done:** Cloudflare Access, which stays an option for a login per tester, and a first protected deployment on Railway ([open items](../project/open-items.md)).
 

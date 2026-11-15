@@ -171,6 +171,8 @@ APP_BASE_URL=
 # the access link once (https://<address>/login?access=<the token>), which up, connect and status
 # show. Webhooks, health checks, the website widget, the API and MCP stay open
 # (docs/features/access-gate.md). Never for an address the public or a marketing site should reach.
+# A PROTECTION_TOKEN of your own in the secrets file closes the deployment by itself, whatever this
+# line says: no here only means that up makes no token.
 PROTECT=no
 
 # Email through Resend. EMAIL_DOMAIN is the subdomain kept for email; EMAIL_FROM is on it.
@@ -265,6 +267,10 @@ STRIPE_ADMIN_KEY=
 STRIPE_WORKER_KEY=
 # PostHog: a project's token (phc_...), to use that project as it is instead of finding or making one.
 POSTHOG_PROJECT_TOKEN=
+# The access gate's token, only with ENVIRONMENT=test: 32 or more letters, digits, dashes,
+# underscores, dots or tildes. Given here, it closes the deployment to strangers by itself, with or
+# without PROTECT=yes in the settings file, and up makes none (docs/features/access-gate.md).
+PROTECTION_TOKEN=
 # For connect: the incoming-call webhook's signing secret (whsec_...), once it exists.
 OPENAI_WEBHOOK_SECRET=
 
@@ -578,10 +584,12 @@ function loadRun(file, { log = true } = {}) {
     if (!["yes", "no", "true", "false", "on", "off", "1", "0"].includes(word)) problems.push(`${key} is yes or no`);
     s[key] = !["no", "false", "off", "0"].includes(word);
   }
-  // Off unless it says yes: closing a deployment is never a default.
+  // Off unless it says yes: closing a deployment is never a default. A PROTECTION_TOKEN in the secrets file closes it
+  // too (see protectOn), and one written here instead would close nothing, so it stops the run rather than warn.
   const protectWord = String(s.PROTECT || "no").toLowerCase();
   if (!["yes", "no", "true", "false", "on", "off", "1", "0"].includes(protectWord)) problems.push("PROTECT is yes or no");
   s.PROTECT = ["yes", "true", "on", "1"].includes(protectWord);
+  if (settings.PROTECTION_TOKEN) problems.push(`PROTECTION_TOKEN is in this file, where the script doesn't read it, so it closes nothing. Move the line to the secrets file (${secretsOption ?? `${file}.secrets`}): there it closes the deployment to strangers by itself`);
   // PostHog: us, eu or a self-hosted instance's address, else off (empty). A settings file without a POSTHOG line counts
   // as us, but sets PostHog up for a deployment made before the PostHog step only once it has the line (see posthogOn).
   s.POSTHOG_ASKED = Boolean(settings.POSTHOG);
@@ -645,6 +653,8 @@ function loadRun(file, { log = true } = {}) {
   hideInLog(state.values.PROTECTION_TOKEN);
   const secretsFile = secretsOption ?? (fs.existsSync(`${file}.secrets`) ? `${file}.secrets` : null);
   config = secretsFile ? loadConfig(secretsFile) : null;
+  // The secrets file's PROTECTION_TOKEN closes the deployment as PROTECT=yes does, so production refuses it as well.
+  if (s.ENVIRONMENT === "production" && givenProtectionToken()) throw new Error(`the secrets file ${config.file} needs fixing:\n  PROTECTION_TOKEN closes the deployment to strangers, and ${file} says ENVIRONMENT=production: the access gate answers 404 to everyone without the access link, customers and search engines included. Take the line out. To close a production deployment before its launch, set PROTECTION_TOKEN on the admin by hand (docs/features/access-gate.md)`);
   const run = { file, settings: s, stateFile, state, stateHash: stateText === null ? null : hashText(stateText) };
   run.earlierNames = recordEarlierNames(run);
   return run;
@@ -2307,11 +2317,22 @@ async function tollfreeSteps(run) {
 
 // ---------------------------------------------------------------- the access gate
 
-// PROTECT=yes closes a test deployment to strangers: the admin answers 404 to every page until a browser opens the
-// access link once (docs/features/access-gate.md). The script makes the admin's PROTECTION_TOKEN and shows the link.
-const protectOn = (run) => Boolean(run.settings.PROTECT) && !run.template;
+// The access gate closes a test deployment to strangers: the admin answers 404 to every page until a browser opens the
+// access link once (docs/features/access-gate.md). The admin has one variable for it, PROTECTION_TOKEN, and having it
+// is what closes it. The script follows the same rule: a PROTECTION_TOKEN in the secrets file closes the deployment by
+// itself, with that token. PROTECT=yes in the settings file closes it too, and has the script make the token when the
+// secrets file gives none. Either way the script puts the token on the admin and shows the link.
+const givenProtectionToken = () => fromFile("PROTECTION_TOKEN", { quiet: true });
+const protectOn = (run) => !run.template && Boolean(run.settings.PROTECT || givenProtectionToken());
+/** What closes the deployment, as the messages name it: the setting, else the secrets file's token. */
+const protectedBy = (run) => (run.settings.PROTECT ? "PROTECT=yes" : `PROTECTION_TOKEN is in ${config.file}`);
 // What the admin starts with: 32 or more of the characters an address carries as they are.
 const PROTECTION_TOKEN_SHAPE = /^[A-Za-z0-9._~-]{32,}$/;
+/** Why the admin wouldn't start with the secrets file's token, or null when it would (or when the file gives none). */
+function givenTokenProblem() {
+  const given = givenProtectionToken();
+  return given && !PROTECTION_TOKEN_SHAPE.test(given) ? `PROTECTION_TOKEN in ${config.file} must be at least 32 letters, digits, dashes, underscores, dots or tildes: the characters an address carries as they are` : null;
+}
 
 /** The link that opens a protected deployment in a browser, or null while it has no token or no address. */
 function accessLink(run, pathname = "/login") {
@@ -2320,29 +2341,47 @@ function accessLink(run, pathname = "/login") {
   return protectOn(run) && token && host ? `https://${host}${pathname}?access=${token}` : null;
 }
 
-/** What up and connect say about a protected deployment, or "". The link shows on screen; the log gets it with the token hidden. */
-function accessLines(run) {
-  const link = accessLink(run);
-  return link ? `\n\nClosed to strangers (PROTECT=yes): every page answers 404 until a browser opens the access link once.\n  ${link}\nIt opens the deployment in that browser for 30 days. Send it only to people who should get in.` : "";
+/**
+ * Said while the secrets file's token isn't the one an earlier run kept and put on the admin, or "". As with every
+ * key, the kept one stays until its step is redone, so a link that was sent out doesn't stop working by surprise.
+ */
+function givenTokenWaits(run) {
+  const given = givenProtectionToken();
+  const kept = v(run, "PROTECTION_TOKEN");
+  return protectOn(run) && given && kept && given !== kept
+    ? `PROTECTION_TOKEN in ${config.file} isn't the token an earlier run put on the admin. That one stays, and the access link carries it. To change to the secrets file's token, run node devops/bootstrap.mjs redo ${run.file} protection, then up: the old link and the browsers that used it then get 404.`
+    : "";
 }
 
-/** What up and status say once PROTECT is no longer yes on a deployment an earlier run closed: the script deletes no variables, so it stays closed. */
+/** What up says about a protected deployment, or "". The link shows on screen; the log gets it with the token hidden. */
+function accessLines(run) {
+  const link = accessLink(run);
+  if (!link) return "";
+  const waits = givenTokenWaits(run);
+  return `\n\nClosed to strangers (${protectedBy(run)}): every page answers 404 until a browser opens the access link once.\n  ${link}\nIt opens the deployment in that browser for 30 days. Send it only to people who should get in.${waits ? `\n${waits}` : ""}`;
+}
+
+/** What up, status and doctor say once nothing asks for the gate on a deployment an earlier run closed: the script deletes no variables, so it stays closed. */
 function protectionLeftOn(run) {
   return !protectOn(run) && !run.template && run.state.done.protection
-    ? `PROTECT isn't yes in ${run.file} any more, but an earlier run put PROTECTION_TOKEN on the admin, and the script deletes no variables: the deployment stays closed until you delete PROTECTION_TOKEN from the admin's variables in Railway. Then run node devops/bootstrap.mjs redo ${run.file} protection, so the script forgets the token.`
+    ? `Nothing asks for the access gate any more (PROTECT isn't yes in ${run.file}, and the secrets file has no PROTECTION_TOKEN), but an earlier run put PROTECTION_TOKEN on the admin, and the script deletes no variables: the deployment stays closed until you delete PROTECTION_TOKEN from the admin's variables in Railway. Then run node devops/bootstrap.mjs redo ${run.file} protection, so the script forgets the token.`
     : "";
 }
 
 async function protectionStep(run) {
   const wasDone = Boolean(run.state.done.protection);
-  await step(run, "protection", "The access gate's token (PROTECTION_TOKEN on the admin, 43 random characters)", async () => {
-    const fromSecretsFile = fromFile("PROTECTION_TOKEN");
-    if (fromSecretsFile && !PROTECTION_TOKEN_SHAPE.test(fromSecretsFile)) throw new Error(`PROTECTION_TOKEN in ${config.file} must be at least 32 letters, digits, dashes, underscores, dots or tildes: the characters an address carries as they are`);
+  const given = givenProtectionToken();
+  // Where the token comes from, said only while the step is still to run: a finished step keeps the token it has.
+  const from = wasDone ? "" : given ? `, from ${config.file}` : ", 43 random characters";
+  await step(run, "protection", `The access gate's token (PROTECTION_TOKEN on the admin${from})`, async () => {
+    const problem = givenTokenProblem();
+    if (problem) throw new Error(problem);
     // Not read back from Railway, unlike a password: a new token locks no data away. The old link and the browsers
     // that used it stop working, and the new link is shown.
-    return { PROTECTION_TOKEN: fromSecretsFile ?? v(run, "PROTECTION_TOKEN") ?? randomBytes(32).toString("base64url") };
+    return { PROTECTION_TOKEN: given ?? v(run, "PROTECTION_TOKEN") ?? randomBytes(32).toString("base64url") };
   });
   hideInLog(v(run, "PROTECTION_TOKEN"));
+  if (givenTokenWaits(run)) console.log(`  ${givenTokenWaits(run)}`);
   if (!dryRun && !wasDone && run.state.done.protection && run.state.done.variables) {
     delete run.state.done.variables;
     save(run);
@@ -2364,7 +2403,7 @@ async function pageAnswer(host) {
 }
 
 /** Why a deployment that should be closed still answers, for connect and doctor. */
-const stillOpen = (run, host, status) => `PROTECT=yes, but https://${host}/login answers ${status} without the access link, so the deployment is open to anyone. Either the admin's deploy with PROTECTION_TOKEN hasn't finished, or ${run.settings.REPO}@${run.settings.BRANCH} is from before the access gate: bring that branch up to date (sync a fork with the repository it follows), and Railway deploys it`;
+const stillOpen = (run, host, status) => `${protectedBy(run)}, but https://${host}/login answers ${status} without the access link, so the deployment is open to anyone. Either the admin's deploy with PROTECTION_TOKEN hasn't finished, or ${run.settings.REPO}@${run.settings.BRANCH} is from before the access gate: bring that branch up to date (sync a fork with the repository it follows), and Railway deploys it`;
 
 // ---------------------------------------------------------------- variables
 
@@ -2422,7 +2461,8 @@ function variableSections(run) {
       SITE_URL: "${{APP_BASE_URL}}", AUTH_TRUSTED_ORIGINS: s.CUSTOM_HOST && x("RAILWAY_HOST") ? `\${{APP_BASE_URL}},https://${x("RAILWAY_HOST")}` : "${{APP_BASE_URL}}",
       TRUSTED_CLIENT_IP_HEADER: "x-real-ip",
       ...(production ? { REQUIRE_EMAIL_VERIFICATION: "true" } : {}), WIDGET_KEY_ISSUANCE_ENABLED: "true",
-      // PROTECT=yes: the admin answers 404 to every page without the access link (the access gate).
+      // The access gate (PROTECT=yes, or a PROTECTION_TOKEN in the secrets file): the admin answers 404 to every page
+      // without the access link.
       ...(protectOn(run) ? { PROTECTION_TOKEN: x("PROTECTION_TOKEN") } : {}),
       WORKER_INTERNAL_URL: "http://${{worker.RAILWAY_PRIVATE_DOMAIN}}:3002",
       DATABASE_URL: role("lobbystack_app", "LOBBYSTACK_APP_PASSWORD"),
@@ -3206,7 +3246,7 @@ async function connect(run) {
     : [billingRun.token ? `In Polar's ${s.POLAR} organization, Settings > Developers, delete the setup token: billing is set up, and nothing else uses it.`
       : `If connect asked for a setup token, delete it in Polar's ${s.POLAR} organization (Settings > Developers): billing is set up, and nothing else uses it.`];
   const steps = [
-    ...(accessLink(run) ? [`The deployment is closed to strangers (PROTECT=yes). Open the access link once in each browser that should
+    ...(accessLink(run) ? [`The deployment is closed to strangers (${protectedBy(run)}). Open the access link once in each browser that should
      get in, yours first; it then works there for 30 days:
      ${accessLink(run)}`] : []),
     ...(cloud && !stripe ? setupTokenGoes : [`Once the admin's new deployment is Active, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL},
@@ -3251,8 +3291,9 @@ function status(run) {
   const host = appHost(run);
   if (host) console.log(`  address: https://${host}`);
   // The one kept value that is shown: the operator sends this link to whoever should get in.
-  if (protectOn(run)) console.log(`  access link (PROTECT=yes): ${accessLink(run) ?? "none yet: up makes the token and shows the link"}`);
+  if (protectOn(run)) console.log(`  access link (${protectedBy(run)}): ${accessLink(run) ?? `none yet: up ${givenProtectionToken() ? "puts the token on the admin" : "makes the token"} and shows the link`}`);
   else if (protectionLeftOn(run)) console.log(`  access gate: ${protectionLeftOn(run)}`);
+  if (givenTokenWaits(run)) console.log(`  access gate: ${givenTokenWaits(run)}`);
   console.log(`  values kept (never printed${accessLink(run) ? ", but for the access link's token" : ""}): ${Object.keys(run.state.values).length}`);
   if (done.length) console.log(`\nTo run a step again: node devops/bootstrap.mjs redo ${run.file} <step>, then the same command as before.`);
 }
@@ -3298,9 +3339,9 @@ function redo(run, wanted) {
   // The one step whose value doesn't stay: the only reason to run it again is a new token.
   if (matches.includes("protection")) {
     delete run.state.values.PROTECTION_TOKEN;
-    console.log(protectOn(run)
-      ? "  forgot the access gate's token, so up makes a new one (or takes the secrets file's). Once the admin deploys with it, the old access link and the browsers that used it get 404: send out the new link."
-      : "  forgot the access gate's token. PROTECT isn't yes, so up makes no new one.");
+    console.log(!protectOn(run) ? "  forgot the access gate's token. PROTECT isn't yes and the secrets file has no PROTECTION_TOKEN, so up puts none on the admin."
+      : givenProtectionToken() ? `  forgot the access gate's token, so up takes the one in ${config.file}. If that is another token, then once the admin deploys with it, the old access link and the browsers that used it get 404: send out the new link.`
+      : "  forgot the access gate's token, so up makes a new one. Once the admin deploys with it, the old access link and the browsers that used it get 404: send out the new link.");
   }
   // Redoing the project step means a new project, such as after deleting the old one in Railway:
   // forget the old project's IDs and address too, or the next steps would keep using them.
@@ -3430,6 +3471,15 @@ async function doctor(run) {
   if (off.length) note(`turned off: ${off.map((name) => `STEP_${name}`).join(", ")} (their values come from the secrets file, or are asked for)`);
   if (config) ok(`secrets file ${config.file}: ${Object.keys(config.flat).length} values (names only: ${Object.keys(config.flat).sort().join(", ") || "none"})`);
   else note("no secrets file: up will ask for each key (init writes one)");
+  // The access gate: what closes the deployment and with which token, and whether the admin would start with the
+  // secrets file's.
+  if (givenTokenProblem()) fix(givenTokenProblem());
+  else if (protectOn(run)) {
+    const kept = v(run, "PROTECTION_TOKEN");
+    const token = givenProtectionToken() && (!kept || kept === givenProtectionToken()) ? "the secrets file's token" : kept ? "the token an earlier run kept" : "a token up makes";
+    note(`access gate: on (${protectedBy(run)}), with ${token}: every page answers 404 until a browser opens the access link once`);
+  }
+  if (givenTokenWaits(run)) note(givenTokenWaits(run));
   const done = Object.keys(run.state.done).length;
   note(done ? `${done} steps already done (status lists them)` : "nothing done yet");
   const open = Object.keys(run.state.byHand ?? {}).filter((id) => !run.state.done[id]);
@@ -3646,9 +3696,10 @@ async function doctor(run) {
     // The access gate: whether a page request that carries nothing gets its 404.
     const answer = await pageAnswer(host);
     if (protectOn(run) && answer.closed) ok(`closed to strangers: https://${host}/login answers 404 without the access link (status shows the link)`);
-    else if (protectOn(run) && !run.state.done.protection) note(`PROTECT=yes, and up hasn't made the access gate's token yet: https://${host} is open until up has run`);
+    else if (protectOn(run) && !run.state.done.protection) note(`${protectedBy(run)}, and up hasn't ${givenProtectionToken() ? "put the access gate's token on the admin" : "made the access gate's token"} yet: https://${host} is open until up has run`);
     else if (protectOn(run) && answer.status !== null) fix(stillOpen(run, host, answer.status));
-    else if (answer.closed) note(`https://${host}/login answers the access gate's 404, so PROTECTION_TOKEN is set on the admin, though PROTECT isn't yes in ${run.file}. Set PROTECT=yes and run up to have the script make the token and show the access link, or delete PROTECTION_TOKEN from the admin's variables in Railway to open the deployment`);
+    else if (answer.closed && protectionLeftOn(run)) note(protectionLeftOn(run));
+    else if (answer.closed) note(`https://${host}/login answers the access gate's 404, so PROTECTION_TOKEN is set on the admin, though PROTECT isn't yes in ${run.file} and the secrets file has no PROTECTION_TOKEN. To have the script show the access link, put the admin's token in the secrets file as PROTECTION_TOKEN and run up, which keeps it (PROTECT=yes would replace it with a new one). To open the deployment, delete PROTECTION_TOKEN from the admin's variables in Railway`);
   }
   console.log(fixes ? `\n${fixes} thing${fixes === 1 ? "" : "s"} to fix first (FIX above).` : `\nNothing to fix. Next: node devops/bootstrap.mjs ${run.state.done["deploy.admin"] ? "connect" : "up"} ${run.file}${run.state.done["deploy.admin"] ? "" : " --dry-run"}`);
   process.exitCode = fixes ? 1 : 0;

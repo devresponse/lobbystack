@@ -528,6 +528,8 @@ The admin and the worker each answer two addresses that say whether they work. R
 
 Each copy of the admin and the worker writes what it's doing to Redis every 10 seconds, and one address on the admin reads them all ([watch every copy](../../features/observability.md#watch-every-copy)). It's the only check from outside that sees the worker, and the only one that sees each copy of a service that runs more than one ([7.24](#724-scale-up)). It costs each copy under a thousandth of a percent of one processor.
 
+Redis holds one record for each copy, under a kilobyte, which the copy replaces at every beat, so the list doesn't grow with time. A copy that stopped drops off it 10 minutes later, and the list expires by itself 20 minutes after the last beat. There is nothing to clean up ([read the heartbeat](../../features/observability.md#read-the-heartbeat)).
+
 Turn it on:
 
 1. Make a token as in [4.3](part-4-test-environment.md#43-make-the-passwords-and-secrets), 64 letters and digits, and save it in the environment's password manager entry. The address takes nothing shorter than 32 characters.

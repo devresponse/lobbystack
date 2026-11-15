@@ -104,7 +104,8 @@ Every 10 seconds each copy writes a short status, its heartbeat, to Redis in one
 
 - **A copy that is told to stop** says so at once, keeps beating while it finishes its calls and requests, and leaves that as its last word. So a deploy, a restart, or a copy the scale script takes away never looks like a copy that died.
 - **A copy that dies** just stops beating. After 30 seconds, three missed beats, it counts as silent.
-- **The list** keeps a copy for 10 minutes after its last beat, then forgets it. It lives in two Redis keys, `<REDIS_PREFIX>:fleet:seen` and `<REDIS_PREFIX>:fleet:beats`, under 600 bytes for each copy.
+- **The list** lives in two Redis keys: `<REDIS_PREFIX>:fleet:seen` holds when each copy last beat, and `<REDIS_PREFIX>:fleet:beats` holds each copy's latest status, under a kilobyte for each copy ([what it costs](#know-what-it-costs)). The prefix is `lobbystack` unless `REDIS_PREFIX` is set. A beat replaces the copy's own record, so Redis holds one record for each copy and no history, however long the deployment runs. The numbers over time leave as metrics instead ([chart the copies' load](#chart-the-copies-load)).
+- **Nothing piles up, and nothing needs deleting.** The list keeps a copy for 10 minutes after its last beat, then the next beat from any copy removes it. A deploy therefore holds the old copies' records beside the new ones for up to 10 minutes. Both keys expire 20 minutes after the last beat, so once every copy has stopped they go by themselves.
 - **Without `REDIS_URL`,** as on a developer's admin, a copy writes nothing. A beat that fails is logged as `fleet.heartbeat_failed`, at most once a minute, and the next beat tries again; no request or call waits on a beat.
 
 ### Ask the status address
@@ -166,6 +167,7 @@ Measured on a computer on 2026-11-15, with Node.js 26 and a local Redis:
 - A beat takes 83 microseconds of the copy's processor and 18 of Redis's, every 10 seconds: under a thousandth of a percent of one processor for each copy.
 - An answer of the status address takes 0.12 milliseconds of the admin's processor for 4 copies and 0.9 for 100, and came back in 23 milliseconds over HTTP.
 - A worker already sends Redis about 790 commands a minute while idle; the heartbeat adds 6.
+- Redis holds about 340 bytes for an admin's record and 750 for a worker's, with identifiers as long as Railway's. Two copies of each took 3 kilobytes of Redis's memory and 25 of each took 36. Eleven beats from every copy left as many records as the first one.
 - The new gauges are read from memory once every 15 seconds: five pools' counters in 280 nanoseconds, and the busy share in 143. A counter that finds its real instrument at each use costs 3 nanoseconds more than before, and a histogram 19.
 - The admin's start-up check of its database roles made four connection pools of its own beside the ones its routes use, each holding a connection for 30 seconds. They now close as soon as the check is done, so a starting copy stays within its connection budget, and the figures above count each pool once.
 

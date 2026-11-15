@@ -6,7 +6,7 @@ After any change here, run `pnpm brands:build` and commit what it writes. The re
 
 If a brand's name, contact address or website changes, update the sample HELP and START messages in that brand's SMS registration, because the replies carry them.
 
-See [docs/branding.md](../docs/branding.md) for the fields and how a deployment picks its brand.
+See [docs/branding.md](../docs/branding.md) for the fields and how a deployment picks its brand. A brand's optional `signInPage` section gives the sign-in and sign-up pages its own words and a dark panel ([the signInPage section](../docs/branding.md#the-signinpage-section)).
 
 ## billing.json
 

@@ -6,10 +6,14 @@ import {
   MAX_BRAND_LOGO_BYTES,
   brandAccentColor,
   brandEmailLogo,
+  brandPalette,
+  contrastRatio,
+  localizedBrandText,
   brandLogoContentType,
   emailSender,
   normalizeAppName,
   normalizeLogoUrl,
+  readableTextOn,
   resolveBranding,
 } from "./branding";
 import { BRANDS } from "./brands/generated";
@@ -93,6 +97,52 @@ describe("brandAccentColor", () => {
   it("takes the brand's colour, then the widget's teal", () => {
     expect(brandAccentColor({ accentColor: "#ffd100" })).toBe("#ffd100");
     expect(brandAccentColor({ accentColor: null })).toBe("#0f766e");
+  });
+});
+
+describe("contrastRatio", () => {
+  it("measures WCAG contrast either way round", () => {
+    expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 5);
+    expect(contrastRatio("#ffffff", "#000000")).toBeCloseTo(21, 5);
+    expect(contrastRatio("#0f766e", "#0f766e")).toBe(1);
+    expect(contrastRatio("#f07423", "#ffffff")).toBeCloseTo(2.91, 2);
+  });
+});
+
+describe("readableTextOn", () => {
+  it("puts black on light accents and white on dark ones", () => {
+    expect(readableTextOn("#ffd100")).toBe("#000000");
+    expect(readableTextOn("#f07423")).toBe("#000000");
+    expect(readableTextOn("#0f766e")).toBe("#ffffff");
+  });
+});
+
+describe("localizedBrandText", () => {
+  const words = { en: "Showing booked", fr: "Visite planifiée", es: "Visita agendada", sr: "Razgledanje zakazano" };
+
+  it("picks the reader's language, and English for any other", () => {
+    expect(localizedBrandText(words, "fr-CA")).toBe("Visite planifiée");
+    expect(localizedBrandText(words, "sr-Latn")).toBe("Razgledanje zakazano");
+    expect(localizedBrandText(words, "de")).toBe("Showing booked");
+    expect(localizedBrandText(words, null)).toBe("Showing booked");
+  });
+});
+
+describe("brandPalette", () => {
+  it("uses a pale accent as text and lines only on the dark page", () => {
+    expect(brandPalette("#FFD100")).toEqual({ accent: "#ffd100", onAccent: "#000000", text: { light: null, dark: "#ffd100" }, line: { light: null, dark: "#ffd100" } });
+  });
+
+  it("uses a mid accent as text on white and as a line on both pages", () => {
+    expect(brandPalette("#0f766e")).toEqual({ accent: "#0f766e", onAccent: "#ffffff", text: { light: "#0f766e", dark: null }, line: { light: "#0f766e", dark: "#0f766e" } });
+  });
+
+  it("keeps a very dark accent off the dark page", () => {
+    expect(brandPalette("#0b1f4d")).toMatchObject({ text: { light: "#0b1f4d", dark: null }, line: { light: "#0b1f4d", dark: null } });
+  });
+
+  it("falls back to the widget's teal for a value that isn't a colour", () => {
+    expect(brandPalette("orange").accent).toBe("#0f766e");
   });
 });
 

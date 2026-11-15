@@ -604,7 +604,7 @@ Email and password sign-in for operators. It also finishes email verification fo
 
 - `GET /{locale}/login`: Prerendered. `GuestAuthCard` (`apps/admin/src/components/guest-auth-card.tsx`) calls `GET /api/auth/get-session` (10-second timeout); a signed-in visitor goes to `returnTo` if `getSafeReturnTo` accepts it, else `/` (also when it points at login or signup). `AuthCard` posts `{ email, password }` to Better Auth's `POST /api/auth/sign-in/email`. An `EMAIL_NOT_VERIFIED` answer opens the code form: `POST /api/auth/email-otp/verify-email`, then sign-in again; resending uses `POST /api/auth/email-otp/send-verification-otp`, with Turnstile after `CHALLENGE_FAILED`. Success records `web.auth.login_succeeded` and loads `returnTo` (same-origin path) or `/`. Links to sign-up keep `returnTo`.
 
-Related files: `apps/admin/src/components/guest-auth-card.tsx`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/src/lib/auth-return-to.ts`, `apps/admin/src/lib/oauth-pages.ts`.
+Related files: `apps/admin/src/components/guest-auth-card.tsx`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/src/components/auth-shell.tsx`, `apps/admin/src/lib/auth-return-to.ts`, `apps/admin/src/lib/oauth-pages.ts`.
 
 **`apps/admin/app/(public)/[locale]/signup/page.tsx`**
 
@@ -612,7 +612,7 @@ Account creation, step 1 of onboarding: email and password sign-up behind Cloudf
 
 - `GET /{locale}/signup`: Prerendered. `GuestAuthCard` first calls `GET /api/auth/get-session` and sends a signed-in visitor to the safe `returnTo` or `/`. `AuthCard` (`apps/admin/src/components/auth-card.tsx`) stores a `?ref=` or `?via=` referral code and reports it to `POST /api/affiliate/click`. Submit waits for a Turnstile token when `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set, then calls `POST /api/auth/sign-up/email` (the sign-up hook in `apps/admin/src/lib/auth.ts` verifies the token). A null `token` in the answer opens the code form: `POST /api/auth/email-otp/verify-email`, then `POST /api/auth/sign-in/email`; resending uses the app's `POST /api/auth/email-otp/send-verification-otp`, with Turnstile after a `CHALLENGE_FAILED`. Success goes to `returnTo` (same-origin local paths only) or `/`.
 
-Related files: `apps/admin/src/components/guest-auth-card.tsx`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/app/api/auth/email-otp/send-verification-otp/route.ts`, `apps/admin/src/lib/auth.ts`.
+Related files: `apps/admin/src/components/guest-auth-card.tsx`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/src/components/auth-shell.tsx`, `apps/admin/app/api/auth/email-otp/send-verification-otp/route.ts`, `apps/admin/src/lib/auth.ts`.
 
 **`apps/admin/app/(public)/[locale]/forgot-password/page.tsx`**
 

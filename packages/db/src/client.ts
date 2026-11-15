@@ -8,6 +8,7 @@ import { rlsContextStatement, type RlsContext } from "./rls/context";
 import { schema } from "./schema";
 import { instrumentPool } from "./instrumentation";
 import { poolMax } from "./pool-budget";
+import { trackPool } from "./pool-usage";
 
 export type Database = NodePgDatabase<typeof schema>;
 export type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -81,6 +82,7 @@ export function createDatabaseClient(
 ): DatabaseClient {
   const pool = new Pool(poolConfig(role, source));
   instrumentPool(pool, role, { query: queryDurationHistogram, wait: poolWaitHistogram });
+  trackPool(pool, role);
   pool.on("error", (error) => {
     recordException(error, { service: "database", operation: "pool_error", role });
   });

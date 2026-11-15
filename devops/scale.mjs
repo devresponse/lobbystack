@@ -7,7 +7,7 @@
 // and gives a copy it takes away the service's draining time to finish. Postgres, Redis and migrate
 // stay at one copy.
 //
-//   node devops/scale.mjs                      how many copies run, and what more would need
+//   node devops/scale.mjs                      how many copies run, how busy each one is, and what more would need
 //   node devops/scale.mjs admin=2 worker=2     two of each
 //   node devops/scale.mjs worker+1             one more worker (worker-1: one fewer)
 //   node devops/scale.mjs admin=1 worker=1     back to one of each
@@ -22,6 +22,17 @@
 //   --bootstrap <settings file>   a deployment devops/bootstrap.mjs made: its state file names the
 //                            project, the environment and the services
 //   --project <id> [--environment <name>]   with an account or workspace token
+//   --status-url <address>   the dashboard's address, for what the copies report about themselves,
+//                            when APP_BASE_URL and Railway's domains don't give it
+//
+// With no change asked for, it shows the copies each service runs and then how busy they are, from
+// two places. Railway's metrics give each copy's processor and memory. The admin's fleet status
+// address (GET /api/internal/fleet, docs/features/observability.md) gives what every copy reports
+// about itself every 10 seconds: whether it runs, how busy its one thread is, its memory, its
+// database connections, a worker's calls and jobs, and each queue's jobs. A copy that went silent is
+// named as a problem. The script asks that address with the admin's FLEET_STATUS_TOKEN, which it
+// reads from the admin's variables, sends only to that address over HTTPS, and never prints.
+// Neither part stops the run: where Railway or the admin doesn't answer, it says so and goes on.
 //
 // It needs a Railway token, which it reads from the environment or asks for, and never saves or
 // prints. By default that's a project token, which belongs to one environment of one project (in
@@ -41,8 +52,9 @@
 //     service that runs in one region.
 // Before it adds or takes away a copy, it checks the time a copy has to finish when Railway takes it
 // away or replaces it: RAILWAY_DEPLOYMENT_DRAINING_SECONDS, 60 on the admin and 1860 on the worker.
-// It reads the admin's and the worker's variables only for these checks and never prints them. It
-// never reads the database's variables and never signs in to the database.
+// It reads the admin's and the worker's variables only for these checks, and for the admin's address
+// and the token of its fleet status address, and never prints them. It never reads the database's
+// variables and never signs in to the database.
 //
 // The change is the one Railway's own CLI makes for `railway scale` (railwayapp/cli 5.74.0,
 // 2026-11-13): one environmentPatchCommit that sets the services' deploy.multiRegionConfig, read from
@@ -56,6 +68,8 @@ import { fileURLToPath } from "node:url";
 
 // The SCALE_* variables exist for tests against stand-ins.
 const ENDPOINT = process.env.SCALE_RAILWAY_URL ?? "https://backboard.railway.com/graphql/v2";
+// A stand-in admin answers over plain HTTP on this computer. Anywhere else the token needs HTTPS.
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const GITHUB_RAW = process.env.SCALE_GITHUB_URL ?? "https://raw.githubusercontent.com";
 const REPO_ROOT = process.env.SCALE_GIT_DIR ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const POLL_MS = Number(process.env.SCALE_POLL_MS ?? 5000);
@@ -80,6 +94,9 @@ const DEFAULT_DISPATCHER_POOL_MAX = 4;
 // The draining time each needs (guide 7.4): the admin a minute to finish its requests, the worker
 // longer than a call can last, 30 minutes, with its goodbye.
 const DRAINING = { admin: 60, worker: 1860 };
+// How far back Railway's metrics are read for each copy's newest processor and memory figures.
+const METRICS_WINDOW_MS = 5 * 60_000;
+const FLEET_STATUS_PATH = "/api/internal/fleet";
 
 const PROJECT_TOKEN_QUERY = `query ProjectToken {
   projectToken {
@@ -120,6 +137,22 @@ const VARIABLES_QUERY = `query ServiceVariables($projectId: String!, $environmen
   variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true)
 }`;
 
+// One series for each copy (Railway's deployment instance) and measurement: processors in use, and memory in GB.
+const METRICS_QUERY = `query ReplicaMetrics($environmentId: String!, $serviceId: String!, $startDate: DateTime!) {
+  metrics(environmentId: $environmentId, serviceId: $serviceId, startDate: $startDate, measurements: [CPU_USAGE, MEMORY_USAGE_GB], groupBy: [DEPLOYMENT_INSTANCE_ID], sampleRateSeconds: 60, averagingWindowSeconds: 60) {
+    measurement
+    tags { deploymentInstanceId }
+    values { ts value }
+  }
+}`;
+
+const DOMAINS_QUERY = `query ServiceDomains($projectId: String!, $environmentId: String!, $serviceId: String!) {
+  domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) {
+    serviceDomains { domain }
+    customDomains { domain }
+  }
+}`;
+
 const PATCH_MUTATION = `mutation EnvironmentPatchCommit($environmentId: String!, $patch: EnvironmentConfig, $commitMessage: String) {
   environmentPatchCommit(environmentId: $environmentId, patch: $patch, commitMessage: $commitMessage)
 }`;
@@ -154,6 +187,8 @@ async function main() {
   for (const service of services) printService(service);
 
   if (!options.changes.length) {
+    await printCopies(where, services);
+    await printFleet(where, services);
     printNeeds(services);
     return;
   }
@@ -329,6 +364,8 @@ async function readService(where, role, volumes) {
   // Only these few facts are kept; the variables themselves go no further.
   return {
     role, id, name, instance, deployment, regions, pools, draining,
+    // The admin's own address and the token of its fleet status address, when they are plain values.
+    ...(role === "admin" ? { baseUrl: addressOf(variables?.APP_BASE_URL), statusToken: plainValue(variables?.FLEET_STATUS_TOKEN) } : {}),
     configured: regions ? Object.values(regions).reduce((sum, count) => sum + count, 0) : null,
     running: runningCopies(instance),
     volume: volumes.find((volume) => volume.serviceId === id)?.mountPath ?? null,
@@ -417,6 +454,24 @@ function poolsOf(role, variables) {
   return { total: unreadable.length ? null : total, unset, unreadable };
 }
 
+/** A variable's value when it is one: not empty, and not a reference to another variable. */
+function plainValue(raw) {
+  const value = String(raw ?? "").trim();
+  return value && !value.includes("${{") ? value : null;
+}
+
+/** An address a variable holds as a plain value, without a closing slash. */
+function addressOf(raw) {
+  const value = plainValue(raw);
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? value.replace(/\/+$/, "") : null;
+  } catch {
+    return null;
+  }
+}
+
 /** RAILWAY_DEPLOYMENT_DRAINING_SECONDS when it's a number, else the service's draining setting. */
 function drainingOf(variables, instance) {
   const raw = String(variables.RAILWAY_DEPLOYMENT_DRAINING_SECONDS ?? "").trim();
@@ -451,6 +506,161 @@ function printNeeds(services) {
     console.log(`${Math.max(2, admin.configured)} admins and ${Math.max(2, worker.configured)} workers could hold up to ${twoEach}${twoEach <= usable ? `, within PostgreSQL's default of ${DEFAULT_MAX_CONNECTIONS}` : `, so the database's max_connections must be ${twoEach + RESERVED_CONNECTIONS} or more`} (guide 7.24).`);
   }
   console.log("Change the copies with node devops/scale.mjs admin=<n> worker=<n>, or worker+1 and worker-1.");
+}
+
+// ---------------------------------------------------------------- how busy the copies are
+
+/** Each copy's newest processor and memory figures from Railway's metrics. Says so and goes on when Railway gives none. */
+async function printCopies(where, services) {
+  const startDate = new Date(Date.now() - METRICS_WINDOW_MS).toISOString();
+  const lines = [];
+  console.log("");
+  for (const service of services) {
+    let series;
+    try {
+      series = (await gql(METRICS_QUERY, { environmentId: where.environment.id, serviceId: service.id, startDate }, { plain: true })).metrics;
+    } catch (error) {
+      console.log(`Railway didn't give each copy's processor and memory (${error.message}). Each service's Metrics tab in Railway shows them.`);
+      return;
+    }
+    const found = new Map();
+    for (const item of Array.isArray(series) ? series : []) {
+      const newest = (Array.isArray(item?.values) ? item.values : []).reduce((latest, point) => (Number.isFinite(Number(point?.value)) && (!latest || Number(point.ts) >= Number(latest.ts)) ? point : latest), null);
+      if (!newest) continue;
+      const id = String(item.tags?.deploymentInstanceId ?? "");
+      const figures = found.get(id) ?? {};
+      if (item.measurement === "CPU_USAGE") figures.cpu = Number(newest.value);
+      if (item.measurement === "MEMORY_USAGE_GB") figures.memoryGb = Number(newest.value);
+      found.set(id, figures);
+    }
+    for (const [id, figures] of found) {
+      const cpu = figures.cpu === undefined ? "" : `${figures.cpu.toFixed(2)} vCPU`;
+      const memory = figures.memoryGb === undefined ? "" : `${Math.round(figures.memoryGb * 1024)} MB`;
+      lines.push(`  ${service.name.padEnd(8)} ${(id ? shortId(id) : "all copies").padEnd(10)} ${cpu.padStart(10)}  ${memory.padStart(8)}`);
+    }
+  }
+  if (!lines.length) {
+    console.log("Railway has no processor and memory figures for these copies yet. Each service's Metrics tab in Railway shows them.");
+    return;
+  }
+  console.log("Each copy's processor and memory, as Railway measured them last:");
+  for (const line of lines) console.log(line);
+}
+
+/** What the copies report about themselves, from the admin's fleet status address. Says so and goes on when it can't be asked. */
+async function printFleet(where, services) {
+  const [admin, worker] = services;
+  const hidden = "What the copies report about themselves isn't shown";
+  console.log("");
+  if (!admin.statusToken) {
+    console.log(`${hidden}: the admin has no FLEET_STATUS_TOKEN of its own (guide 7.10).`);
+    return;
+  }
+  const base = options.statusUrl || admin.baseUrl || (await publicAddress(where, admin));
+  if (!base) {
+    console.log(`${hidden}: the admin's address isn't known. Give it with --status-url https://<the dashboard's address>.`);
+    return;
+  }
+  let url;
+  try {
+    url = new URL(`${base.replace(/\/+$/, "")}${FLEET_STATUS_PATH}`);
+  } catch {
+    console.log(`${hidden}: ${base} isn't an address.`);
+    return;
+  }
+  if (url.protocol !== "https:" && !LOCAL_HOSTS.has(url.hostname)) {
+    console.log(`${hidden}: ${url.origin} isn't an HTTPS address, so the token isn't sent to it.`);
+    return;
+  }
+  // As many running copies as Railway is set to run, so a copy that never reported counts as missing.
+  for (const service of [admin, worker]) if (service.configured) url.searchParams.set(service.role, String(Math.min(service.configured, MAX_COPIES)));
+  let response;
+  let body;
+  try {
+    response = await fetch(url, { headers: { authorization: `Bearer ${admin.statusToken}`, accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+    body = parseJson(await response.text());
+  } catch (error) {
+    console.log(`${hidden}: ${url.origin} couldn't be reached (${error.cause?.code ?? error.message}).`);
+    return;
+  }
+  const address = `${url.origin}${FLEET_STATUS_PATH}`;
+  if (response.status === 404) {
+    console.log(`${hidden}: ${address} answers 404. The admin's release is from before the fleet status address, or the admin started before FLEET_STATUS_TOKEN was set, or the token has fewer than 32 characters. A variable takes effect at the admin's next deploy.`);
+    return;
+  }
+  if (response.status === 401) {
+    console.log(`${hidden}: ${address} refused the token. The running admin has another FLEET_STATUS_TOKEN than its variables hold now: deploy the admin.`);
+    return;
+  }
+  if (!Array.isArray(body?.copies)) {
+    console.log(`${hidden}: ${address} answered ${response.status}${Array.isArray(body?.problems) && body.problems.length ? `: ${body.problems.join(" ")}` : body?.error ? `: ${body.error}` : ""}`);
+    return;
+  }
+  console.log(`What the copies report about themselves (${address}):`);
+  const now = Date.parse(body.checkedAt) || Date.now();
+  for (const copy of body.copies) console.log(`  ${describeCopy(copy, now)}`);
+  console.log(`  ${describeQueues(body.queues, body.queuesCountedSecondsAgo)}`);
+  const problems = Array.isArray(body.problems) ? body.problems : [];
+  if (!problems.length) console.log("  Every copy reports in.");
+  for (const problem of problems) console.log(`  Problem: ${problem}`);
+}
+
+/** The admin's address from Railway: its own domain first, else the one Railway gave the service. */
+async function publicAddress(where, admin) {
+  try {
+    const { domains } = await gql(DOMAINS_QUERY, { projectId: where.project.id, environmentId: where.environment.id, serviceId: admin.id }, { plain: true });
+    const domain = domains?.customDomains?.[0]?.domain ?? domains?.serviceDomains?.[0]?.domain;
+    return typeof domain === "string" && /^[a-z0-9.-]+$/i.test(domain) ? `https://${domain}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function describeCopy(copy, now) {
+  const seen = Number(copy.lastSeenSecondsAgo) || 0;
+  const state = {
+    running: "running",
+    not_ready: "not ready",
+    draining: `shutting down for ${span(Number(copy.drainingForSeconds) || 0)}`,
+    silent: `silent for ${span(seen)}`,
+    left: `left ${span(seen)} ago`,
+  }[copy.state] ?? String(copy.state);
+  const parts = [
+    `${String(copy.service).padEnd(8)} ${shortId(String(copy.replica)).padEnd(10)} ${state.padEnd(24)}`,
+    `busy ${String(Math.round((Number(copy.busy) || 0) * 100)).padStart(3)}%`,
+    `${String(Math.round((Number(copy.rssBytes) || 0) / 1_048_576)).padStart(5)} MB`,
+  ];
+  if (copy.db) parts.push(`${copy.db.inUse} of ${copy.db.max} connections${copy.db.waiting ? `, ${copy.db.waiting} waiting` : ""}`);
+  if (copy.service === "worker") parts.push(`${count(Number(copy.liveCalls) || 0, "call")}, ${count(Number(copy.activeJobs) || 0, "job")}`);
+  const started = Date.parse(copy.startedAt);
+  if (Number.isFinite(started)) parts.push(`up ${span(Math.max(0, Math.round((now - started) / 1000)))}`);
+  return parts.join("   ");
+}
+
+function describeQueues(queues, countedSecondsAgo) {
+  if (!queues || typeof queues !== "object") return "Queues: no worker reports them.";
+  const busy = Object.entries(queues).flatMap(([name, jobs]) => {
+    const parts = [jobs.waiting ? `${jobs.waiting} waiting` : "", jobs.active ? `${jobs.active} running` : "", jobs.delayed ? `${jobs.delayed} scheduled` : ""].filter(Boolean);
+    return parts.length ? [`${name} ${parts.join(", ")}`] : [];
+  });
+  const counted = Number.isFinite(Number(countedSecondsAgo)) ? ` (counted ${span(Number(countedSecondsAgo))} ago)` : "";
+  return busy.length ? `Queues: ${busy.join("; ")}${counted}.` : `Queues: no job waiting, running or scheduled${counted}.`;
+}
+
+/** Railway's copy IDs are UUIDs, which their first eight characters tell apart. Any other name, such as a host's, stays whole. */
+function shortId(id) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) ? id.slice(0, 8) : id;
+}
+
+function count(number, noun) {
+  return `${number} ${noun}${number === 1 ? "" : "s"}`;
+}
+
+function span(seconds) {
+  if (seconds < 90) return `${seconds} s`;
+  if (seconds < 90 * 60) return `${Math.round(seconds / 60)} min`;
+  if (seconds < 48 * 3600) return `${Math.round(seconds / 3600)} h`;
+  return `${Math.round(seconds / 86_400)} days`;
 }
 
 // ---------------------------------------------------------------- the change and its checks
@@ -631,7 +841,8 @@ async function waitForCopies(where, items) {
 
 // ---------------------------------------------------------------- Railway's API
 
-async function gql(query, variables = {}, { mutation = false } = {}) {
+/** `plain` gives Railway's own words for a refusal, for a read the run can do without. */
+async function gql(query, variables = {}, { mutation = false, plain = false } = {}) {
   for (let attempt = 1; ; attempt++) {
     let response;
     try {
@@ -665,7 +876,7 @@ async function gql(query, variables = {}, { mutation = false } = {}) {
     const text = await response.text();
     const body = parseJson(text);
     // Railway reports refusals, a bad token included, as errors in a 200 answer.
-    if (body?.errors?.length) throw new Error(describeErrors(body.errors, mutation));
+    if (body?.errors?.length) throw new Error(plain ? body.errors.map((error) => error.message).join("; ") : describeErrors(body.errors, mutation));
     if (!response.ok || !body?.data) throw new Error(`Railway answered ${response.status}: ${text.slice(0, 300)}`);
     return body.data;
   }
@@ -688,8 +899,8 @@ function describeErrors(errors, mutation) {
 // ---------------------------------------------------------------- the command line
 
 function parseArgs(argv) {
-  const parsed = { changes: [], bootstrap: "", project: "", environment: "", maxConnections: null, names: { admin: "admin", worker: "worker" }, dryRun: false, yes: false, wait: true };
-  const takesValue = new Set(["--bootstrap", "--project", "--environment", "--max-connections", "--admin-service", "--worker-service"]);
+  const parsed = { changes: [], bootstrap: "", project: "", environment: "", statusUrl: "", maxConnections: null, names: { admin: "admin", worker: "worker" }, dryRun: false, yes: false, wait: true };
+  const takesValue = new Set(["--bootstrap", "--project", "--environment", "--max-connections", "--admin-service", "--worker-service", "--status-url"]);
   for (let index = 0; index < argv.length; index++) {
     let arg = argv[index];
     let value;
@@ -710,6 +921,10 @@ function parseArgs(argv) {
     else if (arg === "--environment") parsed.environment = value;
     else if (arg === "--admin-service") parsed.names.admin = value;
     else if (arg === "--worker-service") parsed.names.worker = value;
+    else if (arg === "--status-url") {
+      if (!addressOf(value)) usage("--status-url takes the dashboard's address, such as https://app.example.com.");
+      parsed.statusUrl = addressOf(value);
+    }
     else if (arg === "--max-connections") {
       const max = Number(value);
       if (!Number.isInteger(max) || max < 1) usage("--max-connections takes what `show max_connections;` says, a whole number such as 200.");
@@ -741,7 +956,7 @@ function help() {
 }
 
 function usage(problem) {
-  console.error(`${problem}\n\nUsage: node devops/scale.mjs [admin=<n>] [worker=<n>] [--max-connections <n>] [--dry-run] [--yes] [--no-wait]\n       [--bootstrap <settings file> | --project <id> [--environment <name>]] [--admin-service <name>] [--worker-service <name>]\nRun it with --help for more.`);
+  console.error(`${problem}\n\nUsage: node devops/scale.mjs [admin=<n>] [worker=<n>] [--max-connections <n>] [--dry-run] [--yes] [--no-wait]\n       [--bootstrap <settings file> | --project <id> [--environment <name>]] [--admin-service <name>] [--worker-service <name>]\n       [--status-url <address>]\nRun it with --help for more.`);
   process.exit(2);
 }
 

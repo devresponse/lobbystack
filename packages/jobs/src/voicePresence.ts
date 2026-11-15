@@ -3,9 +3,9 @@
 // entry; the admin app counts them.
 import { randomUUID } from "node:crypto";
 
-import Redis from "ioredis";
+import type Redis from "ioredis";
 
-import { logRedisErrors } from "./redisErrors";
+import { presenceStore } from "./presenceStore";
 
 export const VOICE_PRESENCE_TTL_MS = 30_000;
 const GATEWAY_TTL_MS = 30_000;
@@ -25,19 +25,8 @@ redis.call('HDEL', KEYS[3], ARGV[1])
 if removed == 1 then redis.call('PUBLISH', KEYS[2], ARGV[2]) end
 return removed`;
 
-let redis: Redis | undefined;
-
 function store(): Redis {
-  const url = process.env.REDIS_URL;
-  if (!url) throw new Error("Voice presence requires REDIS_URL.");
-  redis ??= logRedisErrors(new Redis(url, {
-    protocol: 2,
-    lazyConnect: true,
-    maxRetriesPerRequest: 1,
-    enableReadyCheck: true,
-    connectionName: "lobbystack:voice-presence",
-  }), "lobbystack:voice-presence");
-  return redis;
+  return presenceStore("Voice presence");
 }
 
 function key(businessId: string): string {

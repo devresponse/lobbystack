@@ -3,6 +3,7 @@
 export * from "./client";
 export * from "./outbox";
 export * from "./pool-budget";
+export { poolUsage, registerPoolMetrics, serviceConnections, totalPoolUsage, type PoolUsage } from "./pool-usage";
 export * from "./rls/context";
 export * from "./schema";
 

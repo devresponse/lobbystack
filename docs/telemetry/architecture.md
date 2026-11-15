@@ -65,6 +65,8 @@ Client analytics posts to the PostHog managed reverse proxy (`NEXT_PUBLIC_POSTHO
 
 Server runtimes send traces, metrics, and logs to the OTLP base URL configured through `OTEL_EXPORTER_OTLP_ENDPOINT`. The logs carry each runtime's `logEvent()` records, and its `console.warn` and `console.error` output with the active trace ID and the current call's IDs. Runtimes also keep printing them to stdout. They attach headers from `OTEL_EXPORTER_OTLP_HEADERS` and sanitize telemetry before export. An empty endpoint disables server export. Browser events use the public PostHog key and host configured through `NEXT_PUBLIC_POSTHOG_*`.
 
+Since fork PR #185, everything a runtime exports carries `service.instance.id`, which names the copy of the service that sent it: Railway's `RAILWAY_REPLICA_ID`, or the host name. Metrics leave every 15 seconds. `getMeter()` in `packages/telemetry` hands out counters, histograms and gauges that record whenever they were made: OpenTelemetry's own record nothing when they are made before the SDK starts, which is how the worker's database, billing, knowledge and webhook instruments, all made as their modules load, never left the worker before. Observable gauges still have to be made after telemetry starts (`registerPoolMetrics()` in `packages/db`, `registerWorkerMetrics()` in the worker). [Watch every copy](../features/observability.md#watch-every-copy) lists the gauges for each copy's load and the heartbeat beside them.
+
 ## Validation
 
 Run `pnpm telemetry:coverage`, `pnpm replacement:telemetry`, `pnpm replacement:privacy`, and the PostHog/OTel certification steps in `docs/validation/posthog-otel-validation.md` before production cutover.

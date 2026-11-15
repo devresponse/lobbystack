@@ -354,6 +354,7 @@ it("leaves the routes other services call open, with their answers as they were"
     ["POST", "/api/auth/oauth2/token"],
     ["PUT", "/api/storage/local?token=signed"],
     ["GET", "/api/internal/finance/export"],
+    ["GET", "/api/internal/fleet?token=its-own-token&worker=2"],
   ];
   for (const [method, path] of open) {
     const response = proxy(new NextRequest(`http://localhost:3210${path}`, { method, headers: { origin: "https://customer.example" } }));

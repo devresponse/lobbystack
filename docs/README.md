@@ -55,7 +55,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Cancel an account](features/account-cancellation.md) | An owner closing their account's last business without deleting anything, confirmed by email, and bringing it back |
 | [API, CLI and integrations](features/api-cli-integrations.md) | The v1 API, MCP server, CLI, webhooks, Zapier, Make and n8n |
 | [Unanswered questions](features/unanswered-questions.md) | The questions the receptionist couldn't answer, and answering them as text entries |
-| [Logs, errors and alerts](features/observability.md) | Logs, PostHog, following one call, and what to alert on |
+| [Logs, errors and alerts](features/observability.md) | Logs, PostHog, following one call, watching every copy of the admin and the worker, and what to alert on |
 | [Close a test deployment to strangers](features/access-gate.md) | One variable on the admin, `PROTECTION_TOKEN`, that answers a bare 404 at every page and API until a browser opens the access link once, while webhooks, health checks, the website widget, the API and MCP stay open; on `releases/r2` |
 | [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar and Stripe, promo codes, and why it is built this way |
 | [Prepaid minute packs](features/prepaid-packs.md) | Minutes paid once that last a set number of days, beside the plans: the packs on sale, buying one, how calls draw on it, switching to and from a subscription, refunds, disputes and the end of a pack |

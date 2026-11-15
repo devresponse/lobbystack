@@ -16,5 +16,8 @@
   "environments": {
     "dev*": { "appNameSuffix": " (dev)", "indexing": false },
     "test*": { "appNameSuffix": " (test)", "indexing": false }
+  },
+  "signInPage": {
+    "panel": "dark"
   }
 }

@@ -3,7 +3,7 @@
 import { useMemo, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { BookOpenText, CalendarCheck, Clock3, LoaderCircle, PhoneIncoming } from "lucide-react";
-import { brandPalette, intlLocale, type BrandPalette } from "@lobbystack/shared";
+import { brandPalette, currentBrand, intlLocale, localizedBrandText, type BrandPalette, type BrandSignInPage, type BrandText } from "@lobbystack/shared";
 
 import { useBranding } from "@/components/branding-provider";
 import { ScreenHelpButton } from "@/components/screen-help-button";
@@ -38,6 +38,8 @@ export const brandButton = "h-11 w-full border-brand-line/25 bg-brand text-brand
 export const brandLink = "font-medium text-foreground underline decoration-brand decoration-2 underline-offset-4 hover:decoration-brand-line";
 
 type AuthShellProps = {
+  /** A short note above the title, such as who is asking. */
+  eyebrow?: string;
   title?: string;
   description?: ReactNode;
   children?: ReactNode;
@@ -53,7 +55,7 @@ type AuthShellProps = {
  * a band of it above the form on a phone. Everything in it comes from the
  * brand file's name, logo and accent, so any brand gets its own colours.
  */
-export function AuthShell({ title, description, children, legalFooter, progress, pending }: AuthShellProps) {
+export function AuthShell({ eyebrow, title, description, children, legalFooter, progress, pending }: AuthShellProps) {
   const { t, i18n } = useTranslation("onboarding");
   const marketingLocale = resolveLocale(i18n?.resolvedLanguage, i18n?.language);
   const style = useMemo(() => brandScopeStyle(), []);
@@ -74,6 +76,7 @@ export function AuthShell({ title, description, children, legalFooter, progress,
             ) : (
               <>
                 <div className="flex flex-col gap-2">
+                  {eyebrow ? <span className="mb-2 inline-flex w-fit items-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">{eyebrow}</span> : null}
                   <h1 className="font-heading text-3xl leading-tight font-semibold tracking-tight text-foreground">{title}</h1>
                   {description ? <p className="text-[15px] leading-7 text-muted-foreground">{description}</p> : null}
                 </div>
@@ -125,11 +128,21 @@ const POINTS = [
   { key: "book", Icon: CalendarCheck },
 ] as const;
 
-/** The brand's side of the page: its logo and name, what the product does, and an example call. */
-function AuthBrandPanel() {
-  const { t } = useTranslation("auth");
+/**
+ * The brand's side of the page: its logo and name, what the product does, and
+ * an example call. A brand file's signInPage section may set its own words for
+ * each part, and a dark panel; the shared words stand in for the rest.
+ */
+function AuthBrandPanel({ page = currentBrand().signInPage }: { page?: BrandSignInPage }) {
+  const { t, i18n } = useTranslation("auth");
+  const locale = resolveLocale(i18n?.resolvedLanguage, i18n?.language);
+  const words = (value: BrandText | null, key: string) => (value ? localizedBrandText(value, locale) : t(key));
+  const points = page.points
+    ? page.points.map((point, index) => ({ Icon: POINTS[index % POINTS.length]!.Icon, text: localizedBrandText(point, locale) }))
+    : POINTS.map(({ key, Icon }) => ({ Icon, text: t(`panel.points.${key}`) }));
   return (
-    <section className="auth-brand-panel relative isolate overflow-hidden rounded-b-[1.75rem] lg:sticky lg:top-3 lg:h-[calc(100svh-1.5rem)] lg:w-[46%] lg:max-w-[46rem] lg:shrink-0 lg:rounded-[1.75rem]">
+    // A dark panel takes the dark theme inside it, in light mode too.
+    <section className={cn("auth-brand-panel relative isolate overflow-hidden rounded-b-[1.75rem] lg:sticky lg:top-3 lg:h-[calc(100svh-1.5rem)] lg:w-[46%] lg:max-w-[46rem] lg:shrink-0 lg:rounded-[1.75rem]", page.panel === "dark" && "dark")}>
       <div aria-hidden="true" className="auth-brand-glow pointer-events-none absolute inset-0 -z-10" />
       <div aria-hidden="true" className="auth-brand-dots pointer-events-none absolute inset-0 -z-10" />
       <div className="flex h-full flex-col px-6 pb-7 pt-4 sm:px-10 lg:px-12 lg:pb-10 lg:pt-9 xl:px-14">
@@ -138,15 +151,15 @@ function AuthBrandPanel() {
           <ScreenHelpButton buttonClassName="text-current hover:text-current hover:opacity-75" className="-mr-2 lg:hidden" size="icon" />
         </div>
         <div className="mt-6 lg:mt-auto lg:pt-10">
-          <p className="max-w-[16ch] text-balance font-heading text-[1.75rem] leading-[1.1] font-semibold tracking-tight sm:max-w-[20ch] sm:text-4xl lg:text-[2.75rem] lg:leading-[1.05] xl:text-5xl">{t("panel.headline")}</p>
-          <p className="mt-3 hidden max-w-md text-[15px] leading-7 text-(--panel-muted) sm:block lg:mt-4 lg:text-[17px]">{t("panel.description")}</p>
+          <p className="max-w-[16ch] text-balance font-heading text-[1.75rem] leading-[1.1] font-semibold tracking-tight sm:max-w-[20ch] sm:text-4xl lg:text-[2.75rem] lg:leading-[1.05] xl:text-5xl">{words(page.headline, "panel.headline")}</p>
+          <p className="mt-3 hidden max-w-md text-[15px] leading-7 text-(--panel-muted) sm:block lg:mt-4 lg:text-[17px]">{words(page.description, "panel.description")}</p>
         </div>
-        <ConversationPreview className="mt-10 hidden [@media(min-height:46rem)]:lg:block" />
+        <ConversationPreview call={page.exampleCall} className="mt-10 hidden [@media(min-height:46rem)]:lg:block" />
         <ul className="mt-10 hidden grid-cols-3 gap-6 [@media(min-height:54rem)]:lg:grid">
-          {POINTS.map(({ key, Icon }) => (
-            <li className="flex flex-col gap-3 text-sm leading-5 font-medium" key={key}>
+          {points.map(({ Icon, text }, index) => (
+            <li className="flex flex-col gap-3 text-sm leading-5 font-medium" key={index}>
               <span className="grid size-9 place-items-center rounded-full bg-(--panel-hairline)"><Icon aria-hidden="true" className="size-4" /></span>
-              <span>{t(`panel.points.${key}`)}</span>
+              <span>{text}</span>
             </li>
           ))}
         </ul>
@@ -175,18 +188,25 @@ function PanelLockup() {
   );
 }
 
-/** An example call, its lines coming in one after another: what the receptionist does, shown rather than told. */
-function ConversationPreview({ className }: { className?: string }) {
+/**
+ * An example call, its lines coming in one after another: what the
+ * receptionist does, shown rather than told. A brand's own call takes turns
+ * from the caller's first line.
+ */
+function ConversationPreview({ call, className }: { call: BrandSignInPage["exampleCall"]; className?: string }) {
   const { t, i18n } = useTranslation("auth");
   const locale = resolveLocale(i18n?.resolvedLanguage, i18n?.language);
   // A Saturday at 10:00, in the reader's own format.
-  const booked = new Intl.DateTimeFormat(intlLocale(locale), { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(Date.UTC(2026, 10, 21, 10));
-  const lines = [
-    { from: "caller", text: t("panel.preview.caller1") },
-    { from: "agent", text: t("panel.preview.agent1") },
-    { from: "caller", text: t("panel.preview.caller2") },
-    { from: "agent", text: t("panel.preview.agent2") },
-  ] as const;
+  const bookedAt = new Intl.DateTimeFormat(intlLocale(locale), { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(Date.UTC(2026, 10, 21, 10));
+  const lines: ReadonlyArray<{ from: "caller" | "agent"; text: string }> = call
+    ? call.lines.map((line, index) => ({ from: index % 2 === 0 ? "caller" : "agent", text: localizedBrandText(line, locale) }))
+    : [
+      { from: "caller", text: t("panel.preview.caller1") },
+      { from: "agent", text: t("panel.preview.agent1") },
+      { from: "caller", text: t("panel.preview.caller2") },
+      { from: "agent", text: t("panel.preview.agent2") },
+    ];
+  const booked = call?.booked ? localizedBrandText(call.booked, locale) : t("panel.preview.booked");
   const delay = (index: number) => ({ "--rise-delay": `${400 + index * 650}ms` }) as CSSProperties;
   return (
     <figure aria-label={t("panel.preview.label")} className={cn("w-full max-w-[27rem] rounded-2xl bg-[#fff] p-4 text-neutral-900 shadow-[0_28px_60px_-24px_rgb(0_0_0/0.45)] ring-1 ring-black/5 dark:bg-neutral-900/90 dark:text-neutral-50 dark:ring-white/10", className)}>
@@ -210,8 +230,8 @@ function ConversationPreview({ className }: { className?: string }) {
       </ol>
       <div className="auth-rise mt-3 flex items-center gap-2 rounded-xl bg-neutral-50 px-3 py-2.5 text-xs font-medium dark:bg-white/5" style={delay(lines.length)}>
         <CalendarCheck aria-hidden="true" className="size-4 text-emerald-600 dark:text-emerald-400" />
-        <span>{t("panel.preview.booked")}</span>
-        <span className="ml-auto text-neutral-500 dark:text-neutral-400">{booked}</span>
+        <span>{booked}</span>
+        <span className="ml-auto text-neutral-500 dark:text-neutral-400">{bookedAt}</span>
       </div>
     </figure>
   );

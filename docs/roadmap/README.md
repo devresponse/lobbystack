@@ -21,6 +21,7 @@ Each feature has a status:
 
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
+| [Carry the brand's colours into onboarding](onboarding-brand-colours.md) | The brand's accent on onboarding's main buttons and progress dots, as on the sign-in pages | About 1 day | Ready when needed | None; the sign-in pages' design of 2026-11-15 ([branding](../branding.md#color-the-sign-in-pages)) |
 | [Read the business's website during onboarding, as an option](onboarding-website-option.md) | The website read during onboarding again, where and when the deployment chooses, now that fork PR #127 makes the website step only save the address | Not estimated; most of the code is kept | Waiting on 3 decisions | None; the maintainer's request of 2026-11-02 |
 
 **Receptionists**

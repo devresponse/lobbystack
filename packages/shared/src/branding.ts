@@ -1,5 +1,6 @@
 import { brandFileMatched, brandImage, currentBrand, type ResolvedBrand } from "./brands/resolve";
-import type { BrandImage } from "./brands/types";
+import type { BrandImage, BrandText } from "./brands/types";
+import { normalizeInterfaceLocale } from "./locales";
 
 // The name and logo a deployment shows in place of LobbyStack.
 //
@@ -174,6 +175,11 @@ export function brandPalette(accent: string = brandAccentColor()): BrandPalette 
     text: { light: text("light"), dark: text("dark") },
     line: { light: line("light"), dark: line("dark") },
   };
+}
+
+/** Words from a brand file in the reader's language, or in English for a language it has none in. */
+export function localizedBrandText(value: BrandText, locale: string | null | undefined): string {
+  return value[normalizeInterfaceLocale(locale) ?? "en"];
 }
 
 /** The URL of a logo saved in the database, versioned so browsers may cache it for good. */

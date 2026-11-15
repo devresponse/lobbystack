@@ -30,6 +30,7 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
 | `links.zapier` | An `https://` link on zapier.com: the brand's Zapier invite link, or its page in Zapier's app directory once it's listed. | No Zapier card on the Integrations page. |
 | `links.make` | An `https://` link on make.com: the invite link of the brand's app on Make. | No Make card on the Integrations page. |
 | `environments` | Settings by host label, such as `"dev*": { "appNameSuffix": " (dev)", "indexing": false }`. A pattern ending in `*` matches any first label that starts with it. | The plain brand on every host. |
+| `signInPage` | The panel beside the sign-in and sign-up forms: `panel` (`accent` or `dark`) and the brand's own `headline`, `description`, three `points` and `exampleCall`, each in all four languages ([the signInPage section](#the-signinpage-section)). | The accent panel and the shared words. |
 
 `brands/brand.schema.json` and `brands/index.schema.json` give editors completion and checks.
 
@@ -94,7 +95,7 @@ The admin caches the saved row for 30 seconds, so other admin replicas pick up a
 
 - The browser tab's title and icon on every admin page: the dashboard, sign-in and sign-up, onboarding, and the website widget's frame. The logo is the tab icon, so a square logo works best. Give a dark logo a light tile of its own, because a dark tab strip or the dashboard's dark mode hides a dark logo on a transparent background.
 - The picture in link previews of those pages, from the brand file's `ogImage`. A business's public profile page has its own preview, without it.
-- The logo and name above the sign-in, sign-up, password reset, invitation, email change, verification, OAuth consent, and onboarding pages.
+- The logo and name in the brand's panel beside the sign-in, sign-up, forgot password, password reset, invitation, email change, verification, account cancellation and OAuth consent pages ([Color the sign-in pages](#color-the-sign-in-pages)), and above the onboarding steps.
 - The header of the public demo page.
 - The header of the help pages at `/{locale}/help`, which links to the dashboard ([help pages](features/help-pages.md)).
 - The foot of each business's [public profile page](features/public-profile-and-qr.md) at `/profile/<slug>`, after "Answered by", and of the page a visitor gets for a profile that isn't published. Both link to the website.
@@ -153,10 +154,51 @@ alloplace.com and realinfobot.com have no docs yet, so each brand's docs links o
 
 Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. The brand file's `accentColor` sets it. Text on it is black or white, whichever contrasts more, so AlloPlace's yellow, `#FFD100`, and RealInfoBot's orange, `#F07423`, both get black text. Without it, the pages use the website widget's default teal, `#0f766e`.
 
+## Color the sign-in pages
+
+The signed-out pages put the brand beside the form: sign-in, sign-up and its email code step, forgot password, and the pages that links in emails open (password reset, invitation, email change, email verification and account cancellation), and also the OAuth consent page. On a screen 1024 pixels wide or more, a panel fills the left 46% of the page, up to 736 pixels: the logo on a white tile beside the name, a headline and a sentence, an example call whose lines come in one after another, once, and three points about what the receptionist does. The example call shows on screens at least 736 pixels tall and the points on screens at least 864 pixels tall, so the form doesn't scroll on a laptop. On a phone the panel is a band above the form with the logo, the name, the help button and the headline, and the sentence from 640 pixels wide. With reduced motion the call's lines are all there at once. The panel shows straight away while the page checks whether the visitor is already signed in.
+
+One value drives every colour: the brand file's `accentColor`, or the teal, `#0f766e`, without it. `brandPalette` measures its contrast against the light page (white) and the dark page (`#0a0a0a`), and each part uses the accent only where it reads:
+
+| Part of the page | Colour |
+| --- | --- |
+| The panel in light mode | The accent, with black or white text, whichever contrasts more |
+| The panel in dark mode | Near-black with 9% of the accent and a glow of it |
+| The main button | The accent, with black or white text and a faint outline |
+| Link underlines, the password bar on sign-up, the current progress dot | The accent, as decoration: the words keep the page's text colour |
+| Input borders and focus rings | The accent where it reaches 3:1 against the page, else the page's text colour, with a soft halo of the accent |
+| Text in the accent | The accent where it reaches 4.5:1 against the page, else the page's text colour |
+
+So AlloPlace's yellow never becomes text on white, and a dark accent never becomes a focus ring in dark mode. A brand without a logo gets its first letter on the tile.
+
+### The signInPage section
+
+A brand can set its own words and a dark panel in `brand.json`. Every part is optional, and the pages show the shared words for any part it leaves out:
+
+```json
+"signInPage": {
+  "panel": "dark",
+  "headline": { "en": "The AI receptionist for real estate agents.", "fr": "...", "es": "...", "sr": "..." },
+  "description": { "en": "...", "fr": "...", "es": "...", "sr": "..." },
+  "points": [{ "en": "...", "fr": "...", "es": "...", "sr": "..." }, { "...": "..." }, { "...": "..." }],
+  "exampleCall": {
+    "lines": [{ "en": "Hi, is the house on Maple Street still for sale?", "fr": "...", "es": "...", "sr": "..." }, { "...": "..." }],
+    "booked": { "en": "Showing booked", "fr": "...", "es": "...", "sr": "..." }
+  }
+}
+```
+
+- `panel`: `accent`, the default, fills the panel with the accent. `dark` makes it near-black with touches of the accent in light mode too, for a brand whose guidelines keep its colour to small areas.
+- The words, each in all four interface languages, `en`, `fr`, `es` and `sr`: `headline` up to 80 characters, `description` (the sentence under it) up to 200, exactly three `points` of up to 80, and `exampleCall` with two to four `lines` of up to 120, the caller's first and then taking turns with the receptionist, and `booked`, up to 40, for the line under the call, which is "Appointment booked" without it. The day and time beside that line, a Saturday at 10:00, follow the reader's language.
+- AlloPlace sets `"panel": "dark"`, since its guidelines keep its yellow to about a tenth of a screen. RealInfoBot sets its own words for real estate agents, with a call about a listing that books a showing.
+
+`pnpm brands:build` checks the section like the rest of the file, and `brands/brand.schema.json` completes it in editors.
+
 ## How it works
 
 - `brands/`: the brand folders and the domain index. `packages/shared/src/brands/schema.ts` checks and compiles them; `scripts/write-brands.ts` writes `packages/shared/src/brands/generated.ts`; `packages/shared/src/brands/resolve.ts` picks the brand (`resolveBrand`, `currentBrand`).
-- `packages/shared/src/branding.ts`: the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), and the public pages' color (`brandAccentColor`, `readableTextOn`).
+- `packages/shared/src/branding.ts`: the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), the public pages' color (`brandAccentColor`, `readableTextOn`), where the sign-in pages may use the accent (`contrastRatio`, `brandPalette`), and a brand file's words in the reader's language (`localizedBrandText`).
+- `apps/admin/src/components/auth-shell.tsx`: the signed-out pages' layout, the brand's panel and the example call (`AuthShell`), and the accent classes their forms use. `apps/admin/app/theme.css` defines the `brand` colours (`bg-brand`, `text-brand-foreground`, `border-brand-line`) for an element marked `data-brand-scope`, and the panel's styles.
 - `packages/db/migrations/0098_deployment_branding.sql`: the one-row table and the two functions. Every runtime role can read the table, but only `app.save_initial_branding()` writes to it. Row level security is forced on it.
 - `packages/domain/src/server/branding.ts`: reads and saves the branding.
 - `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. Where a brand file applies, it never reads the database. If the database can't be read, pages fall back to the default brand, and the error is reported at most once a minute.

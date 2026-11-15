@@ -8,6 +8,7 @@ import {
   brandEmailLogo,
   brandPalette,
   contrastRatio,
+  localizedBrandText,
   brandLogoContentType,
   emailSender,
   normalizeAppName,
@@ -113,6 +114,17 @@ describe("readableTextOn", () => {
     expect(readableTextOn("#ffd100")).toBe("#000000");
     expect(readableTextOn("#f07423")).toBe("#000000");
     expect(readableTextOn("#0f766e")).toBe("#ffffff");
+  });
+});
+
+describe("localizedBrandText", () => {
+  const words = { en: "Showing booked", fr: "Visite planifiée", es: "Visita agendada", sr: "Razgledanje zakazano" };
+
+  it("picks the reader's language, and English for any other", () => {
+    expect(localizedBrandText(words, "fr-CA")).toBe("Visite planifiée");
+    expect(localizedBrandText(words, "sr-Latn")).toBe("Razgledanje zakazano");
+    expect(localizedBrandText(words, "de")).toBe("Showing booked");
+    expect(localizedBrandText(words, null)).toBe("Showing booked");
   });
 });
 

@@ -55,6 +55,8 @@ describe("TwilioProvider phone provisioning", () => {
     mocks.incomingPhoneNumbers.list.mockResolvedValue([{ sid: "PN123", phoneNumber: "+14165550100", friendlyName: "LobbyStack" }]);
     const twilio = provider();
     expect(await twilio.purchasePhoneNumber({ e164: "+14165550100", friendlyName: "LobbyStack", smsUrl: "https://app.test/sms", statusCallbackUrl: "https://app.test/status" })).toEqual({ providerPhoneId: "PN123", e164: "+14165550100", smsUrl: "https://app.test/sms" });
+    // A text whose first request fails gets one more try at the same webhook.
+    expect(mocks.incomingPhoneNumbers.create).toHaveBeenCalledWith(expect.objectContaining({ smsUrl: "https://app.test/sms", smsMethod: "POST", smsFallbackUrl: "https://app.test/sms", smsFallbackMethod: "POST" }));
     expect(await twilio.findOwnedPhoneNumber({ e164: "+14165550100" })).toEqual({ providerPhoneId: "PN123", e164: "+14165550100", friendlyName: "LobbyStack" });
   });
 

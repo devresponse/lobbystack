@@ -62,11 +62,7 @@ export const brandFileSchema = z.strictObject({
     panel: z.enum(["accent", "dark"]).describe("accent (the default) fills the panel with the accent colour; dark makes it near-black with touches of the accent.").optional(),
     headline: brandText(80).optional(),
     description: brandText(200).describe("The sentence under the headline, in every interface language.").optional(),
-    points: z.array(brandText(80)).length(3, "exactly three points").describe("Three short points, side by side under the example call.").optional(),
-    exampleCall: z.strictObject({
-      lines: z.array(brandText(120)).min(2, "two to four lines").max(4, "two to four lines").describe("Two to four lines: the caller's first, then taking turns with the receptionist."),
-      booked: brandText(40).describe("The line under the call, such as \"Appointment booked\".").optional(),
-    }).optional(),
+    points: z.array(brandText(80)).length(3, "exactly three points").describe("Three short points, listed under the sentence.").optional(),
   }).describe("The panel beside the sign-in and sign-up forms. The pages show the shared words for any part left out.").optional(),
 });
 
@@ -230,7 +226,6 @@ export function compileBrands(sources: BrandSources): CompiledBrands {
         headline: file.signInPage?.headline ?? null,
         description: file.signInPage?.description ?? null,
         points: file.signInPage?.points ?? null,
-        exampleCall: file.signInPage?.exampleCall ? { lines: file.signInPage.exampleCall.lines, booked: file.signInPage.exampleCall.booked ?? null } : null,
       },
     };
   }

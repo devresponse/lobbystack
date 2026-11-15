@@ -305,48 +305,6 @@
   mask-image: radial-gradient(80% 70% at 0% 0%, black, transparent 75%);
 }
 
-@keyframes auth-rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* The preview's lines come in one after another, once; with reduced motion they're all there at once. */
-.auth-rise {
-  animation: auth-rise 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
-  animation-delay: var(--rise-delay, 0ms);
-}
-
-@keyframes auth-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 0.45;
-    transform: scale(0.8);
-  }
-}
-
-.auth-live-dot {
-  animation: auth-pulse 1.8s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .auth-rise,
-  .auth-live-dot {
-    animation: none;
-  }
-}
-
 .AccordionContent,
 .CollapsibleContent {
   overflow: hidden;

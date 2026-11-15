@@ -33,10 +33,8 @@ export type BrandSignInPage = {
   headline: BrandText | null;
   /** The sentence under the headline. */
   description: BrandText | null;
-  /** Three short points, side by side under the example call. */
+  /** Three short points, listed under the sentence. */
   points: BrandText[] | null;
-  /** The example call: its lines, the caller's first and then taking turns, and the line under them, such as "Appointment booked". */
-  exampleCall: { lines: BrandText[]; booked: BrandText | null } | null;
 };
 
 export type BrandDefinition = {

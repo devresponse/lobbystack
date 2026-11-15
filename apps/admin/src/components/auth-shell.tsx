@@ -2,8 +2,8 @@
 
 import { useMemo, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpenText, CalendarCheck, Clock3, LoaderCircle, PhoneIncoming } from "lucide-react";
-import { brandPalette, currentBrand, intlLocale, localizedBrandText, type BrandPalette, type BrandSignInPage, type BrandText } from "@lobbystack/shared";
+import { BookOpenText, CalendarCheck, Clock3, LoaderCircle } from "lucide-react";
+import { brandPalette, currentBrand, localizedBrandText, type BrandPalette, type BrandSignInPage, type BrandText } from "@lobbystack/shared";
 
 import { useBranding } from "@/components/branding-provider";
 import { ScreenHelpButton } from "@/components/screen-help-button";
@@ -51,10 +51,11 @@ type AuthShellProps = {
 };
 
 /**
- * The signed-out pages: the screen split in two on a large screen, the brand's
- * panel filling the left half from top to bottom and the form on the right; a
- * band of the panel above the form on a phone. No rounded corners on either. Everything in it comes from the
- * brand file's name, logo and accent, so any brand gets its own colours.
+ * The signed-out pages. On a large screen the page splits in two: the brand's
+ * panel fills the left half from top to bottom, square, and the form the
+ * right half. On a phone the panel is a band above the form, its words in the
+ * form's column. Everything in it comes from the brand file's name, logo,
+ * accent and words, so any brand gets its own colours.
  */
 export function AuthShell({ eyebrow, title, description, children, legalFooter, progress, pending }: AuthShellProps) {
   const { t, i18n } = useTranslation("onboarding");
@@ -67,8 +68,10 @@ export function AuthShell({ eyebrow, title, description, children, legalFooter, 
         <div className="absolute right-3 top-0 hidden h-11 items-center lg:flex">
           <ScreenHelpButton size="icon" />
         </div>
-        <main className="flex flex-1 flex-col items-center px-6 pb-6 pt-9 sm:px-10 lg:pt-14">
-          <div className="flex w-full max-w-sm flex-col lg:my-auto">
+        {/* On a large screen the space above the form matches the space that holds the footer, so the form sits in the middle of the page, level with the panel's words, however tall the footer is. */}
+        <div aria-hidden="true" className="hidden lg:block lg:flex-1" />
+        <main className="flex flex-1 flex-col items-center px-6 pb-6 pt-9 sm:px-10 lg:flex-none lg:py-8">
+          <div className="flex w-full max-w-sm flex-col">
             {pending ? (
               <div className="flex justify-center py-16" role="status">
                 <LoaderCircle aria-hidden="true" className="size-5 animate-spin text-muted-foreground" />
@@ -86,16 +89,18 @@ export function AuthShell({ eyebrow, title, description, children, legalFooter, 
             )}
           </div>
         </main>
-        <footer className="flex flex-col items-center gap-4 px-6 pb-8 pt-6">
-          {progress ? <ProgressDots current={progress.current} total={progress.total} /> : null}
-          {legalFooter ?? (
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <a className="hover:text-foreground" href={termsHref(marketingLocale)} rel="noreferrer" target="_blank">{t("shell.terms")}</a>
-              <span aria-hidden="true">·</span>
-              <a className="hover:text-foreground" href={privacyHref(marketingLocale)} rel="noreferrer" target="_blank">{t("shell.privacy")}</a>
-            </div>
-          )}
-        </footer>
+        <div className="flex flex-col lg:flex-1 lg:justify-end">
+          <footer className="flex flex-col items-center gap-4 px-6 pb-8 pt-6">
+            {progress ? <ProgressDots current={progress.current} total={progress.total} /> : null}
+            {legalFooter ?? (
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <a className="hover:text-foreground" href={termsHref(marketingLocale)} rel="noreferrer" target="_blank">{t("shell.terms")}</a>
+                <span aria-hidden="true">·</span>
+                <a className="hover:text-foreground" href={privacyHref(marketingLocale)} rel="noreferrer" target="_blank">{t("shell.privacy")}</a>
+              </div>
+            )}
+          </footer>
+        </div>
       </div>
     </div>
   );
@@ -130,9 +135,10 @@ const POINTS = [
 ] as const;
 
 /**
- * The brand's side of the page: its logo and name, what the product does, and
- * an example call. A brand file's signInPage section may set its own words for
- * each part, and a dark panel; the shared words stand in for the rest.
+ * The brand's side of the page: its logo and name at the top, and in the
+ * middle what the product does, a headline, a sentence and three points. A
+ * brand file's signInPage section may set its own words for each part, and a
+ * dark panel; the shared words stand in for the rest.
  */
 function AuthBrandPanel({ page = currentBrand().signInPage }: { page?: BrandSignInPage }) {
   const { t, i18n } = useTranslation("auth");
@@ -143,27 +149,29 @@ function AuthBrandPanel({ page = currentBrand().signInPage }: { page?: BrandSign
     : POINTS.map(({ key, Icon }) => ({ Icon, text: t(`panel.points.${key}`) }));
   return (
     // A dark panel takes the dark theme inside it, in light mode too.
-    <section className={cn("auth-brand-panel relative isolate overflow-hidden lg:sticky lg:top-0 lg:h-svh lg:w-1/2 lg:shrink-0", page.panel === "dark" && "dark")}>
+    <section className={cn("auth-brand-panel relative isolate overflow-hidden px-6 sm:px-10 lg:sticky lg:top-0 lg:h-svh lg:w-1/2 lg:shrink-0 lg:px-0", page.panel === "dark" && "dark")}>
       <div aria-hidden="true" className="auth-brand-glow pointer-events-none absolute inset-0 -z-10" />
       <div aria-hidden="true" className="auth-brand-dots pointer-events-none absolute inset-0 -z-10" />
-      <div className="flex h-full flex-col px-6 pb-7 pt-4 sm:px-10 lg:mx-auto lg:w-full lg:max-w-[46rem] lg:px-12 lg:pb-10 lg:pt-9 xl:px-14">
-        <div className="flex h-11 items-center justify-between gap-4">
+      {/* Below 1024 pixels the band's column is the form's (max-w-sm), so their edges line up. */}
+      <div className="mx-auto flex h-full w-full max-w-sm flex-col pb-7 pt-4 lg:max-w-[46rem] lg:px-12 lg:py-9 xl:px-14">
+        <div className="flex h-11 shrink-0 items-center justify-between gap-4">
           <PanelLockup />
           <ScreenHelpButton buttonClassName="text-current hover:text-current hover:opacity-75" className="-mr-2 lg:hidden" size="icon" />
         </div>
-        <div className="mt-6 lg:mt-auto lg:pt-10">
-          <p className="max-w-[16ch] text-balance font-heading text-[1.75rem] leading-[1.1] font-semibold tracking-tight sm:max-w-[20ch] sm:text-4xl lg:text-[2.75rem] lg:leading-[1.05] xl:text-5xl">{words(page.headline, "panel.headline")}</p>
+        <div className="mt-6 lg:my-auto lg:py-8">
+          <p className="max-w-[16ch] text-balance font-heading text-[1.75rem] leading-[1.1] font-semibold tracking-tight sm:max-w-[20ch] sm:text-4xl xl:text-[2.75rem] xl:leading-[1.05] 2xl:text-5xl">{words(page.headline, "panel.headline")}</p>
           <p className="mt-3 hidden max-w-md text-[15px] leading-7 text-(--panel-muted) sm:block lg:mt-4 lg:text-[17px]">{words(page.description, "panel.description")}</p>
+          <ul className="mt-10 hidden max-w-md flex-col gap-4 [@media(min-height:40rem)]:lg:flex">
+            {points.map(({ Icon, text }, index) => (
+              <li className="flex items-center gap-3 text-[15px] leading-6 font-medium" key={index}>
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-(--panel-hairline)"><Icon aria-hidden="true" className="size-4" /></span>
+                <span>{text}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <ConversationPreview call={page.exampleCall} className="mt-10 hidden [@media(min-height:46rem)]:lg:block" />
-        <ul className="mt-10 hidden grid-cols-3 gap-6 [@media(min-height:54rem)]:lg:grid">
-          {points.map(({ Icon, text }, index) => (
-            <li className="flex flex-col gap-3 text-sm leading-5 font-medium" key={index}>
-              <span className="grid size-9 place-items-center rounded-full bg-(--panel-hairline)"><Icon aria-hidden="true" className="size-4" /></span>
-              <span>{text}</span>
-            </li>
-          ))}
-        </ul>
+        {/* As tall as the logo's row, so the words sit in the middle of the half, level with the form beside them. */}
+        <div aria-hidden="true" className="hidden h-11 shrink-0 lg:block" />
       </div>
     </section>
   );
@@ -186,54 +194,5 @@ function PanelLockup() {
       </span>
       <span aria-hidden="true" className="truncate font-heading text-lg leading-none font-semibold">{appName}</span>
     </div>
-  );
-}
-
-/**
- * An example call, its lines coming in one after another: what the
- * receptionist does, shown rather than told. A brand's own call takes turns
- * from the caller's first line.
- */
-function ConversationPreview({ call, className }: { call: BrandSignInPage["exampleCall"]; className?: string }) {
-  const { t, i18n } = useTranslation("auth");
-  const locale = resolveLocale(i18n?.resolvedLanguage, i18n?.language);
-  // A Saturday at 10:00, in the reader's own format.
-  const bookedAt = new Intl.DateTimeFormat(intlLocale(locale), { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(Date.UTC(2026, 10, 21, 10));
-  const lines: ReadonlyArray<{ from: "caller" | "agent"; text: string }> = call
-    ? call.lines.map((line, index) => ({ from: index % 2 === 0 ? "caller" : "agent", text: localizedBrandText(line, locale) }))
-    : [
-      { from: "caller", text: t("panel.preview.caller1") },
-      { from: "agent", text: t("panel.preview.agent1") },
-      { from: "caller", text: t("panel.preview.caller2") },
-      { from: "agent", text: t("panel.preview.agent2") },
-    ];
-  const booked = call?.booked ? localizedBrandText(call.booked, locale) : t("panel.preview.booked");
-  const delay = (index: number) => ({ "--rise-delay": `${400 + index * 650}ms` }) as CSSProperties;
-  return (
-    <figure aria-label={t("panel.preview.label")} className={cn("w-full max-w-[27rem] rounded-2xl bg-[#fff] p-4 text-neutral-900 shadow-[0_28px_60px_-24px_rgb(0_0_0/0.45)] ring-1 ring-black/5 dark:bg-neutral-900/90 dark:text-neutral-50 dark:ring-white/10", className)}>
-      <div className="flex items-center gap-3 border-b border-neutral-200/80 pb-3 dark:border-white/10">
-        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-brand-foreground"><PhoneIncoming aria-hidden="true" className="size-4" /></span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm leading-5 font-semibold">{t("panel.preview.title")}</p>
-          <p className="truncate text-xs leading-4 text-neutral-500 dark:text-neutral-400">{t("panel.preview.subtitle")}</p>
-        </div>
-        <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
-          <span aria-hidden="true" className="auth-live-dot size-1.5 rounded-full bg-emerald-500" />
-          {t("panel.preview.status")}
-        </span>
-      </div>
-      <ol className="mt-3 flex flex-col gap-2">
-        {lines.map((line, index) => (
-          <li className={cn("auth-rise flex", line.from === "agent" ? "justify-end" : "justify-start")} key={index} style={delay(index)}>
-            <span className={cn("max-w-[85%] rounded-2xl px-3.5 py-2 text-[13px] leading-5", line.from === "agent" ? "rounded-br-md bg-brand text-brand-foreground" : "rounded-bl-md bg-neutral-100 text-neutral-900 dark:bg-white/10 dark:text-neutral-50")}>{line.text}</span>
-          </li>
-        ))}
-      </ol>
-      <div className="auth-rise mt-3 flex items-center gap-2 rounded-xl bg-neutral-50 px-3 py-2.5 text-xs font-medium dark:bg-white/5" style={delay(lines.length)}>
-        <CalendarCheck aria-hidden="true" className="size-4 text-emerald-600 dark:text-emerald-400" />
-        <span>{booked}</span>
-        <span className="ml-auto text-neutral-500 dark:text-neutral-400">{bookedAt}</span>
-      </div>
-    </figure>
   );
 }

@@ -14,7 +14,7 @@ const article: HelpArticle = {
     "If your email address hasn't been confirmed yet, the app may ask for a 6-digit code it emails you before it lets you in. It asks only once your password is right.",
   ],
   areas: [
-    { name: "The app's panel", description: "On a wide screen, the left half of the page shows the app's logo and name, a headline, what the receptionist does and an example call that plays once. On a phone it's a band above the form with the logo, the name, the headline and the help button." },
+    { name: "The app's panel", description: "On a wide screen, the left half of the page shows the app's logo and name at the top, and in the middle a headline, what the receptionist does and three things it does for you. On a phone it's a band above the form with the logo, the name, the headline and the help button." },
     { name: "Welcome back", description: "The form's title, with **Sign in to your account to continue.** under it. Below are the **Email** and **Password** fields." },
     { name: "Forgot password?", description: "The link beside the **Password** label. It opens the page where you get a reset code by email and choose a new password." },
     { name: "Sign in", description: "Checks your email address and password and signs you in. It reads **Signing in...** while it works, and any problem shows just above it." },

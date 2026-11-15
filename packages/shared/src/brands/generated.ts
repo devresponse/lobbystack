@@ -52,8 +52,7 @@ export const BRANDS: Record<string, BrandDefinition> = {
       "panel": "dark",
       "headline": null,
       "description": null,
-      "points": null,
-      "exampleCall": null
+      "points": null
     }
   },
   "lobbystack": {
@@ -77,8 +76,7 @@ export const BRANDS: Record<string, BrandDefinition> = {
       "panel": "accent",
       "headline": null,
       "description": null,
-      "points": null,
-      "exampleCall": null
+      "points": null
     }
   },
   "realinfobot": {
@@ -150,41 +148,7 @@ export const BRANDS: Record<string, BrandDefinition> = {
           "es": "Agenda visitas y toma mensajes por usted",
           "sr": "Zakazuje razgledanja i prima poruke umesto Vas"
         }
-      ],
-      "exampleCall": {
-        "lines": [
-          {
-            "en": "Hi, is the house on Maple Street still for sale?",
-            "fr": "Bonjour, la maison de la rue des Érables est-elle toujours à vendre?",
-            "es": "Hola, ¿la casa de la calle Los Pinos sigue en venta?",
-            "sr": "Zdravo, da li je kuća u Lipovoj ulici još na prodaju?"
-          },
-          {
-            "en": "Yes, it is. Would you like to see it this Saturday?",
-            "fr": "Oui. Voulez-vous la visiter samedi?",
-            "es": "Sí. ¿Le gustaría verla este sábado?",
-            "sr": "Jeste. Želite li da je pogledate ove subote?"
-          },
-          {
-            "en": "Yes please, in the morning.",
-            "fr": "Oui, en matinée, s'il vous plaît.",
-            "es": "Sí, por favor, en la mañana.",
-            "sr": "Da, molim Vas, pre podne."
-          },
-          {
-            "en": "Done. Your showing is booked for Saturday at 10 am.",
-            "fr": "C'est fait. Votre visite est prévue samedi à 10 h.",
-            "es": "Listo. Su visita quedó agendada para el sábado a las 10.",
-            "sr": "Gotovo. Razgledanje Vam je zakazano za subotu u 10 h."
-          }
-        ],
-        "booked": {
-          "en": "Showing booked",
-          "fr": "Visite planifiée",
-          "es": "Visita agendada",
-          "sr": "Razgledanje zakazano"
-        }
-      }
+      ]
     }
   }
 };

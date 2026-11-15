@@ -30,7 +30,7 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
 | `links.zapier` | An `https://` link on zapier.com: the brand's Zapier invite link, or its page in Zapier's app directory once it's listed. | No Zapier card on the Integrations page. |
 | `links.make` | An `https://` link on make.com: the invite link of the brand's app on Make. | No Make card on the Integrations page. |
 | `environments` | Settings by host label, such as `"dev*": { "appNameSuffix": " (dev)", "indexing": false }`. A pattern ending in `*` matches any first label that starts with it. | The plain brand on every host. |
-| `signInPage` | The panel beside the sign-in and sign-up forms: `panel` (`accent` or `dark`) and the brand's own `headline`, `description`, three `points` and `exampleCall`, each in all four languages ([the signInPage section](#the-signinpage-section)). | The accent panel and the shared words. |
+| `signInPage` | The panel beside the sign-in and sign-up forms: `panel` (`accent` or `dark`) and the brand's own `headline`, `description` and three `points`, each in all four languages ([the signInPage section](#the-signinpage-section)). | The accent panel and the shared words. |
 
 `brands/brand.schema.json` and `brands/index.schema.json` give editors completion and checks.
 
@@ -156,7 +156,7 @@ Businesses' public profile pages put one color behind the chat, or behind the ca
 
 ## Color the sign-in pages
 
-The signed-out pages put the brand beside the form: sign-in, sign-up and its email code step, forgot password, and the pages that links in emails open (password reset, invitation, email change, email verification and account cancellation), and also the OAuth consent page. On a screen 1024 pixels wide or more, the page splits in two: the panel fills the left half from top to bottom, edge to edge with square corners, and the form sits in the right half. The panel holds the logo on a white tile beside the name, a headline and a sentence, an example call whose lines come in one after another, once, and three points about what the receptionist does. The example call shows on screens at least 736 pixels tall and the points on screens at least 864 pixels tall, so the form doesn't scroll on a laptop. On a phone the panel is a band across the top, above the form, with the logo, the name, the help button and the headline, and the sentence from 640 pixels wide. With reduced motion the call's lines are all there at once. The panel shows straight away while the page checks whether the visitor is already signed in.
+The signed-out pages put the brand beside the form: sign-in, sign-up and its email code step, forgot password, and the pages that links in emails open (password reset, invitation, email change, email verification and account cancellation), and also the OAuth consent page. On a screen 1024 pixels wide or more, the page splits in two: the panel fills the left half from top to bottom, edge to edge with square corners, and the form sits in the right half. The panel holds the logo on a white tile beside the name at the top, and a headline, a sentence and three points about what the receptionist does. Those words and the form both sit in the middle of the screen's height, so they line up on every signed-out page, however much the footer under the form holds. The points show on screens at least 640 pixels tall. On a phone or a tablet the panel is a band across the top, above the form, with the logo, the name, the help button and the headline, and the sentence from 640 pixels wide; its words start where the form's do. The panel shows straight away while the page checks whether the visitor is already signed in. Until 2026-11-15 the panel also showed an example call; the maintainer took it out to keep the panel to its words.
 
 One value drives every colour: the brand file's `accentColor`, or the teal, `#0f766e`, without it. `brandPalette` measures its contrast against the light page (white) and the dark page (`#0a0a0a`), and each part uses the accent only where it reads:
 
@@ -180,17 +180,13 @@ A brand can set its own words and a dark panel in `brand.json`. Every part is op
   "panel": "dark",
   "headline": { "en": "The AI receptionist for real estate agents.", "fr": "...", "es": "...", "sr": "..." },
   "description": { "en": "...", "fr": "...", "es": "...", "sr": "..." },
-  "points": [{ "en": "...", "fr": "...", "es": "...", "sr": "..." }, { "...": "..." }, { "...": "..." }],
-  "exampleCall": {
-    "lines": [{ "en": "Hi, is the house on Maple Street still for sale?", "fr": "...", "es": "...", "sr": "..." }, { "...": "..." }],
-    "booked": { "en": "Showing booked", "fr": "...", "es": "...", "sr": "..." }
-  }
+  "points": [{ "en": "...", "fr": "...", "es": "...", "sr": "..." }, { "...": "..." }, { "...": "..." }]
 }
 ```
 
 - `panel`: `accent`, the default, fills the panel with the accent. `dark` makes it near-black with touches of the accent in light mode too, for a brand whose guidelines keep its colour to small areas.
-- The words, each in all four interface languages, `en`, `fr`, `es` and `sr`: `headline` up to 80 characters, `description` (the sentence under it) up to 200, exactly three `points` of up to 80, and `exampleCall` with two to four `lines` of up to 120, the caller's first and then taking turns with the receptionist, and `booked`, up to 40, for the line under the call, which is "Appointment booked" without it. The day and time beside that line, a Saturday at 10:00, follow the reader's language.
-- AlloPlace sets `"panel": "dark"`, since its guidelines keep its yellow to about a tenth of a screen. RealInfoBot sets its own words for real estate agents, with a call about a listing that books a showing.
+- The words, each in all four interface languages, `en`, `fr`, `es` and `sr`: `headline` up to 80 characters, `description` (the sentence under it) up to 200, and exactly three `points` of up to 80. A file that still has the old `exampleCall` part is refused, so take it out.
+- AlloPlace sets `"panel": "dark"`, since its guidelines keep its yellow to about a tenth of a screen. RealInfoBot sets its own words for real estate agents.
 
 `pnpm brands:build` checks the section like the rest of the file, and `brands/brand.schema.json` completes it in editors.
 
@@ -198,7 +194,7 @@ A brand can set its own words and a dark panel in `brand.json`. Every part is op
 
 - `brands/`: the brand folders and the domain index. `packages/shared/src/brands/schema.ts` checks and compiles them; `scripts/write-brands.ts` writes `packages/shared/src/brands/generated.ts`; `packages/shared/src/brands/resolve.ts` picks the brand (`resolveBrand`, `currentBrand`).
 - `packages/shared/src/branding.ts`: the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), the public pages' color (`brandAccentColor`, `readableTextOn`), where the sign-in pages may use the accent (`contrastRatio`, `brandPalette`), and a brand file's words in the reader's language (`localizedBrandText`).
-- `apps/admin/src/components/auth-shell.tsx`: the signed-out pages' layout, the brand's panel and the example call (`AuthShell`), and the accent classes their forms use. `apps/admin/app/theme.css` defines the `brand` colours (`bg-brand`, `text-brand-foreground`, `border-brand-line`) for an element marked `data-brand-scope`, and the panel's styles.
+- `apps/admin/src/components/auth-shell.tsx`: the signed-out pages' layout and the brand's panel (`AuthShell`), and the accent classes their forms use. `apps/admin/app/theme.css` defines the `brand` colours (`bg-brand`, `text-brand-foreground`, `border-brand-line`) for an element marked `data-brand-scope`, and the panel's styles.
 - `packages/db/migrations/0098_deployment_branding.sql`: the one-row table and the two functions. Every runtime role can read the table, but only `app.save_initial_branding()` writes to it. Row level security is forced on it.
 - `packages/domain/src/server/branding.ts`: reads and saves the branding.
 - `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. Where a brand file applies, it never reads the database. If the database can't be read, pages fall back to the default brand, and the error is reported at most once a minute.

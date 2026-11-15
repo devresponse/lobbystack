@@ -8,7 +8,7 @@ import { AuthShell, brandScopeStyle } from "./auth-shell";
 const state = vi.hoisted(() => ({
   language: "en",
   branding: { appName: "Northwind Clinics", logoUrl: null as string | null, ready: true },
-  page: { panel: "accent", headline: null, description: null, points: null, exampleCall: null } as BrandSignInPage,
+  page: { panel: "accent", headline: null, description: null, points: null } as BrandSignInPage,
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/login" }));
@@ -26,7 +26,7 @@ afterEach(() => {
   cleanup();
   state.language = "en";
   state.branding = { appName: "Northwind Clinics", logoUrl: null, ready: true };
-  state.page = { panel: "accent", headline: null, description: null, points: null, exampleCall: null };
+  state.page = { panel: "accent", headline: null, description: null, points: null };
 });
 
 describe("AuthShell", () => {
@@ -37,10 +37,9 @@ describe("AuthShell", () => {
     const brand = within(panel());
     expect(brand.getByText("panel.headline")).toBeTruthy();
     expect(brand.getByText("panel.description")).toBeTruthy();
-    expect(brand.getByText("panel.preview.caller1")).toBeTruthy();
-    expect(brand.getByText("panel.preview.agent2")).toBeTruthy();
-    expect(brand.getByText("panel.preview.booked")).toBeTruthy();
     expect(brand.getByText("panel.points.book")).toBeTruthy();
+    // No example call: the panel is the words alone.
+    expect(panel().querySelector("figure")).toBeNull();
     expect(panel().classList.contains("dark")).toBe(false);
   });
 
@@ -61,30 +60,20 @@ describe("AuthShell", () => {
     expect(screen.queryByLabelText("LobbyStack")).toBeNull();
   });
 
-  it("shows a brand's own words in the reader's language, its own example call and a dark panel", () => {
+  it("shows a brand's own words in the reader's language and a dark panel", () => {
     state.language = "fr";
     state.page = {
       panel: "dark",
       headline: words("The AI receptionist for real estate agents.", "La réceptionniste IA des courtiers immobiliers."),
       description: null,
       points: [words("Answers calls", "Répond aux appels"), words("Learns each listing", "Apprend chaque propriété"), words("Books showings", "Planifie les visites")],
-      exampleCall: { lines: [words("Is it still for sale?", "Est-elle toujours à vendre?"), words("Yes. Saturday?", "Oui. Samedi?"), words("Yes please.", "Oui, merci.")], booked: words("Showing booked", "Visite planifiée") },
     };
     render(<AuthShell title="Bon retour" />);
     const brand = within(panel());
     expect(brand.getByText("La réceptionniste IA des courtiers immobiliers.")).toBeTruthy();
     // A part the brand leaves out keeps the shared words.
     expect(brand.getByText("panel.description")).toBeTruthy();
-    expect(brand.getByText("Apprend chaque propriété")).toBeTruthy();
-    expect(brand.getByText("Visite planifiée")).toBeTruthy();
-    expect(brand.queryByText("panel.preview.caller1")).toBeNull();
-    // The lines take turns from the caller's: the caller's on the left, the receptionist's on the right.
-    const lines = brand.getAllByRole("listitem").filter((item) => item.classList.contains("auth-rise"));
-    expect(lines.map((line) => [line.textContent, line.classList.contains("justify-end")])).toEqual([
-      ["Est-elle toujours à vendre?", false],
-      ["Oui. Samedi?", true],
-      ["Oui, merci.", false],
-    ]);
+    expect(brand.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Répond aux appels", "Apprend chaque propriété", "Planifie les visites"]);
     expect(panel().classList.contains("dark")).toBe(true);
   });
 

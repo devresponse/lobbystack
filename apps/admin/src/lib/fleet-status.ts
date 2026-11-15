@@ -9,7 +9,9 @@ import { logEvent, serviceInstance } from "@lobbystack/telemetry/node";
  * the admin and the worker from their heartbeats in Redis, with each queue's
  * jobs, and answers 503 when a copy went silent, a worker stays unready, or a
  * service has fewer running copies than the check expects. An uptime check
- * that watches it sees the worker too, which has no public address.
+ * that watches it sees the worker too, which has no public address. A copy
+ * that died stays listed under `died` for 24 hours with its last beat, so
+ * what it was doing can still be read the next day.
  *
  * It is off, a 404, until FLEET_STATUS_TOKEN is set on the admin, and takes
  * only that token: as `Authorization: Bearer <token>`, or as `?token=<token>`
@@ -82,6 +84,16 @@ function describeCopy(copy: FleetCopy) {
   };
 }
 
+/** A copy that died: its last beat, when that was, and how long the process had run by then. */
+function describeDied(copy: FleetCopy) {
+  return {
+    ...describeCopy(copy),
+    lastSeenAt: new Date(copy.seenAt).toISOString(),
+    ranForSeconds: Math.max(0, Math.round((copy.seenAt - copy.startedAt) / 1000)),
+    ...(copy.queues ? { queues: copy.queues } : {}),
+  };
+}
+
 export type FleetStatusAnswer = { status: number; body: string | Record<string, unknown> };
 
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -119,6 +131,7 @@ export async function fleetStatus(request: Request, env: Env = process.env): Pro
       problems: summary.problems,
       services: summary.services,
       copies: summary.copies.map(describeCopy),
+      died: summary.died.map(describeDied),
       queues: summary.queues,
       queuesCountedSecondsAgo: summary.queuesCountedMsAgo === null ? null : Math.round(summary.queuesCountedMsAgo / 1000),
     },

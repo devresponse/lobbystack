@@ -104,14 +104,22 @@ const silentWorker = {
   answeredBy: "3f2a9c1e-0000-4000-8000-000000000001",
   checkedAt: "2026-11-15T20:00:00.000Z",
   problems: ["worker copy 9b8d7c6a stopped reporting 95 s ago without shutting down, and no newer copy took its place.", "1 worker copy is running, and 2 are expected."],
-  services: { admin: { running: 1, notReady: 0, draining: 0, silent: 0, expected: 1 }, worker: { running: 1, notReady: 0, draining: 0, silent: 1, expected: 2 } },
+  services: { admin: { running: 1, notReady: 0, draining: 0, silent: 0, died: 0, expected: 1 }, worker: { running: 1, notReady: 0, draining: 0, silent: 1, died: 0, expected: 2 } },
   copies: [
     { service: "admin", replica: "3f2a9c1e-0000-4000-8000-000000000001", state: "running", release: "abc1234", deployment: "dep-1", region, startedAt: "2026-11-15T17:00:00.000Z", lastSeenSecondsAgo: 3, busy: 0.071, rssBytes: 256 * 1_048_576, heapUsedBytes: 120_000_000, db: { open: 5, inUse: 1, waiting: 0, max: 24 } },
     { service: "worker", replica: "5e4d3c2b-0000-4000-8000-000000000002", state: "running", release: "abc1234", deployment: "dep-2", region, startedAt: "2026-11-15T19:30:00.000Z", lastSeenSecondsAgo: 8, busy: 0.412, rssBytes: 384 * 1_048_576, heapUsedBytes: 200_000_000, db: { open: 4, inUse: 2, waiting: 1, max: 12 }, ready: true, activeJobs: 1, liveCalls: 2 },
     { service: "worker", replica: "9b8d7c6a-0000-4000-8000-000000000003", state: "silent", release: "abc1234", deployment: "dep-2", region, startedAt: "2026-11-15T19:30:00.000Z", lastSeenSecondsAgo: 95, busy: 0.2, rssBytes: 300 * 1_048_576, heapUsedBytes: 150_000_000, db: { open: 3, inUse: 0, waiting: 0, max: 12 }, ready: true, activeJobs: 0, liveCalls: 1 },
   ],
+  died: [],
   queues: { critical: { waiting: 4, active: 2, delayed: 1, failed: 9 }, bulk: { waiting: 0, active: 0, delayed: 0, failed: 0 } },
   queuesCountedSecondsAgo: 8,
+};
+// A worker that died five hours before, as the address lists it for 24 hours: its last beat, and when that was.
+const diedWorker = {
+  service: "worker", replica: "7a6b5c4d-0000-4000-8000-000000000004", state: "died", release: "abc1234", deployment: "dep-2", region,
+  startedAt: "2026-11-13T15:00:00.000Z", lastSeenSecondsAgo: 18_000, lastSeenAt: "2026-11-15T15:00:00.000Z", ranForSeconds: 172_800,
+  busy: 0.97, rssBytes: 1_890 * 1_048_576, heapUsedBytes: 1_700_000_000, db: { open: 12, inUse: 11, waiting: 3, max: 12 }, ready: true, activeJobs: 12, liveCalls: 4,
+  queues: { critical: { waiting: 40, active: 12, delayed: 0, failed: 9 } },
 };
 
 function freshWorld(): World {
@@ -412,7 +420,8 @@ describe("devops/scale.mjs", { timeout: 30_000 }, () => {
     expect(result.out).toContain(`What the copies report about themselves (${base}/api/internal/fleet):`);
     expect(result.out).toMatch(/^ {2}admin +3f2a9c1e +running +busy +7% +256 MB +1 of 24 connections +up 3 h$/m);
     expect(result.out).toMatch(/^ {2}worker +5e4d3c2b +running +busy +41% +384 MB +2 of 12 connections, 1 waiting +2 calls, 1 job +up 30 min$/m);
-    expect(result.out).toMatch(/^ {2}worker +9b8d7c6a +silent for 2 min +busy +20% +300 MB +0 of 12 connections +1 call, 0 jobs +up 30 min$/m);
+    // A copy that stopped ran until its last report, not until now.
+    expect(result.out).toMatch(/^ {2}worker +9b8d7c6a +silent for 2 min +busy +20% +300 MB +0 of 12 connections +1 call, 0 jobs +ran 28 min$/m);
     expect(result.out).toContain("  Queues: critical 4 waiting, 2 running, 1 scheduled (counted 8 s ago).");
     expect(result.out).toContain("  Problem: worker copy 9b8d7c6a stopped reporting 95 s ago without shutting down, and no newer copy took its place.");
     expect(result.out).toContain("  Problem: 1 worker copy is running, and 2 are expected.");
@@ -423,6 +432,40 @@ describe("devops/scale.mjs", { timeout: 30_000 }, () => {
     // The admin's own variable gave the address, so Railway wasn't asked for one.
     expect(world.operations).not.toContain("ServiceDomains");
     expect(world.patches).toEqual([]);
+    // No copy died in the last 24 hours, so that list isn't shown.
+    expect(result.out).not.toContain("Copies that died");
+  });
+
+  it("lists the copies that died in the last 24 hours with what each reported last, and raises no problem for them", async () => {
+    Object.assign(named("admin").variables, { APP_BASE_URL: base, FLEET_STATUS_TOKEN: fleetToken });
+    const answer = {
+      ...silentWorker, ok: true, problems: [], copies: silentWorker.copies.slice(0, 2), died: [diedWorker],
+      services: { admin: { running: 1, notReady: 0, draining: 0, silent: 0, died: 0, expected: 1 }, worker: { running: 1, notReady: 0, draining: 0, silent: 0, died: 1, expected: 1 } },
+    };
+    world.fleet = { token: fleetToken, status: 200, body: answer };
+    let result = await scale([]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("  Every copy reports in.");
+    expect(result.out).not.toContain("Problem:");
+    expect(result.out).toContain("Copies that died in the last 24 hours, each with what it reported last:");
+    // How long ago it died, what it held then, how long it had run, and the moment to look for in the logs.
+    expect(result.out).toMatch(/^ {2}worker +7a6b5c4d +died 5 h ago +busy +97% +1890 MB +11 of 12 connections, 3 waiting +4 calls, 12 jobs +ran 2 days +last report 2026-11-15 15:00:00 UTC$/m);
+    expect(result.out).not.toContain("listed.");
+
+    // The address lists the newest 50 and counts them all.
+    answer.services.worker.died = 62;
+    answer.services.admin.died = 1;
+    result = await scale([]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("  62 older ones aren't listed.");
+
+    // An admin from before the list sends none: nothing is said about it.
+    const { died: _died, ...older } = answer;
+    world.fleet = { token: fleetToken, status: 200, body: older };
+    result = await scale([]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("  Every copy reports in.");
+    expect(result.out).not.toContain("Copies that died");
   });
 
   it("says that every copy reports in when the status address finds no problem", async () => {

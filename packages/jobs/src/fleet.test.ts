@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FLEET_FORGET_MS, FLEET_HANDOVER_MS, FLEET_STALE_MS, startFleetHeartbeat, summarizeFleet, type FleetRecord } from "./fleet";
+import { FLEET_DIED_MAX, FLEET_DIED_MS, FLEET_FORGET_MS, FLEET_HANDOVER_MS, FLEET_STALE_MS, startFleetHeartbeat, summarizeFleet, type FleetRecord } from "./fleet";
 
 const NOW = 1_800_000_000_000;
 
@@ -31,9 +31,10 @@ describe("what the heartbeats say about the fleet", () => {
     expect(summary.ok).toBe(true);
     expect(summary.problems).toEqual([]);
     expect(summary.services).toEqual({
-      admin: { running: 2, notReady: 0, draining: 0, silent: 0, expected: 1 },
-      worker: { running: 2, notReady: 0, draining: 0, silent: 0, expected: 1 },
+      admin: { running: 2, notReady: 0, draining: 0, silent: 0, died: 0, expected: 1 },
+      worker: { running: 2, notReady: 0, draining: 0, silent: 0, died: 0, expected: 1 },
     });
+    expect(summary.died).toEqual([]);
     expect(summary.copies.map((item) => `${item.service}:${item.replica}:${item.state}`)).toEqual(["admin:a1:running", "admin:a2:running", "worker:w1:running", "worker:w2:running"]);
     expect(summary.queues).toEqual(queues);
     expect(summary.queuesCountedMsAgo).toBe(2_000);
@@ -90,14 +91,55 @@ describe("what the heartbeats say about the fleet", () => {
     ]);
 
     expect(summary.ok).toBe(true);
-    expect(summary.copies.find((item) => item.replica === "a1")?.state).toBe("left");
+    // It never said it was shutting down, so it counts as a copy that died, and its last beat is kept.
+    expect(summary.copies.map((item) => item.replica)).toEqual(["a2", "w1"]);
+    expect(summary.died.map((item) => `${item.replica}:${item.state}`)).toEqual(["a1:died"]);
   });
 
   it("raises no alarm once a crashed copy's replacement has started, under a new name", () => {
-    const summary = summarize([admin("a1"), worker("w1", { seenAt: NOW - 100_000 }), worker("w2", { startedAt: NOW - 80_000 })]);
+    const summary = summarize([admin("a1"), worker("w1", { seenAt: NOW - 100_000, liveCalls: 2, activeJobs: 1 }), worker("w2", { startedAt: NOW - 80_000 })]);
 
     expect(summary.ok).toBe(true);
-    expect(summary.copies.find((item) => item.replica === "w1")?.state).toBe("left");
+    expect(summary.copies.map((item) => `${item.replica}:${item.state}`)).toEqual(["a1:running", "w2:running"]);
+    // The copy that died is listed with its last beat: what it held when it stopped.
+    expect(summary.died).toEqual([expect.objectContaining({ replica: "w1", state: "died", lastSeenMsAgo: 100_000, liveCalls: 2, activeJobs: 1 })]);
+    expect(summary.services.worker).toMatchObject({ running: 1, silent: 0, died: 1 });
+  });
+
+  it("raises no alarm once the host has started a crashed copy again under the same name, and keeps the process that died", () => {
+    // As a server's Docker does: the container keeps its name, and the process in it is new.
+    const records = [
+      admin("a1"),
+      worker("w1", { startedAt: NOW - 3_600_000, seenAt: NOW - 50_000, liveCalls: 3, rssBytes: 900_000_000 }),
+      worker("w1", { startedAt: NOW - 45_000, liveCalls: 0 }),
+    ];
+    const summary = summarize(records);
+
+    expect(summary.ok).toBe(true);
+    expect(summary.services.worker).toMatchObject({ running: 1, silent: 0, died: 1 });
+    expect(summary.copies.filter((item) => item.service === "worker")).toEqual([expect.objectContaining({ replica: "w1", state: "running", startedAt: NOW - 45_000 })]);
+    expect(summary.died).toEqual([expect.objectContaining({ replica: "w1", state: "died", startedAt: NOW - 3_600_000, liveCalls: 3, rssBytes: 900_000_000 })]);
+
+    // Until three beats are missed the process that died still reads as running, as any copy that just died does.
+    const justNow = summarize([admin("a1"), worker("w1", { startedAt: NOW - 3_600_000, seenAt: NOW - 12_000 }), worker("w1", { startedAt: NOW - 8_000, ready: false })]);
+    expect(justNow.ok).toBe(true);
+    expect(justNow.services.worker).toMatchObject({ running: 1, notReady: 1, died: 0 });
+  });
+
+  it("reports only the last process of a copy that kept crashing until the host gave up", () => {
+    const summary = summarize([
+      admin("a1"),
+      worker("w1", { startedAt: NOW - 300_000, seenAt: NOW - 240_000 }),
+      worker("w1", { startedAt: NOW - 230_000, seenAt: NOW - 170_000 }),
+      worker("w1", { startedAt: NOW - 160_000, seenAt: NOW - 100_000 }),
+    ]);
+
+    expect(summary.problems).toEqual([
+      "worker copy w1 stopped reporting 100 s ago without shutting down, and no newer copy took its place.",
+      "No worker copy is running.",
+    ]);
+    expect(summary.services.worker).toMatchObject({ running: 0, silent: 1, died: 2 });
+    expect(summary.died.map((item) => item.lastSeenMsAgo)).toEqual([170_000, 240_000]);
   });
 
   it("still reports a copy of a newer deployment that died while the older one serves", () => {
@@ -140,6 +182,14 @@ describe("what the heartbeats say about the fleet", () => {
     const died = summarize([admin("a1"), worker("w1", { seenAt: NOW - 45_000 })]);
     expect(died.problems).toEqual(["worker copy w1 stopped reporting 45 s ago without shutting down, and no newer copy took its place.", "No worker copy is running."]);
 
+    // Once the host has started it again under the same name, the new process counts for itself: one that
+    // isn't ready after its two minutes is reported, whatever the process before it said.
+    const startedAgain = summarize([admin("a1"), worker("w1", { draining: true, drainingForMs: 5_000, seenAt: NOW - 45_000, startedAt: NOW - 3_600_000 }), worker("w1", { startedAt: NOW - 40_000 })]);
+    expect(startedAgain.ok).toBe(true);
+    expect(startedAgain.copies.filter((item) => item.service === "worker").map((item) => item.state)).toEqual(["left", "running"]);
+    const stuckAgain = summarize([admin("a1"), worker("w1", { draining: true, drainingForMs: 5_000, seenAt: NOW - 45_000, startedAt: NOW - 3_600_000 }), worker("w1", { startedAt: NOW - 40_000, seenAt: NOW - 35_000 })]);
+    expect(stuckAgain.problems).toEqual(["worker copy w1 stopped reporting 35 s ago without shutting down, and no newer copy took its place.", "No worker copy is running."]);
+
     // One of two that was taken away counts for those two minutes too, then shows as missing.
     const takenAway = [admin("a1"), worker("w1"), worker("w2", { draining: true, drainingForMs: 5_000, seenAt: NOW - 45_000 })];
     expect(summarize(takenAway, { worker: 2 }).ok).toBe(true);
@@ -167,10 +217,46 @@ describe("what the heartbeats say about the fleet", () => {
     expect(summarize([admin("a1")], { worker: 0 }).problems).toEqual(["No worker copy is running."]);
   });
 
-  it("forgets a copy 10 minutes after its last beat", () => {
-    const summary = summarize([admin("a1"), worker("w1"), worker("w2", { seenAt: NOW - FLEET_FORGET_MS - 1 })]);
+  it("forgets a copy that left 10 minutes after its last beat", () => {
+    const summary = summarize([admin("a1"), worker("w1"), worker("w2", { draining: true, seenAt: NOW - FLEET_FORGET_MS - 1 })]);
 
     expect(summary.ok).toBe(true);
+    expect(summary.copies.map((item) => item.replica)).toEqual(["a1", "w1"]);
+    expect(summary.died).toEqual([]);
+  });
+
+  it("stops reporting a copy that died after 10 minutes, and keeps its last beat for 24 hours", () => {
+    const dead = (seenAt: number) => worker("w2", { seenAt, startedAt: NOW - 2 * FLEET_DIED_MS, liveCalls: 4, busy: 0.97 });
+
+    // Nothing took its place: a problem for 10 minutes, as before.
+    const early = summarize([admin("a1"), worker("w1", { startedAt: NOW - 2 * FLEET_DIED_MS }), dead(NOW - FLEET_FORGET_MS + 1_000)]);
+    expect(early.problems).toEqual(["worker copy w2 stopped reporting 599 s ago without shutting down, and no newer copy took its place."]);
+    expect(early.copies.find((item) => item.replica === "w2")?.state).toBe("silent");
+    expect(early.died).toEqual([]);
+
+    // Then no problem by itself, and only the number of running copies still tells.
+    const later = [admin("a1"), worker("w1", { startedAt: NOW - 2 * FLEET_DIED_MS }), dead(NOW - FLEET_FORGET_MS - 1)];
+    expect(summarize(later).ok).toBe(true);
+    expect(summarize(later, { worker: 2 }).problems).toEqual(["1 worker copy is running, and 2 are expected."]);
+    expect(summarize(later).copies.map((item) => item.replica)).toEqual(["a1", "w1"]);
+    expect(summarize(later).died).toEqual([expect.objectContaining({ replica: "w2", state: "died", liveCalls: 4, busy: 0.97 })]);
+
+    // Still there the next day, and gone after 24 hours.
+    expect(summarize([admin("a1"), worker("w1"), dead(NOW - FLEET_DIED_MS + 60_000)]).died.map((item) => item.replica)).toEqual(["w2"]);
+    const forgotten = summarize([admin("a1"), worker("w1"), dead(NOW - FLEET_DIED_MS - 1)]);
+    expect(forgotten.died).toEqual([]);
+    expect(forgotten.services.worker.died).toBe(0);
+  });
+
+  it("lists the newest 50 of the copies that died, and counts them all", () => {
+    const dead = Array.from({ length: FLEET_DIED_MAX + 7 }, (_, index) => worker(`gone-${index}`, { seenAt: NOW - 3_600_000 - index * 1_000 }));
+    const summary = summarize([admin("a1"), worker("w1"), ...dead]);
+
+    expect(summary.ok).toBe(true);
+    expect(summary.services.worker.died).toBe(FLEET_DIED_MAX + 7);
+    expect(summary.died).toHaveLength(FLEET_DIED_MAX);
+    expect(summary.died[0]?.replica).toBe("gone-0");
+    expect(summary.died.at(-1)?.replica).toBe(`gone-${FLEET_DIED_MAX - 1}`);
     expect(summary.copies.map((item) => item.replica)).toEqual(["a1", "w1"]);
   });
 });

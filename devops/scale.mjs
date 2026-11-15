@@ -30,8 +30,9 @@
 // address (GET /api/internal/fleet, docs/features/observability.md) gives what every copy reports
 // about itself every 10 seconds: whether it runs, how busy its one thread is, its memory, its
 // database connections, a worker's calls and jobs, and each queue's jobs. A copy that went silent is
-// named as a problem. The script asks that address with the admin's FLEET_STATUS_TOKEN, which it
-// reads from the admin's variables, sends only to that address over HTTPS, and never prints.
+// named as a problem, and a copy that died in the last 24 hours is listed with what it reported
+// last. The script asks that address with the admin's FLEET_STATUS_TOKEN, which it reads from the
+// admin's variables, sends only to that address over HTTPS, and never prints.
 // Neither part stops the run: where Railway or the admin doesn't answer, it says so and goes on.
 //
 // It needs a Railway token, which it reads from the environment or asks for, and never saves or
@@ -603,6 +604,13 @@ async function printFleet(where, services) {
   const problems = Array.isArray(body.problems) ? body.problems : [];
   if (!problems.length) console.log("  Every copy reports in.");
   for (const problem of problems) console.log(`  Problem: ${problem}`);
+  // An admin from before the list of copies that died sends none.
+  const died = Array.isArray(body.died) ? body.died : [];
+  if (!died.length) return;
+  console.log("Copies that died in the last 24 hours, each with what it reported last:");
+  for (const copy of died) console.log(`  ${describeCopy(copy, now)}`);
+  const all = Object.values(body.services ?? {}).reduce((sum, service) => sum + (Number(service?.died) || 0), 0);
+  if (all > died.length) console.log(`  ${count(all - died.length, "older one")} ${all - died.length === 1 ? "isn't" : "aren't"} listed.`);
 }
 
 /** The admin's address from Railway: its own domain first, else the one Railway gave the service. */
@@ -624,6 +632,7 @@ function describeCopy(copy, now) {
     draining: `shutting down for ${span(Number(copy.drainingForSeconds) || 0)}`,
     silent: `silent for ${span(seen)}`,
     left: `left ${span(seen)} ago`,
+    died: `died ${span(seen)} ago`,
   }[copy.state] ?? String(copy.state);
   const parts = [
     `${String(copy.service).padEnd(8)} ${shortId(String(copy.replica)).padEnd(10)} ${state.padEnd(24)}`,
@@ -633,7 +642,14 @@ function describeCopy(copy, now) {
   if (copy.db) parts.push(`${copy.db.inUse} of ${copy.db.max} connections${copy.db.waiting ? `, ${copy.db.waiting} waiting` : ""}`);
   if (copy.service === "worker") parts.push(`${count(Number(copy.liveCalls) || 0, "call")}, ${count(Number(copy.activeJobs) || 0, "job")}`);
   const started = Date.parse(copy.startedAt);
-  if (Number.isFinite(started)) parts.push(`up ${span(Math.max(0, Math.round((now - started) / 1000)))}`);
+  // A copy that stopped ran until its last report, not until now.
+  const stopped = ["silent", "left", "died"].includes(copy.state);
+  if (Number.isFinite(started)) parts.push(`${stopped ? "ran" : "up"} ${span(Math.max(0, Math.round((now - started) / 1000) - (stopped ? seen : 0)))}`);
+  // The moment to look for in the host's logs.
+  if (copy.state === "died") {
+    const last = Date.parse(copy.lastSeenAt);
+    parts.push(`last report ${new Date(Number.isFinite(last) ? last : now - seen * 1000).toISOString().slice(0, 19).replace("T", " ")} UTC`);
+  }
   return parts.join("   ");
 }
 

@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { apiKeys, billingAccounts, billingPackPlans, billingPacks, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, outboxMessages, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, auditLogs, billingAccounts, billingPackPlans, billingPacks, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, outboxMessages, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { findAvailability } from "./booking";
 import { generateApiKey } from "./publicApi/apiKeys";
-import { acceptInvitation, createBusiness, insertInvitationInTransaction, inviteMember, listUserBusinesses, listUserBusinessesWithAllowance, previewInvitation, removeMember } from "./tenancy";
+import { acceptInvitation, createBusiness, insertInvitationInTransaction, inviteMember, listUserBusinesses, listUserBusinessesWithAllowance, operatorAudit, previewInvitation, removeMember, revokeInvitation, updateMemberRole } from "./tenancy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -272,9 +272,76 @@ describe.skipIf(!client)("team membership", () => {
     const accept = (person: { id: string; email: string }, token: string) => acceptInvitation(context, { userId: person.id, tokenHash: hash(token), email: person.email, emailVerified: true });
     const listMembers = async (userId: string) => (await withBusinessTransaction(context.db, { userId, businessId, actorType: "operator" }, (inner) => inner.execute<{ membership_id: string; user_id: string; role: string }>(sql`select membership_id, user_id, role from app.list_business_members(${businessId}::uuid)`))).rows;
     /** A claim link from the owner, as the API's POST /team/claim-link makes one. */
-    const claimLink = async (email: string) => (await withBusinessTransaction(context.db, { userId: owner.id, businessId, actorType: "operator" }, (inner) => insertInvitationInTransaction(inner, { businessId, invitedByUserId: owner.id, normalizedEmail: email, role: "business_owner", transfersOwnership: true }))).token;
-    return { context, businessId, people, invite, accept, listMembers, claimLink };
+    const claimLink = async (email: string) => (await withBusinessTransaction(context.db, { userId: owner.id, businessId, actorType: "operator" }, (inner) => insertInvitationInTransaction(inner, { businessId, invitedByUserId: owner.id, normalizedEmail: email, role: "business_owner", transfersOwnership: true, audit: operatorAudit(owner.id) }))).token;
+    /** The business's team rows in the audit log, read as the migrator; the app role acts again after. */
+    const teamAudit = async () => {
+      await tx.execute(sql`reset role`);
+      const rows = await tx.select({ eventType: auditLogs.eventType, actorUserId: auditLogs.actorUserId, entityType: auditLogs.entityType, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), like(auditLogs.eventType, "team.%")));
+      await tx.execute(sql`set local role lobbystack_app`);
+      return rows;
+    };
+    return { context, businessId, people, invite, accept, listMembers, claimLink, teamAudit };
   }
+
+  it("records each team change made in the dashboard in the audit log, once, with who made it", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner, admin, viewer, invitee], invite, accept, listMembers, teamAudit } = await seedTeam(tx, ["Ana", "Ben", "Cy", "Dee"]);
+      await accept(admin!, await invite(owner!.id, admin!.email, "business_admin"));
+      await accept(viewer!, await invite(admin!.id, viewer!.email, "viewer"));
+      const { invitationId: openInvitation } = await inviteMember(context, { userId: owner!.id, businessId, email: invitee!.email, role: "viewer" });
+      await revokeInvitation(context, { userId: admin!.id, businessId, invitationId: openInvitation });
+      const generated = generateApiKey();
+      await withBusinessTransaction(context.db, { userId: admin!.id, businessId, actorType: "operator" }, (inner) => inner.insert(apiKeys).values({ businessId, name: "Ben's key", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["calls:read"], createdByUserId: admin!.id }));
+      const members = await listMembers(owner!.id);
+      const adminMembership = members.find((row) => row.user_id === admin!.id)!.membership_id;
+      const viewerMembership = members.find((row) => row.user_id === viewer!.id)!.membership_id;
+      await updateMemberRole(context, { userId: owner!.id, businessId, membershipId: adminMembership, role: "viewer" });
+      // The role the member already has saves and records nothing.
+      await updateMemberRole(context, { userId: owner!.id, businessId, membershipId: adminMembership, role: "viewer" });
+      await removeMember(context, { userId: owner!.id, businessId, membershipId: viewerMembership });
+
+      const rows = await teamAudit();
+      expect(rows).toHaveLength(8);
+      expect(rows).toEqual(expect.arrayContaining([
+        { eventType: "team.invitation_created", actorUserId: owner!.id, entityType: "business_invitation", entityId: expect.any(String), payload: { actor: "operator", role: "business_admin" } },
+        { eventType: "team.invitation_created", actorUserId: admin!.id, entityType: "business_invitation", entityId: expect.any(String), payload: { actor: "operator", role: "viewer" } },
+        { eventType: "team.invitation_created", actorUserId: owner!.id, entityType: "business_invitation", entityId: openInvitation, payload: { actor: "operator", role: "viewer" } },
+        { eventType: "team.invitation_accepted", actorUserId: admin!.id, entityType: "business_invitation", entityId: expect.any(String), payload: { actor: "operator", role: "business_admin" } },
+        { eventType: "team.invitation_accepted", actorUserId: viewer!.id, entityType: "business_invitation", entityId: expect.any(String), payload: { actor: "operator", role: "viewer" } },
+        { eventType: "team.invitation_revoked", actorUserId: admin!.id, entityType: "business_invitation", entityId: openInvitation, payload: { actor: "operator", role: "viewer" } },
+        { eventType: "team.member_updated", actorUserId: owner!.id, entityType: "business_membership", entityId: adminMembership, payload: { actor: "operator", memberUserId: admin!.id, role: "viewer", previousRole: "business_admin", apiKeysRevoked: 1 } },
+        { eventType: "team.member_removed", actorUserId: owner!.id, entityType: "business_membership", entityId: viewerMembership, payload: { actor: "operator", memberUserId: viewer!.id, role: "viewer", invitationsRevoked: 0, apiKeysRevoked: 0 } },
+      ]));
+      // No row names anyone by email.
+      expect(JSON.stringify(rows)).not.toContain("@example.invalid");
+    });
+  });
+
+  it("records a handover: the claim link, the new owner taking it, and the sender leaving the team", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner, claimant], claimLink, listMembers, teamAudit } = await seedTeam(tx, ["Ana", "Ben"]);
+      const ownerMembership = (await listMembers(owner!.id)).find((row) => row.user_id === owner!.id)!.membership_id;
+      const token = await claimLink(claimant!.email);
+      await expect(acceptInvitation(context, { userId: claimant!.id, tokenHash: hash(token), email: claimant!.email, emailVerified: true })).resolves.toMatchObject({ businessId, role: "business_owner" });
+
+      const rows = await teamAudit();
+      expect(rows).toHaveLength(3);
+      expect(rows).toEqual(expect.arrayContaining([
+        { eventType: "team.claim_link_created", actorUserId: owner!.id, entityType: "business_invitation", entityId: expect.any(String), payload: { actor: "operator", role: "business_owner" } },
+        { eventType: "team.invitation_accepted", actorUserId: claimant!.id, entityType: "business_invitation", entityId: expect.any(String), payload: { actor: "operator", role: "business_owner", transfersOwnership: true } },
+        { eventType: "team.member_removed", actorUserId: claimant!.id, entityType: "business_membership", entityId: ownerMembership, payload: { actor: "system", reason: "handover", memberUserId: owner!.id, role: "business_owner", invitationsRevoked: 0, apiKeysRevoked: 0 } },
+      ]));
+    });
+  });
+
+  it("records that an owner who accepts a viewer invitation keeps their role", async () => {
+    await rollbackTest(async (tx) => {
+      const { people: [owner, admin], invite, accept, teamAudit } = await seedTeam(tx, ["Ana", "Ben"]);
+      await accept(admin!, await invite(owner!.id, admin!.email, "business_admin"));
+      await accept(owner!, await invite(admin!.id, owner!.email, "viewer"));
+      expect((await teamAudit()).filter((row) => row.eventType === "team.invitation_accepted" && row.actorUserId === owner!.id).map((row) => row.payload)).toEqual([{ actor: "operator", role: "viewer", keptRole: "business_owner" }]);
+    });
+  });
 
   it("lists other active members to the owner, and removing a member revokes their pending invitations", async () => {
     await rollbackTest(async (tx) => {
@@ -298,7 +365,7 @@ describe.skipIf(!client)("team membership", () => {
 
   it("revokes the pending invitations and API keys of an admin who removes themselves", async () => {
     await rollbackTest(async (tx) => {
-      const { context, businessId, people: [owner, admin, alt], invite, accept, listMembers } = await seedTeam(tx, ["Ana", "Ben", "Alt"]);
+      const { context, businessId, people: [owner, admin, alt], invite, accept, listMembers, teamAudit } = await seedTeam(tx, ["Ana", "Ben", "Alt"]);
       await accept(admin!, await invite(owner!.id, admin!.email, "business_admin"));
       const sentByAdmin = await invite(admin!.id, alt!.email, "viewer");
       const generated = generateApiKey();
@@ -309,6 +376,10 @@ describe.skipIf(!client)("team membership", () => {
 
       expect((await listMembers(owner!.id)).map((row) => row.user_id)).toEqual([owner!.id]);
       await expect(accept(alt!, sentByAdmin)).rejects.toThrow("Invitation is invalid or expired.");
+      // The audit row is written while they're still a member, so row-level security lets them record leaving.
+      expect((await teamAudit()).filter((row) => row.eventType === "team.member_removed")).toEqual([
+        { eventType: "team.member_removed", actorUserId: admin!.id, entityType: "business_membership", entityId: adminMembership.membership_id, payload: { actor: "operator", memberUserId: admin!.id, role: "business_admin", invitationsRevoked: 1, apiKeysRevoked: 1 } },
+      ]);
       await tx.execute(sql`reset role`);
       const keys = await tx.select({ revokedAt: apiKeys.revokedAt, revokedBy: apiKeys.revokedByUserId }).from(apiKeys).where(eq(apiKeys.businessId, businessId));
       expect(keys).toEqual([{ revokedAt: expect.any(Date), revokedBy: admin!.id }]);

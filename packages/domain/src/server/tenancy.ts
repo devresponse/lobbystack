@@ -290,6 +290,11 @@ export async function updateBusiness(
 /** Who changed the business, for the audit log: the account, and the API key or grant that acted for it. */
 export type BusinessChangeAudit = { actorUserId: string | null; payload?: Record<string, unknown> };
 
+/** Who made a change in the dashboard, for its audit row: the person signed in. */
+export function operatorAudit(userId: string): BusinessChangeAudit {
+  return { actorUserId: userId, payload: { actor: "operator" } };
+}
+
 /** Updates basic business fields and refreshes the receptionist's snapshot. Callers authorize first. */
 export async function updateBusinessInTransaction(
   tx: DatabaseTransaction,
@@ -370,14 +375,38 @@ export function invitationUrl(token: string): string {
   return `${process.env.APP_BASE_URL ?? "http://localhost"}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
+type TeamAuditEvent = "team.invitation_created" | "team.claim_link_created" | "team.invitation_revoked" | "team.invitation_accepted" | "team.member_updated" | "team.member_removed";
+
 /**
- * Records an invitation the caller may send and queues its email. The email
- * must already be normalized and valid. It names the business and whoever sent
- * it, and is written in `locale`, or in English without one.
+ * Writes a team change's audit row in the transaction that makes the change,
+ * so the dashboard and the v1 API record each change once, the same way. The
+ * payload holds IDs, roles and counts, never an email address, and names the
+ * member's account, since their membership row goes if the business is
+ * deleted and its audit log stays.
+ */
+async function auditTeamChange(
+  tx: DatabaseTransaction,
+  input: { businessId: string; audit: BusinessChangeAudit; eventType: TeamAuditEvent; entityType: "business_invitation" | "business_membership"; entityId: string; payload: Record<string, unknown> },
+): Promise<void> {
+  await tx.insert(auditLogs).values({
+    businessId: input.businessId,
+    ...(input.audit.actorUserId ? { actorUserId: input.audit.actorUserId } : {}),
+    eventType: input.eventType,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    payload: { ...input.audit.payload, ...input.payload },
+  });
+}
+
+/**
+ * Records an invitation the caller may send, with its audit row, and queues
+ * its email. The email must already be normalized and valid. It names the
+ * business and whoever sent it, and is written in `locale`, or in English
+ * without one. An invitation that hands the business over is a claim link.
  */
 export async function insertInvitationInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; invitedByUserId: string; normalizedEmail: string; role: BusinessRole; transfersOwnership?: boolean; locale?: InterfaceLocale | undefined },
+  input: { businessId: string; invitedByUserId: string; normalizedEmail: string; role: BusinessRole; transfersOwnership?: boolean; locale?: InterfaceLocale | undefined; audit: BusinessChangeAudit },
 ): Promise<{ invitationId: string; token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString("base64url");
   const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -394,6 +423,7 @@ export async function insertInvitationInTransaction(
     expiresAt,
     transfersOwnership: input.transfersOwnership ?? false,
   });
+  await auditTeamChange(tx, { businessId: input.businessId, audit: input.audit, eventType: input.transfersOwnership ? "team.claim_link_created" : "team.invitation_created", entityType: "business_invitation", entityId: invitationId, payload: { role: input.role } });
   const business = (await tx.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
   const inviter = (await tx.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, input.invitedByUserId)).limit(1))[0];
   const url = invitationUrl(token);
@@ -438,7 +468,7 @@ export async function inviteMember(
     actorType: "operator",
   }, async (tx) => {
     await requireBusinessAdmin(tx, { userId: input.userId, businessId: input.businessId });
-    const { invitationId, token } = await insertInvitationInTransaction(tx, { businessId: input.businessId, invitedByUserId: input.userId, normalizedEmail, role: input.role, locale: input.locale });
+    const { invitationId, token } = await insertInvitationInTransaction(tx, { businessId: input.businessId, invitedByUserId: input.userId, normalizedEmail, role: input.role, locale: input.locale, audit: operatorAudit(input.userId) });
     return { invitationId, token };
   });
 }
@@ -513,16 +543,19 @@ export async function acceptInvitation(
         target: [businessMemberships.businessId, businessMemberships.userId],
         set: { role: "business_owner", status: "active", updatedAt: new Date() },
       });
+      await auditTeamChange(tx, { businessId: invitation.businessId, audit: operatorAudit(input.userId), eventType: "team.invitation_accepted", entityType: "business_invitation", entityId: invitation.id, payload: { role: "business_owner", transfersOwnership: true } });
       // The business is theirs now, so the account that set it up loses its access:
       // its place on the team, the invitations it sent (it holds their links), its
       // API keys for the business, any partner's platform-key link to it, and the
       // webhooks and calendars that would keep sending it the business's data.
       let turnedOff: HandoverTurnedOff | undefined;
       if (invitation.invitedByUserId !== input.userId) {
-        await tx.update(businessMemberships).set({ status: "removed", updatedAt: new Date() }).where(and(eq(businessMemberships.businessId, invitation.businessId), eq(businessMemberships.userId, invitation.invitedByUserId), eq(businessMemberships.status, "active")));
-        await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.businessId, invitation.businessId), eq(businessInvitations.invitedByUserId, invitation.invitedByUserId), eq(businessInvitations.status, "pending")));
+        const [sender] = await tx.update(businessMemberships).set({ status: "removed", updatedAt: new Date() }).where(and(eq(businessMemberships.businessId, invitation.businessId), eq(businessMemberships.userId, invitation.invitedByUserId), eq(businessMemberships.status, "active"))).returning({ id: businessMemberships.id, role: businessMemberships.role });
+        const invitationsRevoked = (await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.businessId, invitation.businessId), eq(businessInvitations.invitedByUserId, invitation.invitedByUserId), eq(businessInvitations.status, "pending"))).returning({ id: businessInvitations.id })).length;
         turnedOff = await turnOffSenderConnections(tx, { businessId: invitation.businessId, senderUserId: invitation.invitedByUserId, ownerUserId: input.userId });
-        await tx.update(apiKeys).set({ revokedAt: new Date(), revokedByUserId: input.userId, updatedAt: new Date() }).where(and(eq(apiKeys.businessId, invitation.businessId), eq(apiKeys.createdByUserId, invitation.invitedByUserId), isNull(apiKeys.revokedAt)));
+        const apiKeysRevoked = await revokeMemberApiKeys(tx, { businessId: invitation.businessId, userId: invitation.invitedByUserId, revokedByUserId: input.userId });
+        // The new owner's claim took the sender off the team, as turnOffSenderConnections records its part.
+        if (sender) await auditTeamChange(tx, { businessId: invitation.businessId, audit: { actorUserId: input.userId, payload: { actor: "system", reason: "handover" } }, eventType: "team.member_removed", entityType: "business_membership", entityId: sender.id, payload: { memberUserId: invitation.invitedByUserId, role: sender.role, invitationsRevoked, apiKeysRevoked } });
         await tx.execute(sql`select app.finish_business_handover(${invitation.businessId}::uuid, ${invitation.invitedByUserId}::uuid)`);
       }
       // As with a claimed prospect demo, the dashboard opens on the business they now own.
@@ -541,6 +574,7 @@ export async function acceptInvitation(
       setWhere: ne(businessMemberships.status, "active"),
     }).returning({ role: businessMemberships.role });
     const role = joined?.role ?? (await tx.select({ role: businessMemberships.role }).from(businessMemberships).where(and(eq(businessMemberships.businessId, invitation.businessId), eq(businessMemberships.userId, input.userId))).limit(1))[0]!.role;
+    await auditTeamChange(tx, { businessId: invitation.businessId, audit: operatorAudit(input.userId), eventType: "team.invitation_accepted", entityType: "business_invitation", entityId: invitation.id, payload: { role: invitation.role, ...(role !== invitation.role ? { keptRole: role } : {}) } });
     return { businessId: invitation.businessId, role };
   });
 }
@@ -564,7 +598,8 @@ export async function previewInvitation(
   });
 }
 
-export type TeamChangeOutcome = "changed" | "not_found" | "final_owner";
+/** "unchanged" when the member already has the role asked for: nothing is saved or audited. */
+export type TeamChangeOutcome = "changed" | "unchanged" | "not_found" | "final_owner";
 
 /** Whether the active membership is the business's last active owner. The caller holds the team lock. */
 async function isFinalOwner(tx: DatabaseTransaction, businessId: string, role: string): Promise<boolean> {
@@ -578,45 +613,56 @@ async function isFinalOwner(tx: DatabaseTransaction, businessId: string, role: s
  * make keys, and a key keeps every scope it was given, so a member who stops
  * being one, or leaves, keeps none of them.
  */
-async function revokeMemberApiKeys(tx: DatabaseTransaction, input: { businessId: string; userId: string; revokedByUserId?: string | undefined }): Promise<void> {
-  await tx.update(apiKeys).set({ revokedAt: new Date(), revokedByUserId: input.revokedByUserId ?? null, updatedAt: new Date() }).where(and(eq(apiKeys.businessId, input.businessId), eq(apiKeys.createdByUserId, input.userId), isNull(apiKeys.revokedAt)));
+async function revokeMemberApiKeys(tx: DatabaseTransaction, input: { businessId: string; userId: string; revokedByUserId?: string | undefined }): Promise<number> {
+  const revoked = await tx.update(apiKeys).set({ revokedAt: new Date(), revokedByUserId: input.revokedByUserId ?? null, updatedAt: new Date() }).where(and(eq(apiKeys.businessId, input.businessId), eq(apiKeys.createdByUserId, input.userId), isNull(apiKeys.revokedAt))).returning({ id: apiKeys.id });
+  return revoked.length;
 }
 
-/** Changes an active member's role. A business always keeps an owner, and a member demoted below admin loses their API keys. */
-export async function updateMemberRoleInTransaction(tx: DatabaseTransaction, input: { businessId: string; membershipId: string; role: Exclude<BusinessRole, "business_owner">; actorUserId?: string | undefined }): Promise<TeamChangeOutcome> {
+/**
+ * Changes an active member's role, with its audit row. A business always
+ * keeps an owner, and a member demoted below admin loses their API keys.
+ * `actorUserId` revokes them; `audit` says who made the change.
+ */
+export async function updateMemberRoleInTransaction(tx: DatabaseTransaction, input: { businessId: string; membershipId: string; role: Exclude<BusinessRole, "business_owner">; actorUserId?: string | undefined; audit: BusinessChangeAudit }): Promise<TeamChangeOutcome> {
   await lockBusinessTeam(tx, input.businessId);
   const membership = (await tx.select({ role: businessMemberships.role, userId: businessMemberships.userId }).from(businessMemberships).where(and(eq(businessMemberships.id, input.membershipId), eq(businessMemberships.businessId, input.businessId), eq(businessMemberships.status, "active"))).limit(1))[0];
   if (!membership) return "not_found";
   if (await isFinalOwner(tx, input.businessId, membership.role)) return "final_owner";
+  if (membership.role === input.role) return "unchanged";
   await tx.update(businessMemberships).set({ role: input.role, updatedAt: new Date() }).where(and(eq(businessMemberships.id, input.membershipId), eq(businessMemberships.businessId, input.businessId), eq(businessMemberships.status, "active")));
-  if (input.role !== "business_admin") await revokeMemberApiKeys(tx, { businessId: input.businessId, userId: membership.userId, revokedByUserId: input.actorUserId });
+  const apiKeysRevoked = input.role === "business_admin" ? 0 : await revokeMemberApiKeys(tx, { businessId: input.businessId, userId: membership.userId, revokedByUserId: input.actorUserId });
+  await auditTeamChange(tx, { businessId: input.businessId, audit: input.audit, eventType: "team.member_updated", entityType: "business_membership", entityId: input.membershipId, payload: { memberUserId: membership.userId, role: input.role, previousRole: membership.role, apiKeysRevoked } });
   return "changed";
 }
 
 /**
  * Takes an active member off the team, with the pending invitations they sent
  * (the inviter holds the link) or received, either of which would let them
- * back in, and the API keys they made. The app role can't read other people's
- * users rows, so the caller says how to find the member's email.
+ * back in, and the API keys they made, and writes its audit row. The app role
+ * can't read other people's users rows, so the caller says how to find the
+ * member's email.
  */
-export async function removeMemberInTransaction(tx: DatabaseTransaction, input: { businessId: string; membershipId: string; actorUserId?: string | undefined }, memberEmail: () => Promise<string | undefined>): Promise<TeamChangeOutcome> {
+export async function removeMemberInTransaction(tx: DatabaseTransaction, input: { businessId: string; membershipId: string; actorUserId?: string | undefined; audit: BusinessChangeAudit }, memberEmail: () => Promise<string | undefined>): Promise<TeamChangeOutcome> {
   await lockBusinessTeam(tx, input.businessId);
   const membership = (await tx.select({ role: businessMemberships.role, userId: businessMemberships.userId }).from(businessMemberships).where(and(eq(businessMemberships.id, input.membershipId), eq(businessMemberships.businessId, input.businessId), eq(businessMemberships.status, "active"))).limit(1))[0];
   if (!membership) return "not_found";
   if (await isFinalOwner(tx, input.businessId, membership.role)) return "final_owner";
   const email = await memberEmail();
-  // Invitations and keys go first: a member removing themselves can't reach
-  // the business's rows once their membership is gone.
-  await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.businessId, input.businessId), eq(businessInvitations.status, "pending"), or(eq(businessInvitations.invitedByUserId, membership.userId), email ? eq(businessInvitations.normalizedEmail, normalizeAuthEmail(email)) : undefined)));
-  await revokeMemberApiKeys(tx, { businessId: input.businessId, userId: membership.userId, revokedByUserId: input.actorUserId });
+  // Invitations, keys and the audit row go first: a member removing
+  // themselves can't reach the business's rows once their membership is gone.
+  const invitationsRevoked = (await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.businessId, input.businessId), eq(businessInvitations.status, "pending"), or(eq(businessInvitations.invitedByUserId, membership.userId), email ? eq(businessInvitations.normalizedEmail, normalizeAuthEmail(email)) : undefined))).returning({ id: businessInvitations.id })).length;
+  const apiKeysRevoked = await revokeMemberApiKeys(tx, { businessId: input.businessId, userId: membership.userId, revokedByUserId: input.actorUserId });
+  await auditTeamChange(tx, { businessId: input.businessId, audit: input.audit, eventType: "team.member_removed", entityType: "business_membership", entityId: input.membershipId, payload: { memberUserId: membership.userId, role: membership.role, invitationsRevoked, apiKeysRevoked } });
   await tx.update(businessMemberships).set({ status: "removed", updatedAt: new Date() }).where(and(eq(businessMemberships.id, input.membershipId), eq(businessMemberships.businessId, input.businessId), eq(businessMemberships.status, "active")));
   return "changed";
 }
 
-/** Revokes a pending invitation. False when the business has no such pending invitation. */
-export async function revokeInvitationInTransaction(tx: DatabaseTransaction, input: { businessId: string; invitationId: string }): Promise<boolean> {
-  const changed = await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.id, input.invitationId), eq(businessInvitations.businessId, input.businessId), eq(businessInvitations.status, "pending"))).returning({ id: businessInvitations.id });
-  return changed.length > 0;
+/** Revokes a pending invitation, with its audit row. False when the business has no such pending invitation. */
+export async function revokeInvitationInTransaction(tx: DatabaseTransaction, input: { businessId: string; invitationId: string; audit: BusinessChangeAudit }): Promise<boolean> {
+  const [revoked] = await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.id, input.invitationId), eq(businessInvitations.businessId, input.businessId), eq(businessInvitations.status, "pending"))).returning({ role: businessInvitations.role });
+  if (!revoked) return false;
+  await auditTeamChange(tx, { businessId: input.businessId, audit: input.audit, eventType: "team.invitation_revoked", entityType: "business_invitation", entityId: input.invitationId, payload: { role: revoked.role } });
+  return true;
 }
 
 export async function updateMemberRole(
@@ -625,7 +671,7 @@ export async function updateMemberRole(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const outcome = await updateMemberRoleInTransaction(tx, { ...input, actorUserId: input.userId });
+    const outcome = await updateMemberRoleInTransaction(tx, { ...input, actorUserId: input.userId, audit: operatorAudit(input.userId) });
     if (outcome === "not_found") throw new Error("Membership not found.");
     if (outcome === "final_owner") throw new Error("The final owner cannot be changed.");
   });
@@ -638,7 +684,7 @@ export async function removeMember(
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
     // RLS hides the member's users row from the app role; this function returns their email.
-    const outcome = await removeMemberInTransaction(tx, { ...input, actorUserId: input.userId }, async () => (await tx.execute<{ email: string }>(sql`select email from app.list_business_members(${input.businessId}::uuid) where membership_id = ${input.membershipId}::uuid`)).rows[0]?.email);
+    const outcome = await removeMemberInTransaction(tx, { ...input, actorUserId: input.userId, audit: operatorAudit(input.userId) }, async () => (await tx.execute<{ email: string }>(sql`select email from app.list_business_members(${input.businessId}::uuid) where membership_id = ${input.membershipId}::uuid`)).rows[0]?.email);
     if (outcome === "not_found") throw new Error("Membership not found.");
     if (outcome === "final_owner") throw new Error("The final owner cannot be removed.");
   });
@@ -650,6 +696,6 @@ export async function revokeInvitation(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    if (!await revokeInvitationInTransaction(tx, input)) throw new Error("Invitation not found or already resolved.");
+    if (!await revokeInvitationInTransaction(tx, { ...input, audit: operatorAudit(input.userId) })) throw new Error("Invitation not found or already resolved.");
   });
 }

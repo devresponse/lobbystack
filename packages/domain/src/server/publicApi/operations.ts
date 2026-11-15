@@ -962,8 +962,7 @@ export async function createTeamInvitationForApi(context: DomainContext, caller:
   const normalizedEmail = teamEmail(input.email);
   await options.beforeSend?.();
   return await inBusiness(context, caller, async (tx) => {
-    const { invitationId } = await insertInvitationInTransaction(tx, { businessId: caller.businessId, invitedByUserId: options.userId, normalizedEmail, role: input.role });
-    await audit(tx, caller, { eventType: "api.team.invitation_created", entityType: "business_invitation", entityId: invitationId, payload: { role: input.role } });
+    const { invitationId } = await insertInvitationInTransaction(tx, { businessId: caller.businessId, invitedByUserId: options.userId, normalizedEmail, role: input.role, audit: callerAudit(caller) });
     const [row] = await tx.select(teamInvitationColumns).from(businessInvitations).where(eq(businessInvitations.id, invitationId)).limit(1);
     return serializeTeamInvitation(row!);
   });
@@ -977,8 +976,7 @@ export async function createTeamInvitationForApi(context: DomainContext, caller:
 export async function revokeTeamInvitationForApi(context: DomainContext, caller: ApiCaller, invitationId: string): Promise<void> {
   await inBusiness(context, caller, async (tx) => {
     await teamActorInTransaction(tx, caller);
-    if (!await revokeInvitationInTransaction(tx, { businessId: caller.businessId, invitationId })) throw notFound("Invitation");
-    await audit(tx, caller, { eventType: "api.team.invitation_revoked", entityType: "business_invitation", entityId: invitationId });
+    if (!await revokeInvitationInTransaction(tx, { businessId: caller.businessId, invitationId, audit: callerAudit(caller) })) throw notFound("Invitation");
   });
 }
 
@@ -989,10 +987,9 @@ export async function updateTeamMemberForApi(context: DomainContext, caller: Api
     const current = await loadTeamMember(tx, caller.businessId, membershipId);
     if (!current) throw notFound("Team member");
     if (current.role === input.role) return current;
-    const outcome = await updateMemberRoleInTransaction(tx, { businessId: caller.businessId, membershipId, role: input.role, actorUserId });
+    const outcome = await updateMemberRoleInTransaction(tx, { businessId: caller.businessId, membershipId, role: input.role, actorUserId, audit: callerAudit(caller) });
     if (outcome === "not_found") throw notFound("Team member");
     if (outcome === "final_owner") throw lastOwner();
-    await audit(tx, caller, { eventType: "api.team.member_updated", entityType: "business_membership", entityId: membershipId, payload: { role: input.role, previousRole: current.role } });
     return (await loadTeamMember(tx, caller.businessId, membershipId))!;
   });
 }
@@ -1001,10 +998,9 @@ export async function updateTeamMemberForApi(context: DomainContext, caller: Api
 export async function removeTeamMemberForApi(context: DomainContext, caller: ApiCaller, membershipId: string): Promise<void> {
   await inBusiness(context, caller, async (tx) => {
     const actorUserId = await teamActorInTransaction(tx, caller);
-    const outcome = await removeMemberInTransaction(tx, { businessId: caller.businessId, membershipId, actorUserId }, async () => (await selectTeamMembers(tx, caller.businessId, membershipId).limit(1))[0]?.email);
+    const outcome = await removeMemberInTransaction(tx, { businessId: caller.businessId, membershipId, actorUserId, audit: callerAudit(caller) }, async () => (await selectTeamMembers(tx, caller.businessId, membershipId).limit(1))[0]?.email);
     if (outcome === "not_found") throw notFound("Team member");
     if (outcome === "final_owner") throw lastOwner();
-    await audit(tx, caller, { eventType: "api.team.member_removed", entityType: "business_membership", entityId: membershipId });
   });
 }
 
@@ -1023,8 +1019,7 @@ export async function createClaimLinkForApi(context: DomainContext, caller: ApiC
     await lockBusinessTeam(tx, caller.businessId);
     if (!await owns(tx)) throw notOwner();
     await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.businessId, caller.businessId), eq(businessInvitations.status, "pending"), eq(businessInvitations.transfersOwnership, true)));
-    const { invitationId, token } = await insertInvitationInTransaction(tx, { businessId: caller.businessId, invitedByUserId: options.userId, normalizedEmail, role: "business_owner", transfersOwnership: true });
-    await audit(tx, caller, { eventType: "api.team.claim_link_created", entityType: "business_invitation", entityId: invitationId });
+    const { invitationId, token } = await insertInvitationInTransaction(tx, { businessId: caller.businessId, invitedByUserId: options.userId, normalizedEmail, role: "business_owner", transfersOwnership: true, audit: callerAudit(caller) });
     const [row] = await tx.select(teamInvitationColumns).from(businessInvitations).where(eq(businessInvitations.id, invitationId)).limit(1);
     return { invitation: serializeTeamInvitation(row!), url: invitationUrl(token) };
   });

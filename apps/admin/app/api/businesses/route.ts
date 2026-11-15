@@ -80,7 +80,7 @@ export async function DELETE(request: Request) {
     }
     if (!await passwordMatches(request, body.password)) return jsonError("That password isn't right.", 400, "invalid_password");
     const deleted = await deleteOncePlanEnds({ userId: session.user.id, businessId, confirmName: body.confirmName });
-    // The business is gone, and so is its audit log, so this line is what's left of who deleted it.
+    // The business is gone. Its audit log stays, ending with a business.deleted row, and this line puts the same in the logs.
     logEvent("info", "business.deleted", { businessId, userId: session.user.id, releasedNumbers: deleted.releasedNumbers, storedFiles: deleted.storedFiles });
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -430,7 +430,7 @@ Retention is on by default (`CONTENT_RETENTION_ENABLED`, `.env.example:143-148`)
 | Copies of the alerts sent to the team | 30 days, even with retention off |
 | The record of each email after a call (fork PR #84): who it went to and its subject, never the call's words | 30 days, even with retention off |
 | Each QR link's scan count per day (fork PR #129), with nothing about the visitor | 13 months, even with retention off |
-| Contacts (name, phone, email), each call's time and outcome, appointments, the summaries of chats, each STOP or START, and the audit log | Until someone deletes them |
+| Contacts (name, phone, email), each call's time and outcome, appointments, the summaries of chats, each STOP or START, and the audit log | Until someone deletes them. Since migration `0152` a business's audit log outlives the business: see below |
 | The record of each incoming text, with its sender and its words (`provider_events`) | **Forever**: nothing deletes it |
 
 The free plan, on an instance that sells plans, keeps everything for 30 days.
@@ -483,7 +483,18 @@ With a key for that business ([6.7](part-6-first-run.md#67-optional-the-api-and-
 
 Since fork PR #101 one of its owners deletes it, with everything in it, from its **Settings** > **Team**, unless it's an owner's first business: the delete ends its paid plan in Polar, gives its numbers back to Twilio, deletes its files from the bucket and removes its rows ([delete a business](../../features/business-deletion.md)). The copies outside LobbyStack and in the backups (above) remain until they age out.
 
-Since fork PR #102 an owner whose first business is the only one they own cancels it instead, from the same page, after confirming by email: its plan ends and its numbers go back to Twilio 30 days later, but nothing of it is deleted, and [7.27](#727-reactivate-a-canceled-business) opens it again ([cancel an account](../../features/account-cancellation.md)). Its data stays until someone deletes it. A first business, canceled or not, can only be deleted in the database, signed in as `postgres`: end its plan in Polar's dashboard, release its numbers in Twilio's console and delete its folder, named by its ID, in the bucket first, then make a backup and delete it in one transaction, as in step 4 above.
+Since migration `0152` its audit log stays, under the business's ID, so who changed its team, settings and plan, and who deleted it, can still be found. The rows hold IDs, roles, settings and counts, no call, message or contact details, and no screen or API shows them once the business is gone. Signed in to the database as `postgres`:
+
+```sql
+-- A deleted business's ID, by the name its last row keeps
+select business_id, payload->>'name' as name, actor_user_id, created_at from audit_logs where event_type = 'business.deleted';
+-- Everything its audit log says, oldest first
+select created_at, event_type, actor_user_id, entity_type, entity_id, payload from audit_logs where business_id = '<business ID>' order by created_at;
+-- Erasing it, if that's asked for
+delete from audit_logs where business_id = '<business ID>';
+```
+
+Since fork PR #102 an owner whose first business is the only one they own cancels it instead, from the same page, after confirming by email: its plan ends and its numbers go back to Twilio 30 days later, but nothing of it is deleted, and [7.27](#727-reactivate-a-canceled-business) opens it again ([cancel an account](../../features/account-cancellation.md)). Its data stays until someone deletes it. A first business, canceled or not, can only be deleted in the database, signed in as `postgres`: end its plan in Polar's dashboard, release its numbers in Twilio's console and delete its folder, named by its ID, in the bucket first, then make a backup and delete it in one transaction, as in step 4 above. Its audit log stays then too, with no `business.deleted` row.
 
 **Not yet confirmed:**
 
@@ -492,7 +503,7 @@ Since fork PR #102 an owner whose first business is the only one they own cancel
 - How long Railway takes to prepare a restore, for a given size.
 - The deletion statements outlined in the notes ([7.9](#79-data-retention-and-deletion-requests)), which have never been run.
 
-**[7.7](#77-back-up-the-database-and-files) to [7.9](#79-data-retention-and-deletion-requests) were checked against:** `scripts/replacement-backup.sh`, `scripts/replacement-restore.sh`, `scripts/replacement-restore-drill.sh`, `packages/contracts/src/index.ts`, `packages/providers/src/storage/local.ts`, `packages/domain/src/server/storage.ts`, `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/privacy.ts`, `packages/domain/src/server/contentRetentionPolicy.ts`, `packages/domain/src/server/contacts.ts`, `packages/domain/src/server/businessDeletion.ts` (fork PR #101), `packages/shared/src/billing.ts`, `packages/shared/src/publicApi/operations.ts`, `packages/db/src/schema/index.ts`, `apps/worker/src/handlers.ts`, `apps/worker/src/calendarJobs.ts`, `docs/voice/runtime.md`, `docs/operations/remediation-rollout.md`, and Railway's, Cloudflare's and the AWS command-line tool's documentation as read on 2026-10-19. The lines on call summaries were checked against `packages/domain/src/server/privacy.ts`, `packages/domain/src/server/conversations.ts` and `packages/db/migrations/0126_clear_expired_call_summaries.sql` (fork PR #93).
+**[7.7](#77-back-up-the-database-and-files) to [7.9](#79-data-retention-and-deletion-requests) were checked against:** `scripts/replacement-backup.sh`, `scripts/replacement-restore.sh`, `scripts/replacement-restore-drill.sh`, `packages/contracts/src/index.ts`, `packages/providers/src/storage/local.ts`, `packages/domain/src/server/storage.ts`, `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/privacy.ts`, `packages/domain/src/server/contentRetentionPolicy.ts`, `packages/domain/src/server/contacts.ts`, `packages/domain/src/server/businessDeletion.ts` (fork PR #101), `packages/db/migrations/0152_audit_logs_outlive_business.sql`, `packages/shared/src/billing.ts`, `packages/shared/src/publicApi/operations.ts`, `packages/db/src/schema/index.ts`, `apps/worker/src/handlers.ts`, `apps/worker/src/calendarJobs.ts`, `docs/voice/runtime.md`, `docs/operations/remediation-rollout.md`, and Railway's, Cloudflare's and the AWS command-line tool's documentation as read on 2026-10-19. The lines on call summaries were checked against `packages/domain/src/server/privacy.ts`, `packages/domain/src/server/conversations.ts` and `packages/db/migrations/0126_clear_expired_call_summaries.sql` (fork PR #93).
 
 ## Watching the system
 

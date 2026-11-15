@@ -2284,6 +2284,7 @@ async function widgetAddHosts(widgetPath, widget, hosts) {
 async function tollfreeSteps(run) {
   const s = run.settings;
   await step(run, "twilio.tollfree", s.TWILIO_TOLLFREE === "buy" ? "Buy a toll-free number in the subaccount" : `Use ${s.TWILIO_TOLLFREE}`, async () => {
+    // Twilio retries a text's webhook only when it can't connect, so the same address is its fallback too: a text whose first request fails gets one more try.
     const smsUrl = `https://${appHost(run)}/api/webhooks/twilio/sms`;
     const base = `${URLS.twilio}/Accounts/${v(run, "TWILIO_ACCOUNT_SID")}`;
     let number = s.TWILIO_TOLLFREE;
@@ -2295,7 +2296,7 @@ async function tollfreeSteps(run) {
       if (mine) {
         number = mine.phone_number;
         console.log(`  = ${number}, bought earlier`);
-        await twilioSub(run, base, `/IncomingPhoneNumbers/${mine.sid}.json`, { method: "POST", form: { SmsUrl: smsUrl, SmsMethod: "POST" } });
+        await twilioSub(run, base, `/IncomingPhoneNumbers/${mine.sid}.json`, { method: "POST", form: { SmsUrl: smsUrl, SmsMethod: "POST", SmsFallbackUrl: smsUrl, SmsFallbackMethod: "POST" } });
       }
     }
     if (number === "buy") {
@@ -2303,12 +2304,12 @@ async function tollfreeSteps(run) {
       number = available?.available_phone_numbers?.[0]?.phone_number;
       if (!number) throw new Error("Twilio offered no toll-free number");
       await confirm(`Buy ${number} in subaccount ${v(run, "TWILIO_ACCOUNT_SID")}? Twilio bills it every month.`);
-      await twilioSub(run, base, "/IncomingPhoneNumbers.json", { method: "POST", form: { PhoneNumber: number, SmsUrl: smsUrl, SmsMethod: "POST", FriendlyName: friendly } });
+      await twilioSub(run, base, "/IncomingPhoneNumbers.json", { method: "POST", form: { PhoneNumber: number, SmsUrl: smsUrl, SmsMethod: "POST", SmsFallbackUrl: smsUrl, SmsFallbackMethod: "POST", FriendlyName: friendly } });
     } else if (s.TWILIO_TOLLFREE !== "buy") {
       const owned = await twilioSub(run, base, `/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(number)}`);
       const sid = owned?.incoming_phone_numbers?.[0]?.sid;
       if (!sid) throw new Error(`${number} isn't in subaccount ${v(run, "TWILIO_ACCOUNT_SID")}`);
-      await twilioSub(run, base, `/IncomingPhoneNumbers/${sid}.json`, { method: "POST", form: { SmsUrl: smsUrl, SmsMethod: "POST" } });
+      await twilioSub(run, base, `/IncomingPhoneNumbers/${sid}.json`, { method: "POST", form: { SmsUrl: smsUrl, SmsMethod: "POST", SmsFallbackUrl: smsUrl, SmsFallbackMethod: "POST" } });
     }
     await byHand([`Send ${number} for toll-free verification in Twilio's console (guide 3.3, step 19). Texts to US and Canadian phones wait for it.`]);
     return { TWILIO_ALERT_SMS_FROM: number, ...(s.TWILIO_TOLLFREE === "buy" ? { TWILIO_TOLLFREE_NAME: friendly } : {}) };

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { InvalidWebhookSignatureError } from "openai";
 import type { LiveTransportIncomingWebhookEvent } from "openai/resources/webhooks";
 
 import { buildPhoneSessionConfig } from "@lobbystack/agent-core/live/session";
@@ -14,6 +15,8 @@ import { attachWorkerToLiveSession, getLiveClient } from "@/lib/live-prototype";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ROUTE = "/api/webhooks/openai/live";
 
 // SIP "To"/"From" headers look like `<sip:+15551234567@host>`, `"Name" <sip:...>`
 // or `tel:+1555...`, and one header can list several, comma-separated. Carriers
@@ -40,8 +43,8 @@ export async function POST(request: Request) {
   let event;
   try {
     event = await client.webhooks.unwrap(await request.text(), request.headers);
-  } catch {
-    return new NextResponse("Invalid signature.", { status: 400 });
+  } catch (error) {
+    return refusedLiveWebhook(error, request.headers);
   }
   if (event.type !== "live.transport.incoming") return new NextResponse(null, { status: 200 });
   // created_at has second precision, so this is only a rough delivery delay.
@@ -49,6 +52,28 @@ export async function POST(request: Request) {
   const twilioCallSid = twilioCallSidFromSipHeaders(event.data.sip_headers);
   // Every log line, error report and span from here on carries the call's IDs.
   return await withCallContext({ sessionId: event.data.session_id, ...(twilioCallSid ? { twilioCallSid } : {}) }, async () => await routeIncomingCall(client, event, timing, twilioCallSid));
+}
+
+/**
+ * A delivery that unwrap refused. A missing header, a bad signature or a body
+ * that isn't JSON answers 400 with a warning: the sender is wrong, or this
+ * server's OPENAI_WEBHOOK_SECRET is stale. Anything else, such as no secret at
+ * all, is this server's fault: reported as an error and answered 500. Each
+ * answer carries an error ID, and neither ever holds the body.
+ */
+function refusedLiveWebhook(error: unknown, headers: Headers): NextResponse {
+  const errorId = crypto.randomUUID();
+  const header = headers.get("webhook-id");
+  const webhookId = header && /^[\w-]{1,128}$/.test(header) ? header : undefined;
+  const missing = ["webhook-id", "webhook-timestamp", "webhook-signature"].filter((name) => !headers.get(name));
+  const reason = missing.length ? "headers" : error instanceof InvalidWebhookSignatureError ? "signature" : error instanceof SyntaxError ? "payload" : undefined;
+  if (reason) {
+    // The signature errors are the SDK's own fixed sentences, such as "Webhook timestamp is too old".
+    logEvent("warn", "ops.live.webhook_refused", { route: ROUTE, errorId, reason, ...(missing.length ? { missing } : {}), ...(reason === "signature" && error instanceof Error ? { detail: error.message } : {}), ...(webhookId ? { webhookId } : {}) });
+    return NextResponse.json({ error: reason === "payload" ? "Invalid payload." : "Invalid signature.", errorId }, { status: 400, headers: { "x-error-id": errorId } });
+  }
+  runAfterResponse(async () => await reportServerError(error, { operation: "live.webhook", errorId, route: ROUTE, ...(webhookId ? { webhookId } : {}) }));
+  return NextResponse.json({ error: "Webhook processing failed.", errorId }, { status: 500, headers: { "x-error-id": errorId } });
 }
 
 async function routeIncomingCall(client: LiveClient, event: LiveTransportIncomingWebhookEvent, timing: Timing, twilioCallSid: string | undefined) {

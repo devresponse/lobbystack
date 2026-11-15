@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
+import { hostname } from "node:os";
 
-import { forceFlushTelemetryLogs, getLogger, initializeTelemetry, isStorageHttpRequest, redactExportAttributes, redactExportLogValue, redactOtelExceptionText, registerStorageHttpEndpoint, shutdownTelemetry } from "./node";
+import { forceFlushTelemetryLogs, forceFlushTelemetryMetrics, getLogger, getMeter, initializeTelemetry, isStorageHttpRequest, redactExportAttributes, redactExportLogValue, redactOtelExceptionText, registerStorageHttpEndpoint, serviceInstance, shutdownTelemetry } from "./node";
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -169,5 +170,96 @@ describe("OTel exception redaction", () => {
       consoleWarn.mockRestore();
       await new Promise<void>((resolve, reject) => receiver.close((error) => error ? reject(error) : resolve()));
     }
+  });
+});
+
+type OtlpAttribute = { key: string; value: { stringValue?: string } };
+type OtlpMetric = { name: string; gauge?: { dataPoints: Array<{ asDouble?: number; asInt?: number | string }> }; sum?: { dataPoints: Array<{ asDouble?: number; asInt?: number | string }> } };
+type OtlpMetrics = { resourceMetrics: Array<{ resource: { attributes: OtlpAttribute[] }; scopeMetrics: Array<{ metrics: OtlpMetric[] }> }> };
+
+/** Starts telemetry against a local receiver, runs the callback, stops telemetry (which exports the metrics), and returns what the receiver got. */
+async function exportedMetrics(run: () => void | Promise<void>): Promise<{ resources: Array<Record<string, string | undefined>>; metrics: OtlpMetric[] }> {
+  const bodies: OtlpMetrics[] = [];
+  const receiver = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += String(chunk);
+    if (request.url === "/v1/metrics") bodies.push(JSON.parse(body) as OtlpMetrics);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("{}");
+  });
+  await new Promise<void>((resolve, reject) => {
+    receiver.once("error", reject);
+    receiver.listen(0, "127.0.0.1", resolve);
+  });
+  const address = receiver.address();
+  if (!address || typeof address === "string") throw new Error("OTLP test receiver did not start.");
+  try {
+    await initializeTelemetry({ endpoint: `http://127.0.0.1:${address.port}`, serviceName: "lobbystack-test" });
+    await run();
+  } finally {
+    await shutdownTelemetry();
+    await new Promise<void>((resolve, reject) => receiver.close((error) => error ? reject(error) : resolve()));
+  }
+  const resourceMetrics = bodies.flatMap((body) => body.resourceMetrics);
+  return {
+    resources: resourceMetrics.map((entry) => Object.fromEntries(entry.resource.attributes.map((attribute) => [attribute.key, attribute.value.stringValue]))),
+    metrics: resourceMetrics.flatMap((entry) => entry.scopeMetrics.flatMap((scope) => scope.metrics)),
+  };
+}
+
+const firstValue = (metric: OtlpMetric | undefined) => {
+  const point = (metric?.gauge ?? metric?.sum)?.dataPoints[0];
+  return point?.asDouble ?? (point?.asInt === undefined ? undefined : Number(point.asInt));
+};
+
+describe("which copy of a service sent it", () => {
+  it("takes the copy from Railway's replica ID, and from the host name anywhere else", () => {
+    expect(serviceInstance({ RAILWAY_REPLICA_ID: "replica-7f3a", RAILWAY_REPLICA_REGION: "us-west2", RAILWAY_DEPLOYMENT_ID: "dep-1", RAILWAY_GIT_COMMIT_SHA: "abc1234" }))
+      .toEqual({ id: "replica-7f3a", release: "abc1234", deployment: "dep-1", region: "us-west2" });
+    expect(serviceInstance({ SERVICE_VERSION: "1.2.3" })).toEqual({ id: hostname(), release: "1.2.3" });
+    expect(serviceInstance({ RAILWAY_REPLICA_ID: "  " }).id).toBe(hostname());
+  });
+
+  it("puts the copy on every exported metric, with how busy its thread was", async () => {
+    vi.stubEnv("RAILWAY_REPLICA_ID", "replica-7f3a");
+    // The process's own gauges are read at each export, so one is asked for while telemetry runs.
+    const exported = await exportedMetrics(forceFlushTelemetryMetrics);
+
+    expect(exported.resources.length).toBeGreaterThan(0);
+    for (const resource of exported.resources) {
+      expect(resource).toMatchObject({ "service.name": "lobbystack-test", "service.instance.id": "replica-7f3a" });
+    }
+    const utilization = firstValue(exported.metrics.find((metric) => metric.name === "process.event_loop.utilization"));
+    expect(utilization).toBeGreaterThanOrEqual(0);
+    expect(utilization).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("instruments made before telemetry starts", () => {
+  it("record once it has started, as the worker's do: it loads its database and job modules first", async () => {
+    // Made while no SDK runs, as a module-level instrument is in the worker.
+    const meter = getMeter("telemetry-test");
+    const counter = meter.createCounter("telemetry.test.made_early_counter");
+    const histogram = meter.createHistogram("telemetry.test.made_early_histogram");
+    counter.add(5);
+
+    const exported = await exportedMetrics(() => {
+      counter.add(2);
+      histogram.record(12);
+    });
+
+    // What was added before the start is lost, as before; what came after is exported.
+    expect(firstValue(exported.metrics.find((metric) => metric.name === "telemetry.test.made_early_counter"))).toBe(2);
+    expect(exported.metrics.map((metric) => metric.name)).toContain("telemetry.test.made_early_histogram");
+  });
+
+  it("record again after telemetry stopped and started once more", async () => {
+    const counter = getMeter("telemetry-test").createCounter("telemetry.test.restarted_counter");
+    const first = await exportedMetrics(() => counter.add(1));
+    counter.add(10);
+    const second = await exportedMetrics(() => counter.add(3));
+
+    expect(firstValue(first.metrics.find((metric) => metric.name === "telemetry.test.restarted_counter"))).toBe(1);
+    expect(firstValue(second.metrics.find((metric) => metric.name === "telemetry.test.restarted_counter"))).toBe(3);
   });
 });

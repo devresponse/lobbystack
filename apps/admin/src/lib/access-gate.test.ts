@@ -65,6 +65,7 @@ describe("the routes that stay open", () => {
     "/api/auth/oauth2/introspect",
     "/api/storage/local",
     "/api/internal/finance/export",
+    "/api/internal/fleet",
   ])("leaves %s open", (pathname) => {
     expect(isOpenRoute(pathname)).toBe(true);
   });
@@ -112,6 +113,9 @@ describe("the routes that stay open", () => {
     "/api/storage",
     "/api/internal/finance",
     "/api/internal/finance/export/all",
+    "/api/internal",
+    "/api/internal/fleet/copies",
+    "/api/internal/fleets",
     "/api/branding/logo",
     // Routes match by case, so another case is another address.
     "/API/WEBHOOKS/twilio/sms",

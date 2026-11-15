@@ -112,6 +112,7 @@ Las entregas de webhooks rechazan las direcciones privadas, de loopback, de enla
 | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | URL base de OTLP. LobbyStack agrega `/v1/traces`, `/v1/metrics` y `/v1/logs`. Déjela vacía para desactivar la exportación. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Encabezados `key=value` opcionales, separados por comas, que se envían con cada solicitud OTLP. Para PostHog, use `Authorization=Bearer your_posthog_project_token_here`. |
+| `FLEET_STATUS_TOKEN` | Opcional, en el servicio de administración. Al menos 32 caracteres; use letras y dígitos aleatorios, que una dirección lleva tal cual. Cuando está configurada, `GET /api/internal/fleet` lista cada copia en ejecución del servicio de administración y del worker con su carga, y los trabajos de cada cola, para una solicitud que envía el token en `Authorization: Bearer <el token>` o en `?token=<el token>`. La dirección responde `503` cuando una copia dejó de reportarse sin haberse apagado de forma ordenada, cuando un worker no está listo, o cuando hay menos copias en ejecución que las que esperan los parámetros de consulta `admin` y `worker`, así que una comprobación de disponibilidad puede vigilarla. Sin la variable, o con un token más corto, la dirección responde `404`. El token no abre nada más. El archivo `docs/features/observability.md` del repositorio describe la respuesta. |
 
 Un endpoint OTLP vacío no desactiva los registros stdout de los contenedores, los endpoints de estado de la aplicación, las analíticas de producto directas ni el reporte de errores directo.
 

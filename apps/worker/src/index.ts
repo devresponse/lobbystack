@@ -1,8 +1,8 @@
-import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
+import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, registerPoolMetrics, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer, recordedGreetingEnabled } from "@lobbystack/agent-core";
 import { assertProductionSecrets, brandEmailLogo, brandStartupReport, currentBrand, emailSender, isMaintenanceMode } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
-import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, jobQueues, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
+import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, jobQueues, type FleetQueueCounts, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
 import { FirecrawlProvider } from "@lobbystack/providers/crawling/firecrawl";
 import { SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
@@ -17,6 +17,7 @@ import { Worker } from "bullmq";
 import { and, eq, isNull } from "drizzle-orm";
 import OpenAI from "openai";
 
+import { queueCounts, registerWorkerMetrics, startWorkerHeartbeat } from "./fleet";
 import type { WorkerDependencies } from "./handlers";
 import { startHealthServer } from "./health";
 import { createJobProcessor } from "./jobProcessor";
@@ -107,7 +108,7 @@ async function main(): Promise<void> {
   // Sampled once at boot; it does not pause work already claimed by another process.
   if (isMaintenanceMode(process.env)) {
     // Keep liveness available, but report unready and avoid all queue, scheduler, and provider startup.
-    startHealthServer(workerPort, { ready: false, redis: false, database: false, storage: false, activeJobs: 0, draining: false });
+    startHealthServer(workerPort, { ready: false, redis: false, database: false, storage: false, activeJobs: 0, liveCalls: 0, draining: false });
     console.warn("Worker consumer startup is isolated by maintenance mode.");
     return;
   }
@@ -122,6 +123,8 @@ async function main(): Promise<void> {
   for (const warning of brand.warnings) console.warn(warning);
   if (brand.error) throw new Error(brand.error);
   await initializeTelemetry({ serviceName: "lobbystack-worker" });
+  // Each pool's connections go out as gauges, which have to be made after telemetry starts.
+  registerPoolMetrics();
   // The worker's two pools, as SERVICE_DATABASE_ROLES.worker (@lobbystack/db) lists them for the connection budget.
   const database = createDatabaseClient("lobbystack_worker");
   const dispatcherDatabase = createDatabaseClient("lobbystack_dispatcher");
@@ -138,9 +141,14 @@ async function main(): Promise<void> {
     const businessRows = await listSchedulerBusinesses(dispatcherDatabase.db);
     await configureSchedulers(queues, businessRows, appliedSchedulers);
   };
-  const state = { ready: false, redis: false, database: false, storage: false, activeJobs: 0, draining: false };
   const embeddings = createEmbeddingProvider();
   const liveCalls = createLiveCallHandler({ domain: { db: database.db, snapshotCache: getWorkerSnapshotCache(), ...(embeddings ? { embeddings } : {}) }, attachLock: realtime, greetingRecordings: realtime });
+  // What /health/ready answers, and what this copy's heartbeat and gauges report.
+  const state = { ready: false, redis: false, database: false, storage: false, activeJobs: 0, get liveCalls() { return liveCalls.activeCalls(); }, draining: false };
+  // Each queue's jobs as the health check below last counted them, so reporting them costs no extra Redis call.
+  const countedQueues: Record<string, FleetQueueCounts> = {};
+  const fleet = { state, liveCalls: liveCalls.activeCalls, queues: () => countedQueues };
+  registerWorkerMetrics(fleet);
   const health = startHealthServer(workerPort, state, liveCalls.handle);
   const email = createEmailProvider();
   const onboardingFollowupSender = createOnboardingFollowupSender();
@@ -291,7 +299,7 @@ async function main(): Promise<void> {
     const [databaseStatus, storageStatus, ...redisStatuses] = await Promise.all([
       databaseHealthCheck(database).then((result) => result.ok).catch(() => false),
       storage.ensureReady().then(() => true).catch(() => false),
-      ...[...queues.values()].map(async (queue) => { try { await queue.getJobCounts(); return true; } catch { return false; } }),
+      ...[...queues].map(async ([queueName, queue]) => { try { countedQueues[queueName] = queueCounts(await queue.getJobCounts()); return true; } catch { return false; } }),
       realtime.ping().then((result) => result === "PONG").catch(() => false),
     ]);
     state.database = databaseStatus;
@@ -302,6 +310,9 @@ async function main(): Promise<void> {
   await checkHealth();
   const healthRefresh = setInterval(() => void checkHealth(), 10_000);
   healthRefresh.unref();
+  // This copy says it is here every 10 seconds, with what it holds, so the admin's fleet status address
+  // can list every copy and notice one that went quiet.
+  const heartbeat = startWorkerHeartbeat(fleet);
 
   const shutdown = async () => {
     // Readiness fails and new attaches get 503 at once, so new work goes to the next deployment.
@@ -311,9 +322,11 @@ async function main(): Promise<void> {
     abort.abort();
     // Stop taking jobs, and let calls in progress end on their own until the
     // drain timeout. Both still need Redis, the database pools and the HTTP
-    // server (for /internal/live/end), so those close after.
-    await Promise.allSettled([liveCalls.drain(liveDrainTimeoutMs()), dispatchLoop, ...workers.map((worker) => worker.close())]);
-    await Promise.allSettled([...[...queues.values()].map((queue) => queue.close()), realtime.quit(), database.pool.end(), dispatcherDatabase.pool.end(), new Promise<void>((resolve) => health.close(() => resolve())), shutdownTelemetry()]);
+    // server (for /internal/live/end), so those close after. The heartbeat says
+    // at once that this copy is shutting down, and keeps beating while it is.
+    await Promise.allSettled([heartbeat.drain(), liveCalls.drain(liveDrainTimeoutMs()), dispatchLoop, ...workers.map((worker) => worker.close())]);
+    // Its last beat says it was shutting down, so the fleet knows it left on purpose.
+    await Promise.allSettled([heartbeat.stop(), ...[...queues.values()].map((queue) => queue.close()), realtime.quit(), database.pool.end(), dispatcherDatabase.pool.end(), new Promise<void>((resolve) => health.close(() => resolve())), shutdownTelemetry()]);
   };
   process.once("SIGINT", () => void shutdown().finally(() => process.exit(0)));
   process.once("SIGTERM", () => void shutdown().finally(() => process.exit(0)));

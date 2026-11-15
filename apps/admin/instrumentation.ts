@@ -60,8 +60,19 @@ export async function register(): Promise<void> {
         : "NEXT_PUBLIC_TURNSTILE_SITE_KEY or TURNSTILE_SECRET_KEY is missing, so the receptionist answers website chats without Turnstile's check, and a script can spend the businesses' chats.",
     });
   }
+  const { fleetStatusTokenProblem } = await import("./src/lib/fleet-status");
+  const fleetTokenProblem = fleetStatusTokenProblem(process.env);
+  if (fleetTokenProblem && process.env.NEXT_PHASE !== "phase-production-build") logEvent("warn", "fleet.status_token_too_short", { detail: fleetTokenProblem });
   const { assertAdminDatabaseRoles } = await import("./src/lib/startup-role-assertion");
   await assertAdminDatabaseRoles();
+  // The check's pools belong to this hook's own copy of the module, never to the routes, so they close here
+  // instead of each holding a connection for its idle time on top of the copy's connection budget.
+  const { closeDatabases } = await import("./src/lib/databases");
+  await closeDatabases();
+  // This copy says it is here every 10 seconds, so the fleet status address can list every copy of the
+  // admin and the worker and notice one that went quiet. After the checks above: a copy that fails them never starts.
+  const { startAdminFleet } = await import("./src/lib/fleet-heartbeat");
+  startAdminFleet();
 }
 
 export const onRequestError: import("next").Instrumentation.onRequestError = async (error, request, context) => {

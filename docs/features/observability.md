@@ -79,7 +79,7 @@ Neither line carries a token, and a stranger's 404 writes none, since scanners w
 
 ## Watch every copy
 
-Railway can run several copies of the admin and the worker, which it calls replicas ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)). Its charts show each copy's processor and memory, but not what a copy is doing, and an uptime check on the admin's ready check can't see the worker, which has no public address. Since fork PR #185 on `develop/r2`, every copy says which one it is and what it holds, and one address on the admin answers for all of them. It works the same with one copy of each, and on a server under Docker Compose.
+Railway can run several copies of the admin and the worker, which it calls replicas ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)). Its charts show each copy's processor and memory, but not what a copy is doing, and an uptime check on the admin's ready check can't see the worker, which has no public address. Since fork PR #185 on `develop/r2`, every copy says which one it is and what it holds, and one address on the admin answers for all of them. Since fork PR #186, a copy that died stays listed for 24 hours with what it reported last. It works the same with one copy of each, and on a server under Docker Compose.
 
 ### Tell the copies apart
 
@@ -103,9 +103,14 @@ Every 10 seconds each copy writes a short status, its heartbeat, to Redis in one
 | `queues`: each queue's jobs `waiting`, `active`, `delayed` and `failed`, as its health check counted them in the last 10 seconds | Worker |
 
 - **A copy that is told to stop** says so at once, keeps beating while it finishes its calls and requests, and leaves that as its last word. So a deploy, a restart, or a copy the scale script takes away never looks like a copy that died.
-- **A copy that dies** just stops beating. After 30 seconds, three missed beats, it counts as silent.
-- **The list** lives in two Redis keys: `<REDIS_PREFIX>:fleet:seen` holds when each copy last beat, and `<REDIS_PREFIX>:fleet:beats` holds each copy's latest status, under a kilobyte for each copy ([what it costs](#know-what-it-costs)). The prefix is `lobbystack` unless `REDIS_PREFIX` is set. A beat replaces the copy's own record, so Redis holds one record for each copy and no history, however long the deployment runs. The numbers over time leave as metrics instead ([chart the copies' load](#chart-the-copies-load)).
-- **Nothing piles up, and nothing needs deleting.** The list keeps a copy for 10 minutes after its last beat, then the next beat from any copy removes it. A deploy therefore holds the old copies' records beside the new ones for up to 10 minutes. Both keys expire 20 minutes after the last beat, so once every copy has stopped they go by themselves.
+- **A copy that dies** just stops beating: it crashed, was killed, or ran out of memory. After 30 seconds, three missed beats, it counts as silent. Its last beat is kept for 24 hours, so what it held just before can still be read the next day ([read a copy that died](#read-a-copy-that-died)).
+- **Each process has a record of its own,** named after the service, the copy and the moment the process started. A host that starts a crashed copy again under the same name starts a new process, as Docker does *(whether Railway keeps a copy's ID over a restart: not confirmed)*. Its beats then stand beside the last beat of the process that died and don't replace it.
+- **The list** lives in three Redis keys: `<REDIS_PREFIX>:fleet:seen` holds when each copy last beat, `<REDIS_PREFIX>:fleet:died` holds the same for the copies that died, and `<REDIS_PREFIX>:fleet:beats` holds each listed copy's latest status, under a kilobyte for each ([what it costs](#know-what-it-costs)). The prefix is `lobbystack` unless `REDIS_PREFIX` is set. A beat replaces the process's own record, so Redis holds one record for each process and no history, however long the deployment runs. The numbers over time leave as metrics instead ([chart the copies' load](#chart-the-copies-load)).
+- **Nothing piles up, and nothing needs deleting.** When a copy's last beat turns 10 minutes old, the next beat from any copy deals with it, once:
+  - A copy that said it was shutting down is removed. A deploy therefore holds the old copies' records beside the new ones for up to 10 minutes.
+  - A copy that never said so died. Its record moves to the list of copies that died, which keeps the newest 50 and drops each one 24 hours after its last beat.
+  - The list never holds more than 1,000 copies heard from in the last 10 minutes: past that, the oldest go. So a copy that crashes and starts again without end can't fill Redis.
+  - All three keys expire 24 hours and 10 minutes after the last beat from any copy. Once every copy has stopped they go by themselves, and until then they hold the last beats of a deployment that went down altogether.
 - **Without `REDIS_URL`,** as on a developer's admin, a copy writes nothing. A beat that fails is logged as `fleet.heartbeat_failed`, at most once a minute, and the next beat tries again; no request or call waits on a beat.
 
 ### Ask the status address
@@ -129,23 +134,74 @@ curl -H "Authorization: Bearer <the token>" "https://<dashboard domain>/api/inte
 | 503 with `"ok":false` and its `problems` | A problem below, or Redis didn't give the heartbeats within 3 seconds, which also logs `fleet.status_unreadable` |
 | 503 with `Retry-After: 60` | Maintenance mode, which answers every API call but the two health checks this way |
 
-The answer's `problems` are sentences a person can read, `services` counts each service's copies by state beside the number expected, `copies` lists each copy with its state and its last beat, and `queues` holds each queue's jobs from the worker that counted last, with `queuesCountedSecondsAgo`. `answeredBy` names the copy of the admin that answered.
+The answer's `problems` are sentences a person can read, `services` counts each service's copies by state beside the number expected, `copies` lists each copy heard from in the last 10 minutes with its state and its last beat, `died` lists the copies that died in the last 24 hours ([read a copy that died](#read-a-copy-that-died)), and `queues` holds each queue's jobs from the worker that counted last, with `queuesCountedSecondsAgo`. `answeredBy` names the copy of the admin that answered.
 
 | A copy's state | Means |
 | --- | --- |
 | `running` | It beats and takes work |
 | `not_ready` | It beats, but the worker can't reach the database, the files or Redis, or is still starting |
 | `draining` | It beats and is shutting down |
-| `silent` | It stopped beating without saying it was shutting down, and no newer copy took its place |
-| `left` | It stopped beating after it said it was shutting down, or a newer copy took its place |
+| `silent` | It stopped beating in the last 10 minutes without saying it was shutting down, and no newer copy took its place |
+| `left` | It stopped beating after it said it was shutting down. It stays under `copies` for 10 minutes |
+| `died` | It stopped beating without saying it was shutting down, and a newer copy took its place or 10 minutes passed. It is listed under `died`, not under `copies`, for 24 hours |
 
 Three things are a problem, and turn the answer into a 503:
 
-- **A silent copy,** such as "worker copy 9b8d7c6a stopped reporting 45 s ago without shutting down, and no newer copy took its place." It clears when a copy of the same service starts after that last beat, which is what Railway's restart of a crashed copy does, or when a newer deployment's copy runs, or after 10 minutes when the list forgets it. A copy that crashes and reports again within those 30 seconds never shows as a problem: the host's crash notice, and the copy's short time since its start, are the signs.
+- **A silent copy,** such as "worker copy 9b8d7c6a stopped reporting 45 s ago without shutting down, and no newer copy took its place." It clears when a copy of the same service starts after that last beat, which is what Railway's restart of a crashed copy does, or when a newer deployment's copy runs, or after 10 minutes. From then on the copy counts as one that died, which is no problem by itself, and only the number of running copies still tells. A copy that crashes and reports again within those 30 seconds never shows as a problem: the host's crash notice, and the process that died under `died`, are the signs.
 - **A worker that isn't ready,** unless it started in the last 2 minutes.
 - **Fewer running copies than expected,** such as "1 worker copy is running, and 2 are expected." or "No worker copy is running." A copy that started in the last 2 minutes and isn't ready yet counts as running here, and so does one that said it was shutting down in the last 2 minutes, whether it is still finishing or already gone. So a deploy or a restart that replaces the only copy raises no alarm.
 
 In a check on a computer on 2026-11-15, with two workers and two built admins on one PostgreSQL and one Redis, a worker killed with `kill -9` turned the answer into a 503 after 31 seconds, a restart cleared it within 4 seconds, and a worker or an admin stopped the ordinary way never raised a problem. With one worker only, stopping it the ordinary way and starting the next one 12 seconds later raised nothing either, and stopping it for good gave "No worker copy is running." 2 minutes after it was told to stop. Nothing here has run on Railway yet ([open items](../project/open-items.md#test-these)).
+
+### Read a copy that died
+
+A copy that stops beating without saying it was shutting down died: it crashed, was killed, or ran out of memory. Since fork PR #186 its last beat is kept for 24 hours, so what the copy was doing can still be looked into the next day. The status address lists these copies under `died`, the newest first, once a newer copy took their place or 10 minutes passed:
+
+```json
+"died": [
+  {
+    "service": "worker",
+    "replica": "7a6b5c4d-0000-4000-8000-000000000004",
+    "state": "died",
+    "release": "abc1234",
+    "deployment": "dep-2",
+    "region": "us-west2",
+    "startedAt": "2026-11-13T15:00:00.000Z",
+    "lastSeenSecondsAgo": 18000,
+    "busy": 0.97,
+    "rssBytes": 1981808640,
+    "heapUsedBytes": 1700000000,
+    "db": { "open": 12, "inUse": 11, "waiting": 3, "max": 12 },
+    "ready": true,
+    "activeJobs": 12,
+    "liveCalls": 4,
+    "lastSeenAt": "2026-11-15T15:00:00.000Z",
+    "ranForSeconds": 172800,
+    "queues": { "critical": { "waiting": 40, "active": 12, "delayed": 0, "failed": 9 } }
+  }
+]
+```
+
+| In the last beat | What it tells |
+| --- | --- |
+| `lastSeenAt` | When the copy last reported. It died within the 10 seconds after, so this is the moment to look for in the host's log |
+| `ranForSeconds` | How long the process had run by then. A few seconds, in copy after copy, is a copy that crashes soon after it starts |
+| `rssBytes` and `heapUsedBytes` | Its memory. Close to the service's limit, the host stopped it for running out of memory |
+| `busy` | Near 1, its one thread was full, and everything it served waited |
+| `db` | Requests `waiting` mean its database pool was full |
+| `liveCalls` and `activeJobs` | The calls and the jobs a worker held. The calls are taken over or ended within a minute or two ([guide 7.16](../deployment/guide/part-7-operations.md#716-worker-crash-and-stuck-calls)) |
+| `queues` | The queues' jobs as that worker counted them last |
+
+- **It is no problem by itself.** The answer goes back to 200 once another copy took its place or 10 minutes passed, so an uptime check doesn't stay red for a day. `services.<name>.died` counts each service's copies that died in the last 24 hours, and `died` lists the newest 50.
+- **A copy that crashed and came back within 30 seconds** never raised a problem, and is listed all the same. Before, the new process's beats replaced the last beat of the one that died.
+- **A copy that was told to stop** isn't listed, whether a deploy, a restart or the scale script stopped it: its last beat says it was shutting down, and it drops off `copies` after 10 minutes.
+- **A copy that only lost its way to Redis** looks like one that died while it is silent. Its next beat takes it off the list.
+- **A copy that stops before its first beat** isn't listed. A worker beats once its start-up checks have passed, so one that stops on a missing setting or a wrong database password never does: the host's crash notice and the copy's log show it.
+- **The beat doesn't say why the copy died.** The host does: the end of the copy's log at `lastSeenAt`, and Railway's crash notice ([guide 7.16](../deployment/guide/part-7-operations.md#716-worker-crash-and-stuck-calls)).
+- **On Railway,** `node devops/scale.mjs` prints the same list under its table of copies ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)).
+- **After 24 hours the beat is gone,** and nothing keeps a longer history of the copies that died. With the OTLP variables set, each copy's load over time stays in the metrics ([chart the copies' load](#chart-the-copies-load)), and the host keeps its logs.
+
+In a check on a computer on 2026-11-15, with two workers and two built admins on one PostgreSQL and one Redis, a worker killed with `kill -9` turned the answer into a 503 after 26 seconds. Started again under the same name 45 seconds after the kill, it had the answer fine again within 3 seconds, with the process that died under `died`: its last beat, and the 23 seconds it had run. An admin killed and started again the same way was listed too. A worker killed and started again a second later never raised a problem, and was under `died` 28 seconds after. A worker stopped the ordinary way showed as `draining`, then `left`, and never under `died`. Eleven minutes after the last kill, the three that died were still listed, the one that left was gone, and Redis held the four running copies in one list and the three that died in the other. The 24 hours themselves were tried in the tests against Redis, with beats dated back, not by waiting a day. Nothing here has run on Railway yet.
 
 ### Chart the copies' load
 
@@ -165,9 +221,10 @@ The same change makes the worker's older metrics arrive at all. OpenTelemetry ha
 Measured on a computer on 2026-11-15, with Node.js 26 and a local Redis:
 
 - A beat takes 83 microseconds of the copy's processor and 18 of Redis's, every 10 seconds: under a thousandth of a percent of one processor for each copy.
-- An answer of the status address takes 0.12 milliseconds of the admin's processor for 4 copies and 0.9 for 100, and came back in 23 milliseconds over HTTP.
+- Keeping the copies that died for 24 hours (fork PR #186) added two commands to a beat. Measured side by side, a beat took about 16 microseconds of Redis's thread before and 20 after, and the same 20 with 50 copies that died on the list as with none. That's because a copy that stopped is looked at once, when its last beat turns 10 minutes old, and not at every beat: that look takes Redis about 15 microseconds a copy, and a beat looks at 100 copies at most.
+- An answer of the status address takes 0.12 milliseconds of the admin's processor for 4 copies and 0.9 for 100, and came back in 23 milliseconds over HTTP. With 50 copies that died listed beside 4 that run, it takes 0.45.
 - A worker already sends Redis about 790 commands a minute while idle; the heartbeat adds 6.
-- Redis holds about 340 bytes for an admin's record and 750 for a worker's, with identifiers as long as Railway's. Two copies of each took 3 kilobytes of Redis's memory and 25 of each took 36. Eleven beats from every copy left as many records as the first one.
+- Redis holds about 340 bytes for an admin's record and 750 for a worker's, with identifiers as long as Railway's. Two copies of each took 3 kilobytes of Redis's memory and 25 of each took 38. Eleven beats from every copy left as many records as the first one. A worker that died takes about 1 kilobyte for its 24 hours, and 50 of them, the most the list keeps, took 47. At its limit of 1,000 copies heard from in 10 minutes, the list took 1 megabyte.
 - The new gauges are read from memory once every 15 seconds: five pools' counters in 280 nanoseconds, and the busy share in 143. A counter that finds its real instrument at each use costs 3 nanoseconds more than before, and a histogram 19.
 - The admin's start-up check of its database roles made four connection pools of its own beside the ones its routes use, each holding a connection for 30 seconds. They now close as soon as the check is done, so a starting copy stays within its connection budget, and the figures above count each pool once.
 
@@ -191,4 +248,5 @@ Railway keeps logs 7 days on the Hobby plan and 30 on Pro, and its Monitors need
 - Twilio's call SID isn't on the worker's lines, and Twilio's price lookup doesn't use it.
 - Sign-in lines live only in the logs, so they last as long as Railway or PostHog keeps logs. The database keeps no record of sign-ins beyond the sessions still open.
 - Nothing checks a deployment automatically after it deploys ([open items](../project/open-items.md)).
+- Nothing keeps the last beat of a copy that died past 24 hours, and no log line or alert says that a copy died: the status address lists it, and the host's crash notice says it at the time.
 - No dashboard or alert reads the copies' metrics yet: a PostHog dashboard and alerts are the next step ([grow past one stack](../roadmap/scale-past-one-stack.md#watch-the-copies)). Nothing restarts a copy whose thread is stuck, and no copy of the worker refuses calls past a limit of its own.

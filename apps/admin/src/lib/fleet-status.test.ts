@@ -71,17 +71,45 @@ describe("the fleet status address", () => {
         checkedAt: "2026-11-15T20:00:00.000Z",
         problems: [],
         services: {
-          admin: { running: 1, notReady: 0, draining: 0, silent: 0, expected: 1 },
-          worker: { running: 1, notReady: 0, draining: 0, silent: 0, expected: 1 },
+          admin: { running: 1, notReady: 0, draining: 0, silent: 0, died: 0, expected: 1 },
+          worker: { running: 1, notReady: 0, draining: 0, silent: 0, died: 0, expected: 1 },
         },
         copies: [
           { service: "admin", replica: "admin-replica-1", state: "running", release: "abc1234", deployment: "dep-1", region: "us-west2", startedAt: "2026-11-15T19:00:00.000Z", lastSeenSecondsAgo: 4, busy: 0.12, rssBytes: 300_000_000, heapUsedBytes: 150_000_000, db: { open: 3, inUse: 1, waiting: 0, max: 24 } },
           { service: "worker", replica: "worker-replica-1", state: "running", release: "abc1234", deployment: "dep-1", region: "us-west2", startedAt: "2026-11-15T19:00:00.000Z", lastSeenSecondsAgo: 4, busy: 0.12, rssBytes: 300_000_000, heapUsedBytes: 150_000_000, ready: true, activeJobs: 2, liveCalls: 1 },
         ],
+        died: [],
         queues,
         queuesCountedSecondsAgo: 4,
       },
     });
+  });
+
+  it("lists a copy that died for 24 hours with its last beat, and raises no alarm once another took its place", async () => {
+    const backlog = { critical: { waiting: 40, active: 5, delayed: 0, failed: 3 } };
+    mocks.readFleet.mockResolvedValue({ now: NOW, records: [
+      ...healthy(),
+      // It stopped 5 hours ago without saying it was shutting down, after running for 2 hours.
+      copy({ service: "worker", replica: "9b8d7c6a-1f2e-4d3c-8b7a-000000000002", startedAt: NOW - 7 * 3_600_000, seenAt: NOW - 5 * 3_600_000, busy: 0.97, rssBytes: 1_900_000_000, ready: true, activeJobs: 5, liveCalls: 3, db: { open: 12, inUse: 12, waiting: 4, max: 12 }, queues: backlog }),
+      // One that said it was shutting down is forgotten after 10 minutes, and one that died after 24 hours.
+      copy({ service: "worker", replica: "worker-left", draining: true, seenAt: NOW - 11 * 60_000 }),
+      copy({ service: "admin", replica: "admin-long-ago", seenAt: NOW - 25 * 3_600_000 }),
+    ] });
+
+    const answer = await ask();
+    expect(answer.status).toBe(200);
+    const body = answer.body as { ok: boolean; problems: string[]; services: Record<string, Record<string, number>>; copies: Array<Record<string, unknown>>; died: Array<Record<string, unknown>> };
+    expect(body.ok).toBe(true);
+    expect(body.problems).toEqual([]);
+    expect(body.services.worker).toMatchObject({ running: 1, silent: 0, died: 1 });
+    expect(body.services.admin).toMatchObject({ running: 1, died: 0 });
+    expect(body.copies.map((item) => item.replica)).toEqual(["admin-replica-1", "worker-replica-1"]);
+    expect(body.died).toEqual([{
+      service: "worker", replica: "9b8d7c6a-1f2e-4d3c-8b7a-000000000002", state: "died", release: "abc1234", deployment: "dep-1", region: "us-west2",
+      startedAt: "2026-11-15T13:00:00.000Z", lastSeenSecondsAgo: 18_000, busy: 0.97, rssBytes: 1_900_000_000, heapUsedBytes: 150_000_000,
+      db: { open: 12, inUse: 12, waiting: 4, max: 12 }, ready: true, activeJobs: 5, liveCalls: 3,
+      lastSeenAt: "2026-11-15T15:00:00.000Z", ranForSeconds: 7_200, queues: backlog,
+    }]);
   });
 
   it("answers 503 when a worker went silent, which the admin's own health checks can't see", async () => {

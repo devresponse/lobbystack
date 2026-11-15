@@ -51,8 +51,9 @@ type AuthShellProps = {
 };
 
 /**
- * The signed-out pages: the brand's panel beside the form on a large screen,
- * a band of it above the form on a phone. Everything in it comes from the
+ * The signed-out pages: the screen split in two on a large screen, the brand's
+ * panel filling the left half from top to bottom and the form on the right; a
+ * band of the panel above the form on a phone. No rounded corners on either. Everything in it comes from the
  * brand file's name, logo and accent, so any brand gets its own colours.
  */
 export function AuthShell({ eyebrow, title, description, children, legalFooter, progress, pending }: AuthShellProps) {
@@ -60,7 +61,7 @@ export function AuthShell({ eyebrow, title, description, children, legalFooter, 
   const marketingLocale = resolveLocale(i18n?.resolvedLanguage, i18n?.language);
   const style = useMemo(() => brandScopeStyle(), []);
   return (
-    <div className="flex min-h-svh w-full flex-col bg-background text-foreground lg:flex-row lg:gap-3 lg:p-3" data-brand-scope="" style={style}>
+    <div className="flex min-h-svh w-full flex-col bg-background text-foreground lg:flex-row" data-brand-scope="" style={style}>
       <AuthBrandPanel />
       <div className="relative flex flex-1 flex-col">
         <div className="absolute right-3 top-0 hidden h-11 items-center lg:flex">
@@ -142,10 +143,10 @@ function AuthBrandPanel({ page = currentBrand().signInPage }: { page?: BrandSign
     : POINTS.map(({ key, Icon }) => ({ Icon, text: t(`panel.points.${key}`) }));
   return (
     // A dark panel takes the dark theme inside it, in light mode too.
-    <section className={cn("auth-brand-panel relative isolate overflow-hidden rounded-b-[1.75rem] lg:sticky lg:top-3 lg:h-[calc(100svh-1.5rem)] lg:w-[46%] lg:max-w-[46rem] lg:shrink-0 lg:rounded-[1.75rem]", page.panel === "dark" && "dark")}>
+    <section className={cn("auth-brand-panel relative isolate overflow-hidden lg:sticky lg:top-0 lg:h-svh lg:w-1/2 lg:shrink-0", page.panel === "dark" && "dark")}>
       <div aria-hidden="true" className="auth-brand-glow pointer-events-none absolute inset-0 -z-10" />
       <div aria-hidden="true" className="auth-brand-dots pointer-events-none absolute inset-0 -z-10" />
-      <div className="flex h-full flex-col px-6 pb-7 pt-4 sm:px-10 lg:px-12 lg:pb-10 lg:pt-9 xl:px-14">
+      <div className="flex h-full flex-col px-6 pb-7 pt-4 sm:px-10 lg:mx-auto lg:w-full lg:max-w-[46rem] lg:px-12 lg:pb-10 lg:pt-9 xl:px-14">
         <div className="flex h-11 items-center justify-between gap-4">
           <PanelLockup />
           <ScreenHelpButton buttonClassName="text-current hover:text-current hover:opacity-75" className="-mr-2 lg:hidden" size="icon" />

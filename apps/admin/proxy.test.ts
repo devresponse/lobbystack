@@ -3,7 +3,11 @@ import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { config, proxy } from "./proxy";
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 it("skips known assets but retains proxy checks for application paths with extensions", () => {
   for (const url of ["/locales/en/auth.json", "/brand/logo-icon.svg", "/_next/static/chunk.js", "/favicon.ico"]) {
@@ -217,4 +221,214 @@ it("rejects webhooks before their handlers can acknowledge events during mainten
   const response = proxy(new NextRequest("http://localhost:3210/api/webhooks/twilio/sms", { method: "POST" }));
   expect(response.status).toBe(503);
   expect(response.headers.get("retry-after")).toBe("60");
+});
+
+// The access gate: with PROTECTION_TOKEN set, a test deployment answers only
+// to a browser that opened the access link (docs/features/access-gate.md).
+const PROTECTION_TOKEN = "protection-token-fixture-0123456789-abcdef";
+const NOINDEX = "noindex, nofollow";
+
+function accessCookie(origin = "http://localhost:3210"): string {
+  const granted = proxy(new NextRequest(`${origin}/login?access=${PROTECTION_TOKEN}`));
+  const cookie = granted.cookies.getAll()[0]!;
+  return `${cookie.name}=${cookie.value}`;
+}
+
+it("changes nothing while PROTECTION_TOKEN is unset or empty", () => {
+  for (const value of [undefined, "", "  "]) {
+    vi.stubEnv("PROTECTION_TOKEN", value);
+    const page = proxy(new NextRequest(`http://localhost:3210/fr/login?access=${PROTECTION_TOKEN}`, { headers: { "x-protection-token": "kept" } }));
+    expect(page.status).toBe(200);
+    expect(page.headers.get("x-middleware-next")).toBe("1");
+    expect(page.headers.get("cache-control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
+    expect(page.headers.get("x-robots-tag")).toBeNull();
+    expect(page.headers.get("set-cookie")).toBeNull();
+    expect(page.headers.get("x-middleware-request-x-protection-token")).toBe("kept");
+    expect(proxy(new NextRequest("http://localhost:3210/api/branding/logo?v=abc")).headers.get("cache-control")).toBeNull();
+    expect(proxy(new NextRequest("http://localhost:3210/api/widget/session", { method: "POST" })).headers.get("x-robots-tag")).toBeNull();
+  }
+});
+
+it("answers a stranger the same bare 404 at every closed address", async () => {
+  vi.stubEnv("PROTECTION_TOKEN", PROTECTION_TOKEN);
+  const closed: Array<[string, string]> = [
+    ["GET", "/"],
+    ["GET", "/login"],
+    ["GET", "/fr/login"],
+    ["GET", "/en/pricing"],
+    ["GET", "/dashboard"],
+    ["GET", "/profile/acme-dental"],
+    ["GET", "/q/k7m2pq"],
+    ["GET", "/en/help"],
+    ["GET", "/no-such-page"],
+    ["GET", "/api/auth/get-session"],
+    ["POST", "/api/auth/sign-in/email"],
+    ["GET", "/api/auth/oauth2/authorize"],
+    ["GET", "/api/branding/logo?v=abc"],
+    ["POST", "/api/widget-keys"],
+    ["POST", "/api/contacts"],
+    ["OPTIONS", "/api/contacts"],
+    ["HEAD", "/login"],
+    // The token opens a page load only: a script sends the header.
+    ["POST", `/api/contacts?access=${PROTECTION_TOKEN}`],
+  ];
+  for (const [method, path] of closed) {
+    const response = proxy(new NextRequest(`http://localhost:3210${path}`, { method, headers: { "accept-language": "fr" } }));
+    expect(response.status, `${method} ${path}`).toBe(404);
+    expect(response.headers.get("x-middleware-next"), path).toBeNull();
+    expect(response.headers.get("location"), path).toBeNull();
+    expect(response.headers.get("set-cookie"), path).toBeNull();
+    expect(response.headers.get("cache-control"), path).toBe("no-store");
+    expect(response.headers.get("x-robots-tag"), path).toBe(NOINDEX);
+    expect(response.headers.get("content-type"), path).toBe("text/plain; charset=utf-8");
+    expect(response.headers.get("x-content-type-options"), path).toBe("nosniff");
+    expect(await response.text(), path).toBe("Not found");
+  }
+});
+
+it("exchanges the token in an address for the cookie and takes it out of the address", () => {
+  vi.stubEnv("PROTECTION_TOKEN", PROTECTION_TOKEN);
+  const granted = proxy(new NextRequest(`http://localhost:3210/login?access=${PROTECTION_TOKEN}&returnTo=%2Fsettings`));
+  expect(granted.status).toBe(303);
+  expect(granted.headers.get("location")).toBe("http://localhost:3210/login?returnTo=%2Fsettings");
+  expect(granted.headers.get("cache-control")).toBe("no-store");
+  expect(granted.headers.get("x-robots-tag")).toBe(NOINDEX);
+  expect(granted.headers.get("x-frame-options")).toBe("DENY");
+  const setCookie = granted.headers.get("set-cookie") ?? "";
+  expect(setCookie).toMatch(/^lobbystack-access=v1\.\d+\.[A-Za-z0-9_-]{43}; /);
+  expect(setCookie).toContain("HttpOnly");
+  expect(setCookie).toContain("Max-Age=2592000");
+  expect(setCookie).not.toContain(PROTECTION_TOKEN);
+
+  // Over HTTPS, which Railway's proxy reports, the cookie is this host's alone.
+  const secure = proxy(new NextRequest(`https://test.example.test/?access=${PROTECTION_TOKEN}`));
+  expect(secure.headers.get("location")).toBe("https://test.example.test/");
+  expect(secure.headers.get("set-cookie")).toMatch(/^__Host-lobbystack-access=v1\..*; Secure/);
+  expect(secure.headers.get("set-cookie")).not.toContain("Domain");
+});
+
+it("lets a browser with the cookie in, and keeps every answer to it out of shared caches", () => {
+  vi.stubEnv("PROTECTION_TOKEN", PROTECTION_TOKEN);
+  const cookie = accessCookie();
+
+  const page = proxy(new NextRequest("http://localhost:3210/fr/login", { headers: { cookie } }));
+  expect(page.status).toBe(200);
+  expect(page.headers.get("x-middleware-next")).toBe("1");
+  expect(page.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("fr");
+  expect(page.headers.get("content-language")).toBe("fr");
+  // Without the gate this page and the logo are stored by shared caches, which would hand them to a stranger.
+  expect(page.headers.get("cache-control")).toBe("private, no-store");
+  expect(proxy(new NextRequest("http://localhost:3210/api/branding/logo?v=abc", { headers: { cookie } })).headers.get("cache-control")).toBe("private, no-store");
+  expect(page.headers.get("x-robots-tag")).toBe(NOINDEX);
+  expect(page.headers.get("set-cookie")).toBeNull();
+
+  // The rest of the proxy runs as before: language redirects and the origin check on API changes.
+  const legacy = proxy(new NextRequest("http://localhost:3210/login?returnTo=%2Fsettings", { headers: { cookie, "accept-language": "fr" } }));
+  expect(legacy.status).toBe(308);
+  expect(legacy.headers.get("location")).toBe("http://localhost:3210/fr/login?returnTo=%2Fsettings");
+  expect(legacy.headers.get("x-robots-tag")).toBe(NOINDEX);
+  expect(proxy(new NextRequest("http://localhost:3210/api/contacts", { method: "POST", headers: { cookie, origin: "https://untrusted.invalid" } })).status).toBe(403);
+  expect(proxy(new NextRequest("http://localhost:3210/api/contacts", { method: "POST", headers: { cookie, origin: "http://localhost:3210" } })).status).toBe(200);
+
+  // A cookie from before the token changed opens nothing.
+  vi.stubEnv("PROTECTION_TOKEN", "another-protection-token-fixture-9876543210");
+  expect(proxy(new NextRequest("http://localhost:3210/fr/login", { headers: { cookie } })).status).toBe(404);
+});
+
+it("leaves the routes other services call open, with their answers as they were", () => {
+  vi.stubEnv("PROTECTION_TOKEN", PROTECTION_TOKEN);
+  const open: Array<[string, string]> = [
+    ["POST", "/api/webhooks/twilio/sms"],
+    ["POST", "/api/webhooks/stripe"],
+    ["GET", "/api/health/live"],
+    ["GET", "/api/health/ready"],
+    ["GET", "/embed.js"],
+    ["GET", "/embed/wk_live_key"],
+    ["POST", "/api/widget/session"],
+    ["OPTIONS", "/api/widget/chat"],
+    ["POST", "/api/voice/live/session"],
+    ["POST", "/api/voice/live/session/end"],
+    ["GET", "/api/v1/businesses"],
+    ["POST", "/api/mcp"],
+    ["GET", "/.well-known/oauth-protected-resource/api/mcp"],
+    ["POST", "/api/auth/oauth2/token"],
+    ["PUT", "/api/storage/local?token=signed"],
+    ["GET", "/api/internal/finance/export"],
+  ];
+  for (const [method, path] of open) {
+    const response = proxy(new NextRequest(`http://localhost:3210${path}`, { method, headers: { origin: "https://customer.example" } }));
+    expect(response.status, `${method} ${path}`).toBe(200);
+    expect(response.headers.get("x-middleware-next"), path).toBe("1");
+    expect(response.headers.get("x-robots-tag"), path).toBe(NOINDEX);
+    expect(response.headers.get("set-cookie"), path).toBeNull();
+  }
+  // Their caching is their own: the loader stays cacheable, the chat's stream stays unbuffered.
+  expect(proxy(new NextRequest("http://localhost:3210/embed.js")).headers.get("cache-control")).toBeNull();
+  expect(proxy(new NextRequest("http://localhost:3210/api/widget/stream")).headers.get("cache-control")).toBe("private, no-cache, no-store, no-transform");
+  expect(proxy(new NextRequest("http://localhost:3210/embed/wk_live_key")).headers.get("content-security-policy")).toContain("frame-ancestors *");
+  // The widget's chat still opens in the language its loader names.
+  expect(proxy(new NextRequest("http://localhost:3210/embed/wk_live_key?locale=fr")).headers.get("x-middleware-request-x-lobbystack-locale")).toBe("fr");
+  // A script that sends the gate's header with every request hands its token to no open route either.
+  const withHeader = proxy(new NextRequest("http://localhost:3210/api/v1/businesses", { headers: { "x-protection-token": PROTECTION_TOKEN, "x-request-id": "kept" } }));
+  expect(withHeader.status).toBe(200);
+  expect(withHeader.headers.get("x-middleware-override-headers")?.split(",")).toContain("x-request-id");
+  expect(withHeader.headers.get("x-middleware-override-headers")?.split(",")).not.toContain("x-protection-token");
+  expect([...withHeader.headers.values()].join("\n")).not.toContain(PROTECTION_TOKEN);
+});
+
+it("lets a script in by the header, and doesn't pass its token on to the page", () => {
+  vi.stubEnv("PROTECTION_TOKEN", PROTECTION_TOKEN);
+  const response = proxy(new NextRequest("http://localhost:3210/api/dashboard", { headers: { "x-protection-token": PROTECTION_TOKEN, "x-request-id": "kept" } }));
+  expect(response.status).toBe(200);
+  expect(response.headers.get("x-middleware-next")).toBe("1");
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  expect(response.headers.get("set-cookie")).toBeNull();
+  const passedOn = response.headers.get("x-middleware-override-headers")?.split(",") ?? [];
+  expect(passedOn).toContain("x-request-id");
+  expect(passedOn).not.toContain("x-protection-token");
+  expect(response.headers.get("x-middleware-request-x-protection-token")).toBeNull();
+  expect([...response.headers.values()].join("\n")).not.toContain(PROTECTION_TOKEN);
+});
+
+it("answers a stranger's 404 before maintenance mode, which still answers everyone the gate lets through", () => {
+  vi.stubEnv("PROTECTION_TOKEN", PROTECTION_TOKEN);
+  const cookie = accessCookie();
+  vi.stubEnv("LOBBYSTACK_MAINTENANCE_MODE", "true");
+
+  expect(proxy(new NextRequest("http://localhost:3210/api/dashboard")).status).toBe(404);
+  expect(proxy(new NextRequest("http://localhost:3210/api/contacts", { method: "POST" })).status).toBe(404);
+  const signedIn = proxy(new NextRequest("http://localhost:3210/api/dashboard", { headers: { cookie } }));
+  expect(signedIn.status).toBe(503);
+  expect(signedIn.headers.get("retry-after")).toBe("60");
+  expect(signedIn.headers.get("x-robots-tag")).toBe(NOINDEX);
+  // Open routes meet maintenance mode exactly as they do without the gate.
+  expect(proxy(new NextRequest("http://localhost:3210/api/webhooks/twilio/sms", { method: "POST" })).status).toBe(503);
+  expect(proxy(new NextRequest("http://localhost:3210/api/health/live")).status).toBe(200);
+  // The access link still works, so a tester can see the maintenance answer for themselves.
+  expect(proxy(new NextRequest(`http://localhost:3210/login?access=${PROTECTION_TOKEN}`)).status).toBe(303);
+});
+
+it("warns about a token that doesn't match, once a minute at most and never with a token", () => {
+  vi.useFakeTimers({ now: Date.now() + 60 * 60 * 1000 });
+  vi.stubEnv("PROTECTION_TOKEN", PROTECTION_TOKEN);
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const wrong = "an-access-token-from-before-it-was-changed";
+  const lines = () => warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("access_gate.wrong_token"));
+
+  expect(proxy(new NextRequest(`http://localhost:3210/login?access=${wrong}`)).status).toBe(404);
+  expect(lines()).toHaveLength(1);
+  expect(JSON.parse(lines()[0]!)).toMatchObject({ level: "warn", message: "access_gate.wrong_token", via: "query" });
+  expect(lines()[0]).not.toContain(wrong);
+  expect(lines()[0]).not.toContain(PROTECTION_TOKEN);
+
+  // A script guessing tokens gets the same 404 and no line of its own.
+  expect(proxy(new NextRequest("http://localhost:3210/api/dashboard", { headers: { "x-protection-token": wrong } })).status).toBe(404);
+  expect(lines()).toHaveLength(1);
+  // A request with no token at all is never a warning.
+  vi.advanceTimersByTime(61_000);
+  expect(proxy(new NextRequest("http://localhost:3210/login")).status).toBe(404);
+  expect(lines()).toHaveLength(1);
+  expect(proxy(new NextRequest("http://localhost:3210/api/dashboard", { headers: { "x-protection-token": wrong } })).status).toBe(404);
+  expect(lines()).toHaveLength(2);
+  expect(JSON.parse(lines()[1]!)).toMatchObject({ message: "access_gate.wrong_token", via: "header", notLogged: 1 });
 });

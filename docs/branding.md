@@ -210,7 +210,7 @@ A brand can set its own words and a dark panel in `brand.json`. Every part is op
 
 ### Prerendered pages
 
-The sign-in, sign-up, and other public pages are prerendered at build time, before any database can be read. Where the build picks a brand file, by its `APP_BASE_URL`, its `BRAND_PRESET` or as the only brand besides the default, they carry that brand and need nothing more. Otherwise, the browser asks `/api/branding` for the name and logo onboarding saved. Until it answers, the page keeps the logo's space empty instead of showing a name it would then replace, and then the tab title and icon follow.
+The sign-in, sign-up, and other public pages are prerendered at build time, before any database can be read. Where the build picks a brand file, by its `APP_BASE_URL`, its `BRAND_PRESET` or as the only brand besides the default, they carry that brand and need nothing more. Otherwise, the browser asks `/api/branding` for the name and logo onboarding saved. The request carries the browser's cookies, so a test deployment closed with `PROTECTION_TOKEN` answers it too ([the access gate](features/access-gate.md)). Until it answers, the page keeps the logo's space empty instead of showing a name it would then replace, and then the tab title and icon follow.
 
 ## Text that keeps LobbyStack on purpose
 

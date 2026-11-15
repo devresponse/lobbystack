@@ -56,6 +56,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [API, CLI and integrations](features/api-cli-integrations.md) | The v1 API, MCP server, CLI, webhooks, Zapier, Make and n8n |
 | [Unanswered questions](features/unanswered-questions.md) | The questions the receptionist couldn't answer, and answering them as text entries |
 | [Logs, errors and alerts](features/observability.md) | Logs, PostHog, following one call, and what to alert on |
+| [Close a test deployment to strangers](features/access-gate.md) | One variable on the admin, `PROTECTION_TOKEN`, that answers a bare 404 at every page and API until a browser opens the access link once, while webhooks, health checks, the website widget, the API and MCP stay open; on `releases/r2` |
 | [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar and Stripe, promo codes, and why it is built this way |
 | [Prepaid minute packs](features/prepaid-packs.md) | Minutes paid once that last a set number of days, beside the plans: the packs on sale, buying one, how calls draw on it, switching to and from a subscription, refunds, disputes and the end of a pack |
 | [Sign-in email addresses](auth-email-normalization.md) | How addresses are compared |
@@ -78,7 +79,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 ## Read the reviews and research
 
 - [Reviews](reviews/README.md): the phone call path, the website widget and how far it scales, the whole codebase, what limits scale, and billing, each with what has happened since.
-- [Research](research/README.md): voice platforms, an Azure port, Cloudflare, Railway automation, observability, sign-in with Google and Microsoft, forms filled from calls, a cloned voice and each business's own provider keys, plus the voice agent market, a QR place guide and the brand name.
+- [Research](research/README.md): voice platforms, an Azure port, Cloudflare, Railway automation, observability, sign-in with Google and Microsoft, forms filled from calls, a cloned voice, each business's own provider keys and protecting a test deployment's address, plus the voice agent market, a QR place guide and the brand name.
 - [Future features](roadmap/README.md): what the reviews and research proposed and isn't built, kept current where the studies keep their dates.
 
 ## Read the original project's records

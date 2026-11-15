@@ -12,6 +12,8 @@ export type SmokeConfig = {
   expectedSmsUrl: string;
   loginEmail?: string;
   loginPassword?: string;
+  /** The access gate's token, for a deployment closed with PROTECTION_TOKEN (docs/features/access-gate.md). */
+  protectionToken?: string;
   enableCall: boolean;
   callFrom?: string;
   callTo?: string;
@@ -49,6 +51,19 @@ export function signInFailureIsExpected(status: number): boolean {
   return status === 400 || status === 401 || status === 403;
 }
 
+/** The header that lets a script through the access gate. Only the admin gets it, never Twilio. */
+export function accessGateHeaders(config: Pick<SmokeConfig, "protectionToken">): Record<string, string> {
+  return config.protectionToken ? { "x-protection-token": config.protectionToken } : {};
+}
+
+/** What a sign-in check's status says. A deployment closed with PROTECTION_TOKEN answers 404 until the request carries its token. */
+export function signInStatusDetail(status: number, config: Pick<SmokeConfig, "protectionToken">): string {
+  if (status !== 404) return `status ${status}`;
+  return config.protectionToken
+    ? "status 404: if the deployment is closed with PROTECTION_TOKEN, the one given here isn't its token"
+    : "status 404: a deployment closed with PROTECTION_TOKEN answers that, so give its token as PROTECTION_TOKEN on the same line";
+}
+
 export function buildConfig(source: NodeJS.ProcessEnv = process.env): SmokeConfig {
   const adminBaseUrl = trimTrailingSlash(source.ADMIN_BASE_URL ?? "https://app.lobbystack.com");
   const workerBaseUrl = source.WORKER_BASE_URL ? trimTrailingSlash(source.WORKER_BASE_URL) : undefined;
@@ -62,6 +77,7 @@ export function buildConfig(source: NodeJS.ProcessEnv = process.env): SmokeConfi
     expectedSmsUrl: trimTrailingSlash(source.SMOKE_EXPECTED_SMS_URL ?? `${adminBaseUrl}/api/webhooks/twilio/sms`),
     ...(source.SMOKE_LOGIN_EMAIL ? { loginEmail: source.SMOKE_LOGIN_EMAIL } : {}),
     ...(source.SMOKE_LOGIN_PASSWORD ? { loginPassword: source.SMOKE_LOGIN_PASSWORD } : {}),
+    ...(source.PROTECTION_TOKEN?.trim() ? { protectionToken: source.PROTECTION_TOKEN.trim() } : {}),
     enableCall: source.SMOKE_ENABLE_CALL === "1" || source.SMOKE_ENABLE_CALL === "true",
     ...(source.SMOKE_CALL_FROM ? { callFrom: source.SMOKE_CALL_FROM } : {}),
     ...(source.SMOKE_CALL_TO ? { callTo: source.SMOKE_CALL_TO } : {}),
@@ -120,15 +136,15 @@ async function checkSignInEndpoint(config: SmokeConfig): Promise<SmokeCheck> {
   try {
     const response = await fetch(`${config.adminBaseUrl}/api/auth/sign-in/email`, {
       method: "POST",
-      headers: { "content-type": "application/json", origin: config.adminBaseUrl },
+      headers: { "content-type": "application/json", origin: config.adminBaseUrl, ...accessGateHeaders(config) },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
     if (usingRealCredentials) {
-      return { name: "login", ok: response.ok, detail: `status ${response.status}` };
+      return { name: "login", ok: response.ok, detail: signInStatusDetail(response.status, config) };
     }
     const ok = signInFailureIsExpected(response.status);
-    return { name: "login endpoint", ok, detail: ok ? `rejected invalid credentials with ${response.status}` : `unexpected status ${response.status}` };
+    return { name: "login endpoint", ok, detail: ok ? `rejected invalid credentials with ${response.status}` : `unexpected ${signInStatusDetail(response.status, config)}` };
   } catch (error) {
     return { name: "login endpoint", ok: false, detail: error instanceof Error ? error.message : String(error) };
   }

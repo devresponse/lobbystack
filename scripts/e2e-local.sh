@@ -13,6 +13,10 @@
 #   scripts/e2e-local.sh --skip-build    # reuse an existing .next build
 #   scripts/e2e-local.sh -- e2e/auth-pages.e2e.ts   # custom Playwright targets
 #
+# After the journeys it starts the same build once more with PROTECTION_TOKEN
+# set, on the port after the admin's, and runs the access gate's journey
+# (e2e/access-gate.e2e.ts) against it. Custom targets skip that run.
+#
 # Environment overrides: E2E_POSTGRES_PORT, E2E_REDIS_PORT, E2E_ADMIN_PORT,
 # E2E_MAILPIT_SMTP_PORT, E2E_MAILPIT_UI_PORT.
 set -euo pipefail
@@ -31,6 +35,7 @@ MAILPIT_UI_PORT="${E2E_MAILPIT_UI_PORT:-28025}"
 
 KEEP=0
 SKIP_BUILD=0
+ACCESS_GATE=1
 TESTS=(
   e2e/affiliate-program.e2e.ts
   e2e/auth-pages.e2e.ts
@@ -57,7 +62,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep) KEEP=1; shift ;;
     --skip-build) SKIP_BUILD=1; shift ;;
-    --) shift; TESTS=("$@"); break ;;
+    --) shift; TESTS=("$@"); ACCESS_GATE=0; break ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -112,3 +117,8 @@ pnpm --filter @lobbystack/db exec tsx src/cli.ts seed
 
 echo "==> Running the supported browser journeys"
 CI=1 pnpm --filter @lobbystack/admin exec playwright test "${TESTS[@]}"
+
+if [[ "$ACCESS_GATE" -eq 1 ]]; then
+  echo "==> Running the access gate's journey against a server started with PROTECTION_TOKEN"
+  CI=1 pnpm --filter @lobbystack/admin e2e:access-gate
+fi

@@ -377,7 +377,14 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     if (request.headers["x-stand-in-caller"] !== "pnpm") world.polarVersions.push(Array.isArray(version) ? version.join(",") : version);
     answer = polarAnswer(request.method ?? "GET", url.pathname.slice("/polar".length), token, body as FakeWebhookRequest | null);
   } else if (url.pathname.startsWith("/posthog/")) answer = posthogAnswer(request.method ?? "GET", url, token, body as PostHogBody);
-  else if (url.pathname.startsWith("/app/")) answer = adminAnswer(url.pathname.slice("/app".length), token);
+  else if (url.pathname === "/app/login") {
+    // A page request that carries nothing: the access gate's 404 once the admin's live deployment has PROTECTION_TOKEN
+    // (apps/admin/src/lib/access-gate.ts), else the sign-in page's redirect to its language.
+    const closed = Boolean(world.running.admin.PROTECTION_TOKEN);
+    response.writeHead(closed ? 404 : 308, closed ? { "content-type": "text/plain; charset=utf-8" } : { location: "/en/login" });
+    response.end(closed ? "Not found" : "");
+    return;
+  } else if (url.pathname.startsWith("/app/")) answer = adminAnswer(url.pathname.slice("/app".length), token);
   response.writeHead(answer[0], { "content-type": "application/json" });
   response.end(JSON.stringify(answer[1]));
 }
@@ -1205,5 +1212,215 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     // With the smaller pools one admin and one worker fit Postgres's 97 even while a release replaces them both and the
     // old admin takes its minute, so the deployment needn't wait for the higher limit.
     expect(2 * (connectionBudget("admin", world.variables.admin) + connectionBudget("worker", world.variables.worker))).toBeLessThanOrEqual(100 - 3);
+  });
+
+  // The access gate (PROTECT=yes, docs/features/access-gate.md): the admin's PROTECTION_TOKEN and the access link.
+  const tokenShape = /^[A-Za-z0-9_-]{43}$/;
+  const accessLinkOf = (token: unknown) => `https://${railwayHost}/login?access=${String(token)}`;
+
+  /** A deployment up finished with PROTECT=yes: the token is kept, and the admin's live deployment has it. */
+  function protectedAfterUp(token = randomBytes(32).toString("base64url")): string {
+    railwayAfterUp();
+    world.variables.admin.PROTECTION_TOKEN = token;
+    world.running.admin = { ...world.variables.admin };
+    const state = stateAfterUp();
+    state.done.protection = earlier;
+    state.values.PROTECTION_TOKEN = token;
+    writeState(state);
+    return token;
+  }
+
+  it("leaves a deployment open unless PROTECT says yes, and never closes production", async () => {
+    writeSettings();
+    const state = stateAfterUp();
+    for (const id of ["variables", "deploy.databases", "deploy.migrate", "deploy.admin", "deploy.worker"]) delete state.done[id];
+    writeState(state);
+    const open = await bootstrap(["up", settings(), "--yes"]);
+    expect(open.code, open.out).toBe(0);
+    expect(world.variables.admin.PROTECTION_TOKEN).toBeUndefined();
+    expect(open.out).not.toContain("Access gate");
+    expect(open.out).not.toContain("?access=");
+    expect(readState().done.protection).toBeUndefined();
+    expect((await bootstrap(["status", settings()])).out).not.toContain("access link");
+
+    writeSettings({ PROTECT: "maybe" });
+    const unclear = await bootstrap(["status", settings()]);
+    expect(unclear.code, unclear.out).toBe(1);
+    expect(unclear.out).toContain("PROTECT is yes or no");
+
+    writeSettings({ PROTECT: "yes", ENVIRONMENT: "production" });
+    const production = await bootstrap(["status", settings()]);
+    expect(production.code, production.out).toBe(1);
+    expect(production.out).toContain("PROTECT=yes is only for ENVIRONMENT=test");
+  });
+
+  it("makes the access gate's token in up, puts it on the admin before its first deploy, and shows the access link, which the log never has", async () => {
+    writeSettings({ PROTECT: "yes" });
+    const before = stateAfterUp();
+    for (const id of ["variables", "deploy.databases", "deploy.migrate", "deploy.admin", "deploy.worker"]) delete before.done[id];
+    writeState(before);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    const state = readState();
+    const token = String(state.values.PROTECTION_TOKEN);
+    expect(token).toMatch(tokenShape);
+    for (const id of ["protection", "variables", "deploy.admin"]) expect(state.done[id], id).toBeTruthy();
+    // Only the admin has it, and it went in before the admin's first deploy, which then started with it.
+    expect(world.variables.admin.PROTECTION_TOKEN).toBe(token);
+    expect(world.deployments.admin[0]?.id).toBe("admin-deployment-2");
+    for (const service of ["Postgres", "Redis", "migrate", "worker"] as const) expect(world.variables[service].PROTECTION_TOKEN, service).toBeUndefined();
+    expect(readFileSync(`${settings()}.vars`, "utf8")).toContain(`PROTECTION_TOKEN=${token}\n`);
+    // The link is on screen, for the operator to send on, and the log has it without the token.
+    expect(result.out).toContain("Closed to strangers (PROTECT=yes): every page answers 404 until a browser opens the access link once.");
+    expect(result.out).toContain(accessLinkOf(token));
+    expect(logText()).not.toContain(token);
+    expect(logText()).toContain(`https://${railwayHost}/login?access=‹hidden›`);
+
+    const status = await bootstrap(["status", settings()]);
+    expect(status.code, status.out).toBe(0);
+    expect(status.out).toContain(`access link (PROTECT=yes): ${accessLinkOf(token)}`);
+    expect(logText()).not.toContain(token);
+
+    // The token stays from run to run, so the link that was sent out keeps working.
+    const again = await bootstrap(["up", settings(), "--yes"]);
+    expect(again.code, again.out).toBe(0);
+    expect(again.out).toContain("= The access gate's token (PROTECTION_TOKEN on the admin, 43 random characters) (done");
+    expect(readState().values.PROTECTION_TOKEN).toBe(token);
+    expect(world.variables.admin.PROTECTION_TOKEN).toBe(token);
+  });
+
+  it("closes a deployment that is already up, and doctor says whether it is closed yet", async () => {
+    writeSettings({ PROTECT: "yes" });
+    railwayAfterUp();
+    writeState(stateAfterUp());
+    const waiting = await bootstrap(["doctor", settings()]);
+    expect(waiting.out).toContain("note   PROTECT=yes, and up hasn't made the access gate's token yet");
+    expect((await bootstrap(["status", settings()])).out).toContain("access link (PROTECT=yes): none yet: up makes the token and shows the link");
+
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("The variables are done already, so they run again below, to bring the token to the admin.");
+    const token = String(readState().values.PROTECTION_TOKEN);
+    expect(token).toMatch(tokenShape);
+    expect(result.out).toContain("~ admin: ");
+    expect(world.variables.admin.PROTECTION_TOKEN).toBe(token);
+    expect(result.out).toContain(accessLinkOf(token));
+    // Railway deploys the admin again with it. Until that deployment is live, pages still answer.
+    expect(world.deployments.admin[0]?.status).toBe("DEPLOYING");
+    expect(world.deployments.Postgres).toHaveLength(1);
+    const stillOpen = await bootstrap(["doctor", settings()]);
+    expect(stillOpen.code, stillOpen.out).toBe(1);
+    expect(stillOpen.out).toContain(`FIX    PROTECT=yes, but https://${railwayHost}/login answers 308 without the access link, so the deployment is open to anyone.`);
+    expect(stillOpen.out).toContain("acme/lobbystack@main is from before the access gate");
+
+    world.running.admin = { ...world.variables.admin };
+    const closed = await bootstrap(["doctor", settings()]);
+    expect(closed.out).toContain(`ok     closed to strangers: https://${railwayHost}/login answers 404 without the access link`);
+    expect(closed.out).not.toContain("FIX    PROTECT=yes");
+    expect(logText()).not.toContain(token);
+  });
+
+  it("says in connect whether the deployment is closed, and gives the access link with what is left to do", async () => {
+    readyForBilling();
+    writeSettings({ DEPLOYMENT_MODE: "self_hosted_standard", PROTECT: "yes" });
+    const token = randomBytes(32).toString("base64url");
+    const state = readState();
+    state.done.protection = earlier;
+    state.values.PROTECTION_TOKEN = token;
+    writeState(state);
+    world.variables.admin.PROTECTION_TOKEN = token;
+    world.running.admin = { ...world.variables.admin };
+    const closed = await bootstrap(["connect", settings()]);
+    expect(closed.code, closed.out).toBe(0);
+    expect(closed.out).toContain(`closed to strangers: https://${railwayHost}/login answers 404 without the access link`);
+    expect(closed.out).toContain("1. The deployment is closed to strangers (PROTECT=yes). Open the access link once in each browser that should");
+    expect(closed.out).toContain(accessLinkOf(token));
+    expect(logText()).not.toContain(token);
+
+    // A branch from before the access gate ignores the variable, and the deployment stays open with no error anywhere.
+    delete world.running.admin.PROTECTION_TOKEN;
+    const open = await bootstrap(["connect", settings()]);
+    expect(open.code, open.out).toBe(0);
+    expect(open.out).toContain(`WARNING: PROTECT=yes, but https://${railwayHost}/login answers 308 without the access link, so the deployment is open to anyone.`);
+  });
+
+  it("makes a new token when the protection step is redone, or takes the secrets file's, and refuses one the admin wouldn't start with", async () => {
+    writeSettings({ PROTECT: "yes" });
+    const first = protectedAfterUp();
+    const redo = await bootstrap(["redo", settings(), "protection"]);
+    expect(redo.code, redo.out).toBe(0);
+    expect(redo.out).toContain("forgot the access gate's token, so up makes a new one");
+    const forgotten = readState();
+    expect(forgotten.values.PROTECTION_TOKEN).toBeUndefined();
+    for (const id of ["protection", "variables"]) expect(forgotten.done[id], id).toBeUndefined();
+
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    const second = String(readState().values.PROTECTION_TOKEN);
+    expect(second).toMatch(tokenShape);
+    expect(second).not.toBe(first);
+    expect(world.variables.admin.PROTECTION_TOKEN).toBe(second);
+    expect(world.deployments.admin[0]?.status).toBe("DEPLOYING");
+    expect(result.out).toContain(accessLinkOf(second));
+    expect(result.out).not.toContain(first);
+
+    // A token of the operator's own choosing, from the secrets file.
+    const chosen = `chosen.token~${"c".repeat(30)}`;
+    writeSettings({ PROTECT: "yes" }, { PROTECTION_TOKEN: chosen });
+    expect((await bootstrap(["redo", settings(), "protection"])).code).toBe(0);
+    const given = await bootstrap(["up", settings(), "--yes"]);
+    expect(given.code, given.out).toBe(0);
+    expect(world.variables.admin.PROTECTION_TOKEN).toBe(chosen);
+    expect(given.out).toContain(accessLinkOf(chosen));
+
+    writeSettings({ PROTECT: "yes" }, { PROTECTION_TOKEN: "too+short" });
+    expect((await bootstrap(["redo", settings(), "protection"])).code).toBe(0);
+    const refused = await bootstrap(["up", settings(), "--yes"]);
+    expect(refused.code, refused.out).toBe(1);
+    expect(refused.out).toContain("must be at least 32 letters, digits, dashes, underscores, dots or tildes");
+    expect(world.variables.admin.PROTECTION_TOKEN).toBe(chosen);
+  });
+
+  it("says in doctor when the admin is closed by a token the settings file doesn't know of", async () => {
+    writeSettings();
+    railwayAfterUp();
+    writeState(stateAfterUp());
+    world.running.admin.PROTECTION_TOKEN = randomBytes(32).toString("base64url");
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain(`note   https://${railwayHost}/login answers the access gate's 404, so PROTECTION_TOKEN is set on the admin, though PROTECT isn't yes`);
+    world.running.admin = { ...world.variables.admin };
+    expect((await bootstrap(["doctor", settings()])).out).not.toContain("access gate");
+  });
+
+  it("says that a deployment stays closed after PROTECT goes back to no, until the variable is deleted in Railway", async () => {
+    writeSettings({ PROTECT: "yes" });
+    const token = protectedAfterUp();
+    writeSettings({ PROTECT: "no" });
+    const reminder = "PROTECT isn't yes in";
+    const status = await bootstrap(["status", settings()]);
+    expect(status.code, status.out).toBe(0);
+    expect(status.out).toContain(`access gate: ${reminder}`);
+    expect(status.out).toContain("the deployment stays closed until you delete PROTECTION_TOKEN from the admin's variables in Railway");
+    expect(status.out).not.toContain("?access=");
+    const up = await bootstrap(["up", settings(), "--yes"]);
+    expect(up.code, up.out).toBe(0);
+    expect(up.out).toContain(reminder);
+    // The script deletes no variable, and makes no new deployment for it.
+    expect(world.variables.admin.PROTECTION_TOKEN).toBe(token);
+    expect(up.out).not.toContain("Access gate");
+
+    // Once the variable is gone from Railway, redo forgets the token and the reminder stops.
+    delete world.variables.admin.PROTECTION_TOKEN;
+    world.running.admin = { ...world.variables.admin };
+    const redo = await bootstrap(["redo", settings(), "protection"]);
+    expect(redo.code, redo.out).toBe(0);
+    expect(redo.out).toContain("forgot the access gate's token. PROTECT isn't yes, so up makes no new one.");
+    expect(readState().values.PROTECTION_TOKEN).toBeUndefined();
+    const after = await bootstrap(["up", settings(), "--yes"]);
+    expect(after.code, after.out).toBe(0);
+    expect(after.out).not.toContain(reminder);
+    expect(world.variables.admin.PROTECTION_TOKEN).toBeUndefined();
+    expect((await bootstrap(["status", settings()])).out).not.toContain("access gate");
+    expect((await bootstrap(["doctor", settings()])).out).not.toContain("access gate");
   });
 });

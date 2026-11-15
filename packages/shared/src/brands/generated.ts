@@ -70,14 +70,14 @@ export const BRANDS: Record<string, BrandDefinition> = {
   "realinfobot": {
     "id": "realinfobot",
     "appName": "RealInfoBot",
-    "logoUrl": "/brand/realinfobot/logo.svg?v=5614ff37c8c5",
+    "logoUrl": "/brand/realinfobot/logo.png?v=5e434c988a2a",
     "emailLogo": {
-      "url": "/brand/realinfobot/logo-email.png?v=d0d4ad554d3b",
+      "url": "/brand/realinfobot/logo-email.png?v=f4cfd9ecc161",
       "width": 96,
       "height": 96
     },
     "ogImage": {
-      "url": "/brand/realinfobot/og.png?v=e28d64e06fb2",
+      "url": "/brand/realinfobot/og.png?v=656b15216f7d",
       "width": 1200,
       "height": 630
     },

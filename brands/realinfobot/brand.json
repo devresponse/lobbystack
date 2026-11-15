@@ -1,7 +1,7 @@
 {
   "$schema": "../brand.schema.json",
   "appName": "RealInfoBot",
-  "logo": "logo.svg",
+  "logo": "logo.png",
   "emailLogo": "logo-email.png",
   "ogImage": "og.png",
   "accentColor": "#F07423",

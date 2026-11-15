@@ -29,6 +29,14 @@ Cloudflare Turnstile checks that a person, not a bot, fills in the sign-up form.
 | `TURNSTILE_SECRET_KEY` | The secret key of your Turnstile widget. The admin uses it to check each email sign-up, and each website chat visitor before the receptionist answers. Without it, every email sign-up fails unless `APP_BASE_URL` starts with `http://localhost:` or `http://127.0.0.1:`. The form then says "We couldn't create your account. Please try again.", and the admin's response says `Turnstile is not configured.` |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | The widget's site key. The browser reads it to show the challenge on the sign-up form. Next.js writes it into the browser code when the admin is built, so the admin build needs it as a Docker build argument. Rebuild the admin after you change it. Compose passes it to the build from `.env`. If the build has no site key while the secret key is set, the form shows no challenge and every sign-up fails with the same message. |
 
+## Access gate for test deployments
+
+Anyone who finds the public address of a test deployment can open its sign-in page. One variable on the admin closes the deployment to everyone who doesn't have its access link. Leave it unset on any deployment your customers use.
+
+| Variable | Purpose |
+| --- | --- |
+| `PROTECTION_TOKEN` | Optional. At least 32 characters: letters, digits, `-`, `_`, `.` or `~`. With it set, every page and API route answers `404` until a browser opens `https://<your address>/login?access=<the token>` once. That link sets a cookie that lets the browser in for 30 days. Webhooks, the website widget, `/api/v1` and the MCP server stay open behind their own keys and signatures, and so do the health checks. A script sends the token in an `X-Protection-Token` header instead. The admin refuses to start with a shorter token, or with one that has other characters. Changing the token shuts every browser out until it opens the new link. Leave it empty to keep the deployment open. The repository's `docs/features/access-gate.md` lists every route that stays open. |
+
 ## Branding
 
 The name, logo, colour and outside links come from a brand folder under `brands/` in the repository, picked by the domain of `APP_BASE_URL`: `alloplace.com` and its subdomains get AlloPlace's. To add your own brand, add a folder, claim your domain in `brands/index.json`, and run `pnpm brands:build`. The repository's `docs/branding.md` lists the fields.

@@ -86,7 +86,9 @@ export function BrandingProvider({ initial, i18n, children }: { initial: Brandin
   useEffect(() => {
     if (initial.final) return;
     let cancelled = false;
-    void fetch(BRANDING_API_PATH, { cache: "no-store", credentials: "omit" })
+    // With the browser's cookies: a deployment closed with PROTECTION_TOKEN
+    // (docs/features/access-gate.md) answers 404 to a request without its access cookie.
+    void fetch(BRANDING_API_PATH, { cache: "no-store", credentials: "same-origin" })
       .then(async (response) => response.ok ? parseBrandingResponse(await response.json()) : null)
       .catch(() => null)
       .then((branding) => {

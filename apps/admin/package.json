@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
     "e2e": "playwright test",
+    "e2e:access-gate": "playwright test --config playwright.access-gate.config.ts",
     "e2e:parity": "playwright test --config playwright.parity.config.ts",
     "e2e:parity:certify": "node ../../scripts/admin-ui-visual-certify.mjs"
   },

@@ -50,7 +50,8 @@ describe("deployment branding in the page", () => {
 
     // Nothing names the deployment until the server says what it's called.
     expect(screen.queryByLabelText("LobbyStack")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith(BRANDING_API_PATH, expect.objectContaining({ cache: "no-store" }));
+    // With the browser's cookies, or a deployment closed with PROTECTION_TOKEN would answer 404.
+    expect(fetchMock).toHaveBeenCalledWith(BRANDING_API_PATH, { cache: "no-store", credentials: "same-origin" });
     await act(async () => answer!(Response.json({ appName: "Acme Desk", logoUrl: "/api/branding/logo?v=abc" })));
 
     const mark = await screen.findByLabelText("Acme Desk");

@@ -29,6 +29,14 @@ Cloudflare Turnstile comprueba que quien completa el formulario de registro es u
 | `TURNSTILE_SECRET_KEY` | La clave secreta de su widget de Turnstile. El servicio de administración la usa para verificar cada registro con correo electrónico, y a cada visitante del chat del sitio web antes de que la recepcionista responda. Sin ella, todo registro con correo electrónico falla, a menos que `APP_BASE_URL` empiece por `http://localhost:` o `http://127.0.0.1:`. El formulario muestra entonces "No pudimos crear su cuenta. Inténtelo de nuevo.", y la respuesta del servicio de administración indica `Turnstile is not configured.` |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | La clave del sitio del widget. El navegador la lee para mostrar la verificación en el formulario de registro. Next.js la escribe en el código del navegador al compilar el servicio de administración, así que esa compilación la necesita como argumento de compilación de Docker. Vuelva a compilar el servicio de administración después de cambiarla. Compose la pasa a la compilación desde `.env`. Si la compilación no tiene clave del sitio y la clave secreta está configurada, el formulario no muestra ninguna verificación y todos los registros fallan con el mismo mensaje. |
 
+## Barrera de acceso para implementaciones de prueba
+
+Cualquiera que encuentre la dirección pública de una implementación de prueba puede abrir su página de inicio de sesión. Una variable en el servicio de administración cierra la implementación a quien no tenga su enlace de acceso. Déjela vacía en toda implementación que usen sus clientes.
+
+| Variable | Función |
+| --- | --- |
+| `PROTECTION_TOKEN` | Opcional. Al menos 32 caracteres: letras, dígitos, `-`, `_`, `.` o `~`. Cuando está configurada, todas las páginas y rutas de la API responden `404` hasta que un navegador abre una vez `https://<su dirección>/login?access=<el token>`. Ese enlace deja una cookie que permite entrar al navegador durante 30 días. Los webhooks, el widget del sitio web, `/api/v1` y el servidor MCP siguen abiertos detrás de sus propias claves y firmas, igual que las comprobaciones de estado. Un script envía el token en un encabezado `X-Protection-Token`. El servicio de administración se niega a iniciarse con un token más corto, o con uno que contenga otros caracteres. Cambiar el token deja fuera a todos los navegadores hasta que abran el enlace nuevo. Déjela vacía para mantener la implementación abierta. El archivo `docs/features/access-gate.md` del repositorio enumera todas las rutas que siguen abiertas. |
+
 ## Imagen de marca
 
 El nombre, el logo, el color y los enlaces externos vienen de una carpeta de marca en `brands/` del repositorio, elegida por el dominio de `APP_BASE_URL`: `alloplace.com` y sus subdominios reciben los de AlloPlace. Para añadir su propia marca, añada una carpeta, reclame su dominio en `brands/index.json` y ejecute `pnpm brands:build`. El archivo `docs/branding.md` del repositorio enumera los campos.

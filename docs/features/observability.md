@@ -1,6 +1,6 @@
 # Follow logs, errors and alerts
 
-Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call or a sign-in, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `1a2c81b`; sign-in lines, against the code of fork PR #104; receptionist lines, against the code of fork PR #129; the bootstrap script's PostHog values and the dashboard's EU link, against fork PR #165.
+Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call or a sign-in, a closed test deployment's lines, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `1a2c81b`; sign-in lines, against the code of fork PR #104; receptionist lines, against the code of fork PR #129; the bootstrap script's PostHog values and the dashboard's EU link, against fork PR #165; the access gate's lines, against the code of fork PR #176.
 
 ## Set the variables
 
@@ -67,6 +67,15 @@ Since fork PR #104, the admin writes one line for each sign-in and account step.
 When the sign-in service breaks, error tracking gets it with an `errorId`. A dashboard request whose session check fails answers 503 with the `errorId` (`auth.session_check`), and so does a sign-up code that can't be sent (`auth.verification_code`). An exception inside Better Auth, such as a database outage behind a sign-in, is reported as `auth.better_auth`.
 
 To find out why someone can't sign in, look up their user ID in the `users` table and filter Railway's logs with `@userId:<id>`. A lockout has no user ID, so search `auth.rate_limited` around the time instead.
+
+## Watch a closed test deployment
+
+Since fork PR #176 on `releases/r2`, a test deployment closed to strangers with `PROTECTION_TOKEN` writes two lines of its own ([close a test deployment to strangers](access-gate.md#watch-it-in-the-logs)):
+
+- `access_gate.on`, as the admin starts with the variable set. When every page answers "Not found", this line is the reason: the person needs the access link, not a password.
+- `access_gate.wrong_token`, a warning: a request offered a token that isn't `PROTECTION_TOKEN` and got the 404. `via` is `query` for a token in an address, or `header`. Each copy of the admin writes at most one a minute, with `notLogged`, the number left out since the line before. It's usually someone with an access link from before the token changed.
+
+Neither line carries a token, and a stranger's 404 writes none, since scanners would fill the log. The proxy is built apart from the rest of the admin, so it writes its warning with `console.warn`, as the JSON line `logEvent` would write.
 
 ## Alert on what matters
 

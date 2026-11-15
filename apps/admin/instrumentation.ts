@@ -16,6 +16,11 @@ export async function register(): Promise<void> {
   const { trustedClientIpStartupError } = await import("./src/lib/trusted-client-ip");
   const clientIpError = trustedClientIpStartupError(process.env);
   if (clientIpError) throw new Error(clientIpError);
+  // A PROTECTION_TOKEN that is short or breaks the access link would close the
+  // deployment with a gate nobody can open, or one that can be guessed.
+  const { protectionToken, protectionTokenStartupError } = await import("./src/lib/access-gate");
+  const accessGateError = protectionTokenStartupError(process.env);
+  if (accessGateError) throw new Error(accessGateError);
   // A BILLING_PROVIDER the worker refuses stops the admin too, which would otherwise show Polar's plans.
   const { readBillingProviderId } = await import("@lobbystack/providers/billing/factory");
   readBillingProviderId(process.env);
@@ -33,6 +38,12 @@ export async function register(): Promise<void> {
   }
   const { initializeTelemetry, logEvent } = await import("@lobbystack/telemetry/node");
   await initializeTelemetry({ serviceName: "lobbystack-admin" });
+  // Said at every start, so "every page answers 404" has its reason in the log. Never with the token.
+  if (protectionToken(process.env) && process.env.NEXT_PHASE !== "phase-production-build") {
+    logEvent("info", "access_gate.on", {
+      detail: "PROTECTION_TOKEN is set, so every page answers 404 until a browser opens an address with ?access=<the token> once. Webhooks, health checks, the website widget, the API and MCP stay open. Remove the variable and redeploy to open the deployment.",
+    });
+  }
   const { emailVerificationOffInProduction } = await import("./src/lib/email-verification-setting");
   if (emailVerificationOffInProduction(process.env)) {
     logEvent("warn", "auth.email_verification_off", {

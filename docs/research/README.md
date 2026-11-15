@@ -15,6 +15,7 @@ This folder keeps the fork's research: studies of options that were weighed but 
 | 2026-10-25 | [Weigh forms filled from calls and chats](intake-forms.md) | Can the receptionist interview callers and fill a business's form from the conversation? | Yes: fill it after the conversation from the transcript, with evidence and review; a first version is 15 to 23 days. Not built; nine decisions wait |
 | 2026-10-25 | [Weigh a cloned voice for calls](custom-voices.md) | Can calls speak in a clone of the maintainer's own voice? | Yes, once OpenAI enables cloned voices, in English accents only; one voice for every call is about 2 days. Not built; seven decisions wait |
 | 2026-10-25 | [Weigh each business's own OpenAI and Twilio keys](business-provider-keys.md) | Can each business bring its own provider keys, kept in the database? | Yes: an encrypted table with its own key ring, and a webhook address and owner check per credential; 32 to 49 days. Not built; nine decisions wait |
+| 2026-11-14 | [Protect a test deployment's public address](dev-server-protection.md) | How to keep strangers off a test deployment on Railway without a VPN or an IP allowlist? | A token gate inside the admin: an access link leaves a 30-day cookie, and everyone else gets a 404. Built the next day (fork PR #176, on `releases/r2`); Cloudflare Access stays an option for a login per tester |
 
 The phone call review's study of moving off OpenAI is in [review the phone call path](../reviews/phone-calls-2026-10-06.md#weigh-moving-off-openai).
 

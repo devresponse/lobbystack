@@ -188,4 +188,41 @@ describe("compileBrands", () => {
     long.brands.alloplace!.file = { appName: "x".repeat(38), environments: { "dev*": { appNameSuffix: " (dev)" } } };
     expect(() => compileBrands(long)).toThrow("must stay within 40 visible characters");
   });
+
+  describe("signInPage", () => {
+    const words = (en: string) => ({ en, fr: `${en} (fr)`, es: `${en} (es)`, sr: `${en} (sr)` });
+    const withPage = (signInPage: unknown) => {
+      const input = sources();
+      input.brands.alloplace!.file = { appName: "AlloPlace", signInPage };
+      return input;
+    };
+
+    it("gives a brand without the section the accent panel and the shared words", () => {
+      expect(compileBrands(sources()).brands.lobbystack!.signInPage).toEqual({ panel: "accent", headline: null, description: null, points: null });
+    });
+
+    it("carries a brand's own words, trimmed, and its panel", () => {
+      const page = compileBrands(withPage({
+        panel: "dark",
+        headline: { ...words("The receptionist for agents."), en: "  The receptionist for agents.  " },
+        points: [words("One"), words("Two"), words("Three")],
+      })).brands.alloplace!.signInPage;
+      expect(page).toEqual({
+        panel: "dark",
+        headline: words("The receptionist for agents."),
+        description: null,
+        points: [words("One"), words("Two"), words("Three")],
+      });
+    });
+
+    it("refuses words missing a language, the wrong number of points, and unknown parts", () => {
+      expect(() => compileBrands(withPage({ headline: { en: "Hello" } }))).toThrow("brands/alloplace/brand.json signInPage.headline.fr");
+      expect(() => compileBrands(withPage({ points: [words("One"), words("Two")] }))).toThrow("signInPage.points: exactly three points");
+      expect(() => compileBrands(withPage({ panel: "yellow" }))).toThrow("signInPage.panel");
+      expect(() => compileBrands(withPage({ headline: words("x".repeat(81)) }))).toThrow("signInPage.headline.en");
+      expect(() => compileBrands(withPage({ subtitle: words("Hello") }))).toThrow("signInPage");
+      // The example call left the page on 2026-11-15, so a file that still has one is told.
+      expect(() => compileBrands(withPage({ exampleCall: { lines: [words("Hello?"), words("Hi.")] } }))).toThrow("signInPage");
+    });
+  });
 });

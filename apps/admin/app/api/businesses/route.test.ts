@@ -82,7 +82,7 @@ describe("deleting a business through the API", () => {
     expect(await response.json()).toEqual({ ok: true });
     expect(fixture.verify).toHaveBeenCalledWith({ body: { password: "correct horse" }, headers: request.headers });
     expect(fixture.remove).toHaveBeenCalledWith({ db: "app" }, { userId: "user_1", businessId: "business_2", confirmName: "Studio" });
-    // The audit log goes with the business, so the log line records who deleted it.
+    // The log line records who deleted it, as the business.deleted audit row the delete writes does.
     expect(fixture.log).toHaveBeenCalledWith("info", "business.deleted", { businessId: "business_2", userId: "user_1", releasedNumbers: 1, storedFiles: 3 });
   });
 

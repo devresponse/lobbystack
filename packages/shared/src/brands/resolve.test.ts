@@ -6,7 +6,7 @@ import type { BrandDefinition } from "./types";
 const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null, makeUrl: null };
 
 function brand(id: string, appName: string, environments: BrandDefinition["environments"] = []): BrandDefinition {
-  return { id, appName, logoUrl: `/brand/${id}/logo.svg?v=1`, emailLogo: null, ogImage: null, accentColor: null, links, environments };
+  return { id, appName, logoUrl: `/brand/${id}/logo.svg?v=1`, emailLogo: null, ogImage: null, accentColor: null, links, environments, signInPage: { panel: "accent", headline: null, description: null, points: null } };
 }
 
 const data: BrandData = {

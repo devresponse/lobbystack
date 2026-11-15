@@ -10,6 +10,25 @@ Texts sent to a business's number land in the dashboard's **Messages**, and the 
 
 AI replies to texts are left out on purpose: `ai_sms` is a restricted capability in `packages/shared/src/product-capabilities.ts`, and the parity check refuses code that adds one. Adding them would need an `sms` channel in the agent core, a worker job, the **Take over** switch for text threads, a usage cap and, for US local numbers, A2P 10DLC registration.
 
+## Know what happens when a text can't be handled
+
+Since fork PR #181, on `develop/r2`, the two Twilio routes, `/api/webhooks/twilio/sms` and `/api/webhooks/twilio/status`, answer a delivery they can't handle in one of two ways (`apps/admin/src/lib/twilio-webhook-failure.ts`). Before, the texts route answered 500 and the status route 503, and neither left a trace.
+
+| Answer | When | What it leaves |
+| --- | --- | --- |
+| 400 `{ ok: false, error: "Invalid Twilio webhook.", errorId }` | Twilio signed the delivery, but its fields don't pass the schema, for example a text with no `To` or no message SID. Sending it again changes nothing. | A warning in the admin's log, `ops.twilio.webhook_invalid`, with the route, the error ID, the names of the fields refused and the message SID |
+| 503 `{ ok: false, error: "Temporary webhook failure.", errorId }`, with `Retry-After: 60` | Handling it failed, for example because the database didn't answer | An error report in PostHog and the admin's log, with the operation (`twilio.sms` or `twilio.status`), the route, the error ID and the message SID |
+
+Both answers carry the error ID in the `x-error-id` header too. No line or report holds a text's words or a phone number. The message SID, which finds the message in Twilio's console, is the only thing from the delivery they repeat, and only when it looks like one: two letters and 32 hex digits. An error report also leaves out the values Drizzle puts in its messages, email addresses and phone numbers (`redactOtelExceptionText` in `packages/telemetry/src/node.ts`). A request without Twilio's signature still answers 401, and logs nothing.
+
+### Get a second try at a text
+
+Twilio tries an incoming text's webhook again only when it can't connect: by default, one more try after a failed connection or TLS handshake ([Twilio's connection overrides](https://www.twilio.com/docs/usage/webhooks/webhooks-connection-overrides)). A text whose request fails or times out goes to the number's fallback address instead, when it has one. Since fork PR #181, every number LobbyStack buys has its texting address as its fallback too (`purchasePhoneNumber` in `packages/providers/src/twilio/twilioProvider.ts`), and bootstrap's `twilio.tollfree` step sets the same on the shared toll-free number. The second try stores the text once, since a text's message SID is saved only once.
+
+A number bought before, or a shared sender set up before or by hand, needs it set by hand: in Twilio's console, open the number's settings and set **Primary handler fails** to **Webhook**, the same address as **A message comes in**, and **HTTP POST** *(field names not confirmed)*. For a shared number bootstrap set up, `node devops/bootstrap.mjs redo .env.bootstrap-<name> twilio.tollfree`, then `up`, sets it instead, without buying another number. When the fallback fails too, the text is only in Twilio's console: **Monitor** > **Logs** > **Messaging** has it, and the **Debugger** shows error 11200.
+
+A status callback has no fallback, and Twilio tries it again only when it can't connect. Twilio's connection overrides at the end of `TWILIO_STATUS_CALLBACK_URL` could ask for more, for example `#rc=3&rp=5xx` for up to three more tries after a 5xx answer; the admin leaves the part after `#` out when it checks the signature, as Twilio does. LobbyStack sets none, and none has been tried on a deployment.
+
 ## Reply from Messages
 
 A reply from Messages goes out when the contact agreed to texts, or when they texted that conversation themselves (fork PR #12). Before #12, a reply to someone who had just texted, without having agreed to texts, stayed queued forever and looked sent. Texts held back before #12 were never sent.
@@ -47,4 +66,5 @@ One known gap: texts sent through the `TWILIO_ALERT_*` account are priced agains
 
 - No alerts or appointment texts: for a cloud business without its own texting number, check `TWILIO_ALERT_SMS_FROM` on both services. For a business with a number, check that the number is active and can send texts.
 - A reply that stays queued: open it in Messages and read why it was held.
+- A text that never reached Messages: find it in Twilio's console, under **Monitor** > **Logs** > **Messaging**, and search the admin's log for its message SID. An `ops.twilio.webhook_invalid` warning names the fields the admin refused. An exception with the operation `twilio.sms` is a failure, under the error ID that Twilio's **Debugger** shows with the admin's answer *(not confirmed)*. A 401 there means the signature didn't match: check `TWILIO_AUTH_TOKEN` and `TWILIO_SMS_WEBHOOK_URL` on the admin.
 - `pnpm replacement:sms-consent` checks consent, `STOP` handling, replies to people who texted first, and cross-business isolation against a local stack.

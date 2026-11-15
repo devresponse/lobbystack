@@ -221,3 +221,61 @@ describe("website chat startup checks", () => {
     expect(turnstileWarnings(warn)).toEqual([]);
   });
 });
+
+// The access gate: PROTECTION_TOKEN closes a test deployment to strangers (docs/features/access-gate.md).
+describe("access gate startup checks", () => {
+  const token = "protection-token-fixture-0123456789-abcdef";
+
+  beforeEach(() => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+    for (const name of ["BETTER_AUTH_SECRET", "INTERNAL_SERVICE_SECRET", "INTERNAL_SERVICE_TOKEN", "WIDGET_SESSION_SECRET", "ENCRYPTION_KEY", "OTP_HASH_SECRET", "LOCAL_STORAGE_SIGNING_SECRET"]) {
+      vi.stubEnv(name, "strong-production-fixture-secret-12345");
+    }
+    vi.stubEnv("STORAGE_PROVIDER", "local");
+    vi.stubEnv("PROTECTION_TOKEN", undefined);
+    mocks.getDatabase.mockImplementation((role: DatabaseRole) => ownRole(role));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  function gateOnLines(info: { mock: { calls: unknown[][] } }): Array<Record<string, unknown>> {
+    return info.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("access_gate.on")).map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+
+  it("refuses to start with a token that can be guessed or breaks the access link, before opening database clients", async () => {
+    vi.stubEnv("PROTECTION_TOKEN", "too-short");
+    await expect(register()).rejects.toThrow("PROTECTION_TOKEN is 9 characters long and needs at least 32");
+    vi.stubEnv("PROTECTION_TOKEN", `${token}+plus`);
+    await expect(register()).rejects.toThrow("PROTECTION_TOKEN has a character an address can't carry as it is");
+    expect(mocks.getDatabase).not.toHaveBeenCalled();
+  });
+
+  it("says at every start that the gate is on, without the token", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.stubEnv("PROTECTION_TOKEN", token);
+    await expect(register()).resolves.toBeUndefined();
+    expect(gateOnLines(info)).toEqual([expect.objectContaining({ level: "info", message: "access_gate.on" })]);
+    expect(info.mock.calls.flat().join("\n")).not.toContain(token);
+  });
+
+  it.each([undefined, "", "  "])("stays quiet while the deployment is open (%j)", async (value) => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.stubEnv("PROTECTION_TOKEN", value);
+    await expect(register()).resolves.toBeUndefined();
+    expect(gateOnLines(info)).toEqual([]);
+  });
+
+  it("builds with any token and says nothing, since a build serves no one", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.stubEnv("NEXT_PHASE", "phase-production-build");
+    vi.stubEnv("PROTECTION_TOKEN", "too-short");
+    await expect(register()).resolves.toBeUndefined();
+    vi.stubEnv("PROTECTION_TOKEN", token);
+    await expect(register()).resolves.toBeUndefined();
+    expect(gateOnLines(info)).toEqual([]);
+  });
+});

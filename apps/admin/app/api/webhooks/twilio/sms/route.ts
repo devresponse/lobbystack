@@ -6,9 +6,12 @@ import { isSharedSmsSender, receiveInboundSms, receiveSharedSenderSms } from "@l
 import { resolveTwilioWebhookUrl, validateTwilioSignature } from "@lobbystack/providers/twilio/webhookSecurity";
 import { getAppDatabase } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
+import { failedTwilioWebhook, invalidTwilioWebhook, twilioMessageSid } from "@/lib/twilio-webhook-failure";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ROUTE = "/api/webhooks/twilio/sms";
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -20,13 +23,22 @@ function twiml(reply?: string | null): NextResponse {
   return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?><Response>${message}</Response>`, { status: 200, headers: { "content-type": "text/xml" } });
 }
 
+/**
+ * A text to one of the deployment's numbers. A delivery the schema refuses
+ * answers 400 and one that fails answers 503, each with an error ID and a
+ * trace that names only the message SID.
+ */
 export async function POST(request: Request) {
+  let messageSid: string | undefined;
   try {
     const rawBody = await request.text();
     const params = Object.fromEntries(new URLSearchParams(rawBody));
     const valid = validateTwilioSignature({ authToken: process.env.TWILIO_AUTH_TOKEN, signatureHeader: request.headers.get("x-twilio-signature"), url: resolveTwilioWebhookUrl(request.url, process.env.TWILIO_SMS_WEBHOOK_URL), params });
     if (!valid) return new NextResponse("Unauthorized", { status: 401 });
-    const body = twilioSmsInboundSchema.parse(params);
+    messageSid = twilioMessageSid(params);
+    const parsed = twilioSmsInboundSchema.safeParse(params);
+    if (!parsed.success) return invalidTwilioWebhook(parsed.error, { route: ROUTE, messageSid });
+    const body = parsed.data;
     const resolved = await getAppDatabase().db.execute<{ business_id: string }>(sql`select app.resolve_business_by_phone(${body.To}) as business_id`);
     const businessId = resolved.rows[0]?.business_id;
     if (!businessId) {
@@ -48,7 +60,7 @@ export async function POST(request: Request) {
       payload: { From: body.From, To: body.To, Body: body.Body, MessageSid: providerMessageId, ...(body.NumMedia !== undefined ? { NumMedia: body.NumMedia } : {}), ...(body.OptOutType ? { OptOutType: body.OptOutType } : {}) },
     });
     return twiml();
-  } catch {
-    return new NextResponse("Temporary webhook failure.", { status: 500 });
+  } catch (error) {
+    return failedTwilioWebhook(error, { route: ROUTE, operation: "twilio.sms", messageSid });
   }
 }

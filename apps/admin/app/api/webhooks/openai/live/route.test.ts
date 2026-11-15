@@ -1,5 +1,6 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { InvalidWebhookSignatureError } from "openai";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 const mocks = vi.hoisted(() => ({ unwrap: vi.fn(), reject: vi.fn(), accept: vi.fn(), hangup: vi.fn(), execute: vi.fn(), snapshot: vi.fn(), startLivePhoneCall: vi.fn(), finishLiveCall: vi.fn(), attach: vi.fn(), sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1", instructions: "Answer calls." })), recordedGreeting: vi.fn() }));
@@ -532,5 +533,53 @@ describe("POST /api/webhooks/openai/live", () => {
     expect(response.status).toBe(200);
     expect(mocks.reject).toHaveBeenCalledWith("live_1", { status_code: 404 });
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  // A delivery unwrap refuses: OpenAI's headers, and a body naming a caller that no line may repeat.
+  const refused = (headers: Record<string, string> = { "webhook-id": "wh_0123", "webhook-timestamp": "1763179200", "webhook-signature": "v1,fixture" }) => new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: JSON.stringify({ data: { sip_headers: [{ name: "From", value: "<sip:+14165550134@example.com>" }] } }), headers });
+  const refusals = (warn: MockInstance<typeof console.warn>) => warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>).filter((line) => line.message === "ops.live.webhook_refused");
+
+  it("refuses a delivery whose signature doesn't match, and warns why without the body", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.unwrap.mockRejectedValue(new InvalidWebhookSignatureError("Webhook timestamp is too old"));
+
+    const response = await POST(refused());
+
+    expect(response.status).toBe(400);
+    const body = await response.json() as { error: string; errorId: string };
+    expect(body).toEqual({ error: "Invalid signature.", errorId: expect.any(String) });
+    expect(response.headers.get("x-error-id")).toBe(body.errorId);
+    expect(refusals(warn)).toEqual([expect.objectContaining({ level: "warn", route: "/api/webhooks/openai/live", errorId: body.errorId, reason: "signature", detail: "Webhook timestamp is too old", webhookId: "wh_0123" })]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("+14165550134");
+    // A refusal is the sender's problem, or a stale secret, not an error to alert on.
+    expect(error).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("names the headers an unsigned delivery is missing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.unwrap.mockRejectedValue(new Error("Missing required header: webhook-signature"));
+
+    const response = await POST(refused({ "webhook-id": "wh_0123" }));
+
+    expect(response.status).toBe(400);
+    expect(refusals(warn)).toEqual([expect.objectContaining({ reason: "headers", missing: ["webhook-timestamp", "webhook-signature"], webhookId: "wh_0123" })]);
+    expect(refusals(warn)[0]).not.toHaveProperty("detail");
+  });
+
+  it("reports a refusal that is this server's fault, such as no webhook secret, as an error with its error ID", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.unwrap.mockRejectedValue(new Error("The webhook secret must either be set using the env var, OPENAI_WEBHOOK_SECRET, on the client class, OpenAI({ webhookSecret: '123' }), or passed to this function"));
+
+    const response = await POST(refused());
+
+    expect(response.status).toBe(500);
+    const body = await response.json() as { error: string; errorId: string };
+    expect(body).toEqual({ error: "Webhook processing failed.", errorId: expect.any(String) });
+    expect(response.headers.get("x-error-id")).toBe(body.errorId);
+    await vi.waitFor(() => expect(error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)).toEqual([expect.objectContaining({ operation: "live.webhook", errorId: body.errorId, route: "/api/webhooks/openai/live", webhookId: "wh_0123" })]));
+    expect(refusals(warn)).toEqual([]);
   });
 });

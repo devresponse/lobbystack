@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, isNull, min, ne, or, sql } from "drizzle-orm";
 
-import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, businessMemberships, businesses, calls, enqueueOutbox, feedbackSubmissions, onboardingNumberClaimEvents, outboxMessages, phoneNumbers, productEvents, providerEvents, rlsContextStatement, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingCheckoutRequests, billingPackCheckouts, businessMemberships, businesses, calls, enqueueOutbox, feedbackSubmissions, onboardingNumberClaimEvents, outboxMessages, phoneNumbers, productEvents, providerEvents, rlsContextStatement, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { isManagedBillingAccount, lockBillingAccount, MANAGED_BILLING_SOURCE } from "./billing";
 import { PACK_CHECKOUT_CLOSED_FOR_PLAN } from "./billingPacks";
@@ -63,11 +63,13 @@ export type BusinessDeletion = { releasedNumbers: number; storedFiles: number };
 
 /**
  * Deletes a business and everything in it, for one of its owners: the team,
- * calls and recordings, chats, contacts, appointments, knowledge, settings,
- * billing records and audit log, and the webhook payloads, analytics events
- * and feedback that name it, which would otherwise outlive it unlinked. The
- * owner types its name to confirm. People's accounts stay: only their place
- * on the business goes, and whoever had it open moves to another of theirs.
+ * calls and recordings, chats, contacts, appointments, knowledge, settings
+ * and billing records, and the webhook payloads, analytics events and
+ * feedback that name it, which would otherwise outlive it unlinked. Only its
+ * audit log stays (migration 0152), ending with a business.deleted row that
+ * names the business and who deleted it. The owner types its name to
+ * confirm. People's accounts stay: only their place on the business goes,
+ * and whoever had it open moves to another of theirs.
  *
  * An account's root business is never deleted: the business each owner has
  * owned longest, the first one for a normal sign-up. So an owner needs at
@@ -143,6 +145,8 @@ export async function deleteBusiness(context: DomainContext, input: { userId: st
       for (let start = 0; start < stored.length; start += STORED_FILES_PER_JOB) {
         await enqueueOutbox(tx, { topic: "privacy.deleteStoredObjects", businessId, aggregateType: "business", aggregateId: businessId, dedupeKey: `business:${businessId}:delete-stored-objects:${start}`, payload: { businessId, objectKeys: stored.slice(start, start + STORED_FILES_PER_JOB).map((object) => object.objectKey) } });
       }
+      // Written while the owner is still a member, as the audit log's RLS asks; it outlives the business.
+      await tx.insert(auditLogs).values({ businessId, actorUserId: userId, eventType: "business.deleted", entityType: "business", entityId: businessId, payload: { name: business.name, releasedNumbers: numbers.length, storedFiles: stored.length } });
       await tx.delete(businesses).where(eq(businesses.id, businessId));
       return { releasedNumbers: numbers.length, storedFiles: stored.length };
     });

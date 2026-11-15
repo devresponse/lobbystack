@@ -7,17 +7,29 @@ import { resolveTwilioWebhookUrl, validateTwilioSignature } from "@lobbystack/pr
 import { getAppDatabase } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
 import { twilioStatusAuthToken } from "@/lib/twilio-status-auth";
+import { failedTwilioWebhook, invalidTwilioWebhook, twilioMessageSid } from "@/lib/twilio-webhook-failure";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const ROUTE = "/api/webhooks/twilio/status";
+
+/**
+ * A sent text's delivery status. A delivery the schema refuses answers 400;
+ * one whose status couldn't be saved is never acknowledged: it answers 503,
+ * with an error ID and a trace that names only the message SID.
+ */
 export async function POST(request: Request) {
+  let messageSid: string | undefined;
   try {
     const rawBody = await request.text();
     const params = Object.fromEntries(new URLSearchParams(rawBody));
     const valid = validateTwilioSignature({ authToken: twilioStatusAuthToken(params, request.url, process.env, request.headers.get("x-twilio-signature-key-sid")), signatureHeader: request.headers.get("x-twilio-signature"), url: resolveTwilioWebhookUrl(request.url, process.env.TWILIO_STATUS_CALLBACK_URL), params });
     if (!valid) return new NextResponse("Unauthorized", { status: 401 });
-    const body = twilioSmsStatusSchema.parse(params);
+    messageSid = twilioMessageSid(params);
+    const parsed = twilioSmsStatusSchema.safeParse(params);
+    if (!parsed.success) return invalidTwilioWebhook(parsed.error, { route: ROUTE, messageSid });
+    const body = parsed.data;
     const providerPrice = body.Price !== undefined && Number.isFinite(Number(body.Price)) ? Number(body.Price) : undefined;
     const providerPriceUnit = body.PriceUnit?.trim().toLowerCase() || undefined;
     const providerCostUsd = providerPrice !== undefined && providerPriceUnit === "usd" ? Math.abs(providerPrice) : undefined;
@@ -44,9 +56,8 @@ export async function POST(request: Request) {
     else if (operatorDeliveryId && /^[0-9a-f-]{36}$/i.test(operatorDeliveryId)) await updateOperatorNotificationDeliveryStatus(workerContext, { businessId, deliveryId: operatorDeliveryId, providerMessageId, providerStatus: body.MessageStatus, ...(providerPrice !== undefined ? { providerPrice } : {}), ...(providerPriceUnit ? { providerPriceUnit } : {}), ...(providerCostUsd !== undefined ? { providerCostUsd } : {}), ...(body.NumSegments !== undefined ? { providerNumSegments: body.NumSegments } : {}) });
     else await updateSmsDeliveryStatus(workerContext, { businessId, providerMessageId, providerStatus: body.MessageStatus });
     return NextResponse.json({ ok: true });
-  } catch {
-    // Never acknowledge an event whose durable status update failed. An
-    // ingress retry policy must be configured separately with Twilio.
-    return NextResponse.json({ ok: false, error: "Temporary webhook failure." }, { status: 503, headers: { "Retry-After": "60" } });
+  } catch (error) {
+    // Twilio tries a status callback again only when it can't connect, unless its URL asks for more (docs/features/sms.md).
+    return failedTwilioWebhook(error, { route: ROUTE, operation: "twilio.status", messageSid });
   }
 }

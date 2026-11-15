@@ -114,6 +114,11 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* The brand's colours, inside an element marked data-brand-scope (see below). */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-text: var(--brand-text);
+  --color-brand-line: var(--brand-line);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -243,6 +248,61 @@
 
 @utility faded-bottom {
   @apply after:pointer-events-none after:absolute after:start-0 after:bottom-0 after:hidden after:h-32 after:w-full after:rounded-b-2xl after:bg-[linear-gradient(180deg,transparent_10%,var(--background)_70%)] md:after:block;
+}
+
+/*
+ * Brand colours. An element marked data-brand-scope sets --brand and
+ * --brand-foreground from the brand file's accent, and --brand-text-* and
+ * --brand-line-* only where the accent contrasts enough with that theme's
+ * page (brandPalette in packages/shared). Elsewhere text, lines and focus
+ * rings fall back to the page's own text colour.
+ */
+[data-brand-scope] {
+  --brand-text: var(--brand-text-light, var(--foreground));
+  --brand-line: var(--brand-line-light, var(--foreground));
+  --brand-deep: color-mix(in oklab, var(--brand) 9%, oklch(0.17 0 0));
+}
+
+.dark [data-brand-scope] {
+  --brand-text: var(--brand-text-dark, var(--foreground));
+  --brand-line: var(--brand-line-dark, var(--foreground));
+}
+
+/* The sign-in pages' brand panel: the accent as a field in light mode, a deep tint of it in dark mode. */
+.auth-brand-panel {
+  background-color: var(--brand);
+  color: var(--brand-foreground);
+  --panel-muted: color-mix(in oklab, var(--brand-foreground) 72%, var(--brand));
+  --panel-hairline: color-mix(in oklab, var(--brand-foreground) 14%, transparent);
+}
+
+/* A brand that asks for a dark panel (the panel carries .dark) gets it in light mode too. */
+.dark .auth-brand-panel,
+.auth-brand-panel.dark {
+  background-color: var(--brand-deep);
+  color: oklch(0.985 0 0);
+  --panel-muted: oklch(0.82 0 0);
+  --panel-hairline: oklch(1 0 0 / 10%);
+}
+
+.auth-brand-glow {
+  background:
+    radial-gradient(60% 50% at 100% 0%, oklch(1 0 0 / 30%), transparent 70%),
+    radial-gradient(70% 60% at 0% 100%, oklch(0 0 0 / 7%), transparent 70%);
+}
+
+.dark .auth-brand-glow {
+  background:
+    radial-gradient(60% 50% at 0% 0%, color-mix(in oklab, var(--brand) 34%, transparent), transparent 70%),
+    radial-gradient(50% 40% at 100% 100%, color-mix(in oklab, var(--brand) 20%, transparent), transparent 70%);
+}
+
+/* A faint dot grid in the panel's text colour, fading out towards the form. */
+.auth-brand-dots {
+  background-image: radial-gradient(currentColor 1px, transparent 1.2px);
+  background-size: 22px 22px;
+  opacity: 0.12;
+  mask-image: radial-gradient(80% 70% at 0% 0%, black, transparent 75%);
 }
 
 .AccordionContent,

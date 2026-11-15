@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildConfig, normalizeUrl, parseList, signInFailureIsExpected, trunkMatches, webhookMatches } from "./production-smoke";
+import { accessGateHeaders, buildConfig, normalizeUrl, parseList, signInFailureIsExpected, signInStatusDetail, trunkMatches, webhookMatches } from "./production-smoke";
 
 describe("production smoke helpers", () => {
   it("parses comma-separated lists and trims blanks", () => {
@@ -54,5 +54,25 @@ describe("production smoke helpers", () => {
     expect(config.expectedNumbers).toEqual(["+15550000001"]);
     expect(config.enableCall).toBe(true);
     expect(config.twilioAccountSid).toBe("ACtest");
+  });
+
+  // A deployment closed with PROTECTION_TOKEN (docs/features/access-gate.md) answers 404 to the sign-in route.
+  it("sends the access gate's token to the admin only when one is given", () => {
+    expect(buildConfig({}).protectionToken).toBeUndefined();
+    expect(buildConfig({ PROTECTION_TOKEN: "  " }).protectionToken).toBeUndefined();
+    expect(accessGateHeaders(buildConfig({}))).toEqual({});
+    const token = "smoke-access-gate-token-0123456789-abcdef";
+    const config = buildConfig({ PROTECTION_TOKEN: ` ${token}\n` });
+    expect(config.protectionToken).toBe(token);
+    expect(accessGateHeaders(config)).toEqual({ "x-protection-token": token });
+  });
+
+  it("says what a 404 from the sign-in route means, without the token", () => {
+    const token = "smoke-access-gate-token-0123456789-abcdef";
+    expect(signInStatusDetail(500, {})).toBe("status 500");
+    expect(signInStatusDetail(404, {})).toContain("give its token as PROTECTION_TOKEN");
+    const wrong = signInStatusDetail(404, { protectionToken: token });
+    expect(wrong).toContain("isn't its token");
+    expect(wrong).not.toContain(token);
   });
 });

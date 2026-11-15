@@ -2047,7 +2047,8 @@ export const auditLogs = pgTable(
   "audit_logs",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    // No foreign key since migration 0152: a business's audit log outlives it.
+    businessId: uuid("business_id").notNull(),
     actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
     eventType: varchar("event_type", { length: 120 }).notNull(),
     entityType: varchar("entity_type", { length: 120 }).notNull(),

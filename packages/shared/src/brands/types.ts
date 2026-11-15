@@ -4,6 +4,7 @@
 
 import type { BillingDisplay } from "../billingDisplay";
 import type { BillingAccounts, BillingPlanTier, ResolvedBillingPlan } from "../billingProfile";
+import type { InterfaceLocale } from "../locales";
 
 /** Settings for hosts whose first label matches a pattern, such as dev01 for "dev*". */
 export type BrandEnvironment = {
@@ -17,6 +18,24 @@ export type BrandEnvironment = {
 
 /** A PNG a brand serves from the admin: its URL, versioned by its content, and its size in pixels. */
 export type BrandImage = { url: string; width: number; height: number };
+
+/** Words in every interface language. */
+export type BrandText = Record<InterfaceLocale, string>;
+
+/**
+ * The brand's panel on the sign-in, sign-up and other signed-out pages. Each
+ * part the brand file leaves out is null, and the pages show the shared words
+ * in its place.
+ */
+export type BrandSignInPage = {
+  /** "accent" fills the panel with the accent colour; "dark" makes it near-black with touches of the accent, in light mode too. */
+  panel: "accent" | "dark";
+  headline: BrandText | null;
+  /** The sentence under the headline. */
+  description: BrandText | null;
+  /** Three short points, listed under the sentence. */
+  points: BrandText[] | null;
+};
 
 export type BrandDefinition = {
   id: string;
@@ -39,6 +58,7 @@ export type BrandDefinition = {
     makeUrl: string | null;
   };
   environments: BrandEnvironment[];
+  signInPage: BrandSignInPage;
 };
 
 /**

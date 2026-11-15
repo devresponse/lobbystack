@@ -162,9 +162,15 @@ export class TwilioProvider {
       .filter((number) => number.capabilities.sms && number.capabilities.voice);
   }
 
+  /**
+   * Buys a number that posts its texts to smsUrl. Twilio retries an incoming
+   * text's webhook only when it can't connect, so the same URL is also its
+   * fallback: a request that fails or times out gets one more try, and the
+   * text is still stored once, since its message SID is saved only once.
+   */
   async purchasePhoneNumber(input: { e164: string; friendlyName: string; smsUrl: string; statusCallbackUrl: string }): Promise<{ providerPhoneId: string; e164: string; smsUrl?: string }> {
     assertCertificationOperationAllowed();
-    const number = await this.client.incomingPhoneNumbers.create({ phoneNumber: input.e164, friendlyName: input.friendlyName, smsUrl: input.smsUrl, smsMethod: "POST", statusCallback: input.statusCallbackUrl, statusCallbackMethod: "POST" });
+    const number = await this.client.incomingPhoneNumbers.create({ phoneNumber: input.e164, friendlyName: input.friendlyName, smsUrl: input.smsUrl, smsMethod: "POST", smsFallbackUrl: input.smsUrl, smsFallbackMethod: "POST", statusCallback: input.statusCallbackUrl, statusCallbackMethod: "POST" });
     return { providerPhoneId: number.sid, e164: number.phoneNumber, ...(number.smsUrl ? { smsUrl: number.smsUrl } : {}) };
   }
 

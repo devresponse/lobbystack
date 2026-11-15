@@ -28,7 +28,7 @@ function onRailway(env: Record<string, string | undefined>): boolean {
 export function trustedClientIpStartupError(env: Record<string, string | undefined> = process.env): string | null {
   if (env.NODE_ENV !== "production" || env.NEXT_PHASE === "phase-production-build" || !onRailway(env) || trustedClientIpHeader(env)) return null;
   const configured = env.TRUSTED_CLIENT_IP_HEADER?.trim();
-  const fix = "On Railway set it to x-real-ip, which Railway's proxy writes on every request, or to cf-connecting-ip when Cloudflare's proxy sits in front of Railway.";
+  const fix = "On Railway set it to x-real-ip, which Railway's proxy writes on every request, with Cloudflare's proxy in front too. cf-connecting-ip is only for an admin that nothing but Cloudflare can reach.";
   return configured
     ? `[trusted-client-ip] TRUSTED_CLIENT_IP_HEADER is "${configured}", which the admin doesn't accept. ${fix}`
     : `[trusted-client-ip] TRUSTED_CLIENT_IP_HEADER is not set, so the website chat's and sign-in's limits per IP address would not run. ${fix}`;

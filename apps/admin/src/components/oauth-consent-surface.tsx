@@ -4,7 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ReplacementOnboardingShell } from "@/components/replacement-onboarding-shell";
+import { AuthShell, brandButton } from "@/components/auth-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -40,9 +40,7 @@ export function OAuthConsentSurface(props: OAuthConsentProps) {
 
   if (props.kind === "invalid") {
     return (
-      <ReplacementOnboardingShell description={t("oauthConsent.invalidRequest.description")} title={t("oauthConsent.invalidRequest.title")} width="sm">
-        {null}
-      </ReplacementOnboardingShell>
+      <AuthShell description={t("oauthConsent.invalidRequest.description")} title={t("oauthConsent.invalidRequest.title")} />
     );
   }
 
@@ -73,20 +71,20 @@ export function OAuthConsentSurface(props: OAuthConsentProps) {
 
   if (props.businesses.length === 0) {
     return (
-      <ReplacementOnboardingShell description={t("oauthConsent.subtitle", { client })} title={t("oauthConsent.title", { client })} width="sm">
+      <AuthShell description={t("oauthConsent.subtitle", { client })} title={t("oauthConsent.title", { client })}>
         <div className="flex flex-col gap-6">
           <Alert>
             <AlertTitle>{t("oauthConsent.noBusinesses.title")}</AlertTitle>
             <AlertDescription>{t("oauthConsent.noBusinesses.description")}</AlertDescription>
           </Alert>
-          <Button disabled={pending !== null} onClick={() => void decide(false)} variant="outline">{t("oauthConsent.deny")}</Button>
+          <Button className="h-11 w-full" disabled={pending !== null} onClick={() => void decide(false)} variant="outline">{t("oauthConsent.deny")}</Button>
         </div>
-      </ReplacementOnboardingShell>
+      </AuthShell>
     );
   }
 
   return (
-    <ReplacementOnboardingShell description={t("oauthConsent.subtitle", { client })} {...(props.client.host ? { eyebrow: t("oauthConsent.requestedBy", { host: props.client.host }) } : {})} title={t("oauthConsent.title", { client })} width="sm">
+    <AuthShell description={t("oauthConsent.subtitle", { client })} {...(props.client.host ? { eyebrow: t("oauthConsent.requestedBy", { host: props.client.host }) } : {})} title={t("oauthConsent.title", { client })}>
       <div className="flex w-full flex-col gap-6 text-left">
         <FieldGroup className="gap-6">
           <Field>
@@ -124,14 +122,14 @@ export function OAuthConsentSurface(props: OAuthConsentProps) {
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
 
         <div className="flex flex-col gap-3">
-          <Button disabled={pending !== null || !businessId} onClick={() => void decide(true)}>{pending === "allow" ? t("oauthConsent.allowing") : t("oauthConsent.allow")}</Button>
-          <Button disabled={pending !== null} onClick={() => void decide(false)} variant="outline">{t("oauthConsent.deny")}</Button>
+          <Button className={brandButton} disabled={pending !== null || !businessId} onClick={() => void decide(true)}>{pending === "allow" ? t("oauthConsent.allowing") : t("oauthConsent.allow")}</Button>
+          <Button className="h-11 w-full" disabled={pending !== null} onClick={() => void decide(false)} variant="outline">{t("oauthConsent.deny")}</Button>
         </div>
-        <p className="text-center text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {props.client.redirectHost ? <>{t("oauthConsent.returnsTo", { host: props.client.redirectHost })}<br /></> : null}
           {t("oauthConsent.signedInAs", { email: props.email })}
         </p>
       </div>
-    </ReplacementOnboardingShell>
+    </AuthShell>
   );
 }

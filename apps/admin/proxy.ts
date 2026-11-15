@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { BRAND_LOGO_PATH, isMaintenanceMode, normalizeInterfaceLocale } from "@lobbystack/shared";
 
+import { ACCESS_GATE_ROBOTS, ACCESS_HEADER, accessDeniedResponse, accessGrantedResponse, decideAccess, reportWrongAccessToken } from "@/lib/access-gate";
 import { configuredAppOrigins } from "@/lib/app-origins";
 import { LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE_SECONDS, localeTag } from "@/lib/locale";
 import { DEFAULT_HELP_LOCALE, helpLocaleFor, isHelpLocale } from "@/lib/help/locales";
@@ -46,6 +47,15 @@ function maintenanceResponse(headers: Record<string, string>): NextResponse {
     status: 503,
     headers: { ...headers, "Cache-Control": "no-store", "Retry-After": "60" },
   });
+}
+
+// The access gate's own answers, the 404 and the 303 that sets its cookie, are never stored.
+function accessGateResponse(response: NextResponse, headers: Record<string, string>): NextResponse {
+  for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+  if (process.env.NODE_ENV === "production") response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  response.headers.set("Cache-Control", "no-store");
+  response.headers.set("X-Robots-Tag", ACCESS_GATE_ROBOTS);
+  return response;
 }
 
 function applyResponsePolicy(
@@ -113,7 +123,7 @@ function hasValidCsrfOrigin(request: NextRequest): boolean {
   return origin !== null && configuredOrigins(request).has(origin.replace(/\/$/, ""));
 }
 
-export function proxy(request: NextRequest) {
+export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const headers = isEmbeddablePath(pathname)
     ? embeddableSecurityHeaders()
@@ -121,6 +131,29 @@ export function proxy(request: NextRequest) {
       ? brandLogoSecurityHeaders()
       : isPublicProfilePath(pathname) ? publicProfileSecurityHeaders()
         : isEntryLinkPath(pathname) ? entryLinkSecurityHeaders() : securityHeaders();
+
+  // The access gate (PROTECTION_TOKEN, docs/features/access-gate.md) answers
+  // first, before maintenance mode, so a closed address says the same 404
+  // whatever state the deployment is in. Open routes go on as if it were off.
+  const access = decideAccess(request);
+  if (access.outcome === "deny") {
+    if (access.wrongToken) reportWrongAccessToken(access.wrongToken);
+    return accessGateResponse(accessDeniedResponse(), headers);
+  }
+  if (access.outcome === "grant") return accessGateResponse(accessGrantedResponse(request, access.token), headers);
+  const response = route(request, headers, access.outcome);
+  // A test deployment stays out of search results, the widget's and the API's answers included.
+  if (access.outcome !== "off") response.headers.set("X-Robots-Tag", ACCESS_GATE_ROBOTS);
+  return response;
+}
+
+// Everything the proxy did before the access gate. `access` is "pass" for an
+// address the gate let through: its answer is one visitor's alone.
+function route(request: NextRequest, headers: Record<string, string>, access: "off" | "open" | "pass"): NextResponse {
+  const { pathname } = request.nextUrl;
+  const gated = access === "pass";
+  // A page a shared cache could store would reach a stranger without the cookie.
+  const cacheControl = gated ? "private, no-store" : cacheControlForRequest(pathname, request.nextUrl.searchParams);
 
   const isApiRequest = pathname.startsWith("/api/");
   if (isMaintenanceMode(process.env) && (isWebhookPath(pathname) || (isApiRequest && !isMaintenanceHealthProbe(pathname, request.method)) || stateChangingMethods.has(request.method))) {
@@ -197,9 +230,12 @@ export function proxy(request: NextRequest) {
   requestHeaders.set(LOCALE_HEADER, locale.locale);
   requestHeaders.set(LOCALE_SOURCE_HEADER, locale.source);
   requestHeaders.set(PATHNAME_HEADER, pathname);
+  // The token a script sent has done its work, and an open route never needed it:
+  // pages, routes and their error reports never see it.
+  if (access !== "off") requestHeaders.delete(ACCESS_HEADER);
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
-  applyResponsePolicy(response, request, headers, locale, cacheControlForRequest(pathname, request.nextUrl.searchParams));
+  applyResponsePolicy(response, request, headers, locale, cacheControl);
 
   if (stateChangingMethods.has(request.method) && pathname.startsWith("/api/") && !csrfExemptPaths.has(pathname) && !csrfExemptPrefixes.some((prefix) => pathname.startsWith(prefix)) && !hasValidCsrfOrigin(request)) {
     return applyResponsePolicy(
@@ -207,7 +243,7 @@ export function proxy(request: NextRequest) {
       request,
       headers,
       locale,
-      cacheControlForRequest(pathname, request.nextUrl.searchParams),
+      cacheControl,
     );
   }
   return response;

@@ -47,7 +47,13 @@ export const BRANDS: Record<string, BrandDefinition> = {
         "appNameSuffix": " (test)",
         "indexing": false
       }
-    ]
+    ],
+    "signInPage": {
+      "panel": "dark",
+      "headline": null,
+      "description": null,
+      "points": null
+    }
   },
   "lobbystack": {
     "id": "lobbystack",
@@ -65,7 +71,13 @@ export const BRANDS: Record<string, BrandDefinition> = {
       "zapierUrl": null,
       "makeUrl": null
     },
-    "environments": []
+    "environments": [],
+    "signInPage": {
+      "panel": "accent",
+      "headline": null,
+      "description": null,
+      "points": null
+    }
   },
   "realinfobot": {
     "id": "realinfobot",
@@ -102,7 +114,42 @@ export const BRANDS: Record<string, BrandDefinition> = {
         "appNameSuffix": " (test)",
         "indexing": false
       }
-    ]
+    ],
+    "signInPage": {
+      "panel": "accent",
+      "headline": {
+        "en": "The AI receptionist for real estate agents.",
+        "fr": "La réceptionniste IA des courtiers immobiliers.",
+        "es": "La recepcionista con IA para agentes inmobiliarios.",
+        "sr": "AI recepcioner za agente za nekretnine."
+      },
+      "description": {
+        "en": "It answers every call about your listings, tells buyers what they want to know and books showings while you're with clients.",
+        "fr": "Elle répond à chaque appel sur vos propriétés, renseigne les acheteurs et planifie les visites pendant que vous êtes avec vos clients.",
+        "es": "Contesta cada llamada sobre sus propiedades, informa a los compradores y agenda visitas mientras usted atiende a sus clientes.",
+        "sr": "Odgovara na svaki poziv o Vašim nekretninama, daje kupcima informacije i zakazuje razgledanja dok ste Vi sa klijentima."
+      },
+      "points": [
+        {
+          "en": "Answers calls about your listings at any hour",
+          "fr": "Répond aux appels sur vos propriétés, à toute heure",
+          "es": "Atiende llamadas sobre sus propiedades a toda hora",
+          "sr": "Odgovara na pozive o Vašim nekretninama u bilo koje doba"
+        },
+        {
+          "en": "Learns each listing from your website and files",
+          "fr": "Apprend chaque propriété grâce à votre site et à vos fichiers",
+          "es": "Conoce cada propiedad gracias a su sitio web y sus archivos",
+          "sr": "Upoznaje svaku nekretninu preko Vašeg sajta i fajlova"
+        },
+        {
+          "en": "Books showings and takes messages for you",
+          "fr": "Planifie les visites et prend les messages pour vous",
+          "es": "Agenda visitas y toma mensajes por usted",
+          "sr": "Zakazuje razgledanja i prima poruke umesto Vas"
+        }
+      ]
+    }
   }
 };
 

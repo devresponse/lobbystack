@@ -18,6 +18,21 @@ One deployment of LobbyStack serves many businesses. They share one database, on
 
 Calls find their business by the dialled number, texts by the number they were sent to, the website widget by its key, and a QR link (`/q/<code>`) by its code.
 
+## Know what the audit log says about the team
+
+Since fork PR #180, on `develop/r2`, every change to a business's team leaves a row in its audit log (`audit_logs`), written in the same transaction as the change by the function that makes it in `packages/domain/src/server/tenancy.ts`, so the dashboard and the v1 API, which the command line uses, record it once and the same way:
+
+| Event | Written when | Payload, besides who acted |
+| --- | --- | --- |
+| `team.invitation_created` | Someone invites a person (**Settings > Team** or `POST /v1/team/invitations`) | `role` |
+| `team.claim_link_created` | Someone makes a claim link that hands the business over (`POST /v1/team/claim-link`) | `role`, always `business_owner` |
+| `team.invitation_revoked` | Someone cancels a pending invitation or claim link | `role` |
+| `team.invitation_accepted` | The person invited joins, on the accept page | `role`; `keptRole` when they were already a member and kept their role; `transfersOwnership: true` for a claim link |
+| `team.member_updated` | Someone changes a member's role. Asking for the role they already have records nothing | `memberUserId`, `role`, `previousRole`, `apiKeysRevoked` (a member moved below admin loses their keys) |
+| `team.member_removed` | Someone removes a member, an admin removes themselves, or a claim link's acceptance takes the account that sent it off the team (`reason: "handover"`) | `memberUserId`, `role`, `invitationsRevoked` (the pending ones they sent or were sent), `apiKeysRevoked` |
+
+Who acted is in `actor_user_id` and the payload's `actor`: `operator` with the person's account for the dashboard, and for the API what `callerAudit` records for every v1 change: a per-business key (`api_key`, with `apiKeyId`), an OAuth grant (`mcp`, with the grant and the account) or a platform key (`platform_key`, with its partner and the account it acts as). A handover's removal says `system`, with the new owner's account. Rows name accounts by ID and never hold an email address. Before this, from the original project until 2026-11-15, the dashboard wrote no team rows and the API wrote `api.team.invitation_created`, `api.team.invitation_revoked`, `api.team.member_updated`, `api.team.member_removed` and `api.team.claim_link_created`, which older rows still say. A business's audit log outlives the business ([delete a business](business-deletion.md#know-what-happens-when-you-delete)), which is why each member row names the account and not only the membership.
+
 ## Know what the deployment shares
 
 - One OpenAI key and its models, and so one OpenAI rate limit and spending limit.
@@ -29,7 +44,7 @@ So one business that is attacked or misbehaves can use up what the others share.
 
 ## Know who can sign up
 
-Sign-up is open to anyone who can pass the Turnstile check (required everywhere but `localhost`), and there is no switch to close it. A new business gets the deployment's `DEPLOYMENT_MODE`: on `cloud`, the Free plan (30 voice minutes a month and no phone number) until it pays; on `self_hosted_standard`, the self-hosted plan with no limits. On a self-hosted deployment open to the internet, that means anyone can sign up and spend the deployment's OpenAI and Twilio budget. Use the deployment's own OpenAI project and Twilio subaccount with spending limits. A sign-up mode that can close sign-up or limit it to a list is recommended and not built ([roadmap](../roadmap/protect-the-deployment.md)).
+Sign-up is open to anyone who can pass the Turnstile check (required everywhere but `localhost`), and there is no switch to close it. A new business gets the deployment's `DEPLOYMENT_MODE`: on `cloud`, the Free plan (30 voice minutes a month and no phone number) until it pays; on `self_hosted_standard`, the self-hosted plan with no limits. On a self-hosted deployment open to the internet, that means anyone can sign up and spend the deployment's OpenAI and Twilio budget. Use the deployment's own OpenAI project and Twilio subaccount with spending limits. A sign-up mode that can close sign-up or limit it to a list is recommended and not built ([roadmap](../roadmap/protect-the-deployment.md)). A test deployment is another matter: since fork PR #176 on `releases/r2`, `PROTECTION_TOKEN` closes all of it, the sign-up page included, to every browser that hasn't opened its access link ([close a test deployment to strangers](access-gate.md)).
 
 There is no console for the person who runs the deployment: `platform_admin` is only a membership rank, and deployment-wide work goes through an operator key and the v1 API ([API and CLI](api-cli-integrations.md#pick-a-key)).
 

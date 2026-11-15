@@ -227,13 +227,13 @@ On an instance that sells plans, cloud businesses send their appointment texts, 
     - START: `<app name>: You can get texts from this number again. Reply HELP for help or STOP to opt out.`
 
     Until Twilio verifies it, the number can't send texts.
-20. **After [4.7](part-4-test-environment.md#47-use-your-own-domain-optional):** open the number's settings, set **A message comes in** to **Webhook**, `https://<your address>/api/webhooks/twilio/sms`, **HTTP POST**, and save *(field names not confirmed)*. LobbyStack didn't buy this number, so it doesn't set this address itself, and it needs these texts to record STOP and START and to answer HELP.
+20. **After [4.7](part-4-test-environment.md#47-use-your-own-domain-optional):** open the number's settings, set **A message comes in** to **Webhook**, `https://<your address>/api/webhooks/twilio/sms`, **HTTP POST**, set **Primary handler fails** to the same, and save *(field names not confirmed)*. LobbyStack didn't buy this number, so it doesn't set these addresses itself, and it needs these texts to record STOP and START and to answer HELP. The second address gives a text whose first request fails one more try ([texts](../../features/sms.md#get-a-second-try-at-a-text)).
 
 The shared number answers only STOP, START and HELP; any other text to it gets no reply and isn't kept. A STOP to it stops texts from every business that has that phone as a contact (`packages/domain/src/server/sms.ts:72-85`).
 
 **After [4.7](part-4-test-environment.md#47-use-your-own-domain-optional): nothing to do at Twilio for the business numbers**
 
-LobbyStack writes the texting addresses onto each number it buys, from the worker's `APP_BASE_URL`. You only give the admin and the worker the same addresses, below, so the admin accepts what Twilio sends.
+LobbyStack writes the texting addresses onto each number it buys, from the worker's `APP_BASE_URL`, and since fork PR #181 the texting address as the number's fallback too. A number bought before that has no fallback until you set **Primary handler fails** as in step 20. You only give the admin and the worker the same addresses, below, so the admin accepts what Twilio sends.
 
 **What goes where**
 

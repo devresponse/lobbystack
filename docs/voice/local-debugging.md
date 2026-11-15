@@ -239,7 +239,7 @@ With the stack and the tunnel running, send one request through the tunnel. In W
 curl -X POST https://your-dev-domain.ngrok-free.app/api/webhooks/openai/live
 ```
 
-`Invalid signature.` means the request reached the admin. With `pnpm dev`, it also compiles the route now, which would otherwise happen on your first real call while the caller hears ringing.
+A 400 with `Invalid signature.` means the request reached the admin, which logs `ops.live.webhook_refused` with the reason `headers`, since the request has none of OpenAI's. With `pnpm dev`, it also compiles the route now, which would otherwise happen on your first real call while the caller hears ringing.
 
 Then call the test number. The admin logs `live.incoming` with each step's timing, and the worker logs `live.delegation` and `live.closed`. Text the number to see the message under Messages. For repeatable calls, `pnpm voice:call` can dial the test number with the scripted callers from [Place real test calls](./testing.md#place-real-test-calls). It reads `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` from the shell, not from `.env.local`, and `pnpm voice:eval` reads `OPENAI_API_KEY` the same way.
 
@@ -261,7 +261,8 @@ A phone call keeps running while you're paused:
 | Docker says `Ports are not available` | Another program, or a port range Windows reserved, holds the port. `netsh interface ipv4 show excludedportrange protocol=tcp` lists the reserved ranges. Change the port in `.env`, along with the URLs that contain it |
 | Sign-in fails with `Invalid origin` | The dashboard isn't open at `APP_BASE_URL` |
 | The admin fails with `Can't resolve '@lobbystack/telemetry/node'` | Build it with `pnpm --filter @lobbystack/telemetry build` |
-| The webhook answers 400 `Invalid signature.` to real calls in the ngrok inspector | `OPENAI_WEBHOOK_SECRET` is your deployment's secret, not the local endpoint's |
+| The webhook answers 400 `Invalid signature.` to real calls in the ngrok inspector, and the admin logs `ops.live.webhook_refused` with the reason `signature` | `OPENAI_WEBHOOK_SECRET` is your deployment's secret, not the local endpoint's |
+| Real calls get 500 `Webhook processing failed.`, and the admin reports an exception under the operation `live.webhook` | The admin has no `OPENAI_WEBHOOK_SECRET` |
 | The check request answers 500 instead of `Invalid signature.` | The admin has no `OPENAI_API_KEY`. Add it and restart `pnpm dev` |
 | The local admin logs `incoming call for a number this deployment doesn't serve` for your test call | The number isn't in the local `phone_numbers` table, or isn't `active` |
 | A busy signal | The local business is a cloud business whose free minutes ran out (SIP 486). Only businesses created with `DEPLOYMENT_MODE=self_hosted_standard` have unlimited minutes |

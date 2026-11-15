@@ -7,7 +7,7 @@ import ForgotPasswordPage from "../../app/(public)/[locale]/forgot-password/page
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock("@/components/replacement-onboarding-shell", () => ({ ReplacementOnboardingShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
+vi.mock("@/components/auth-shell", async (importOriginal) => ({ ...await importOriginal<typeof import("@/components/auth-shell")>(), AuthShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 async function requestCode() {

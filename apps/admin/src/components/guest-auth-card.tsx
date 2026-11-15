@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AuthCard } from "./auth-card";
+import { AuthShell } from "./auth-shell";
 import { getSafeReturnTo } from "@/lib/auth-return-to";
 import { capturePromoCodeFromUrl } from "@/lib/promo-code";
 import { stripLocalePrefix } from "@/lib/locale-path";
@@ -41,6 +41,7 @@ export function GuestAuthCard({ mode }: { mode: "login" | "signup" }) {
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
   }, [router]);
 
-  if (checking) return <div className="flex min-h-svh items-center justify-center" role="status"><LoaderCircle className="size-5 animate-spin" aria-hidden="true" /><span className="sr-only">{t("checkingSession")}</span></div>;
+  // The brand's panel shows at once; only the form waits for the session check.
+  if (checking) return <AuthShell pending={t("checkingSession")} />;
   return <AuthCard mode={mode} />;
 }

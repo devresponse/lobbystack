@@ -68,6 +68,126 @@
         },
         "additionalProperties": false
       }
+    },
+    "signInPage": {
+      "type": "object",
+      "properties": {
+        "panel": {
+          "type": "string",
+          "enum": [
+            "accent",
+            "dark"
+          ],
+          "description": "accent (the default) fills the panel with the accent colour; dark makes it near-black with touches of the accent."
+        },
+        "headline": {
+          "type": "object",
+          "properties": {
+            "en": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "fr": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "es": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "sr": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            }
+          },
+          "required": [
+            "en",
+            "fr",
+            "es",
+            "sr"
+          ],
+          "additionalProperties": false,
+          "description": "Words in every interface language: en, fr, es and sr, each at most 80 characters."
+        },
+        "description": {
+          "type": "object",
+          "properties": {
+            "en": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "fr": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "es": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "sr": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "en",
+            "fr",
+            "es",
+            "sr"
+          ],
+          "additionalProperties": false,
+          "description": "The sentence under the headline, in every interface language."
+        },
+        "points": {
+          "minItems": 3,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "en": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "fr": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "es": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "sr": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "required": [
+              "en",
+              "fr",
+              "es",
+              "sr"
+            ],
+            "additionalProperties": false,
+            "description": "Words in every interface language: en, fr, es and sr, each at most 80 characters."
+          },
+          "description": "Three short points, listed under the sentence."
+        }
+      },
+      "additionalProperties": false,
+      "description": "The panel beside the sign-in and sign-up forms. The pages show the shared words for any part left out."
     }
   },
   "required": [

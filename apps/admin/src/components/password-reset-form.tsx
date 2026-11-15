@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ReplacementOnboardingShell } from "./replacement-onboarding-shell";
+import { AuthShell, brandButton, brandInput, brandLink } from "./auth-shell";
 import { Button } from "./ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
@@ -37,14 +37,14 @@ export function PasswordResetForm({ token }: { token: string | null }) {
     finally { setLoading(false); }
   }
 
-  return <ReplacementOnboardingShell title={t("forgotPassword.newPassword")} description={complete ? t("forgotPassword.resetComplete") : undefined} progress={null} width="sm">
+  return <AuthShell title={t("forgotPassword.newPassword")} description={complete ? t("forgotPassword.resetComplete") : undefined}>
     <div className="flex w-full flex-col gap-6">
       {!complete ? <form onSubmit={submit}><FieldGroup className="gap-4">
-        <Field><FieldLabel htmlFor="reset-new-password">{t("forgotPassword.newPassword")}</FieldLabel><Input autoComplete="new-password" className="h-11" id="reset-new-password" onChange={event => setPassword(event.target.value)} placeholder={t("forgotPassword.newPasswordPlaceholder")} required type="password" value={password} /></Field>
+        <Field><FieldLabel htmlFor="reset-new-password">{t("forgotPassword.newPassword")}</FieldLabel><Input autoComplete="new-password" className={brandInput} id="reset-new-password" onChange={event => setPassword(event.target.value)} placeholder={t("forgotPassword.newPasswordPlaceholder")} required type="password" value={password} /></Field>
         {error ? <div className="-mt-1 flex flex-col gap-2"><FieldError>{t(`errors.${error}`)}</FieldError></div> : null}
-        <div className="mt-2"><Button className="h-11 w-full" disabled={!token} loading={loading} loadingLabel={t("forgotPassword.verifySubmitting")} type="submit">{t("forgotPassword.verifySubmit")}</Button></div>
+        <div className="mt-2"><Button className={brandButton} disabled={!token} loading={loading} loadingLabel={t("forgotPassword.verifySubmitting")} type="submit">{t("forgotPassword.verifySubmit")}</Button></div>
       </FieldGroup></form> : null}
-      <p className="text-center text-sm text-muted-foreground"><Link className="font-medium text-foreground underline-offset-4 hover:underline" href={loginPath}>{t("forgotPassword.backToLogin")}</Link></p>
+      <p className="text-sm text-muted-foreground"><Link className={brandLink} href={loginPath}>{t("forgotPassword.backToLogin")}</Link></p>
     </div>
-  </ReplacementOnboardingShell>;
+  </AuthShell>;
 }

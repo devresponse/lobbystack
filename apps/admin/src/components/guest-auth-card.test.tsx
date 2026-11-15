@@ -7,6 +7,7 @@ const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("./auth-card", () => ({ AuthCard: ({ mode }: { mode: string }) => <div>{mode} form</div> }));
+vi.mock("./auth-shell", () => ({ AuthShell: ({ pending }: { pending?: string }) => <div role="status">{pending}</div> }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); window.history.replaceState(null, "", "/"); });
 
 it.each(["login", "signup"] as const)("redirects an authenticated %s visitor without showing the form", async mode => {

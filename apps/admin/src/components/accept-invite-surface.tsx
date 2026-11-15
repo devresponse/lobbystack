@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ReplacementOnboardingShell } from "./replacement-onboarding-shell";
+import { AuthShell, brandButton, brandLink } from "./auth-shell";
 import { Button } from "./ui/button";
 import { useSignOut } from "@/hooks/use-sign-out";
 import { buildAuthPathWithReturnTo } from "@/lib/auth-return-to";
@@ -95,12 +95,12 @@ export function AcceptInviteSurface() {
   else if (invitation?.expired) description = t("acceptInvite.expired");
   else if (isInvitationValid) description = t("acceptInvite.subtitle", { businessName: invitation!.businessName, email: invitation!.email });
 
-  return <div className="ph-no-capture"><ReplacementOnboardingShell description={description} progress={null} title={t("acceptInvite.title")} width="sm"><div className="flex flex-col gap-6">
-    {errorMessage ? <p className="text-center text-sm text-destructive">{errorMessage}</p> : null}
-    {isAuthenticated && wrongAccount ? <Button className="h-11 w-full" onClick={() => void signOut(loginHref)}>{t("acceptInvite.switchAccount")}</Button> : isAuthenticated ? <form className="flex flex-col" onSubmit={submit}><Button className="h-11 w-full" disabled={!isInvitationValid || isSubmitting || isPreviewLoading} loading={isSubmitting} loadingLabel={t("acceptInvite.submitting")} type="submit">{t("acceptInvite.submit")}</Button></form> : <div className="flex flex-col gap-3">
-      <Button className="h-11 w-full" role="link" nativeButton={false} render={<Link href={loginHref} />}>{t("acceptInvite.signIn")}</Button>
+  return <div className="ph-no-capture"><AuthShell description={description} title={t("acceptInvite.title")}><div className="flex flex-col gap-6">
+    {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
+    {isAuthenticated && wrongAccount ? <Button className={brandButton} onClick={() => void signOut(loginHref)}>{t("acceptInvite.switchAccount")}</Button> : isAuthenticated ? <form className="flex flex-col" onSubmit={submit}><Button className={brandButton} disabled={!isInvitationValid || isSubmitting || isPreviewLoading} loading={isSubmitting} loadingLabel={t("acceptInvite.submitting")} type="submit">{t("acceptInvite.submit")}</Button></form> : <div className="flex flex-col gap-3">
+      <Button className={brandButton} role="link" nativeButton={false} render={<Link href={loginHref} />}>{t("acceptInvite.signIn")}</Button>
       <Button className="h-11 w-full" role="link" nativeButton={false} render={<Link href={signupHref} />} variant="outline">{t("acceptInvite.createAccount")}</Button>
     </div>}
-    <p className="text-center text-sm"><Link className="font-medium text-foreground underline-offset-4 hover:underline" href={isAuthenticated ? "/settings/team" : localizePublicPath("/login", locale)}>{isAuthenticated ? t("acceptInvite.backToSettings") : t("acceptInvite.backToLogin")}</Link></p>
-  </div></ReplacementOnboardingShell></div>;
+    <p className="text-sm"><Link className={brandLink} href={isAuthenticated ? "/settings/team" : localizePublicPath("/login", locale)}>{isAuthenticated ? t("acceptInvite.backToSettings") : t("acceptInvite.backToLogin")}</Link></p>
+  </div></AuthShell></div>;
 }

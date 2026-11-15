@@ -5,6 +5,7 @@ import { z } from "zod";
 import { billingProfileSchema, canonicalBillingProfileJson, resolveBillingPlans, type BillingProfile } from "../billingProfile";
 import { MAX_APP_NAME_LENGTH, brandLogoContentType, normalizeAccentColor, normalizeAppName } from "../branding";
 import { normalizeEmailAddress, normalizeMakeUrl, normalizePageUrl, normalizeSiteUrl, normalizeZapierUrl } from "../brandLinks";
+import type { InterfaceLocale } from "../locales";
 import type { BrandAccountLimits, BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex, BrandPlanDisplay } from "./types";
 
 // The files under brands/ and how `pnpm brands:build` turns them into
@@ -19,6 +20,12 @@ const ASSET_NAME = /^[a-z0-9][a-z0-9._-]*\.(?:svg|png|jpg|jpeg|webp)$/;
 const PNG_NAME = /^[a-z0-9][a-z0-9._-]*\.png$/;
 
 const checked = (normalize: (value: unknown) => string | null, message: string) => z.string().refine((value) => normalize(value) !== null, message);
+
+// Words in every interface language, as billing.json's plan screens take them.
+const brandText = (max: number) => {
+  const words = z.string().trim().min(1).max(max);
+  return z.strictObject({ en: words, fr: words, es: words, sr: words } satisfies Record<InterfaceLocale, typeof words>).describe(`Words in every interface language: en, fr, es and sr, each at most ${max} characters.`);
+};
 
 export const brandIndexSchema = z.strictObject({
   $schema: z.string().optional(),
@@ -49,6 +56,18 @@ export const brandFileSchema = z.strictObject({
       indexing: z.boolean().optional(),
     }),
   ).optional(),
+  // The panel beside the sign-in and sign-up forms. Each part is optional:
+  // the pages show the shared words for any the file leaves out.
+  signInPage: z.strictObject({
+    panel: z.enum(["accent", "dark"]).describe("accent (the default) fills the panel with the accent colour; dark makes it near-black with touches of the accent.").optional(),
+    headline: brandText(80).optional(),
+    description: brandText(200).describe("The sentence under the headline, in every interface language.").optional(),
+    points: z.array(brandText(80)).length(3, "exactly three points").describe("Three short points, side by side under the example call.").optional(),
+    exampleCall: z.strictObject({
+      lines: z.array(brandText(120)).min(2, "two to four lines").max(4, "two to four lines").describe("Two to four lines: the caller's first, then taking turns with the receptionist."),
+      booked: brandText(40).describe("The line under the call, such as \"Appointment booked\".").optional(),
+    }).optional(),
+  }).describe("The panel beside the sign-in and sign-up forms. The pages show the shared words for any part left out.").optional(),
 });
 
 export type BrandFile = z.infer<typeof brandFileSchema>;
@@ -206,6 +225,13 @@ export function compileBrands(sources: BrandSources): CompiledBrands {
         makeUrl: file.links?.make ? normalizeMakeUrl(file.links.make) : null,
       },
       environments,
+      signInPage: {
+        panel: file.signInPage?.panel ?? "accent",
+        headline: file.signInPage?.headline ?? null,
+        description: file.signInPage?.description ?? null,
+        points: file.signInPage?.points ?? null,
+        exampleCall: file.signInPage?.exampleCall ? { lines: file.signInPage.exampleCall.lines, booked: file.signInPage.exampleCall.booked ?? null } : null,
+      },
     };
   }
   if (index.success) {

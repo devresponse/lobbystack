@@ -1,5 +1,6 @@
 import { brandFileMatched, brandImage, currentBrand, type ResolvedBrand } from "./brands/resolve";
-import type { BrandImage } from "./brands/types";
+import type { BrandImage, BrandText } from "./brands/types";
+import { normalizeInterfaceLocale } from "./locales";
 
 // The name and logo a deployment shows in place of LobbyStack.
 //
@@ -120,16 +121,65 @@ export function brandAccentColor(brand: Pick<ResolvedBrand, "accentColor"> = cur
   return brand.accentColor ?? DEFAULT_BRAND_ACCENT_COLOR;
 }
 
-/** Black or white, whichever contrasts more with a #rrggbb colour (a yellow gets black). */
-export function readableTextOn(color: string): "#000000" | "#ffffff" {
+/** The WCAG relative luminance of a #rgb or #rrggbb colour, from 0 (black) to 1 (white). Anything else counts as black. */
+function relativeLuminance(color: string): number {
   const digits = normalizeAccentColor(color)?.slice(1) ?? "000000";
   const [red, green, blue] = [0, 2, 4].map((start) => {
     const channel = Number.parseInt(digits.slice(start, start + 2), 16) / 255;
     return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
   });
-  const luminance = 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+  return 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+}
+
+/** The WCAG contrast ratio of two colours, from 1 (the same) to 21 (black on white). */
+export function contrastRatio(first: string, second: string): number {
+  const [lighter, darker] = [relativeLuminance(first), relativeLuminance(second)].sort((a, b) => b - a);
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
+/** Black or white, whichever contrasts more with a #rrggbb colour (a yellow gets black). */
+export function readableTextOn(color: string): "#000000" | "#ffffff" {
+  const luminance = relativeLuminance(color);
   // Contrast ratios against black (luminance 0) and against white (luminance 1).
   return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff";
+}
+
+/** The page backgrounds of the admin's light and dark themes (`--background` in theme.css). */
+export const PAGE_BACKGROUNDS = { light: "#ffffff", dark: "#0a0a0a" } as const;
+
+/**
+ * The colours a page draws from the brand's accent. The accent fills buttons
+ * and panels with black or white text on it. It colours text, lines and focus
+ * rings on the page itself only where it contrasts enough with that theme's
+ * background (4.5:1 for text, 3:1 for lines); elsewhere those take the
+ * page's own text colour, so a pale yellow never becomes yellow text on
+ * white and a dark navy never disappears in dark mode.
+ */
+export type BrandPalette = {
+  accent: string;
+  onAccent: "#000000" | "#ffffff";
+  /** The accent as text on each theme's page, or null where the page's own text colour stands in. */
+  text: Record<keyof typeof PAGE_BACKGROUNDS, string | null>;
+  /** The accent as a line, outline or focus ring on each theme's page, or null where the page's own text colour stands in. */
+  line: Record<keyof typeof PAGE_BACKGROUNDS, string | null>;
+};
+
+export function brandPalette(accent: string = brandAccentColor()): BrandPalette {
+  const color = normalizeAccentColor(accent) ?? DEFAULT_BRAND_ACCENT_COLOR;
+  const passes = (minimum: number) => (theme: keyof typeof PAGE_BACKGROUNDS) => (contrastRatio(color, PAGE_BACKGROUNDS[theme]) >= minimum ? color : null);
+  const text = passes(4.5);
+  const line = passes(3);
+  return {
+    accent: color,
+    onAccent: readableTextOn(color),
+    text: { light: text("light"), dark: text("dark") },
+    line: { light: line("light"), dark: line("dark") },
+  };
+}
+
+/** Words from a brand file in the reader's language, or in English for a language it has none in. */
+export function localizedBrandText(value: BrandText, locale: string | null | undefined): string {
+  return value[normalizeInterfaceLocale(locale) ?? "en"];
 }
 
 /** The URL of a logo saved in the database, versioned so browsers may cache it for good. */

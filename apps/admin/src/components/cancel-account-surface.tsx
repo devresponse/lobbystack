@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ReplacementOnboardingShell } from "./replacement-onboarding-shell";
+import { AuthShell, brandButton, brandInput, brandLink } from "./auth-shell";
 import { Button } from "./ui/button";
 import { Field, FieldGroup, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
@@ -91,9 +91,9 @@ export function CancelAccountSurface() {
   }
 
   if (canceledName !== null) {
-    return <div className="ph-no-capture"><ReplacementOnboardingShell description={t("cancelAccount.canceledDescription", { businessName: canceledName })} progress={null} title={t("cancelAccount.canceledTitle")} width="sm"><div className="flex flex-col gap-6">
-      <Button className="h-11 w-full" onClick={startOver}>{t("cancelAccount.startOver")}</Button>
-    </div></ReplacementOnboardingShell></div>;
+    return <div className="ph-no-capture"><AuthShell description={t("cancelAccount.canceledDescription", { businessName: canceledName })} title={t("cancelAccount.canceledTitle")}><div className="flex flex-col gap-6">
+      <Button className={brandButton} onClick={startOver}>{t("cancelAccount.startOver")}</Button>
+    </div></AuthShell></div>;
   }
 
   const wrongAccount = errorCode === "wrong_account";
@@ -105,15 +105,15 @@ export function CancelAccountSurface() {
   else if (cancellation?.state === "canceled") description = t("cancelAccount.alreadyCanceled", { businessName: cancellation.businessName });
   else if (isPending) description = t(isAuthenticated ? "cancelAccount.confirmPrompt" : "cancelAccount.signInPrompt", { businessName: cancellation!.businessName, email: cancellation!.email });
 
-  return <div className="ph-no-capture"><ReplacementOnboardingShell description={description} progress={null} title={t("cancelAccount.title")} width="sm"><div className="flex flex-col gap-6">
-    {isPending && wrongAccount ? <Button className="h-11 w-full" onClick={() => void signOut(loginHref)}>{t("cancelAccount.switchAccount")}</Button> : null}
-    {isPending && !wrongAccount && !isAuthenticated ? <Button className="h-11 w-full" role="link" nativeButton={false} render={<Link href={loginHref} />}>{t("cancelAccount.signIn")}</Button> : null}
+  return <div className="ph-no-capture"><AuthShell description={description} title={t("cancelAccount.title")}><div className="flex flex-col gap-6">
+    {isPending && wrongAccount ? <Button className={brandButton} onClick={() => void signOut(loginHref)}>{t("cancelAccount.switchAccount")}</Button> : null}
+    {isPending && !wrongAccount && !isAuthenticated ? <Button className={brandButton} role="link" nativeButton={false} render={<Link href={loginHref} />}>{t("cancelAccount.signIn")}</Button> : null}
     {isPending && !wrongAccount && isAuthenticated ? <form className="flex flex-col gap-6" onSubmit={submit}>
       <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive" data-testid="cancel-account-effects">{t("cancelAccount.effects")}</p>
-      <FieldGroup><Field><FieldLabel htmlFor="cancel-account-password">{t("cancelAccount.passwordLabel")}</FieldLabel><Input autoComplete="current-password" className="h-11" id="cancel-account-password" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></Field></FieldGroup>
-      {errorCode ? <p className="text-center text-sm text-destructive" role="alert">{t(`cancelAccount.errors.${confirmErrors.has(errorCode) ? errorCode : "failed"}`)}</p> : null}
+      <FieldGroup><Field><FieldLabel htmlFor="cancel-account-password">{t("cancelAccount.passwordLabel")}</FieldLabel><Input autoComplete="current-password" className={brandInput} id="cancel-account-password" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></Field></FieldGroup>
+      {errorCode ? <p className="text-sm text-destructive" role="alert">{t(`cancelAccount.errors.${confirmErrors.has(errorCode) ? errorCode : "failed"}`)}</p> : null}
       <Button className="h-11 w-full" disabled={!password || isSubmitting} loading={isSubmitting} loadingLabel={t("cancelAccount.submitting")} type="submit" variant="destructive">{t("cancelAccount.submit")}</Button>
     </form> : null}
-    <p className="text-center text-sm"><Link className="font-medium text-foreground underline-offset-4 hover:underline" href={isAuthenticated ? "/" : localizePublicPath("/login", locale)}>{isAuthenticated ? t(isPending ? "cancelAccount.keep" : "cancelAccount.backToDashboard") : t("cancelAccount.backToLogin")}</Link></p>
-  </div></ReplacementOnboardingShell></div>;
+    <p className="text-sm"><Link className={brandLink} href={isAuthenticated ? "/" : localizePublicPath("/login", locale)}>{isAuthenticated ? t(isPending ? "cancelAccount.keep" : "cancelAccount.backToDashboard") : t("cancelAccount.backToLogin")}</Link></p>
+  </div></AuthShell></div>;
 }

@@ -31,7 +31,7 @@ function prefetch() {
  * screen, which closes with its close button, the Escape key, a click beside
  * it or a move to another screen.
  */
-export function ScreenHelpButton({ className, size = "icon-xs" }: { /** Placement, for the button's wrapper. */ className?: string; size?: "icon" | "icon-sm" | "icon-xs" }) {
+export function ScreenHelpButton({ buttonClassName, className, size = "icon-xs" }: { /** The button's colours where the screen behind it isn't the page's, such as a brand panel. */ buttonClassName?: string; /** Placement, for the button's wrapper. */ className?: string; size?: "icon" | "icon-sm" | "icon-xs" }) {
   const { t } = useTranslation("common");
   const pathname = usePathname() ?? "/";
   const [open, setOpen] = useState(false);
@@ -54,7 +54,7 @@ export function ScreenHelpButton({ className, size = "icon-xs" }: { /** Placemen
             render={
               <Button
                 aria-label={t("help.screen")}
-                className="text-sidebar-foreground hover:bg-transparent hover:text-sidebar-accent-foreground aria-expanded:bg-transparent"
+                className={cn("text-sidebar-foreground hover:bg-transparent hover:text-sidebar-accent-foreground aria-expanded:bg-transparent", buttonClassName)}
                 onFocus={prefetch}
                 onPointerEnter={prefetch}
                 size={size}

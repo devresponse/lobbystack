@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { TriangleAlert } from "lucide-react";
+import { Check, Circle, TriangleAlert } from "lucide-react";
 
-import { ReplacementOnboardingShell } from "@/components/replacement-onboarding-shell";
+import { AuthShell, brandButton, brandInput, brandLink } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -223,7 +223,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   }
 
   if (verificationPending) return (
-    <ReplacementOnboardingShell description={t(login ? "verifyEmail.codeDescription" : "verifyEmail.codeDescriptionSignup", { email: email.trim().toLowerCase() })} title={t("verifyEmail.codeTitle")} width="sm">
+    <AuthShell description={t(login ? "verifyEmail.codeDescription" : "verifyEmail.codeDescriptionSignup", { email: email.trim().toLowerCase() })} title={t("verifyEmail.codeTitle")}>
       <div className="flex w-full flex-col gap-6">
         <form onSubmit={verifyEmail}>
           <FieldGroup className="gap-4">
@@ -233,28 +233,28 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
                 disabled={verificationLoading}
                 autoComplete="one-time-code"
                 autoFocus
-                containerClassName="justify-center"
+                containerClassName="justify-start"
                 id="verification-code"
                 maxLength={6}
                 onChange={(value) => setVerificationCode(value.replace(/\D/g, "").slice(0, 6))}
                 value={verificationCode}
               >
                 <InputOTPGroup>
-                  {[0, 1, 2, 3, 4, 5].map((index) => <InputOTPSlot aria-invalid={verificationError ? true : undefined} className="size-12 text-lg" index={index} key={index} />)}
+                  {[0, 1, 2, 3, 4, 5].map((index) => <InputOTPSlot aria-invalid={verificationError ? true : undefined} className="size-12 text-lg data-[active=true]:border-brand-line data-[active=true]:ring-brand/35" index={index} key={index} />)}
                 </InputOTPGroup>
               </InputOTP>
             </Field>
             {verificationError ? <FieldError>{verificationError}</FieldError> : null}
             {resendStatus ? <p className="text-sm text-muted-foreground" role="status">{resendStatus}</p> : null}
-            <Button className="mt-2 h-11 w-full" disabled={verificationCode.length !== 6 || resendLoading} loading={verificationLoading} loadingLabel={t("verifyEmail.verifying")} type="submit">{t("verifyEmail.verify")}</Button>
+            <Button className={cn("mt-2", brandButton)} disabled={verificationCode.length !== 6 || resendLoading} loading={verificationLoading} loadingLabel={t("verifyEmail.verifying")} type="submit">{t("verifyEmail.verify")}</Button>
             {resendChallengeRequired && turnstileSiteKey ? <Turnstile key={resendTurnstileResetKey} onError={() => { setResendTurnstileToken(null); setVerificationError(t("errors.turnstileFailed")); }} onTokenChange={setResendTurnstileToken} siteKey={turnstileSiteKey} /> : null}
             <Button className="h-11 w-full" disabled={verificationLoading || Boolean(resendChallengeRequired && turnstileSiteKey && !resendTurnstileToken)} loading={resendLoading} loadingLabel={t("verifyEmail.resending")} onClick={() => void resendVerificationCode()} type="button" variant="outline">{t("verifyEmail.resend")}</Button>
           </FieldGroup>
         </form>
-        {!login ? <p className="text-center text-sm text-muted-foreground">{t("verifyEmail.existingAccountHelp")} <Link className="font-medium text-foreground underline-offset-4 hover:underline" href={authPath("/login")}>{t("signup.signIn")}</Link> {t("verifyEmail.or")} <Link className="font-medium text-foreground underline-offset-4 hover:underline" href={localizePublicPath("/forgot-password", authLocale)}>{t("verifyEmail.resetPassword")}</Link>.</p> : null}
-        <button disabled={verificationLoading} className="text-center text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={() => { setVerificationPending(false); setVerificationCode(""); setVerificationError(null); setResendStatus(null); }} type="button">{t("verifyEmail.useDifferentEmail")}</button>
+        {!login ? <p className="text-sm text-muted-foreground">{t("verifyEmail.existingAccountHelp")} <Link className={brandLink} href={authPath("/login")}>{t("signup.signIn")}</Link> {t("verifyEmail.or")} <Link className={brandLink} href={localizePublicPath("/forgot-password", authLocale)}>{t("verifyEmail.resetPassword")}</Link>.</p> : null}
+        <button disabled={verificationLoading} className="self-start text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline hover:decoration-brand hover:decoration-2" onClick={() => { setVerificationPending(false); setVerificationCode(""); setVerificationError(null); setResendStatus(null); }} type="button">{t("verifyEmail.useDifferentEmail")}</button>
       </div>
-    </ReplacementOnboardingShell>
+    </AuthShell>
   );
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const passwordCriteria = [
@@ -263,29 +263,35 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
     { label: t("signup.passwordCriteria.specialCharacter"), isMet: /[^A-Za-z0-9\s]/.test(password) },
   ];
   const isSignupReady = isEmailValid && passwordCriteria.every((criterion) => criterion.isMet);
+  const metCriteria = passwordCriteria.filter((criterion) => criterion.isMet).length;
   const marketingLocale = resolveLocale(i18n.resolvedLanguage, i18n.language);
   const legalFooter = !login ? (
-    <p className="max-w-full text-center text-xs leading-5 text-muted-foreground sm:whitespace-nowrap">
+    <p className="max-w-sm text-center text-xs leading-5 text-muted-foreground">
       {t("signup.legal.prefix")} {" "}
-      <a className="underline underline-offset-4 hover:text-foreground" href={termsHref(marketingLocale)} rel="noreferrer" target="_blank">{t("signup.legal.terms")}</a>{" "}
+      <a className="underline decoration-brand underline-offset-4 hover:text-foreground" href={termsHref(marketingLocale)} rel="noreferrer" target="_blank">{t("signup.legal.terms")}</a>{" "}
       {t("signup.legal.and")} {" "}
-      <a className="underline underline-offset-4 hover:text-foreground" href={privacyHref(marketingLocale)} rel="noreferrer" target="_blank">{t("signup.legal.privacy")}</a>
+      <a className="underline decoration-brand underline-offset-4 hover:text-foreground" href={privacyHref(marketingLocale)} rel="noreferrer" target="_blank">{t("signup.legal.privacy")}</a>
       {t("signup.legal.suffix")}
     </p>
   ) : undefined;
   return (
-    <ReplacementOnboardingShell legalFooter={legalFooter} progress={login ? null : { current: 1, total: 8 }} title={login ? t("login.title") : t("signup.title")} width="sm">
+    <AuthShell description={login ? t("login.subtitle") : t("signup.subtitle")} legalFooter={legalFooter} progress={login ? null : { current: 1, total: 8 }} title={login ? t("login.title") : t("signup.title")}>
       <div className="flex w-full flex-col gap-6">
         <form onSubmit={submit}>
           <FieldGroup className="gap-4">
-            <Field data-invalid={hasBlurredEmail && email.length > 0 && !isEmailValid ? true : undefined}><FieldLabel htmlFor="auth-email">{login ? t("login.email") : t("signup.email")}</FieldLabel><Input aria-invalid={hasBlurredEmail && email.length > 0 && !isEmailValid} autoComplete="email" className={cn("h-11", hasBlurredEmail && email.length > 0 && !isEmailValid && "border-destructive text-destructive focus-visible:border-destructive focus-visible:ring-destructive/20")} id="auth-email" onBlur={() => setHasBlurredEmail(true)} onChange={(event) => { setHasBlurredEmail(false); setEmail(event.target.value); }} placeholder={login ? t("login.emailPlaceholder") : t("signup.emailPlaceholder")} required type="email" value={email} />{hasBlurredEmail && email.length > 0 && !isEmailValid ? <FieldError className="flex items-center gap-2 font-medium"><TriangleAlert className="size-4 shrink-0" aria-hidden="true" /><span>{t(login ? "login.emailInvalid" : "signup.emailInvalid")}</span></FieldError> : null}</Field>
+            <Field data-invalid={hasBlurredEmail && email.length > 0 && !isEmailValid ? true : undefined}><FieldLabel htmlFor="auth-email">{login ? t("login.email") : t("signup.email")}</FieldLabel><Input aria-invalid={hasBlurredEmail && email.length > 0 && !isEmailValid} autoComplete="email" className={cn(brandInput, hasBlurredEmail && email.length > 0 && !isEmailValid && "border-destructive text-destructive focus-visible:border-destructive focus-visible:ring-destructive/20")} id="auth-email" onBlur={() => setHasBlurredEmail(true)} onChange={(event) => { setHasBlurredEmail(false); setEmail(event.target.value); }} placeholder={login ? t("login.emailPlaceholder") : t("signup.emailPlaceholder")} required type="email" value={email} />{hasBlurredEmail && email.length > 0 && !isEmailValid ? <FieldError className="flex items-center gap-2 font-medium"><TriangleAlert className="size-4 shrink-0" aria-hidden="true" /><span>{t(login ? "login.emailInvalid" : "signup.emailInvalid")}</span></FieldError> : null}</Field>
             <Field>
-              <div className="flex items-center justify-between gap-3"><FieldLabel htmlFor="auth-password">{login ? t("login.password") : t("signup.password")}</FieldLabel>{login ? <Link className="text-xs font-medium text-muted-foreground hover:text-foreground" href={localizePublicPath("/forgot-password", authLocale)}>{t("login.forgotPassword")}</Link> : null}</div>
-              <Input autoComplete={login ? "current-password" : "new-password"} className="h-11" id="auth-password" minLength={8} onChange={(event) => setPassword(event.target.value)} onFocus={() => setHasFocusedPassword(true)} placeholder={login ? t("login.passwordPlaceholder") : t("signup.passwordPlaceholder")} required type="password" value={password} />
-              {!login && hasFocusedPassword ? <ul aria-live="polite" className="flex flex-col gap-1 pt-0.5 text-sm font-medium">{passwordCriteria.map((criterion) => <li className={cn("flex items-center gap-2", criterion.isMet ? "text-emerald-700" : "text-muted-foreground")} key={criterion.label}><span aria-hidden="true" className="w-3 text-center">{criterion.isMet ? "✓" : "×"}</span><span>{criterion.label}</span></li>)}</ul> : null}
+              <div className="flex items-center justify-between gap-3"><FieldLabel htmlFor="auth-password">{login ? t("login.password") : t("signup.password")}</FieldLabel>{login ? <Link className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline hover:decoration-brand hover:decoration-2" href={localizePublicPath("/forgot-password", authLocale)}>{t("login.forgotPassword")}</Link> : null}</div>
+              <Input autoComplete={login ? "current-password" : "new-password"} className={brandInput} id="auth-password" minLength={8} onChange={(event) => setPassword(event.target.value)} onFocus={() => setHasFocusedPassword(true)} placeholder={login ? t("login.passwordPlaceholder") : t("signup.passwordPlaceholder")} required type="password" value={password} />
+              {!login && hasFocusedPassword ? (
+                <div className="flex flex-col gap-2.5 pt-1">
+                  <div aria-hidden="true" className="grid grid-cols-3 gap-1.5">{passwordCriteria.map((criterion, index) => <span className={cn("h-1 rounded-full transition-colors duration-300", index < metCriteria ? "bg-brand" : "bg-muted")} key={criterion.label} />)}</div>
+                  <ul aria-live="polite" className="flex flex-col gap-1 text-sm font-medium">{passwordCriteria.map((criterion) => <li className={cn("flex items-center gap-2", criterion.isMet ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")} key={criterion.label}>{criterion.isMet ? <Check aria-hidden="true" className="size-3.5" strokeWidth={2.5} /> : <Circle aria-hidden="true" className="size-3.5" />}<span>{criterion.label}</span></li>)}</ul>
+                </div>
+              ) : null}
             </Field>
             {error ? <div className="flex flex-col gap-2 -mt-1"><FieldError>{error}</FieldError></div> : null}
-            <Button className="mt-2 h-11 w-full" disabled={!login && !isSignupReady} loading={loading} loadingLabel={login ? t("login.submitting") : t("signup.submitting")} type="submit">{login ? t("login.submit") : t("signup.submit")}</Button>
+            <Button className={cn("mt-2", brandButton)} disabled={!login && !isSignupReady} loading={loading} loadingLabel={login ? t("login.submitting") : t("signup.submitting")} type="submit">{login ? t("login.submit") : t("signup.submit")}</Button>
           </FieldGroup>
         </form>
         {!login && turnstileSiteKey ? <Turnstile key={turnstileResetKey} onError={() => { pendingChallengeSubmit.current = false; setTurnstileToken(null); setLoading(false); setError(t("errors.turnstileFailed")); }} onTokenChange={(token) => {
@@ -293,8 +299,8 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
           if (!token && pendingChallengeSubmit.current) { pendingChallengeSubmit.current = false; setLoading(false); setError(t("errors.turnstileRequired")); }
           if (token && pendingChallengeSubmit.current) { pendingChallengeSubmit.current = false; void submitCredentials(token); }
         }} siteKey={turnstileSiteKey} /> : null}
-        <p className="text-center text-sm text-muted-foreground">{login ? t("login.noAccount") : t("signup.haveAccount")} <Link className="font-medium text-foreground underline-offset-4 hover:underline" href={authPath(login ? "/signup" : "/login")}>{login ? t("login.createOne") : t("signup.signIn")}</Link></p>
+        <p className="text-sm text-muted-foreground">{login ? t("login.noAccount") : t("signup.haveAccount")} <Link className={brandLink} href={authPath(login ? "/signup" : "/login")}>{login ? t("login.createOne") : t("signup.signIn")}</Link></p>
       </div>
-    </ReplacementOnboardingShell>
+    </AuthShell>
   );
 }

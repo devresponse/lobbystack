@@ -14,8 +14,9 @@ const article: HelpArticle = {
     "If someone invited you to join their business, start from the link in the invitation email instead. It brings you back to the invitation after you create your account, so you join their team rather than setting up a new business.",
   ],
   areas: [
-    { name: "Create your account", description: "The page's title, under the app's logo. Below it are the **Email** and **Password** fields." },
-    { name: "Password checklist", description: "Appears under **Password** once you click into it. Each rule, **Minimum 8 letters**, **At least one number** and **At least one special character**, shows a cross until your password meets it and a tick once it does." },
+    { name: "The app's panel", description: "On a wide screen, the left part of the page shows the app's logo and name, a headline, what the receptionist does and an example call that plays once. On a phone it's a band above the form with the logo, the name, the headline and the help button." },
+    { name: "Create your account", description: "The form's title, with **Use your email to get started.** under it. Below are the **Email** and **Password** fields." },
+    { name: "Password checklist", description: "Appears under **Password** once you click into it. Each rule, **Minimum 8 letters**, **At least one number** and **At least one special character**, shows an empty circle until your password meets it and a tick once it does. The bar above the rules fills a third for each rule met." },
     { name: "Create account", description: "Creates the account and emails you a verification code. The button stays off until the email address looks complete and all three password rules show a tick. It reads **Creating account...** while it works, and any problem shows just above it." },
     { name: "Security check", description: "A check below the form that confirms a person is signing up. It must be complete before the account is created. If you select **Create account** first, the page asks you to complete it and carries on by itself once it's done." },
     { name: "Already have an account? Sign in", description: "Opens the log-in page, for an account you already have." },

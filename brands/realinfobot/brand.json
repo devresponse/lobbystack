@@ -15,5 +15,73 @@
   "environments": {
     "dev*": { "appNameSuffix": " (dev)", "indexing": false },
     "test*": { "appNameSuffix": " (test)", "indexing": false }
+  },
+  "signInPage": {
+    "headline": {
+      "en": "The AI receptionist for real estate agents.",
+      "fr": "La réceptionniste IA des courtiers immobiliers.",
+      "es": "La recepcionista con IA para agentes inmobiliarios.",
+      "sr": "AI recepcioner za agente za nekretnine."
+    },
+    "description": {
+      "en": "It answers every call about your listings, tells buyers what they want to know and books showings while you're with clients.",
+      "fr": "Elle répond à chaque appel sur vos propriétés, renseigne les acheteurs et planifie les visites pendant que vous êtes avec vos clients.",
+      "es": "Contesta cada llamada sobre sus propiedades, informa a los compradores y agenda visitas mientras usted atiende a sus clientes.",
+      "sr": "Odgovara na svaki poziv o Vašim nekretninama, daje kupcima informacije i zakazuje razgledanja dok ste Vi sa klijentima."
+    },
+    "points": [
+      {
+        "en": "Answers calls about your listings at any hour",
+        "fr": "Répond aux appels sur vos propriétés, à toute heure",
+        "es": "Atiende llamadas sobre sus propiedades a toda hora",
+        "sr": "Odgovara na pozive o Vašim nekretninama u bilo koje doba"
+      },
+      {
+        "en": "Learns each listing from your website and files",
+        "fr": "Apprend chaque propriété grâce à votre site et à vos fichiers",
+        "es": "Conoce cada propiedad gracias a su sitio web y sus archivos",
+        "sr": "Upoznaje svaku nekretninu preko Vašeg sajta i fajlova"
+      },
+      {
+        "en": "Books showings and takes messages for you",
+        "fr": "Planifie les visites et prend les messages pour vous",
+        "es": "Agenda visitas y toma mensajes por usted",
+        "sr": "Zakazuje razgledanja i prima poruke umesto Vas"
+      }
+    ],
+    "exampleCall": {
+      "lines": [
+        {
+          "en": "Hi, is the house on Maple Street still for sale?",
+          "fr": "Bonjour, la maison de la rue des Érables est-elle toujours à vendre?",
+          "es": "Hola, ¿la casa de la calle Los Pinos sigue en venta?",
+          "sr": "Zdravo, da li je kuća u Lipovoj ulici još na prodaju?"
+        },
+        {
+          "en": "Yes, it is. Would you like to see it this Saturday?",
+          "fr": "Oui. Voulez-vous la visiter samedi?",
+          "es": "Sí. ¿Le gustaría verla este sábado?",
+          "sr": "Jeste. Želite li da je pogledate ove subote?"
+        },
+        {
+          "en": "Yes please, in the morning.",
+          "fr": "Oui, en matinée, s'il vous plaît.",
+          "es": "Sí, por favor, en la mañana.",
+          "sr": "Da, molim Vas, pre podne."
+        },
+        {
+          "en": "Done. Your showing is booked for Saturday at 10 am.",
+          "fr": "C'est fait. Votre visite est prévue samedi à 10 h.",
+          "es": "Listo. Su visita quedó agendada para el sábado a las 10.",
+          "sr": "Gotovo. Razgledanje Vam je zakazano za subotu u 10 h."
+        }
+      ],
+      "booked": {
+        "en": "Showing booked",
+        "fr": "Visite planifiée",
+        "es": "Visita agendada",
+        "sr": "Razgledanje zakazano"
+      }
+    }
   }
 }

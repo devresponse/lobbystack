@@ -2,7 +2,7 @@
 
 The scalability review of 2026-10-18 found that the single database isn't the first limit: database connections, the one admin process, background jobs that run for each business, and the shared provider accounts bite first ([scalability](../reviews/scalability-2026-10-18.md)). Its roadmap hardens one stack, then makes it survive a failure, then splits businesses into cells.
 
-- **Status:** started. Apart from billing fixes, fork PR #168 made two admins and two workers possible: smaller connection pools on each copy, a database made with room for 200 connections, a minute for the old admin to finish at a release, and new calls spread over the worker's copies ([replicas review](../reviews/replicas-2026-11-13.md)). Phase 1 holds most of the near-term value and needs no new service except PgBouncer.
+- **Status:** started. Apart from billing fixes, fork PR #168 made two admins and two workers possible: smaller connection pools on each copy, a database made with room for 200 connections, a minute for the old admin to finish at a release, and new calls spread over the worker's copies ([replicas review](../reviews/replicas-2026-11-13.md)). Since fork PR #182 on `develop/r2`, `devops/scale.mjs` sets the number of copies after its checks ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)). Phase 1 holds most of the near-term value and needs no new service except PgBouncer.
 - **Effort:** not estimated in days; each item is a pull request or a setting of its own.
 - **Measured:** one admin process served about 400 people chatting at once in a local test, slowed at 600 and failed at 800 ([widget scalability](../reviews/widget-scalability-2026-10-15.md#know-the-answer)).
 

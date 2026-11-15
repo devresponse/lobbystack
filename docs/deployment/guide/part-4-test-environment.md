@@ -522,7 +522,7 @@ What to expect afterwards:
 - **Treat the link as a password,** since whoever has it reaches the sign-in page. To let someone new in, send them the link. To take access away from anyone, change the token, which shuts everyone out until they open the new link ([7.18](part-7-operations.md#718-rotate-secrets-and-keys)).
 - **To open the environment again,** delete the variable and click **Deploy**.
 - **The smoke test's automatic check** needs the token on its command line ([4.9](#49-smoke-test)).
-- **With the bootstrap script** ([4.11](#411-set-it-all-up-with-the-bootstrap-script)), `PROTECT=yes` in the settings file does steps 1 to 3 and shows the access link.
+- **With the bootstrap script** ([4.11](#411-set-it-all-up-with-the-bootstrap-script)), `PROTECT=yes` in the settings file does steps 1 to 3 and shows the access link. With a token of your own, put `PROTECTION_TOKEN=<the token>` in the script's secrets file instead, which closes the environment by itself: `up` then does steps 2 and 3, and shows the link too.
 - **A deployment that stays open** after step 3 runs a version from before the gate, or has the variable on another service than the admin ([8.2](part-8-troubleshooting.md#82-builds-and-start-up)).
 
 This hasn't been tried on Railway yet: it was tried on a server on a computer, and by the code's tests.

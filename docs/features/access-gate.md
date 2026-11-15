@@ -32,7 +32,7 @@ The gate is the first check in the admin's proxy (`apps/admin/proxy.ts`), which 
 4. **Check it:** in a private window, `https://<your address>/` shows only "Not found", and `https://<your address>/api/health/live` still answers.
 5. **Send the access link** to the people who should get in.
 
-With the bootstrap script, set `PROTECT=yes` in the settings file and run `up`: it makes the token, sets it on the admin and shows the access link ([devops/bootstrap.md](../../devops/bootstrap.md#close-the-deployment-to-strangers)).
+With the bootstrap script, set `PROTECT=yes` in the settings file and run `up`: it makes the token, sets it on the admin and shows the access link. A token of your own works the same way with no `PROTECT=yes`: since fork PR #178, a `PROTECTION_TOKEN` in the script's secrets file closes the deployment by itself, as the variable does on the admin ([devops/bootstrap.md](../../devops/bootstrap.md#close-the-deployment-to-strangers)).
 
 - **A token the admin refuses.** With a token shorter than 32 characters, or one with any other character, the admin doesn't start: it stops with `[access-gate] PROTECTION_TOKEN is 9 characters long and needs at least 32.` or `… has a character an address can't carry as it is.`, and Railway keeps the version that was running. A short token could be guessed, and a character such as `+` would break the access link. The message never repeats the token.
 - **Unset or empty** means no gate. Spaces and line ends around a pasted token are dropped.
@@ -87,7 +87,7 @@ These answer without the cookie, because the caller is a provider's server, a vi
 
 - **Change it** by setting a new value on the admin and deploying. Every cookie signed with the old token stops working at once, on every device, and the old link gets the 404: send out the new link. It's also the only way to take one person's access away, since everyone shares one token.
 - **Turn it off** by deleting the variable and deploying. The cookies left in browsers do nothing.
-- **With the bootstrap script,** `node devops/bootstrap.mjs redo .env.bootstrap-<name> protection`, then `up`, makes a new token and shows the new link. To turn the gate off, set `PROTECT=no`, and delete `PROTECTION_TOKEN` from the admin's variables in Railway yourself, since the script deletes no variables ([devops/bootstrap.md](../../devops/bootstrap.md#close-the-deployment-to-strangers)).
+- **With the bootstrap script,** `node devops/bootstrap.mjs redo .env.bootstrap-<name> protection`, then `up`, takes the secrets file's token, or makes a new one, and shows the new link. To turn the gate off, set `PROTECT=no` and take `PROTECTION_TOKEN` out of the secrets file, and delete `PROTECTION_TOKEN` from the admin's variables in Railway yourself, since the script deletes no variables ([devops/bootstrap.md](../../devops/bootstrap.md#close-the-deployment-to-strangers)).
 
 ## Watch it in the logs
 
@@ -114,7 +114,7 @@ A wrong token is usually someone with an access link from before the token chang
 - **`apps/admin/proxy.ts`:** asks `decideAccess` first, answers the 404 or the 303 itself, and otherwise runs as before, with `private, no-store` for a browser the gate let through and `X-Robots-Tag` on every answer. Its `matcher` is unchanged.
 - **`apps/admin/instrumentation.ts`:** refuses to start with a token the gate wouldn't take, and logs `access_gate.on`. A build skips both, since it serves no one.
 - **The proxy is built apart from the rest of the admin,** so the warning is written with `console.warn` as the JSON line `logEvent` would write, which Railway reads the same way, without loading the telemetry package into the proxy.
-- **Around it:** `PROTECTION_TOKEN` in `.env.example` and `docker-compose.yml`; `PROTECT` and the `protection` step in `devops/bootstrap.mjs`; the header in `scripts/production-smoke.ts`.
+- **Around it:** `PROTECTION_TOKEN` in `.env.example` and `docker-compose.yml`; `PROTECT`, the secrets file's `PROTECTION_TOKEN` and the `protection` step in `devops/bootstrap.mjs`; the header in `scripts/production-smoke.ts`.
 - **Every request a page makes has to carry the cookie.** The sign-in pages asked `/api/branding` for the deployment's name and logo without cookies, which the gate would answer with the 404, so `apps/admin/src/components/branding-provider.tsx` now sends them. A new `fetch` with `credentials: "omit"` would meet the same 404.
 
 ## Know how it's tested
@@ -124,4 +124,4 @@ A wrong token is usually someone with an access link from before the token chang
 - **Start-up:** `apps/admin/src/lib/instrumentation.test.ts` covers the refused tokens and `access_gate.on`.
 - **A browser journey:** `apps/admin/e2e/access-gate.e2e.ts` runs against a server of its own, started with the variable by `apps/admin/playwright.access-gate.config.ts`: a stranger's 404, the image optimizer's same answer for a real page and a made-up one, the access link landing on the sign-in page with the cookie and none of that page's own requests turned away, a script's header, and the widget's loader and chat, a Twilio webhook, the API and MCP answering as on an open deployment. `pnpm --filter @lobbystack/admin e2e:access-gate` runs it, and so do `scripts/e2e-local.sh` and CI's Replacement Platform workflow.
 - **The page's own request:** `apps/admin/src/components/branding-provider.test.tsx` covers that the request for the name and logo carries the browser's cookies.
-- **The scripts:** `scripts/bootstrap.test.ts` covers `PROTECT` in `up`, `status`, `connect`, `doctor` and `redo`, and that the log never has the token; `scripts/production-smoke.test.ts` covers the header.
+- **The scripts:** `scripts/bootstrap.test.ts` covers `PROTECT=yes`, and a `PROTECTION_TOKEN` in the secrets file without it, in `up`, `status`, `connect`, `doctor` and `redo`, that production refuses both, and that the log never has the token; `scripts/production-smoke.test.ts` covers the header.

@@ -1,10 +1,12 @@
 import { and, asc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { businesses, businessHours, receptionistProfiles, type DatabaseTransaction } from "@lobbystack/db";
 import { replaceBusinessHoursInTransaction } from "@lobbystack/domain";
 import { normalizeBookingMode } from "@lobbystack/shared";
-import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
+import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
+import { jsonError, parseBody } from "@/lib/request-input";
 
 export const dynamic = "force-dynamic";
 
@@ -21,15 +23,13 @@ async function loadHours(tx: DatabaseTransaction, businessId: string) {
   return { timezone: business[0].timezone, hoursSource: business[0].hoursSource, bookingMode: normalizeBookingMode(profile[0]?.bookingMode), hours };
 }
 
-function readHours(body: unknown): Array<{ dayOfWeek: number; openMinutes: number; closeMinutes: number }> {
-  const hours = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>).hours : undefined;
-  if (!Array.isArray(hours) || hours.length > 28) throw jsonError("hours must be a list of up to 28 opening windows.");
-  return hours.map((window) => {
-    const value = typeof window === "object" && window !== null ? window as Record<string, unknown> : {};
-    if (![value.dayOfWeek, value.openMinutes, value.closeMinutes].every((field) => typeof field === "number")) throw jsonError("Each opening window needs dayOfWeek, openMinutes and closeMinutes.");
-    return { dayOfWeek: value.dayOfWeek as number, openMinutes: value.openMinutes as number, closeMinutes: value.closeMinutes as number };
-  });
-}
+// A window is a day and the minutes from midnight it opens and closes, so a day can have several.
+const openingWindow = z.object({
+  dayOfWeek: z.number("Each opening window needs dayOfWeek, openMinutes and closeMinutes.").int("dayOfWeek is a whole number, 0 for Sunday to 6 for Saturday.").min(0, "dayOfWeek is 0 for Sunday to 6 for Saturday.").max(6, "dayOfWeek is 0 for Sunday to 6 for Saturday."),
+  openMinutes: z.number("Each opening window needs dayOfWeek, openMinutes and closeMinutes.").int("openMinutes is a whole number of minutes from midnight.").min(0, "openMinutes is between 0 and 1440.").max(1_440, "openMinutes is between 0 and 1440."),
+  closeMinutes: z.number("Each opening window needs dayOfWeek, openMinutes and closeMinutes.").int("closeMinutes is a whole number of minutes from midnight.").min(0, "closeMinutes is between 0 and 1440.").max(1_440, "closeMinutes is between 0 and 1440."),
+});
+const weeklyHours = z.object({ hours: z.array(openingWindow, "hours must be a list of up to 28 opening windows.").max(28, "hours must be a list of up to 28 opening windows.") });
 
 export async function GET(request: Request) {
   try {
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
-      const hours = readHours(await readJson(request));
+      const { hours } = await parseBody(request, weeklyHours);
       try {
         await replaceBusinessHoursInTransaction(tx, { businessId, hours });
       } catch (error) {

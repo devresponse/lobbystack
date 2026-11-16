@@ -89,6 +89,7 @@ Every request to the admin app passes through these first, so the entry file sum
    - `withOperatorTransaction` runs both, then opens a database transaction carrying the business's row-level security context (`withBusinessTransaction` in `packages/db`) and checks membership (`requireBusinessMembership` in `packages/domain`), with an optional minimum role.
    - `requireProspectDemoOperator` lets through only the account whose email is `PROSPECT_DEMO_OPERATOR_EMAIL` (503 when that is unset, 403 for anyone else).
    - `asApiResponse` turns an error into JSON: an error with a status below 500 keeps it (`{ error, code }`); anything else answers 500 "Request failed." with an `errorId` that is sent to error tracking.
+   - `parseBody(request, schema)` and `parseQuery(request, schema)` in `apps/admin/src/lib/request-input.ts`, since fork PR #191, check a body or a query string against a zod schema through the same `parseApiInput` the v1 API uses. That module holds `jsonError` and `readJson` too and reaches neither the database nor the session, so a route's tests can use the real checks; `api-helpers` passes them on, so the routes that import them from there are unchanged. A wrong field answers 400 `invalid_request` with `{ error: "field: what to fix", code, details }`, instead of the 500 the hand-written checks gave. In a query string an empty parameter counts as absent, so a cleared search box isn't a mistake.
    - `createDomainContext()` in `apps/admin/src/lib/domain-context.ts` gives the `packages/domain` functions the app's database role and the embeddings provider; `createWorkerDomainContext()` uses the worker's database role instead.
 4. **The public API wrapper.** Every `/api/v1` route file hands its methods to `v1.<operationId>` in `apps/admin/src/lib/public-api/routes.ts`, which runs `handleApiRequest` in `apps/admin/src/lib/public-api/http.ts`. That checks the key, its scope, the business, the rate limit and the `Idempotency-Key`, runs the operation, turns errors into the API's error format and logs a `public_api.request` line (section 9).
 
@@ -3578,13 +3579,14 @@ These turned up while the entry files were read for this catalog. Each was check
 
 `asApiResponse` keeps a status only when the error carries one. These requests throw a plain `Error` (or a `ZodError`), so they answer 500 "Request failed." and are reported as server errors, where a 400, 404, 409 or 429 was meant.
 
+Since fork PR #191, `POST /api/catalog`, `/api/team`, `PUT /api/hours` and `/api/widget-keys` check what they are sent with a schema and answer 400 with the field that is wrong, and an unknown widget key answers 404. What is left is below.
+
 | Route | Which requests | Where |
 |---|---|---|
 | `GET /api/analytics` | An invalid `from` or `to`, an unknown `granularity`, a range too long for it | `apps/admin/app/api/analytics/route.ts:12, 27, 30` |
 | `POST`, `PATCH /api/businesses` | POST with a `slug` another business has; PATCH with no field it knows | `packages/domain/src/server/tenancy.ts:88-116, 185` |
-| `POST /api/catalog` | A missing `businessId`, or any field that fails its check | `apps/admin/app/api/catalog/route.ts:30-36` |
 | `POST`, `PATCH`, `DELETE /api/rules` | A body that fails its check, an unknown rule, an empty change, a reorder that doesn't list every rule | `apps/admin/app/api/rules/route.ts`, `packages/domain/src/server/rules.ts` |
-| `POST`, `PATCH`, `DELETE /api/team` | A missing body, `businessId`, `email` or valid `role`; an unknown member or invitation; the last owner | `apps/admin/app/api/team/route.ts:58-63`, `packages/domain/src/server/tenancy.ts:483-507` |
+| `POST`, `PATCH`, `DELETE /api/team` | An unknown member or invitation; the last owner. The body's own fields answer 400 since fork PR #191 | `packages/domain/src/server/tenancy.ts:483-507` |
 | `POST /api/team/accept` | A missing token; an unknown, expired or used invitation | `packages/domain/src/server/tenancy.ts:341-362` |
 | `POST /api/knowledge` | Any `sourceType` but `website` | `packages/domain/src/server/knowledge.ts:94-95` |
 | `PATCH`, `DELETE /api/knowledge/{documentId}`; `PATCH`, `DELETE /api/knowledge/snippets/{snippetId}` | An unknown document or snippet | `packages/domain/src/server/knowledge.ts:160, 235, 277, 296` |
@@ -3600,7 +3602,6 @@ These turned up while the entry files were read for this catalog. Each was check
 | `POST /api/onboarding/stage` | A move that skips a step or isn't allowed | `packages/domain/src/server/onboarding.ts:169-171` |
 | `DELETE /api/phone-numbers` | A number that isn't active | `packages/domain/src/server/compliance.ts:36` |
 | `GET`, `POST`, `PUT /api/uploads` | Any field that fails its check, a missing `businessId` included; a file over 25 MB, full storage, an upload that doesn't match, an unknown object. The upload form's own messages for these never show. | `apps/admin/app/api/uploads/route.ts:15, 30, 38`, `packages/domain/src/server/storage.ts`, `apps/admin/src/lib/storage-upload.ts:19-23` |
-| `POST`, `PATCH /api/widget-keys` | Invalid `allowedOrigins` or `config`, a missing `id`, an unknown key, an empty change | `apps/admin/app/api/widget-keys/route.ts:14-70` |
 | `GET /api/calls/active` | Any request while no worker heartbeat is fresh, for example when the worker isn't running, even with no calls. An open Calls page asks every 5 seconds, and each answer is reported as a server error. | `packages/jobs/src/voicePresence.ts:105-119` |
 
 ### Other status codes

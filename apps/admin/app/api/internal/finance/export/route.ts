@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 import { NextResponse } from "next/server";
+import { sql, type SQL } from "drizzle-orm";
 
 import { bearerToken } from "@lobbystack/domain";
 import { getFinanceExportDatabase } from "@/lib/api-helpers";
@@ -29,7 +30,6 @@ function parseCursor(value: string | null): Cursor | undefined {
   } catch { return undefined; }
 }
 
-function escape(value: string): string { return value.replaceAll("'", "''"); }
 function limit(value: string | null): number {
   const parsed = Number(value ?? "100");
   return Number.isInteger(parsed) ? Math.min(500, Math.max(1, parsed)) : 100;
@@ -37,17 +37,28 @@ function limit(value: string | null): number {
 function date(value: string | null): string | undefined {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
 }
-function cursorFilter(cursor: Cursor | undefined, updatedAt: string, id: string): string {
-  return cursor ? `and (${updatedAt}, ${id}) > ('${escape(cursor.updatedAt)}'::timestamptz, '${escape(cursor.id)}')` : "";
+/**
+ * Every value below reaches PostgreSQL as a bind parameter (AUDIT-010). The
+ * queries used to be template strings with the values quoted by hand, which
+ * was safe only because each one was checked first and quoted with a
+ * `replaceAll("'", "''")` of its own. Nothing made the next parameter follow
+ * that, and nothing else in the codebase looked like it. Only the column names
+ * below, which are fixed text in this file, go in as SQL.
+ */
+const column = (name: string): SQL => sql.raw(name);
+function cursorFilter(cursor: Cursor | undefined, updatedAt: SQL, id: SQL): SQL {
+  return cursor ? sql` and (${updatedAt}, ${id}) > (${cursor.updatedAt}::timestamptz, ${cursor.id})` : sql``;
 }
-function range(from: string | undefined, to: string | undefined, column: string): string {
-  return `${from ? `and ${column} >= '${from}'::date` : ""} ${to ? `and ${column} < ('${to}'::date + interval '1 day')` : ""}`;
+function range(from: string | undefined, to: string | undefined, occurredAt: SQL): SQL {
+  const after = from ? sql` and ${occurredAt} >= ${from}::date` : sql``;
+  const before = to ? sql` and ${occurredAt} < (${to}::date + interval '1 day')` : sql``;
+  return sql`${after}${before}`;
 }
 // node-postgres materializes timestamptz as Date, which drops microseconds.
 // Export UTC timestamp text directly so a consumer can safely advance the
 // `(updatedAt, id)` cursor across records written in the same millisecond.
-function exportUpdatedAt(column: string): string {
-  return `to_char(${column} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+function exportUpdatedAt(name: string): SQL {
+  return sql.raw(`to_char(${name} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`);
 }
 function envelope(resource: Resource, rows: Array<Record<string, unknown>>, size: number) {
   const data = rows.slice(0, size);
@@ -72,24 +83,24 @@ export async function GET(request: Request) {
   const db = getFinanceExportDatabase().db;
 
   if (resource === "usage") {
-    const rows = (await db.execute<Record<string, unknown>>(`select u.id, u.business_id as "businessId", b.name as "tenantName", u.occurred_at as "occurredAt", ${exportUpdatedAt("u.updated_at")} as "updatedAt", u.event_kind as "eventKind", u.channel, case when u.event_kind like '%_provider' then 'provider' when u.operation like 'voice.%' then 'voice' when u.operation like 'web_voice.%' then 'web_voice' when u.operation like 'knowledge.%' then 'embedding' else 'ai' end as service, u.operation, u.provider, u.model, u.pricing_version as "pricingVersion", u.pricing_source as "pricingSource", u.pricing_effective_date as "pricingEffectiveDate", u.pricing_rates as "ratesUsdPerMillionTokens", u.token_usage as "tokenUsage", u.cost_usd as "costUsd", u.quantity, u.quantity_unit as "quantityUnit", u.call_id as "callId", u.conversation_id as "conversationId", bu.quantity as "billedSeconds" from unit_economics_events u join businesses b on b.id = u.business_id left join billing_usage_events bu on u.call_id is not null and bu.business_id = u.business_id and bu.source_key = 'voice:' || u.call_id::text where true ${range(from, to, "u.occurred_at")} ${cursorFilter(cursor, "u.updated_at", "u.id::text")} order by u.updated_at, u.id limit ${size + 1}`)).rows;
+    const rows = (await db.execute<Record<string, unknown>>(sql`select u.id, u.business_id as "businessId", b.name as "tenantName", u.occurred_at as "occurredAt", ${exportUpdatedAt("u.updated_at")} as "updatedAt", u.event_kind as "eventKind", u.channel, case when u.event_kind like '%_provider' then 'provider' when u.operation like 'voice.%' then 'voice' when u.operation like 'web_voice.%' then 'web_voice' when u.operation like 'knowledge.%' then 'embedding' else 'ai' end as service, u.operation, u.provider, u.model, u.pricing_version as "pricingVersion", u.pricing_source as "pricingSource", u.pricing_effective_date as "pricingEffectiveDate", u.pricing_rates as "ratesUsdPerMillionTokens", u.token_usage as "tokenUsage", u.cost_usd as "costUsd", u.quantity, u.quantity_unit as "quantityUnit", u.call_id as "callId", u.conversation_id as "conversationId", bu.quantity as "billedSeconds" from unit_economics_events u join businesses b on b.id = u.business_id left join billing_usage_events bu on u.call_id is not null and bu.business_id = u.business_id and bu.source_key = 'voice:' || u.call_id::text where true ${range(from, to, column("u.occurred_at"))} ${cursorFilter(cursor, column("u.updated_at"), column("u.id::text"))} order by u.updated_at, u.id limit ${size + 1}`)).rows;
     return envelope(resource, rows, size);
   }
   if (resource === "businesses") {
-    const rows = (await db.execute<Record<string, unknown>>(`select id, legacy_convex_id as "legacyConvexId", name as "tenantName", status, deployment_mode as "deploymentMode", created_at as "createdAt", ${exportUpdatedAt("updated_at")} as "updatedAt" from businesses where true ${cursorFilter(cursor, "updated_at", "id::text")} order by updated_at, id limit ${size + 1}`)).rows;
+    const rows = (await db.execute<Record<string, unknown>>(sql`select id, legacy_convex_id as "legacyConvexId", name as "tenantName", status, deployment_mode as "deploymentMode", created_at as "createdAt", ${exportUpdatedAt("updated_at")} as "updatedAt" from businesses where true ${cursorFilter(cursor, column("updated_at"), column("id::text"))} order by updated_at, id limit ${size + 1}`)).rows;
     return envelope(resource, rows, size);
   }
   if (resource === "service-periods") {
-    const servicePeriodRange = `${from ? `and (current_period_end is null or current_period_end >= '${from}'::date)` : ""} ${to ? `and current_period_start < ('${to}'::date + interval '1 day')` : ""}`;
-    const rows = (await db.execute<Record<string, unknown>>(`select id, business_id as "businessId", source, customer_id as "customerId", subscription_id as "subscriptionId", plan, billing_interval as "billingInterval", subscription_state as "subscriptionState", current_period_start as "currentPeriodStart", current_period_end as "currentPeriodEnd", ${exportUpdatedAt("updated_at")} as "updatedAt" from billing_accounts where true ${servicePeriodRange} ${cursorFilter(cursor, "updated_at", "id::text")} order by updated_at, id limit ${size + 1}`)).rows;
+    const servicePeriodRange = sql`${from ? sql` and (current_period_end is null or current_period_end >= ${from}::date)` : sql``}${to ? sql` and current_period_start < (${to}::date + interval '1 day')` : sql``}`;
+    const rows = (await db.execute<Record<string, unknown>>(sql`select id, business_id as "businessId", source, customer_id as "customerId", subscription_id as "subscriptionId", plan, billing_interval as "billingInterval", subscription_state as "subscriptionState", current_period_start as "currentPeriodStart", current_period_end as "currentPeriodEnd", ${exportUpdatedAt("updated_at")} as "updatedAt" from billing_accounts where true ${servicePeriodRange} ${cursorFilter(cursor, column("updated_at"), column("id::text"))} order by updated_at, id limit ${size + 1}`)).rows;
     return envelope(resource, rows, size);
   }
   if (resource === "transactions") {
-    const rows = (await db.execute<Record<string, unknown>>(`select id, business_id as "businessId", kind, source_id as "sourceId", order_id as "orderId", subscription_id as "subscriptionId", provider_customer_id as "providerCustomerId", provider_customer_id as "polarCustomerId", occurred_at as "occurredAt", ${exportUpdatedAt("updated_at")} as "updatedAt" from billing_transactions where true ${range(from, to, "occurred_at")} ${cursorFilter(cursor, "updated_at", "id::text")} order by updated_at, id limit ${size + 1}`)).rows;
+    const rows = (await db.execute<Record<string, unknown>>(sql`select id, business_id as "businessId", kind, source_id as "sourceId", order_id as "orderId", subscription_id as "subscriptionId", provider_customer_id as "providerCustomerId", provider_customer_id as "polarCustomerId", occurred_at as "occurredAt", ${exportUpdatedAt("updated_at")} as "updatedAt" from billing_transactions where true ${range(from, to, column("occurred_at"))} ${cursorFilter(cursor, column("updated_at"), column("id::text"))} order by updated_at, id limit ${size + 1}`)).rows;
     return envelope(resource, rows, size);
   }
 
   // Source-derived updatedAt supports cursor-based revisions to daily totals.
-  const rows = (await db.execute<Record<string, unknown>>(`with daily_calls as (select c.business_id, (c.started_at at time zone 'UTC')::date as day, count(*)::int as call_count, coalesce(sum(c.provider_duration_seconds), 0)::int as voice_seconds, coalesce(sum(bu.quantity), 0)::int as billed_voice_seconds, count(*) filter (where bu.quantity = 0 and not c.billing_excluded and c.disposition is distinct from 'spam_ended' and coalesce(c.provider_duration_seconds, 0) > 0)::int as short_calls_waived, max(c.updated_at) as updated_at from calls c left join billing_usage_events bu on bu.business_id = c.business_id and bu.source_key = 'voice:' || c.id::text where true ${range(from, to, "c.started_at")} group by c.business_id, (c.started_at at time zone 'UTC')::date), daily_bookings as (select business_id, (created_at at time zone 'UTC')::date as day, count(*) filter (where status <> 'canceled')::int as booking_count, max(updated_at) as updated_at from appointments where true ${range(from, to, "created_at")} group by business_id, (created_at at time zone 'UTC')::date), daily as (select coalesce(c.business_id, b.business_id) as business_id, coalesce(c.day, b.day) as day, coalesce(c.call_count, 0) as call_count, coalesce(c.voice_seconds, 0) as voice_seconds, coalesce(c.billed_voice_seconds, 0) as billed_voice_seconds, coalesce(c.short_calls_waived, 0) as short_calls_waived, coalesce(b.booking_count, 0) as booking_count, greatest(coalesce(c.updated_at, '-infinity'::timestamptz), coalesce(b.updated_at, '-infinity'::timestamptz)) as updated_at from daily_calls c full outer join daily_bookings b on b.business_id = c.business_id and b.day = c.day) select business_id || ':' || to_char(day, 'YYYY-MM-DD') as id, business_id as "businessId", to_char(day, 'YYYY-MM-DD') as date, call_count as "callCount", voice_seconds as "voiceSeconds", billed_voice_seconds as "billedVoiceSeconds", short_calls_waived as "shortCallsWaived", booking_count as "bookingCount", ${exportUpdatedAt("updated_at")} as "updatedAt" from daily where true ${cursorFilter(cursor, "updated_at", "(business_id || ':' || to_char(day, 'YYYY-MM-DD'))")} order by updated_at, id limit ${size + 1}`)).rows;
+  const rows = (await db.execute<Record<string, unknown>>(sql`with daily_calls as (select c.business_id, (c.started_at at time zone 'UTC')::date as day, count(*)::int as call_count, coalesce(sum(c.provider_duration_seconds), 0)::int as voice_seconds, coalesce(sum(bu.quantity), 0)::int as billed_voice_seconds, count(*) filter (where bu.quantity = 0 and not c.billing_excluded and c.disposition is distinct from 'spam_ended' and coalesce(c.provider_duration_seconds, 0) > 0)::int as short_calls_waived, max(c.updated_at) as updated_at from calls c left join billing_usage_events bu on bu.business_id = c.business_id and bu.source_key = 'voice:' || c.id::text where true ${range(from, to, column("c.started_at"))} group by c.business_id, (c.started_at at time zone 'UTC')::date), daily_bookings as (select business_id, (created_at at time zone 'UTC')::date as day, count(*) filter (where status <> 'canceled')::int as booking_count, max(updated_at) as updated_at from appointments where true ${range(from, to, column("created_at"))} group by business_id, (created_at at time zone 'UTC')::date), daily as (select coalesce(c.business_id, b.business_id) as business_id, coalesce(c.day, b.day) as day, coalesce(c.call_count, 0) as call_count, coalesce(c.voice_seconds, 0) as voice_seconds, coalesce(c.billed_voice_seconds, 0) as billed_voice_seconds, coalesce(c.short_calls_waived, 0) as short_calls_waived, coalesce(b.booking_count, 0) as booking_count, greatest(coalesce(c.updated_at, '-infinity'::timestamptz), coalesce(b.updated_at, '-infinity'::timestamptz)) as updated_at from daily_calls c full outer join daily_bookings b on b.business_id = c.business_id and b.day = c.day) select business_id || ':' || to_char(day, 'YYYY-MM-DD') as id, business_id as "businessId", to_char(day, 'YYYY-MM-DD') as date, call_count as "callCount", voice_seconds as "voiceSeconds", billed_voice_seconds as "billedVoiceSeconds", short_calls_waived as "shortCallsWaived", booking_count as "bookingCount", ${exportUpdatedAt("updated_at")} as "updatedAt" from daily where true ${cursorFilter(cursor, column("updated_at"), column("(business_id || ':' || to_char(day, 'YYYY-MM-DD'))"))} order by updated_at, id limit ${size + 1}`)).rows;
   return envelope("metrics", rows, size);
 }

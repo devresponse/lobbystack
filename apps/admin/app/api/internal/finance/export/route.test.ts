@@ -1,3 +1,5 @@
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -13,6 +15,12 @@ vi.mock("@/lib/api-helpers", () => ({
 }));
 
 import { GET } from "./route";
+
+// AUDIT-010: the queries are Drizzle `sql` templates now, so a test reads the
+// text PostgreSQL is sent and the values it is sent beside it.
+const dialect = new PgDialect();
+const sent = (index = 0) => dialect.sqlToQuery(mocks.execute.mock.calls[index]?.[0] as SQL);
+const text = (index = 0) => sent(index).sql;
 
 describe("finance export", () => {
   afterEach(() => {
@@ -47,11 +55,11 @@ describe("finance export", () => {
     }));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ version: "v1", resource: "metrics", data: [expect.objectContaining({ bookingCount: 1 })], nextCursor: null });
-    expect(mocks.execute.mock.calls[0]?.[0]).toContain("daily_bookings");
-    expect(mocks.execute.mock.calls[0]?.[0]).toContain("booking_count");
-    expect(mocks.execute.mock.calls[0]?.[0]).toContain("status <> 'canceled'");
-    expect(mocks.execute.mock.calls[0]?.[0]).toContain("short_calls_waived");
-    expect(mocks.execute.mock.calls[0]?.[0]).toContain("billed_voice_seconds");
+    expect(text()).toContain("daily_bookings");
+    expect(text()).toContain("booking_count");
+    expect(text()).toContain("status <> 'canceled'");
+    expect(text()).toContain("short_calls_waived");
+    expect(text()).toContain("billed_voice_seconds");
   });
 
   it("rejects a syntactically valid cursor with an invalid timestamp", async () => {
@@ -73,7 +81,7 @@ describe("finance export", () => {
       headers: { authorization: "Bearer finance-only-token" },
     }));
     expect(response.status).toBe(200);
-    const query = mocks.execute.mock.calls[0]?.[0] as string;
+    const query = text();
     expect(query).not.toContain("event_kind in");
     expect(query).toContain("knowledge.%");
     expect(query).toContain("%_provider");
@@ -91,7 +99,7 @@ describe("finance export", () => {
       ),
     );
     expect(response.status).toBe(200);
-    expect(mocks.execute.mock.calls[0]?.[0]).toContain(
+    expect(text()).toContain(
       'legacy_convex_id as "legacyConvexId"',
     );
   });
@@ -104,9 +112,10 @@ describe("finance export", () => {
       headers: { authorization: "Bearer finance-only-token" },
     }));
     expect(response.status).toBe(200);
-    const query = mocks.execute.mock.calls[0]?.[0] as string;
-    expect(query).toContain("current_period_end is null or current_period_end >= '2026-09-01'::date");
-    expect(query).toContain("current_period_start < ('2026-09-30'::date + interval '1 day')");
+    const query = text();
+    expect(query).toContain("current_period_end is null or current_period_end >= $1::date");
+    expect(query).toContain("current_period_start < ($2::date + interval '1 day')");
+    expect(sent().params).toEqual(["2026-09-01", "2026-09-30", 101]);
   });
 
   it("exports durable transaction-to-business attribution keys", async () => {
@@ -148,14 +157,35 @@ describe("finance export", () => {
         }),
       ],
     });
-    const query = mocks.execute.mock.calls[0]?.[0] as string;
+    const query = text();
     expect(query).toContain("from billing_transactions");
     // The payer's customer from the provider-neutral column, also under its old name for existing readers.
     expect(query).toContain(`provider_customer_id as "providerCustomerId", provider_customer_id as "polarCustomerId"`);
-    expect(query).toContain("occurred_at >= '2026-09-01'::date");
-    expect(query).toContain("occurred_at < ('2026-09-30'::date + interval '1 day')");
+    expect(query).toContain("occurred_at >= $1::date");
+    expect(query).toContain("occurred_at < ($2::date + interval '1 day')");
+    expect(sent().params).toEqual(["2026-09-01", "2026-09-30", 101]);
     expect(query).toContain("order by updated_at, id");
     expect(query).not.toContain("amount_cents");
+  });
+
+  // AUDIT-010: the five queries were template strings, and a value was made
+  // safe by a `replaceAll("'", "''")` written beside it. Nothing made the next
+  // parameter follow that. Every value is a bind parameter now.
+  it("sends a cursor as a parameter, whatever is written in it", async () => {
+    process.env.FINANCE_EXPORT_ENABLED = "true";
+    process.env.FINANCE_EXPORT_TOKEN = "finance-only-token";
+    mocks.execute.mockResolvedValueOnce({ rows: [] });
+    const id = "row'); drop table calls; --";
+    const cursor = Buffer.from(JSON.stringify({ updatedAt: "2026-09-09T12:00:00.000Z", id })).toString("base64url");
+
+    const response = await GET(new Request(`http://localhost/api/internal/finance/export?resource=usage&cursor=${cursor}&limit=25`, {
+      headers: { authorization: "Bearer finance-only-token" },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(text()).toContain("and (u.updated_at, u.id::text) > ($1::timestamptz, $2)");
+    expect(text()).not.toContain("drop table");
+    expect(sent().params).toEqual(["2026-09-09T12:00:00.000Z", id, 26]);
   });
 
   it("serializes updatedAt at microsecond precision for strict cursors", async () => {
@@ -166,7 +196,7 @@ describe("finance export", () => {
       headers: { authorization: "Bearer finance-only-token" },
     }));
     expect(response.status).toBe(200);
-    expect(mocks.execute.mock.calls[0]?.[0]).toContain("HH24:MI:SS.US");
+    expect(text()).toContain("HH24:MI:SS.US");
   });
 });
 
@@ -184,7 +214,7 @@ describe("finance export service periods", () => {
     mocks.execute.mockResolvedValue({ rows: [managed] });
     const response = await GET(new Request("http://localhost/api/internal/finance/export?resource=service-periods", { headers: { authorization: "Bearer finance-only-token" } }));
     expect(response.status).toBe(200);
-    expect(String(mocks.execute.mock.calls[0]?.[0])).toMatch(/\bsource\b/);
+    expect(text()).toMatch(/\bsource\b/);
     expect(await response.json()).toMatchObject({ data: [{ source: "managed", plan: "enterprise", subscriptionId: null }] });
   });
 });

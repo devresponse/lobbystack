@@ -19,6 +19,8 @@
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "tsx src/cli.ts migrate",
     "db:check": "tsx src/cli.ts check",
+    "db:compare-schema": "tsx src/cli.ts compare-schema",
+    "db:freeze-migrations": "tsx src/cli.ts freeze-migrations",
     "db:seed": "tsx src/cli.ts seed",
     "db:reset:test": "tsx src/cli.ts reset-test",
     "db:verify-rls": "tsx src/cli.ts verify-rls"

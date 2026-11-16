@@ -55,6 +55,8 @@
     "billing": "tsx --tsconfig scripts/tsconfig.json scripts/billing.ts",
     "billing:scenarios": "tsx --tsconfig scripts/tsconfig.json scripts/billing-scenarios.ts",
     "db:check": "pnpm --filter @lobbystack/db db:check",
+    "db:compare-schema": "pnpm --filter @lobbystack/db db:compare-schema",
+    "db:freeze-migrations": "pnpm --filter @lobbystack/db db:freeze-migrations",
     "db:seed": "pnpm --filter @lobbystack/db db:seed",
     "db:reset:test": "pnpm --filter @lobbystack/db db:reset:test",
     "db:verify-rls": "pnpm --filter @lobbystack/db db:verify-rls",

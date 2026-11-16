@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { config as loadEnv } from "dotenv";
@@ -11,6 +11,7 @@ import type { PoolClient } from "pg";
 import { initializeTelemetry, shutdownTelemetry } from "@lobbystack/telemetry/node";
 
 import { createDatabaseClient, databaseHealthCheck } from "./client";
+import { readMigrationChecksums } from "./migrations/checksums";
 import {
   concurrentIndexName,
   MIGRATION_JOURNAL_TABLE,
@@ -18,6 +19,15 @@ import {
   ROLE_MIGRATION,
   SCHEMA_MIGRATIONS,
 } from "./migrations/raw-migrations";
+import {
+  compareSchemas,
+  DATABASE_COLUMNS_QUERY,
+  DATABASE_INDEXES_QUERY,
+  describeCodeTables,
+  describeDatabaseTables,
+  type ColumnRow,
+  type IndexRow,
+} from "./schema-drift";
 import { businesses, schema } from "./schema";
 
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -81,6 +91,24 @@ async function main(): Promise<void> {
           updated += 1;
         }
         console.log(`Database role logins configured for ${updated} roles.`);
+        break;
+      }
+      case "freeze-migrations": {
+        const migrationsDirectory = resolve("migrations");
+        const onDisk = readMigrationChecksums(migrationsDirectory);
+        await writeFile(join(migrationsDirectory, "checksums.json"), `${JSON.stringify(onDisk, null, 2)}\n`);
+        console.log(`Froze ${Object.keys(onDisk).length} migrations in migrations/checksums.json.`);
+        break;
+      }
+      case "compare-schema": {
+        const columns = await migrator.db.execute<ColumnRow>(sql.raw(DATABASE_COLUMNS_QUERY));
+        const indexes = await migrator.db.execute<IndexRow>(sql.raw(DATABASE_INDEXES_QUERY));
+        const differences = compareSchemas(describeCodeTables(schema), describeDatabaseTables(columns.rows, indexes.rows));
+        if (differences.length) {
+          for (const difference of differences) console.error(`schema drift: ${difference}`);
+          throw new Error(`The Drizzle schema and the database disagree in ${differences.length} place${differences.length === 1 ? "" : "s"}.`);
+        }
+        console.log(`The Drizzle schema matches the database: ${Object.keys(schema).length} tables compared.`);
         break;
       }
       case "check": {

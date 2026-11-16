@@ -36,6 +36,20 @@ describe("finance export", () => {
     expect(mocks.getFinanceExportDatabase).not.toHaveBeenCalled();
   });
 
+  // AUDIT-017: read like every true/false setting, so `1` turns it on and `no` leaves it off.
+  it("is on or off for every way of writing true or false", async () => {
+    process.env.FINANCE_EXPORT_TOKEN = "finance-only-token";
+    for (const value of ["1", "TRUE", "yes", "on"]) {
+      process.env.FINANCE_EXPORT_ENABLED = value;
+      expect((await GET(new Request("http://localhost/api/internal/finance/export?resource=usage"))).status, value).toBe(401);
+    }
+    for (const value of ["false", "0", "no", "off", ""]) {
+      process.env.FINANCE_EXPORT_ENABLED = value;
+      expect((await GET(new Request("http://localhost/api/internal/finance/export?resource=usage"))).status, value).toBe(404);
+    }
+    expect(mocks.getFinanceExportDatabase).not.toHaveBeenCalled();
+  });
+
   it("requires the dedicated finance bearer token", async () => {
     process.env.FINANCE_EXPORT_ENABLED = "true";
     process.env.FINANCE_EXPORT_TOKEN = "finance-only-token";

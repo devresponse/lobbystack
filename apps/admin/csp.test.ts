@@ -36,6 +36,12 @@ describe("recordingStorageSource", () => {
   });
   it("supports path-style storage", () => {
     expect(recordingStorageSource({ ...storage, S3_FORCE_PATH_STYLE: "true" })).toBe("https://t3.storageapi.dev");
+    // AUDIT-017: the storage provider reads `1` and `TRUE` as on, so the policy
+    // has to name the same origin. It used to name the bucket's own, and the
+    // browser then refused the files the provider served from the endpoint.
+    expect(recordingStorageSource({ ...storage, S3_FORCE_PATH_STYLE: "1" })).toBe("https://t3.storageapi.dev");
+    expect(recordingStorageSource({ ...storage, S3_FORCE_PATH_STYLE: "TRUE" })).toBe("https://t3.storageapi.dev");
+    expect(recordingStorageSource({ ...storage, S3_FORCE_PATH_STYLE: "off" })).toBe("https://recordings.t3.storageapi.dev");
     expect(recordingStorageSource({ ...storage, S3_ENDPOINT: "http://127.0.0.1:9000" })).toBe("http://127.0.0.1:9000");
   });
   it("supports AWS without a custom endpoint", () => {

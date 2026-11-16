@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { sql, type SQL } from "drizzle-orm";
 
 import { bearerToken } from "@lobbystack/domain";
+import { envFlag } from "@lobbystack/shared";
 import { getFinanceExportDatabase } from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
@@ -69,7 +70,7 @@ function envelope(resource: Resource, rows: Array<Record<string, unknown>>, size
 
 /** Disabled by default; it accepts only the dedicated finance bearer token. */
 export async function GET(request: Request) {
-  if (process.env.FINANCE_EXPORT_ENABLED !== "true") return new Response("Not found", { status: 404 });
+  if (!envFlag(process.env, "FINANCE_EXPORT_ENABLED")) return new Response("Not found", { status: 404 });
   if (!authorized(request)) return new Response("Unauthorized", { status: 401 });
   const url = new URL(request.url);
   const resource = url.searchParams.get("resource");

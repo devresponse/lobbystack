@@ -8,9 +8,11 @@ For a deployment set up with `devops/bootstrap.mjs`, [Bootstrap script variables
 
 **A setting that is on or off**
 
-A true/false setting takes `true`, `false`, `1`, `0`, `yes`, `no`, `on` or `off`, in any case and with spaces around it, so `TRUE` and `1` both mean on. The admin and the worker refuse to start when one holds anything else, such as `SMTP_SECURE=ssl`, and the startup line names every setting they couldn't read. They are `BETTER_AUTH_USE_SECURE_COOKIES`, `BRAND_REQUIRED`, `CONTENT_RETENTION_ENABLED`, `CSP_SCRIPT_NONCE`, `CSP_SCRIPT_NONCE_ENFORCED`, `LIVE_PROTOTYPE_ENABLED`, `LIVE_RECORDED_GREETING`, `LOBBYSTACK_CERTIFICATION_MODE`, `LOBBYSTACK_MAINTENANCE_MODE`, `POLAR_ACCEPT_LEGACY_BUSINESS_IDS`, `REQUIRE_EMAIL_VERIFICATION`, `S3_FORCE_PATH_STYLE`, `SMTP_SECURE`, `WIDGET_KEY_ISSUANCE_ENABLED` and `WIDGET_TURNSTILE`, listed with their defaults in `packages/shared/src/env.ts`.
+A true/false setting takes `true`, `false`, `1`, `0`, `yes`, `no`, `on` or `off`, in any case and with spaces around it, so `TRUE` and `1` both mean on. The admin and the worker refuse to start when one holds anything else, such as `SMTP_SECURE=ssl`, and the startup line names every setting they couldn't read. They are `BETTER_AUTH_USE_SECURE_COOKIES`, `BRAND_REQUIRED`, `CONTENT_RETENTION_ENABLED`, `CSP_SCRIPT_NONCE`, `CSP_SCRIPT_NONCE_ENFORCED`, `FINANCE_EXPORT_ENABLED`, `LIVE_PROTOTYPE_ENABLED`, `LIVE_RECORDED_GREETING`, `LIVE_RECORDED_GREETING_PHONE`, `LOBBYSTACK_CERTIFICATION_MODE`, `LOBBYSTACK_MAINTENANCE_MODE`, `POLAR_ACCEPT_LEGACY_BUSINESS_IDS`, `REQUIRE_EMAIL_VERIFICATION`, `S3_FORCE_PATH_STYLE`, `SMTP_SECURE`, `WIDGET_KEY_ISSUANCE_ENABLED` and `WIDGET_TURNSTILE`, listed with their defaults in `packages/shared/src/env.ts`.
 
-Before fork PR #195 each was its own comparison with the word `true`, so `1` or `TRUE` quietly meant off.
+Before fork PR #195 each was its own comparison with the word `true`, so `1` or `TRUE` quietly meant off. `FINANCE_EXPORT_ENABLED` and `LIVE_RECORDED_GREETING_PHONE` joined the list with fork PR #212, and the admin's Content Security Policy began to read `S3_FORCE_PATH_STYLE` as the storage client does. On a copy from before it, only `FINANCE_EXPORT_ENABLED=true` turns the export on, only `LIVE_RECORDED_GREETING_PHONE=false` keeps phone calls on the spoken greeting, and neither is checked at startup.
+
+The migrate service's own switches, `LOBBYSTACK_SKIP_ENV_FILES`, `VERIFY_RLS_BEHAVIOR` and `LOBBYSTACK_ALLOW_CONTRACT_WITH_EXPAND`, are on for `true`, `1`, `yes` or `on` and off for anything else. They never stop the migration from starting.
 
 **Stop an injected script from running (fork PR #203)**
 

@@ -1,3 +1,5 @@
+import { envFlag } from "@lobbystack/shared";
+
 /**
  * Origins the browser needs for PostHog ingestion, session replay assets, and
  * error reporting. PostHog serves its SDK bundles from changing posthog.com
@@ -31,7 +33,9 @@ export function recordingStorageSource(
     const endpoint = new URL(source.S3_ENDPOINT || `https://s3.${region}.amazonaws.com`);
     if (!["https:", "http:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) return undefined;
     // Match S3's path-style fallback for IP endpoints and dotted HTTPS buckets.
-    const pathStyle = source.S3_FORCE_PATH_STYLE === "true" ||
+    // Read as the storage provider reads it, so `1` and `TRUE` name the same
+    // origin here that the files are then served from.
+    const pathStyle = envFlag(source, "S3_FORCE_PATH_STYLE") ||
       /^[\d.]+$/.test(endpoint.hostname) || endpoint.hostname.startsWith("[") ||
       (endpoint.protocol === "https:" && bucket.includes("."));
     if (!pathStyle) endpoint.hostname = `${bucket}.${endpoint.hostname}`;

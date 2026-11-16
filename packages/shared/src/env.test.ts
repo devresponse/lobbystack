@@ -23,6 +23,15 @@ describe("true/false settings", () => {
     expect(envFlag({ REQUIRE_EMAIL_VERIFICATION: "   " }, "REQUIRE_EMAIL_VERIFICATION")).toBe(true);
   });
 
+  // Three sites still compared text after the list went in, and were found by reading the code again.
+  it("holds the finance export and the phone greeting, each with what unset means", () => {
+    expect(envFlag({}, "FINANCE_EXPORT_ENABLED")).toBe(false);
+    expect(envFlag({ FINANCE_EXPORT_ENABLED: "1" }, "FINANCE_EXPORT_ENABLED")).toBe(true);
+    expect(envFlag({}, "LIVE_RECORDED_GREETING_PHONE")).toBe(true);
+    expect(envFlag({ LIVE_RECORDED_GREETING_PHONE: "off" }, "LIVE_RECORDED_GREETING_PHONE")).toBe(false);
+    expect(booleanSettingErrors({ FINANCE_EXPORT_ENABLED: "enabled" })).toEqual(["FINANCE_EXPORT_ENABLED must be true, false, 1, 0, yes, no, on or off."]);
+  });
+
   it("gives secure cookies the setting that production wants", () => {
     expect(envFlag({ NODE_ENV: "production" }, "BETTER_AUTH_USE_SECURE_COOKIES")).toBe(true);
     expect(envFlag({ NODE_ENV: "development" }, "BETTER_AUTH_USE_SECURE_COOKIES")).toBe(false);

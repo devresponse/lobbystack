@@ -1,6 +1,6 @@
 import { greetingRecordingFailedKey, greetingRecordingInProgressKey, greetingRecordingKey, recordedGreetingEnabled } from "@lobbystack/agent-core/live/greetingRecording";
 import { LIVE_VOICE } from "@lobbystack/agent-core/live/session";
-import { callOpening, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, envFlag, type BusinessContextSnapshot } from "@lobbystack/shared";
 
 import { getRedis, waitForRedis } from "./redis";
 
@@ -33,7 +33,7 @@ async function withinCheckTimeout<T>(check: () => Promise<T>, fallback: T): Prom
  */
 export async function recordedGreetingFor(snapshot: OpeningSnapshot, options: { phone?: boolean } = {}): Promise<RecordedGreeting | undefined> {
   if (!recordedGreetingEnabled()) return undefined;
-  if (options.phone && process.env.LIVE_RECORDED_GREETING_PHONE === "false") return undefined;
+  if (options.phone && !envFlag(process.env, "LIVE_RECORDED_GREETING_PHONE")) return undefined;
   const text = callOpening(snapshot);
   const redis = getRedis();
   if (!text || !redis) return undefined;

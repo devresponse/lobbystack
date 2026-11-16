@@ -101,6 +101,8 @@ Never start several queries at once on one transaction, as `Promise.all` over `t
 
 Parallel queries are fine on the pool, outside a transaction, since each gets its own connection. A test fixture that shares one transaction for everything turns them into the same problem, which is why `publicProfiles.integration.test.ts` wraps its transaction in `oneTransactionAtATime`. Take care with `runIdempotent`, which hands its transaction to idempotent v1 and MCP operations as `context.db`.
 
+`withBusinessTransaction` runs the callback again when PostgreSQL ends the transaction itself: a deadlock (SQLSTATE 40P01) or a serialization failure (40001), three times, waiting 10, 20 and 40 ms plus up to half of each again so two deadlocked transactions don't come straight back together. Everything else is raised to the caller on the first try. Re-running is safe because the work left for other services goes through the outbox, written in the same transaction and rolled back with it; a callback that also writes outside the database, such as calling a provider's API, is not safe to re-run and belongs in a job, not in the transaction. A retried deadlock leaves no log line, so it is counted from the `db.response.status_code` attribute on the `db.transaction` span (the technical audit's AUDIT-016).
+
 ## Write integration tests that clean up
 
 - Keep each test's rows in one transaction that rolls back, with the `rollbackTest` helper the integration test files define, so tests running in parallel don't see each other's data.

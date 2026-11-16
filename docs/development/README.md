@@ -31,6 +31,19 @@ pnpm build
 
 CI runs on every pull request and every push to `main`, to a release branch such as `releases/r2` or to a development branch such as `develop/r2` ([overview](../project/overview.md#make-a-change)).
 
+## Lint with the types in hand
+
+The admin's ESLint reads the TypeScript program (`recommendedTypeChecked` with `projectService`, the technical audit's AUDIT-020). Without the types, a rule sees `save(row)` and can't tell whether it returned a promise, so the two mistakes that look like working code were invisible to every check the repository runs:
+
+- `@typescript-eslint/no-floating-promises`: a promise nobody waits for, which loses its error and finishes whenever it likes;
+- `@typescript-eslint/no-misused-promises`: an `async` function handed to something that expects no return value, such as a Node request handler, where a rejection takes the process down instead of the request.
+
+Both are errors. React's `act` is allowed to float, because with a synchronous callback React's own documentation says not to await it, and `checksVoidReturn.attributes` is off, because `onSubmit={async () => …}` is how React is written.
+
+Reading the program costs about 45 seconds and more memory than Node gives a script by default, so `apps/admin`'s `lint` script starts ESLint through `node --max-old-space-size=4096` rather than the usual shim. Leave that in place; without it the run dies with a heap error that looks nothing like a lint failure.
+
+**The rules turned off in `eslint.config.mjs` carry a count, and the count only goes down.** Eleven of the set's rules, from `require-await` at 566 hits and `no-unsafe-member-access` at 328 down to three, are each a piece of work of their own, and leaving them on as warnings would bury the two that matter. Their counts on 2026-11-16 are written beside them. Take a family on, fix it, delete its line; never raise a number, and never add a line without one.
+
 ## See how much the tests cover
 
 `pnpm test:coverage` runs the admin, worker, `db` and `domain` suites with coverage and prints one table for the four. Every source file counts, not only the ones a test imported, so an untested file shows as zero instead of vanishing. The settings live in `vitest.coverage.mts` and the table comes from `scripts/coverage-summary.mjs`.

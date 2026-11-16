@@ -176,7 +176,7 @@ describe("v1 method handling", () => {
       for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"]) {
         expect(typeof routeModule[method], `${method} ${route}`).toBe("function");
         if (supported.includes(method)) continue;
-        const response = await (routeModule[method] as () => Response)();
+        const response = await (routeModule[method] as () => Response | Promise<Response>)();
         expect(response.status, `${method} ${route}`).toBe(405);
         expect(response.headers.get("allow")?.split(", ")).toEqual(expect.arrayContaining([...supported, "OPTIONS"]));
         expect(await response.json()).toEqual({ error: { code: "method_not_allowed", message: expect.any(String) } });
@@ -186,7 +186,7 @@ describe("v1 method handling", () => {
 
   it("keeps PUT /contacts in the v1 error shape", async () => {
     const { PUT } = await import("../../../app/api/v1/contacts/route");
-    const response = await PUT();
+    const response = PUT();
     expect(response.status).toBe(405);
     expect(response.headers.get("allow")).toBe("GET, POST, HEAD, OPTIONS");
   });

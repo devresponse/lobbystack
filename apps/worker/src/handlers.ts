@@ -28,7 +28,7 @@ import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
 import type { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import type OpenAI from "openai";
-import { extractDocumentTextInThread, type OcrRecorder } from "./documentExtraction";
+import { ExtractionLimitError, extractDocumentTextInChildProcess, type OcrRecorder } from "./documentExtraction";
 import { keepOpeningsRecorded, type GreetingRecordings } from "./greetingRecordings";
 import { isLivePrototypeEnabled, type LiveRecoveryOutcome } from "./liveCalls";
 import { reconcileBusinessCalendar, syncAppointmentCalendar, type CalendarOperations } from "./calendarJobs";
@@ -383,11 +383,14 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       let text: string;
       try {
         const extractionStartedAt = performance.now();
-        text = await extractDocumentTextInThread({ body, contentType: source.contentType }, recordOcr);
+        text = await extractDocumentTextInChildProcess({ body, contentType: source.contentType }, recordOcr);
         extractionDuration.record(performance.now() - extractionStartedAt, { content_type: source.contentType.split(";", 1)[0] ?? "unknown" });
       } catch (error) {
-        if (execution.isFinalAttempt !== false) await markKnowledgeDocumentFailed(dependencies.domain, { businessId, documentId, error: "We couldn't read the text in this document." });
-        throw error;
+        // A document that passed the memory cap or the deadline passes it again on every attempt,
+        // and each attempt costs the machine that memory again, so this one stops here (AUDIT-025).
+        const permanent = error instanceof ExtractionLimitError;
+        if (permanent || execution.isFinalAttempt !== false) await markKnowledgeDocumentFailed(dependencies.domain, { businessId, documentId, error: "We couldn't read the text in this document." });
+        throw permanent ? new UnrecoverableError(error.message) : error;
       }
       const result = await indexKnowledgeText(dependencies, { businessId, documentId, text });
       return { status: "completed", entityId: `${documentId}:${result.chunkCount}` };

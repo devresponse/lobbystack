@@ -15,8 +15,9 @@ vi.mock("@lobbystack/db", async (importOriginal) => ({
   withBusinessTransaction: async (_db: unknown, _scope: unknown, callback: (tx: unknown) => unknown) => await callback({ select: mocks.select }),
 }));
 vi.mock("@lobbystack/domain", async (importOriginal) => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), markKnowledgeDocumentFailed: vi.fn(async () => true) }));
-vi.mock("./documentExtraction", () => ({ extractDocumentTextInThread: mocks.extract }));
+vi.mock("./documentExtraction", async (importOriginal) => ({ ...await importOriginal<typeof import("./documentExtraction")>(), extractDocumentTextInChildProcess: mocks.extract }));
 
+import { ExtractionLimitError } from "./documentExtraction";
 import { handleJob } from "./handlers";
 
 afterEach(() => { vi.clearAllMocks(); });
@@ -36,6 +37,20 @@ describe("knowledge.extractDocument", () => {
     expect(markKnowledgeDocumentFailed).not.toHaveBeenCalled();
 
     await expect(handleJob(job(businessId, documentId), dependencies, { isFinalAttempt: true })).rejects.toThrow("Invalid PDF structure.");
+    expect(markKnowledgeDocumentFailed).toHaveBeenCalledWith(dependencies.domain, { businessId, documentId, error: "We couldn't read the text in this document." });
+  });
+
+  it("fails a document that passed a limit at once, without spending the other attempts on it", async () => {
+    const businessId = randomUUID();
+    const documentId = randomUUID();
+    const dependencies = { domain: { db: {} as never }, storage: { getObject: vi.fn(async () => new Uint8Array([1])) } as never };
+    mocks.extract.mockRejectedValue(new ExtractionLimitError("Document extraction reached its 2048 MB memory limit."));
+
+    const error = await handleJob(job(businessId, documentId), dependencies, { isFinalAttempt: false }).catch((caught: unknown) => caught);
+
+    // The job processor ends a job on an UnrecoverableError, whatever attempts are left.
+    expect((error as Error).name).toBe("UnrecoverableError");
+    expect(String(error)).toContain("2048 MB memory limit");
     expect(markKnowledgeDocumentFailed).toHaveBeenCalledWith(dependencies.domain, { businessId, documentId, error: "We couldn't read the text in this document." });
   });
 });

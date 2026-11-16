@@ -36,7 +36,7 @@ Before businesses can live in separate databases: lookups that arrive without a 
 
 ## Scale Redis
 
-Memory isn't Redis's limit, since jobs and counters expire; being a single copy is. In order: a memory ceiling with an alert, keeping `noeviction`, which BullMQ requires; one shared subscriber per process for dashboards; then a standby with failover (Railway's Redis high availability takes the official `redis` image). Later, a durable node for queues and sessions and a cache node for limits, pub/sub and snapshots. Braces in keys (`{critical}` queue names, the business ID in counter keys) keep a Redis Cluster possible; without them the presence and rate-limit scripts fail on a cluster.
+Memory isn't Redis's limit, since jobs and counters expire; being a single copy is. In order: a memory ceiling with an alert, keeping `noeviction`, which BullMQ requires; one shared subscriber per process for dashboards, which fork PR #196 on `develop/r2` built ([development](../development/README.md#share-one-redis-connection-never-one-per-request)); then a standby with failover (Railway's Redis high availability takes the official `redis` image). Later, a durable node for queues and sessions and a cache node for limits, pub/sub and snapshots. Braces in keys (`{critical}` queue names, the business ID in counter keys) keep a Redis Cluster possible; without them the presence and rate-limit scripts fail on a cluster.
 
 ## Scale each part
 

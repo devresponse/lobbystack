@@ -78,7 +78,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 
 ## Read the reviews and research
 
-- [Reviews](reviews/README.md): the phone call path, the website widget and how far it scales, the whole codebase, what limits scale, and billing, each with what has happened since.
+- [Reviews](reviews/README.md): the phone call path, the website widget and how far it scales, the whole codebase, what limits scale, billing, running two or more copies, and the code's technical quality, each with what has happened since.
 - [Research](research/README.md): voice platforms, an Azure port, Cloudflare, Railway automation, observability, sign-in with Google and Microsoft, forms filled from calls, a cloned voice, each business's own provider keys and protecting a test deployment's address, plus the voice agent market, a QR place guide and the brand name.
 - [Future features](roadmap/README.md): what the reviews and research proposed and isn't built, kept current where the studies keep their dates.
 

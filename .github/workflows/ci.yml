@@ -159,6 +159,8 @@ jobs:
         run: pnpm --filter @lobbystack/admin exec vitest run src/lib/auth-issuance.integration.test.ts src/lib/email-verification-policy.test.ts
       - name: Test live-call presence against Redis
         run: pnpm --filter @lobbystack/admin exec vitest run src/lib/voice-presence.integration.test.ts
+      - name: Test the public API's rate limit against Redis
+        run: pnpm --filter @lobbystack/admin exec vitest run src/lib/public-api/rate-limit.test.ts
       - name: Test the copies' heartbeats against Redis
         run: |
           pnpm --filter @lobbystack/jobs exec vitest run src/fleet.integration.test.ts
@@ -167,6 +169,37 @@ jobs:
         env:
           LOBBYSTACK_RESET_TEST_DATABASE_URL: postgres://postgres:lobbystack@127.0.0.1:5432/lobbystack_test
         run: pnpm exec vitest run --config scripts/vitest.config.ts scripts/reset-database.integration.test.ts
+
+  # How much of the four suites' code the tests exercise (AUDIT-021). No
+  # threshold: the numbers are published for a month first, and only then do the
+  # measured figures become floors. It stays out of `validate` until then, so a
+  # coverage run never blocks a release.
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12.15.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --filter "./packages/**" build
+      - name: Measure and publish coverage
+        run: pnpm test:coverage
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: coverage
+          path: |
+            apps/admin/coverage/lcov.info
+            apps/worker/coverage/lcov.info
+            packages/db/coverage/lcov.info
+            packages/domain/coverage/lcov.info
+          retention-days: 14
 
   e2e:
     runs-on: ubuntu-latest
@@ -185,6 +218,9 @@ jobs:
         run: pnpm --filter @lobbystack/admin exec playwright install --with-deps chromium
       - name: Run supported browser journeys against an isolated stack
         run: bash scripts/e2e-local.sh
+      - name: List the journeys that needed a retry
+        if: always()
+        run: node scripts/flaky-journeys.mjs
 
   images:
     uses: ./.github/workflows/runtime-images.yml

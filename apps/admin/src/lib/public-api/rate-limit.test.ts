@@ -37,8 +37,9 @@ describe("per-key rate limiting", () => {
     expect(apiRateLimitPerMinute({ PUBLIC_API_RATE_LIMIT_PER_MINUTE: "nope" })).toBe(120);
   });
 
-  // Opt-in: runs against a real Redis when LOBBYSTACK_TEST_REDIS_URL is set.
-  const redisUrl = process.env.LOBBYSTACK_TEST_REDIS_URL;
+  // Runs against a real Redis when REDIS_TEST_URL is set, as CI's database job does
+  // (AUDIT-021: it used a name no workflow set, so it had never run in CI).
+  const redisUrl = process.env.REDIS_TEST_URL;
   const redis = redisUrl ? new Redis(redisUrl, { lazyConnect: true }) : undefined;
   afterAll(async () => { await redis?.quit(); });
   it.skipIf(!redis)("enforces the limit with Redis", async () => {

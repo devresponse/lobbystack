@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export { isMaintenanceMode } from "./maintenance";
+export { fetchWithTimeout, OUTBOUND_FETCH_TIMEOUT_MS } from "./outboundFetch";
 export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, isRuntimeLocale, normalizeInterfaceLocale, normalizeRuntimeLocale, runtimeLocaleEndonyms, runtimeLocaleNames, runtimeLocales } from "./locales";
 export type { InterfaceLocale, RuntimeLocale } from "./locales";
 import { interfaceLocales, type InterfaceLocale, type RuntimeLocale } from "./locales";

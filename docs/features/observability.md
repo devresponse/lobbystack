@@ -14,6 +14,8 @@ All three take a PostHog project token (`phc_...`). The exporter sends JSON, so 
 
 On Railway, `NEXT_PUBLIC_POSTHOG_HOST` may stay unset for PostHog's US region, where the dashboard then uses PostHog's US host. For the EU region, set it and the worker's `POSTHOG_HOST` to `https://eu.i.posthog.com`; since fork PR #165 the dashboard's links into PostHog then open PostHog's EU app. In Docker Compose, set it: `docker-compose.yml` and `.env.example` default it to the original project's own PostHog relay. The website widget loads no analytics at all (fork PR #22).
 
+The worker sends each business's product events to PostHog in one request a minute while the business is in use. Since fork PR #189 a request gets 15 seconds: when PostHog stalls, the `telemetry.flush` job fails, the events stay pending and the next run sends them. Before, a stalled PostHog held the job for minutes, and with it a slot of the `maintenance` queue, which daily summaries, retention and number reclaim share (the technical audit's AUDIT-023).
+
 ## Follow one call
 
 Since fork PR #41, `withCallContext`, `logEvent`, `reportError` and `reportWarning` (`packages/telemetry`) put these fields on every line written during a call: `callId`, `sessionId`, `businessId` and, for phone calls, `twilioCallSid`, plus the `traceId`.

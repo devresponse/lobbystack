@@ -26,6 +26,7 @@ import { OutboxDispatcher } from "./outboxDispatcher";
 import { configureSchedulers, type Schedule } from "./scheduler";
 import { getWorkerSnapshotCache } from "./snapshot-cache";
 import { logUnhandledRejections } from "./processGuards";
+import { createProductAnalytics } from "./productAnalytics";
 
 function createEmailProvider(): SmtpEmailProvider | undefined {
   const host = process.env.SMTP_HOST;
@@ -82,22 +83,6 @@ function createCalendarProvider(): GoogleCalendarProvider | undefined {
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const redirectUri = process.env.GOOGLE_REDIRECT_URI;
   return clientId && clientSecret && redirectUri ? new GoogleCalendarProvider({ clientId, clientSecret, redirectUri }) : undefined;
-}
-
-function createProductAnalytics(): WorkerDependencies["productAnalytics"] {
-  const apiKey = process.env.POSTHOG_API_KEY;
-  if (!apiKey) return undefined;
-  const host = process.env.POSTHOG_HOST ?? "https://us.i.posthog.com";
-  return {
-    capture: async (events) => {
-      const response = await fetch(`${host.replace(/\/$/, "")}/batch/`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ api_key: apiKey, batch: events.map((event) => ({ event: event.event, distinct_id: event.distinctId, properties: event.properties, timestamp: event.timestamp })) }),
-      });
-      if (!response.ok) throw new Error(`PostHog product event delivery failed with status ${response.status}.`);
-    },
-  };
 }
 
 // Containers set PORT; local `pnpm dev` only has WORKER_PORT, which the admin's WORKER_INTERNAL_URL targets.

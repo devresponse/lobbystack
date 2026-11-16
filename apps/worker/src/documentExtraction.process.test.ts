@@ -82,7 +82,9 @@ describe("extraction process", () => {
     const bomb = docxFile("<w:p/>".repeat(500_000));
     expect(bomb.length).toBeLessThan(10_000);
     await expect(extractDocumentTextInChildProcess({ body: bomb, contentType: docx }, () => undefined, { maxHeapMb: 64, maxMemoryMb: 2048, timeoutMs: 30_000 })).rejects.toThrow(/memory limit/);
-  });
+    // How long V8 collects before it gives up at its limit varies with what else the machine is doing:
+    // half a second alone, over five on a busy CI runner. The child is allowed 30, so the test waits longer.
+  }, 60_000);
 
   // AUDIT-025: a worker thread's heap limit doesn't cover the ArrayBuffers a PDF's inflated streams
   // live in, so before this cap a 0.5 MB file like this one took the process past 1,200 MB.

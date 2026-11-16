@@ -6,7 +6,7 @@ On 2026-11-14 the whole repository was read for its technical quality, from `rel
 
 The architecture is sound and needs no redesign. No finding was critical: one was high, ten were medium, twelve low and two informational. The high one was that `releases/r2`, the branch deployments build from, got none of the checks `main` did.
 
-Every finding has had its pull request since. The fixes for AUDIT-001 to 006 are in `releases/r2`. The others are in `develop/r2` only, as is #187, and reach a deployment when `develop/r2` next moves into `releases/r2`.
+Every finding has had its pull request since. The fixes for AUDIT-001 to 006 reached `releases/r2` by 2026-11-15. The others, and #187, landed in `develop/r2` on 2026-11-16, so `releases/r2` and the deployments that follow it have them once `develop/r2` has moved into it after that day.
 
 A finding with a pull request is not always finished. Where the audit named a habit spread over many files, the fix is a rule that refuses anything new and a list of what was already there, which only gets shorter ([the lists](#work-the-lists-down)). Some fixes are off until someone turns them on, or have run only in tests ([what is left](#know-what-is-left)).
 

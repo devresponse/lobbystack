@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { widgetKeys, type DatabaseTransaction } from "@lobbystack/db";
 
@@ -35,5 +35,16 @@ export async function insertWidgetKeyInTransaction(tx: DatabaseTransaction, inpu
 /** Changes the fields in the patch. Null when the business has no such key. */
 export async function updateWidgetKeyInTransaction(tx: DatabaseTransaction, input: { businessId: string; widgetKeyId: string; patch: WidgetKeyPatch }): Promise<WidgetKeyRow | null> {
   const [row] = await tx.update(widgetKeys).set({ ...input.patch, updatedAt: new Date() }).where(and(eq(widgetKeys.id, input.widgetKeyId), eq(widgetKeys.businessId, input.businessId))).returning();
+  return row ?? null;
+}
+
+/** Every key a business has, newest first, as the dashboard's widget page lists them. */
+export async function listWidgetKeysInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<WidgetKeyRow[]> {
+  return await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, input.businessId)).orderBy(desc(widgetKeys.createdAt));
+}
+
+/** One key of this business, or null. */
+export async function findWidgetKeyInTransaction(tx: DatabaseTransaction, input: { businessId: string; widgetKeyId: string }): Promise<WidgetKeyRow | null> {
+  const [row] = await tx.select().from(widgetKeys).where(and(eq(widgetKeys.id, input.widgetKeyId), eq(widgetKeys.businessId, input.businessId))).limit(1);
   return row ?? null;
 }

@@ -18,7 +18,8 @@ vi.mock("@/lib/api-helpers", async (original) => ({
     return callback({ businessId: "business", tx: { select: () => ({ from: query }) } });
   },
 }));
-vi.mock("@lobbystack/domain", () => ({
+vi.mock("@lobbystack/domain", async (original) => ({
+  ...await original<typeof import("@lobbystack/domain")>(),
   replaceBusinessHoursInTransaction: async (_tx: unknown, input: { hours: unknown[] }) => {
     fixture.replace(input);
     if (input.hours.some((window) => (window as { closeMinutes: number; openMinutes: number }).closeMinutes <= (window as { openMinutes: number }).openMinutes)) throw new Error("Closing time must be after opening time.");

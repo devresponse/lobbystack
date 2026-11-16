@@ -1,10 +1,8 @@
-import { and, asc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { businesses, businessHours, receptionistProfiles, type DatabaseTransaction } from "@lobbystack/db";
-import { replaceBusinessHoursInTransaction } from "@lobbystack/domain";
-import { normalizeBookingMode } from "@lobbystack/shared";
+import { readBusinessHoursPageInTransaction, replaceBusinessHoursInTransaction, type BusinessHoursPage } from "@lobbystack/domain";
+import type { DatabaseTransaction } from "@lobbystack/db";
 import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
 import { jsonError, parseBody } from "@/lib/request-input";
 
@@ -14,13 +12,10 @@ export const dynamic = "force-dynamic";
 // AI from the knowledge sources, or a person. Saving here makes them the
 // operator's, so AI never replaces them.
 
-async function loadHours(tx: DatabaseTransaction, businessId: string) {
-  const business = await tx.select({ timezone: businesses.timezone, hoursSource: businesses.hoursSource }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
-  // The default receptionist's booking mode, which the hours page explains.
-  const profile = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
-  if (!business[0]) throw jsonError("Business not found.", 404);
-  return { timezone: business[0].timezone, hoursSource: business[0].hoursSource, bookingMode: normalizeBookingMode(profile[0]?.bookingMode), hours };
+async function loadHours(tx: DatabaseTransaction, businessId: string): Promise<BusinessHoursPage> {
+  const page = await readBusinessHoursPageInTransaction(tx, { businessId });
+  if (!page) throw jsonError("Business not found.", 404);
+  return page;
 }
 
 // A window is a day and the minutes from midnight it opens and closes, so a day can have several.

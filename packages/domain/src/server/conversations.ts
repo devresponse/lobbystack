@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
-import { auditLogs, businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, receptionistProfiles, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { isUuid, PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
@@ -13,6 +13,7 @@ import { buildConversationSessionSummary, extractCallerContext, normalizeCallSum
 import type { DomainContext } from "./context";
 import { queueOperatorAlertInTransaction, type OperatorAlertEventKey } from "./notifications";
 import { recordProductEventBestEffort } from "./productEvents";
+import { recordReceptionistJoin } from "./receptionistRecords";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
 import { loadSmsReachInTransaction, smsHoldError } from "./sms";
 
@@ -559,4 +560,51 @@ export async function loadWidgetChatHistory(
     const rows = await tx.select({ id: messages.id, direction: messages.direction, body: messages.body, createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, input.conversationId))).orderBy(desc(messages.createdAt)).limit(200);
     return rows.reverse().map((row) => ({ ...row, direction: row.direction === "inbound" ? "inbound" : "outbound" }));
   });
+}
+
+// The dashboard's Messages screen. The receptionist that answered each
+// conversation; one from before receptionists shows the default.
+const conversationFields = { conversationId: conversations.id, contactName: contacts.name, contactPhone: contacts.phone, visitorName: widgetVisitors.name, visitorEmail: widgetVisitors.email, channel: conversations.channel, conversationStatus: conversations.status, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt, archivedAt: conversations.archivedAt, receptionistId: receptionistProfiles.id, receptionistName: receptionistProfiles.name };
+const answeredBy = recordReceptionistJoin(conversations.businessId, conversations.receptionistId);
+
+export type ConversationChannelFilter = "web_chat" | "sms";
+export type ConversationListFilters = { businessId: string; limit: number; offset: number; search?: string | undefined; channel?: ConversationChannelFilter | undefined; receptionistId?: string | undefined; archived: boolean };
+
+/**
+ * One row per conversation, its latest message, newest first. Archived
+ * conversations are left out unless archived is true.
+ * It reads one more row than the page to say whether another page follows.
+ */
+export async function listConversationsInTransaction(tx: DatabaseTransaction, filters: ConversationListFilters) {
+  const latest = tx.select({ id: messages.id, body: messages.body, direction: messages.direction, status: messages.status, createdAt: messages.createdAt })
+    .from(messages).where(eq(messages.conversationId, conversations.id)).orderBy(desc(messages.createdAt)).limit(1).as("latest");
+  const rows = await tx.select({ id: latest.id, ...conversationFields, body: latest.body, direction: latest.direction, status: latest.status, createdAt: latest.createdAt })
+    .from(conversations).innerJoinLateral(latest, sql`true`)
+    .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+    .leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id))
+    .leftJoin(receptionistProfiles, answeredBy)
+    .where(and(
+      eq(conversations.businessId, filters.businessId),
+      filters.archived ? isNotNull(conversations.archivedAt) : isNull(conversations.archivedAt),
+      filters.receptionistId ? eq(conversations.receptionistId, filters.receptionistId) : undefined,
+      filters.channel === "web_chat" ? eq(conversations.channel, "web_chat") : filters.channel === "sms" ? ne(conversations.channel, "web_chat") : undefined,
+      filters.search ? or(...[contacts.name, contacts.phone, widgetVisitors.name, widgetVisitors.email, latest.body].map((column) => ilike(column, `%${filters.search}%`))) : undefined,
+    ))
+    .orderBy(desc(latest.createdAt), desc(conversations.id)).limit(filters.limit + 1).offset(filters.offset);
+  return { messages: rows.slice(0, filters.limit), hasNext: rows.length > filters.limit };
+}
+
+/**
+ * One thread, archived or not, oldest message first.
+ * shortcut: returns the newest 500 messages; add "load older" paging if threads grow past that.
+ */
+export async function readConversationThreadInTransaction(tx: DatabaseTransaction, input: { businessId: string; conversationId: string }) {
+  const thread = await tx.select({ id: messages.id, ...conversationFields, messageChannel: messages.channel, body: messages.body, direction: messages.direction, status: messages.status, providerStatus: messages.providerStatus, createdAt: messages.createdAt })
+    .from(messages).innerJoin(conversations, eq(messages.conversationId, conversations.id))
+    .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+    .leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id))
+    .leftJoin(receptionistProfiles, answeredBy)
+    .where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, input.conversationId)))
+    .orderBy(desc(messages.createdAt)).limit(500);
+  return thread.reverse();
 }

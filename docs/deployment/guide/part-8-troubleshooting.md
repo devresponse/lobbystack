@@ -200,6 +200,7 @@ The dashboard updates itself through the worker and Redis: the worker sends each
 2. Check that the admin has `REDIS_URL`, and that both services use the same Redis and the same `REDIS_PREFIX` ([7.6](part-7-operations.md#76-change-a-setting-safely)). On a server, they read the same `.env`, so they match.
 3. In the browser's **Network** tab ([8.1](#81-where-to-find-the-reason)), find the request that starts with `realtime?businessId=`:
    - 503 with "Realtime is not configured": the admin has no `REDIS_URL`.
+   - 429 with "Too many open streams": that account already has 12 live streams open. Each dashboard tab holds one, so close the tabs you aren't watching; a place is given back as soon as a tab closes.
    - It stays open, but shows only `ping` lines: the worker doesn't send the changes, or sends them to another Redis or prefix. Its log may have `job.failed` lines for `realtime.publish`.
 
 **"Too many tries. Try again later." when buying a plan or opening the billing portal**

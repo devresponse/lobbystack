@@ -1110,7 +1110,7 @@ Related files: `packages/domain/src/server/tenancy.ts`, `apps/admin/src/componen
 | GET | `https://demo.alloplace.com/api/setup` | The setup guide's steps and where each stands | Admin+ | `apps/admin/app/api/setup/route.ts` |
 | PATCH | `https://demo.alloplace.com/api/setup` | Skip a setup guide step, or bring it back (`stepId`, `skipped`) | Admin+ | `apps/admin/app/api/setup/route.ts` |
 | GET | `https://demo.alloplace.com/api/analytics` | Analytics for a period: `days` (default 30), or `from` and `to`, and `granularity` (`hour`, `day`, `week`, `month` or `year`) | Member | `apps/admin/app/api/analytics/route.ts` |
-| GET | `https://demo.alloplace.com/api/realtime` | Live updates for the dashboard as Server-Sent Events. Needs `?businessId=` and `REDIS_URL` (503 without it). | Member | `apps/admin/app/api/realtime/route.ts` |
+| GET | `https://demo.alloplace.com/api/realtime` | Live updates for the dashboard as Server-Sent Events. Needs `?businessId=` and `REDIS_URL` (503 without it); 12 streams per account (429 above that). | Member | `apps/admin/app/api/realtime/route.ts` |
 
 #### Entry files
 
@@ -1151,9 +1151,11 @@ Related files: `packages/domain/src/server/analytics.ts`, `apps/admin/src/compon
 
 The Server-Sent Events stream the dashboard opens per business through `subscribeRealtimeQuery` (`apps/admin/src/lib/realtime-query.ts`), so screens refetch when calls, messages, appointments, rules or knowledge change.
 
-- `GET /api/realtime`: Any member: needs `?businessId=` (plain-text 400), then `withOperatorTransaction` checks membership. Without `REDIS_URL` it answers plain-text 503. Otherwise it returns a `text/event-stream` fed by its own ioredis subscriber on `<REDIS_PREFIX>:realtime:<businessId>`, where the worker's `realtime.publish` jobs and voice presence publish. It sends `ready` once subscribed, each event that `parseRealtimeMessage` (`apps/admin/src/lib/realtime.ts`) accepts for this business, with its `id`, type and JSON, and `ping` every 15 seconds while Redis answers. A Redis drop, failed ping or client abort closes it.
+- `GET /api/realtime`: Any member: needs `?businessId=` (plain-text 400), then `withOperatorTransaction` checks membership. Without `REDIS_URL` it answers plain-text 503. An account already holding `MAX_STREAMS_PER_USER` streams (12, `apps/admin/src/lib/realtime-subscriber.ts`) gets a plain-text 429 asking it to close a dashboard tab; the place is given back when a stream ends. Otherwise it returns a `text/event-stream` listening on `<REDIS_PREFIX>:realtime:<businessId>`, where the worker's `realtime.publish` jobs and voice presence publish. It sends `ready` once subscribed, each event that `parseRealtimeMessage` (`apps/admin/src/lib/realtime.ts`) accepts for this business, with its `id`, type and JSON, and `ping` to the browser every 15 seconds. A Redis drop or a client abort closes it.
 
-Related files: `apps/admin/src/lib/realtime.ts`, `apps/admin/src/lib/realtime-query.ts`, `apps/worker/src/handlers.ts`, `packages/contracts/src/index.ts`.
+**One Redis connection per admin process (fork PR #196, AUDIT-011).** Every stream used to open its own ioredis connection and ping Redis on its own timer, so ten open tabs meant ten connections and ten pingers. `apps/admin/src/lib/realtime-subscriber.ts` now holds one connection for the whole process: the first stream on a channel subscribes, the last one unsubscribes, and the connection is dropped when no channel is left. Redis is pinged once per process, not once per stream, and a dropped connection or a failed ping ends every stream on it so the browsers reconnect. The browser's own back-off (`subscribeRealtimeQuery`) is spread by up to half the wait again, so a redeploy doesn't bring every tab back at the same instant.
+
+Related files: `apps/admin/src/lib/realtime-subscriber.ts`, `apps/admin/src/lib/realtime.ts`, `apps/admin/src/lib/realtime-query.ts`, `apps/worker/src/handlers.ts`, `packages/contracts/src/index.ts`.
 
 ### Calls
 

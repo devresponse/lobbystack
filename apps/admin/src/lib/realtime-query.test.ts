@@ -21,8 +21,10 @@ function giveUp(source: Source) {
   source.readyState = Source.CLOSED;
   source.dispatchEvent(new Event("error"));
 }
-beforeEach(() => { sources.length = 0; vi.useFakeTimers(); vi.stubGlobal("EventSource", Source); });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+// The reconnect wait carries up to half again of random spread, so these tests
+// pin the random part down and one test of its own checks that it is there.
+beforeEach(() => { sources.length = 0; vi.useFakeTimers(); vi.stubGlobal("EventSource", Source); vi.spyOn(Math, "random").mockReturnValue(0); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 it("shares a connection and coalesces 100 events into one invalidation per query", () => {
   const invalidateQueries = vi.fn();
@@ -114,4 +116,16 @@ it("retries at once when the browser is back online or the tab is shown", () => 
   window.dispatchEvent(new Event("online"));
   vi.advanceTimersByTime(120_000);
   expect(sources).toHaveLength(8);
+});
+
+// AUDIT-011: a deploy drops every stream at once, so the waits are spread.
+it("waits a little longer than the back-off, by an amount of its own", () => {
+  vi.spyOn(Math, "random").mockReturnValue(1);
+  const client = { invalidateQueries: vi.fn() } as unknown as QueryClient;
+  const close = subscribeRealtimeQuery(client, businessId, ["messages", businessId], ["message.upserted"]);
+  giveUp(sources[0]!);
+
+  vi.advanceTimersByTime(1_499); expect(sources).toHaveLength(1);
+  vi.advanceTimersByTime(1); expect(sources).toHaveLength(2);
+  close();
 });

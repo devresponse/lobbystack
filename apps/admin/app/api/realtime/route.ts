@@ -1,48 +1,46 @@
-import Redis from "ioredis";
-
 import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
 import { parseRealtimeMessage } from "@/lib/realtime";
+import { holdStreamForUser, realtimeChannel, subscribeToRealtime, MAX_STREAMS_PER_USER } from "@/lib/realtime-subscriber";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PING_TIMEOUT_MS = 5_000;
-
+/**
+ * The dashboard's event stream. One Redis subscriber serves every stream this
+ * process holds (AUDIT-011), so connections grow with servers, not with tabs.
+ */
 export async function GET(request: Request): Promise<Response> {
   try {
     const businessId = new URL(request.url).searchParams.get("businessId");
     if (!businessId) {
       return new Response("businessId is required", { status: 400 });
     }
-    await withOperatorTransaction(request, async () => undefined);
+    const session = await withOperatorTransaction(request, async ({ session }) => session);
     const redisUrl = process.env.REDIS_URL;
     if (!redisUrl) {
       return new Response("Realtime is not configured", { status: 503 });
     }
-    const channel = `${process.env.REDIS_PREFIX ?? "lobbystack"}:realtime:${businessId}`;
+    const release = holdStreamForUser(session.user.id);
+    if (!release) {
+      // The browser treats this as a failed stream and opens the next one later.
+      return new Response(`Too many open streams: ${MAX_STREAMS_PER_USER} at a time. Close a dashboard tab.`, { status: 429 });
+    }
+    const channel = realtimeChannel(businessId);
     const encoder = new TextEncoder();
     let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let cleanup: (closeController?: boolean) => Promise<void> = async () => undefined;
+    let cleanup: (closeController?: boolean) => Promise<void> = async () => { release(); };
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        // shortcut: one Redis connection per open stream (per tab and business); share one subscriber per process before open tabs near Redis maxclients (10,000).
-        const subscriber = new Redis(redisUrl, {
-          protocol: 2,
-          maxRetriesPerRequest: 1,
-          // A connection that died without closing never answers: its ping fails instead of waiting forever.
-          commandTimeout: PING_TIMEOUT_MS,
-          lazyConnect: true,
-          connectionName: `lobbystack:sse:${businessId}`,
-        });
         let closed = false;
+        let unsubscribe: (() => void) | undefined;
         const onAbort = () => { void cleanup(); };
         cleanup = async (closeController = true) => {
           if (closed) return;
           closed = true;
           if (heartbeat) clearInterval(heartbeat);
           request.signal.removeEventListener("abort", onAbort);
-          subscriber.removeAllListeners("message");
-          subscriber.disconnect(false);
+          unsubscribe?.();
+          release();
           if (closeController) {
             try { controller.close(); } catch { /* client disconnected */ }
           }
@@ -52,34 +50,35 @@ export async function GET(request: Request): Promise<Response> {
           await cleanup();
           return;
         }
-        subscriber.on("message", (_receivedChannel, rawMessage) => {
-          const event = parseRealtimeMessage(rawMessage, businessId);
-          if (!event) {
-            return;
-          }
-          controller.enqueue(encoder.encode(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
-        });
         try {
-          await subscriber.connect();
-          if (closed) return;
-          await subscriber.subscribe(channel);
-          if (closed) return;
-          // Pub/Sub keeps no backlog and ioredis resubscribes silently, so end the
-          // stream on a Redis drop: the browser reconnects and refetches on "ready".
-          subscriber.once("close", () => void cleanup());
-          controller.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({ businessId })}\n\n`));
-          // The browser hears a ping only while Redis answers one too, and opens
-          // a new stream when the pings stop. A ping Redis leaves unanswered ends
-          // this stream at once, so the browser reconnects with a new subscriber.
-          heartbeat = setInterval(() => {
-            subscriber.ping().then(() => {
-              if (closed) return;
+          unsubscribe = await subscribeToRealtime(redisUrl, channel, {
+            message: (raw) => {
+              const event = parseRealtimeMessage(raw, businessId);
+              if (!event) return;
               try {
-                controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
+                controller.enqueue(encoder.encode(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
               } catch {
                 void cleanup(false);
               }
-            }, () => void cleanup());
+            },
+            // Pub/Sub keeps no backlog, so a drop ends the stream: the browser
+            // reconnects and refetches on the next "ready".
+            dropped: () => void cleanup(),
+          });
+          if (closed) {
+            unsubscribe();
+            return;
+          }
+          controller.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({ businessId })}\n\n`));
+          // The browser hears a ping while this stream lives, and opens a new one
+          // when the pings stop. Redis itself is pinged once per process, not per stream.
+          heartbeat = setInterval(() => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
+            } catch {
+              void cleanup(false);
+            }
           }, 15_000);
           heartbeat.unref?.();
         } catch (error) {

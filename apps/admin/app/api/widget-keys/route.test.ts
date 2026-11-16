@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ insert: vi.fn(), values: vi.fn(), select: vi.fn(), update: vi.fn(), setReceptionist: vi.fn() }));
 
+// The route's session and database come from api-helpers, which reaches auth and the database;
+// what it reads from the request comes from request-input, which is used as it is.
 vi.mock("@/lib/api-helpers", () => ({
-  readJson: (request: Request) => request.json(),
   withOperatorTransaction: (_request: Request, callback: (input: unknown) => Promise<unknown>) => callback({ session: { user: { id: "owner" } }, businessId: "business", tx: { insert: mocks.insert, select: mocks.select, update: mocks.update } }),
-  jsonError: (message: string, status = 400, code?: string) => new Response(JSON.stringify({ error: message, ...(code ? { code } : {}) }), { status }),
   asApiResponse: (error: unknown) => {
     if (error instanceof Response) return error;
     const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;

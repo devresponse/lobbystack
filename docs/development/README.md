@@ -30,6 +30,10 @@ pnpm build
 
 CI runs on every pull request and every push to `main`, to a release branch such as `releases/r2` or to a development branch such as `develop/r2` ([overview](../project/overview.md#make-a-change)).
 
+## Check what a request sends
+
+Every dashboard route under `apps/admin/app/api` reads its body with `parseBody(request, schema)` and its query string with `parseQuery(request, schema)` (`apps/admin/src/lib/request-input.ts`), with a zod schema whose messages say what to fix. A caller's mistake then answers 400 with the field's name, as the v1 API does, rather than the 500 and the error report a `throw new Error` gives through `asApiResponse` ([the route catalog](../reference/routes.md#mistakes-by-the-caller-that-answer-500)). Reuse a v1 schema from `packages/shared/src/publicApi/schemas.ts` where the operation is the same. Keep `throw new Error` for what is really the server's fault, and use `jsonError(message, status, code)` for a 404, a 409 or a 429.
+
 ## Know what trips the checks up
 
 - **The worker's docx heap test** (`apps/worker/src/documentExtraction.process.test.ts`) can fail on a small machine. `pnpm test` runs the packages' tests side by side and stops them all at the first failure, so the admin's tests then don't finish: run them on their own with `pnpm --filter @lobbystack/admin test`, and say so in the pull request's testing notes.

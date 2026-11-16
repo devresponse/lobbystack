@@ -86,6 +86,19 @@ async function writeVoicePresence(input: VoicePresenceInput, forceRemoval: boole
   }
 }
 
+/**
+ * The count can't be trusted: no worker's heartbeat is fresh, or a call's own
+ * entry or its worker's has gone stale. It says nothing about Redis, whose
+ * failures are errors of their own. A caller that polls answers this as "not
+ * known right now" instead of reporting a fault each time.
+ */
+export class VoicePresenceUnavailableError extends Error {
+  constructor() {
+    super("Voice presence is unavailable.");
+    this.name = "VoicePresenceUnavailableError";
+  }
+}
+
 export async function countActiveVoiceCalls(businessId: string): Promise<number> {
   const client = store();
   const presenceKey = key(businessId);
@@ -104,7 +117,7 @@ export async function countActiveVoiceCalls(businessId: string): Promise<number>
     return #calls / 2
   `, 3, presenceKey, gatewayKey(), `${presenceKey}:owners`, now);
   if (typeof count !== "number" || count < 0) {
-    throw new Error("Voice presence is unavailable.");
+    throw new VoicePresenceUnavailableError();
   }
   return count;
 }

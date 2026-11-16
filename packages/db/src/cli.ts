@@ -11,6 +11,7 @@ import type { PoolClient } from "pg";
 import { initializeTelemetry, shutdownTelemetry } from "@lobbystack/telemetry/node";
 
 import { createDatabaseClient, databaseHealthCheck } from "./client";
+import { switchOn } from "./command-switch";
 import { readMigrationChecksums } from "./migrations/checksums";
 import {
   concurrentIndexName,
@@ -32,7 +33,7 @@ import {
 import { businesses, schema } from "./schema";
 
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
-if (process.env.LOBBYSTACK_SKIP_ENV_FILES !== "true") {
+if (!switchOn(process.env.LOBBYSTACK_SKIP_ENV_FILES)) {
   loadEnv({ path: [resolve(repositoryRoot, ".env.local"), resolve(repositoryRoot, ".env")], quiet: true });
 }
 
@@ -356,7 +357,7 @@ async function main(): Promise<void> {
         if (receptionistFailures.length > 0) {
           throw new Error(`Receptionist grant verification failed for: ${receptionistFailures.join(", ")}`);
         }
-        if (process.env.VERIFY_RLS_BEHAVIOR === "true") {
+        if (switchOn(process.env.VERIFY_RLS_BEHAVIOR)) {
           await verifyRlsBehavior(migrator);
         }
         console.log(`RLS enabled and forced on ${rows.rows.length} tables.`);
@@ -378,7 +379,7 @@ async function main(): Promise<void> {
 
 /** The operator's deliberate override, for a database nothing is serving yet. */
 function allowContractWithExpand(source: Readonly<Record<string, string | undefined>>): boolean {
-  return ["true", "1", "yes", "on"].includes((source.LOBBYSTACK_ALLOW_CONTRACT_WITH_EXPAND ?? "").trim().toLowerCase());
+  return switchOn(source.LOBBYSTACK_ALLOW_CONTRACT_WITH_EXPAND);
 }
 
 async function ensureMigrationJournal(client: ReturnType<typeof createDatabaseClient>): Promise<void> {

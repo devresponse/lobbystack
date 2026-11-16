@@ -67,6 +67,9 @@ describe("recordedGreetingFor", () => {
     vi.stubEnv("LIVE_RECORDED_GREETING_PHONE", "false");
     await expect(recordedGreetingFor(snapshot, { phone: true })).resolves.toBeUndefined();
     await expect(recordedGreetingFor(snapshot)).resolves.toEqual({ text: opening, play: true });
+    // Read like every true/false setting (AUDIT-017): `0` used to leave the recording on.
+    vi.stubEnv("LIVE_RECORDED_GREETING_PHONE", "0");
+    await expect(recordedGreetingFor(snapshot, { phone: true })).resolves.toBeUndefined();
     vi.stubEnv("LIVE_RECORDED_GREETING_PHONE", "true");
     vi.stubEnv("LIVE_RECORDED_GREETING", "false");
     await expect(recordedGreetingFor(snapshot, { phone: true })).resolves.toBeUndefined();

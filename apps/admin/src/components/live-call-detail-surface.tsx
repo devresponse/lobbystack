@@ -39,34 +39,12 @@ import { useTelemetry } from "@/components/product-analytics";
 import { formatDateTime } from "@/lib/locale";
 import { subscribeRealtimeQuery } from "@/lib/realtime-query";
 
-type Detail = {
-  call: {
-    id: string;
-    legacyConvexId: string | null;
-    providerCallId: string;
-    provider: string;
-    transport: string;
-    status: string;
-    disposition: string | null;
-    transferState: string | null;
-    startedAt: string;
-    endedAt: string | null;
-    providerDurationSeconds: number | null;
-    gatewaySessionId: string | null;
-    twilioCallSid?: string | null;
-    /** When an owner or admin archived the call, which hides it from the Calls list. */
-    archivedAt?: string | null;
-    /** The receptionist that answered; a call from before receptionists shows the default one. */
-    receptionist?: { id: string; name: string | null } | null;
-  };
-  contact: { id: string; name: string | null; phone: string | null; email: string | null; blockedAt: string | null } | null;
-  outcome: string | null;
-  timeline: Array<{ type: string; at: string | null; status: string }>;
-  transcript: Array<{ id: string; sequence: number; speaker: string; text: string; confidence: number | null; final: boolean; createdAt: string }>;
-  recording: { state: "available" | "pending" | "expired" | "missing"; objectId?: string; contentType?: string };
-  appointments: Array<{ id: string; startsAt: string; endsAt: string; timezone: string; status: string; serviceName: string; staffName: string }>;
-  followUpTasks: Array<{ id: string; title: string; body: string; status: string; request?: string | null; createdAt: string; updatedAt: string }>;
-};
+import type { CallDetail } from "@lobbystack/domain";
+import type { Jsonified } from "@lobbystack/shared";
+
+/** What `GET /api/calls/{callId}` sends, as `getCallDetail` builds it and JSON delivers it (AUDIT-018). */
+type Detail = Jsonified<CallDetail>;
+
 
 function formatDate(value: string, locale: string): string {
   return formatDateTime(value, locale, { dateStyle: "medium", timeStyle: "short" });

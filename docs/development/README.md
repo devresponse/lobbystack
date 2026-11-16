@@ -31,6 +31,25 @@ pnpm build
 
 CI runs on every pull request and every push to `main`, to a release branch such as `releases/r2` or to a development branch such as `develop/r2` ([overview](../project/overview.md#make-a-change)).
 
+## Search for what the person typed
+
+Text from a search box goes through `searchPattern` (`@lobbystack/db`) before it reaches `ilike`. `%` and `_` are wildcards in SQL's `LIKE` and `\` is its escape character, so without it a search for `50%` matched everything beginning "50", `o_t` matched "out" and "oat" alike, and a term ending in a backslash failed with a PostgreSQL error (the technical audit's AUDIT-012). `scripts/search-pattern.test.ts` reads the source and fails on a `LIKE` pattern built by interpolation, so the next search can't repeat it.
+
+**How much the call search costs, measured.** The audit suspected the call list's search of scanning a business's whole history twice per page and said to measure before changing anything. Measured on PostgreSQL 16 with 50,000 calls, 50,000 contacts and 300,000 transcript lines in one business:
+
+| What the page does | Time |
+| --- | --- |
+| List, no search | 0.04 ms |
+| Count, no search | 6 ms |
+| List, searching a term that matches rows near the top | 2 ms |
+| List, searching a term that matches nothing | 107 ms |
+| List, searching, page 20 (`offset 1000`) | 122 ms |
+| Count, searching | 149 ms |
+
+So a search costs about a quarter of a second at 50,000 calls, and the count is the larger half of it. Two things are worth knowing before changing this. The planner already drops the `contacts` and `conversations` joins from the count when nothing searches them, so there is nothing to win by building the two queries separately. And capping the count (`limit 1001` inside it) helps only a term that matches a lot, where it takes 149 ms down to 25 ms. A term that matches nothing still has to look at every call, so the cap buys nothing in the case that is already the slowest.
+
+The step that would change the shape of the curve is an index `ilike '%term%'` can use: `pg_trgm` GIN indexes on the searched columns, which needs `create extension`, something no migration here does yet. It would also mean giving up the correlated subquery over the last transcript line, which cannot use an index, and searching every line with `exists` instead, which is probably what somebody searching a transcript wants anyway. On these numbers it is worth doing when a business passes a few hundred thousand calls, and not before.
+
 ## Lint with the types in hand
 
 The admin's ESLint reads the TypeScript program (`recommendedTypeChecked` with `projectService`, the technical audit's AUDIT-020). Without the types, a rule sees `save(row)` and can't tell whether it returned a promise, so the two mistakes that look like working code were invisible to every check the repository runs:

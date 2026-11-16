@@ -1,6 +1,6 @@
 import { and, count, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
-import { appointments, auditLogs, billingUsageEvents, calls, contacts, conversations, conversationSessions, enqueueOutbox, inboxItems, receptionistProfiles, services, staff, storageObjects, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
+import { appointments, auditLogs, billingUsageEvents, calls, contacts, conversations, conversationSessions, enqueueOutbox, inboxItems, receptionistProfiles, searchPattern, services, staff, storageObjects, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
 import { billableVoiceSeconds, isNonBillableCallDisposition, isUuid } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem, type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
@@ -463,7 +463,7 @@ export async function listCalls(
       eq(calls.businessId, input.businessId),
       isNull(calls.archivedAt),
       input.receptionistId ? eq(calls.receptionistId, input.receptionistId) : undefined,
-      ...(search ? [or(ilike(contacts.name, `%${search}%`), ilike(contacts.phone, `%${search}%`), ilike(conversations.summary, `%${search}%`), ilike(calls.disposition, `%${search}%`), ilike(calls.providerCallId, `%${search}%`), ilike(transcriptPreview, `%${search}%`))!] : []),
+      ...(search ? [or(...[contacts.name, contacts.phone, conversations.summary, calls.disposition, calls.providerCallId, transcriptPreview].map((column) => ilike(column, searchPattern(search))))!] : []),
     );
     const rows = await tx.select({
        id: calls.id,

@@ -46,6 +46,18 @@ async function withReceiver(run: (endpoint: string, bodies: { logs: string[]; tr
   }
 }
 
+type ExportedLog = { severityText: string | undefined; body: string | undefined; attributes: Record<string, unknown> };
+
+/** The log records the receiver got, with each attribute's value unwrapped. */
+function exportedLogs(bodies: string[]): ExportedLog[] {
+  type Payload = { resourceLogs?: Array<{ scopeLogs?: Array<{ logRecords?: Array<{ severityText?: string; body?: { stringValue?: string }; attributes?: Array<{ key: string; value: Record<string, unknown> }> }> }> }> };
+  return bodies
+    .flatMap((body) => (JSON.parse(body) as Payload).resourceLogs ?? [])
+    .flatMap((resource) => resource.scopeLogs ?? [])
+    .flatMap((scope) => scope.logRecords ?? [])
+    .map((record) => ({ severityText: record.severityText, body: record.body?.stringValue, attributes: Object.fromEntries((record.attributes ?? []).map(({ key, value }) => [key, Object.values(value)[0]])) }));
+}
+
 describe("call context", () => {
   it("prints one JSON line with the call's IDs and a redacted error", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -114,6 +126,30 @@ describe("call context", () => {
       const [line] = lines(warn);
       expect(line).toMatchObject({ level: "warn", message: "live.attach_retry", callId: CALL_ID, sessionId: SESSION_ID, closeCode: 1006 });
       expect(line?.traceId).toMatch(/^[0-9a-f]{32}$/);
+    });
+  });
+
+  it("keeps a line's severity and event name when a field is called level or message", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // As a provider's error body spread into the fields would arrive.
+    const providerBody: Record<string, unknown> = { message: "Mailbox full", level: "fatal", fieldLevel: "taken" };
+    await withReceiver(async (endpoint, bodies) => {
+      await initializeTelemetry({ endpoint, serviceName: "lobbystack-test" });
+      logEvent("warn", "ops.provider.refused", { businessId: "biz_1", ...providerBody });
+      // @ts-expect-error A field written as `message` in the call doesn't compile.
+      logEvent("warn", "business.cancellation_inbox_missing", { message: "Set the brand's contactEmail." });
+      // @ts-expect-error Nor does one written as `level`.
+      logEvent("warn", "ops.provider.refused", { level: "fatal" });
+      await forceFlushTelemetryLogs();
+      await shutdownTelemetry();
+
+      expect(lines(warn)).toEqual([
+        { level: "warn", message: "ops.provider.refused", businessId: "biz_1", fieldMessage: "Mailbox full", fieldLevel_: "fatal", fieldLevel: "taken" },
+        { level: "warn", message: "business.cancellation_inbox_missing", fieldMessage: "Set the brand's contactEmail." },
+        { level: "warn", message: "ops.provider.refused", fieldLevel: "fatal" },
+      ]);
+      // The export keeps both too, and masks the field as it does any key with "message" in its name.
+      expect(exportedLogs(bodies.logs)[0]).toEqual({ severityText: "WARN", body: "ops.provider.refused", attributes: { businessId: "biz_1", fieldMessage: "[redacted]", fieldLevel_: "fatal", fieldLevel: "taken" } });
     });
   });
 

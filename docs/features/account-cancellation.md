@@ -23,7 +23,7 @@ Since fork PR #102, an owner whose account is down to one business, its root, ca
 
 - **The owner** gets the confirmation email, in their dashboard language.
 - **The deployment's inbox** gets "Cancellation request: <business>" when the owner asks, and "Canceled: <business>" when they confirm. Both are in English and list the business's ID, slug, type, time zone, website, creation date, owners, team size, plan and phone numbers, with who asked and when. The second also says what happened to the plan and the numbers, and points to [reactivating it](../deployment/guide/part-7-operations.md#727-reactivate-a-canceled-business).
-- **The inbox is the brand's `contactEmail`** in `brands/<brand>/brand.json`, else `FEEDBACK_TO_EMAIL`. With neither, nobody is told: the admin logs the warning `business.cancellation_inbox_missing`, and the owner can still cancel. It never falls back to LobbyStack's own addresses, as other contact links do.
+- **The inbox is the brand's `contactEmail`** in `brands/<brand>/brand.json`, else `FEEDBACK_TO_EMAIL`. With neither, nobody is told: the admin logs the warning `business.cancellation_inbox_missing`, with what to set in its `detail`, and the owner can still cancel. Before fork PR #188 that sentence was the line's message in place of the event name, so a search or an alert on `business.cancellation_inbox_missing` found nothing. It never falls back to LobbyStack's own addresses, as other contact links do.
 
 ## Know what happens when you cancel
 

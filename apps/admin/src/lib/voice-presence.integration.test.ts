@@ -32,7 +32,7 @@ describe.runIf(Boolean(testUrl))("live voice presence in Redis", () => {
   });
 
   it("counts only fresh sessions and publishes transitions instead of every heartbeat", async () => {
-    const { countActiveVoiceCalls, renewVoicePresenceGateway, updateVoicePresence, VOICE_PRESENCE_TTL_MS } = await import("./voice-presence");
+    const { countActiveVoiceCalls, renewVoicePresenceGateway, updateVoicePresence, VOICE_PRESENCE_TTL_MS, VoicePresenceUnavailableError } = await import("./voice-presence");
     const events: Array<{ type: string; entityId: string; businessId: string }> = [];
     subscriber.on("message", (_channel, message) => { events.push(JSON.parse(message)); });
     const callId = randomUUID();
@@ -42,7 +42,8 @@ describe.runIf(Boolean(testUrl))("live voice presence in Redis", () => {
     const now = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
 
-    await expect(countActiveVoiceCalls(businessId)).rejects.toThrow("Voice presence is unavailable");
+    // The class, not only the words: GET /api/calls/active answers 503 for it and 500 for anything else.
+    await expect(countActiveVoiceCalls(businessId)).rejects.toBeInstanceOf(VoicePresenceUnavailableError);
     await renewVoicePresenceGateway(gatewayId);
     await renewVoicePresenceGateway(secondGatewayId);
     expect(await countActiveVoiceCalls(businessId)).toBe(0);
@@ -59,13 +60,13 @@ describe.runIf(Boolean(testUrl))("live voice presence in Redis", () => {
     await renewVoicePresenceGateway(gatewayId);
     expect(events).toHaveLength(2);
     clock.mockReturnValue(now + VOICE_PRESENCE_TTL_MS + 1_000);
-    await expect(countActiveVoiceCalls(businessId)).rejects.toThrow("Voice presence is unavailable");
+    await expect(countActiveVoiceCalls(businessId)).rejects.toBeInstanceOf(VoicePresenceUnavailableError);
     // Fresh gateway A must not conceal stale media evidence from gateway B.
     await updateVoicePresence({ businessId, callId: secondCallId, active: false, gatewayId: secondGatewayId });
     await vi.waitFor(() => expect(events).toHaveLength(3));
     expect(await countActiveVoiceCalls(businessId)).toBe(1);
     clock.mockReturnValue(now + 2 * VOICE_PRESENCE_TTL_MS);
-    await expect(countActiveVoiceCalls(businessId)).rejects.toThrow("Voice presence is unavailable");
+    await expect(countActiveVoiceCalls(businessId)).rejects.toBeInstanceOf(VoicePresenceUnavailableError);
 
     await renewVoicePresenceGateway(gatewayId);
     await updateVoicePresence({ businessId, callId, active: true, gatewayId });

@@ -5,25 +5,42 @@ import { z } from "zod";
 import { billingAccounts, billingCheckoutRequests } from "@lobbystack/db";
 import { billingSubscriptionChangeShown, createBillingCheckoutRequest, isBillingSubscriptionAction, type BillingCheckoutTarget, type BillingInterval } from "@lobbystack/domain";
 import { billingProviderNames, billingProviderOf, planChangeRefusalOf } from "@lobbystack/shared";
-import { asApiResponse, businessIdFromRequest, readJson, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
+import { asApiResponse, businessIdFromRequest, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
 import { assertBillingCallAllowed } from "@/lib/billing-limit";
 import { createDomainContext } from "@/lib/domain-context";
 import { checkPromoCodeLimit, promoCodeLimitResponse } from "@/lib/promo-code-limit";
+import { jsonError, parseBody, parseQuery } from "@/lib/request-input";
 import { trustedClientIp } from "@/lib/trusted-client-ip";
 
 export const dynamic = "force-dynamic";
 
-const targets = ["starter", "pro"] as const;
-const intervals = ["monthly", "annual"] as const;
-const billingEmailSchema = z.email().max(320);
+const targets = ["starter", "pro"] as const satisfies readonly BillingCheckoutTarget[];
+const intervals = ["monthly", "annual"] as const satisfies readonly BillingInterval[];
+
+// The one refusal a person can meet: the onboarding plan page shows it under the billing email they typed.
+const billingEmailMessage = "Give an email address, such as billing@example.com.";
+
+// A caller's mistake answers 400 with the field's name, never a 500 and an error report (AUDIT-007).
+const checkoutLookup = z.object({
+  // Any id PostgreSQL would take, so a request that exists is never refused here; anything else never reaches it.
+  requestId: z.guid({ error: (issue) => (issue.input === undefined ? "requestId is required." : "requestId is the id a checkout request answered with.") }),
+});
+const checkoutStart = z.object({
+  // Without one, the business the request names in its address or its header.
+  businessId: z.string("businessId is text.").nullish(),
+  target: z.enum(targets, "target is starter or pro."),
+  billingInterval: z.enum(intervals, "billingInterval is monthly or annual."),
+  promoCode: z.string("promoCode is text.").optional(),
+  // The email the business's new Polar customer gets when Polar already has the person's own for another business.
+  billingEmail: z.string(billingEmailMessage).trim().pipe(z.email(billingEmailMessage).max(320, billingEmailMessage)).optional(),
+}, "A checkout request is a JSON object.");
 
 export async function GET(request: Request) {
   try {
-    const requestId = new URL(request.url).searchParams.get("requestId");
-    if (!requestId) throw new Error("A requestId is required.");
+    const { requestId } = parseQuery(request, checkoutLookup);
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
       const row = (await tx.select({ id: billingCheckoutRequests.id, status: billingCheckoutRequests.status, checkoutId: billingCheckoutRequests.checkoutId, checkoutUrl: billingCheckoutRequests.checkoutUrl, error: billingCheckoutRequests.error, target: billingCheckoutRequests.target, billingInterval: billingCheckoutRequests.billingInterval, planCode: billingCheckoutRequests.planCode }).from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.id, requestId), eq(billingCheckoutRequests.businessId, businessId))).limit(1))[0];
-      if (!row) throw new Error("Checkout request not found.");
+      if (!row) throw jsonError("Checkout request not found.", 404, "not_found");
       const account = (await tx.select({ plan: billingAccounts.plan, interval: billingAccounts.billingInterval, state: billingAccounts.subscriptionState, planCode: billingAccounts.planCode, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
       // A cancel, resume or keep once the provider's webhook shows it; a checkout someone paid, or a plan change the
       // provider made, once its webhook has put the business on the plan: a promo code's plan, or the target's standard one.
@@ -40,26 +57,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await requireApiSession(request);
-    const body = await readJson(request);
-    if (typeof body !== "object" || body === null || Array.isArray(body)) throw new Error("A checkout request is required.");
-    const input = body as Record<string, unknown>;
-    const businessId = typeof input.businessId === "string" ? input.businessId : businessIdFromRequest(request);
-    if (!businessId) throw new Error("A businessId is required.");
-    if (typeof input.target !== "string" || !targets.includes(input.target as BillingCheckoutTarget)) throw new Error("target is invalid.");
-    if (typeof input.billingInterval !== "string" || !intervals.includes(input.billingInterval as BillingInterval)) throw new Error("billingInterval is invalid.");
-    if (input.promoCode !== undefined && typeof input.promoCode !== "string") throw new Error("promoCode is invalid.");
-    // The email the business's new Polar customer gets when Polar already has the person's own for another business.
-    const billingEmail = typeof input.billingEmail === "string" ? input.billingEmail.trim() : input.billingEmail;
-    if (billingEmail !== undefined && !billingEmailSchema.safeParse(billingEmail).success) throw Object.assign(new Error("billingEmail must be an email address."), { status: 400 });
+    const input = await parseBody(request, checkoutStart);
+    const businessId = input.businessId ?? businessIdFromRequest(request);
+    if (!businessId) throw jsonError("A businessId is required.", 400, "invalid_request");
     // A code sells the plan it unlocks, whatever the target; each try counts as a guess.
-    const promoCode = typeof input.promoCode === "string" && input.promoCode.trim() ? input.promoCode : undefined;
+    const promoCode = input.promoCode?.trim() ? input.promoCode : undefined;
     const checkPromoCode = async () => {
       const limit = await checkPromoCodeLimit({ businessId, userId: session.user.id, ip: trustedClientIp(request) });
       if (!limit.allowed) throw promoCodeLimitResponse(limit.status);
     };
     // Each new request is a call to Polar; the person's open one for the same checkout comes back without one.
     const checkLimit = (subject: { businessId: string; userId: string }) => assertBillingCallAllowed("checkout", subject);
-    const requestId = await createBillingCheckoutRequest(createDomainContext(), { userId: session.user.id, businessId, target: input.target as BillingCheckoutTarget, billingInterval: input.billingInterval as BillingInterval, promoCode, ...(typeof billingEmail === "string" ? { billingEmail } : {}), checkPromoCode, checkLimit });
+    const requestId = await createBillingCheckoutRequest(createDomainContext(), { userId: session.user.id, businessId, target: input.target, billingInterval: input.billingInterval, promoCode, ...(input.billingEmail !== undefined ? { billingEmail: input.billingEmail } : {}), checkPromoCode, checkLimit });
     return NextResponse.json({ requestId }, { status: 202 });
   } catch (error) {
     return asApiResponse(error);

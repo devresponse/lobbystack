@@ -45,8 +45,9 @@ const worthReading = (reports: PolicyReport[]) => [...new Set(reports)].filter((
 const scriptSources = (policy: string | undefined, directive = "script-src") =>
   (policy ?? "").split("; ").find((entry) => entry.startsWith(`${directive} `)) ?? "";
 
+// A browser reads <SCRIPT> as it reads <script>, so a tag in any case has to carry the nonce.
 async function scriptTags(response: Response | null): Promise<string[]> {
-  return [...(await response!.text()).matchAll(/<script\b[^>]*>/g)].map((match) => match[0]);
+  return [...(await response!.text()).matchAll(/<script\b[^>]*>/gi)].map((match) => match[0]);
 }
 
 async function removeFixtures(email: string, businessId: string | undefined): Promise<void> {

@@ -61,6 +61,12 @@ A true/false setting is read with `envFlag(env, "NAME")` from `@lobbystack/share
 
 Settings that are not true/false are still read where they are used (the technical audit's AUDIT-017); a typed module per service follows.
 
+## Share one Redis connection, never one per request
+
+A long-lived Redis connection belongs to the process, not to the request that needed it first. `apps/admin/src/lib/realtime-subscriber.ts` is the pattern: one ioredis subscriber for the whole admin process, a `Map` of channel to listeners, subscribe on a channel's first listener and unsubscribe on its last, one `ping` timer for the connection rather than one per stream, and every listener told when the connection drops so each request can end cleanly. Anything that keeps a connection open for as long as a browser tab is open needs a cap too: `MAX_STREAMS_PER_USER` answers 429 rather than letting one account hold the pool. Where a browser reconnects on a timer, spread the wait (`spread` in `apps/admin/src/lib/realtime-query.ts`), so a redeploy doesn't bring every tab back in the same instant.
+
+Tests for a module-level singleton need `vi.resetModules()` and a dynamic `await import()` per test, or one test's connection is the next one's.
+
 ## Know what trips the checks up
 
 - **The worker's docx heap test** (`apps/worker/src/documentExtraction.process.test.ts`) can fail on a small machine. `pnpm test` runs the packages' tests side by side and stops them all at the first failure, so the admin's tests then don't finish: run them on their own with `pnpm --filter @lobbystack/admin test`, and say so in the pull request's testing notes.

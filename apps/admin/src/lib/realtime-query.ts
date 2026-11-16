@@ -11,6 +11,15 @@ const clients = new WeakMap<QueryClient, Map<string, Connection>>();
 const SILENT_STREAM_MS = 45_000;
 const RETRY_MAX_MS = 30_000;
 
+/**
+ * Up to half the wait again, chosen per tab (AUDIT-011). A redeploy drops every
+ * stream at the same moment; without this they would all come back together and
+ * ask the same server for a Redis listener at once.
+ */
+function spread(delayMs: number): number {
+  return delayMs + Math.random() * delayMs * 0.5;
+}
+
 /** One connection per business and browser QueryClient; never shared across requests. */
 export function subscribeRealtimeQuery(client: QueryClient, businessId: string, key: QueryKey, events: readonly string[]): () => void {
   let businesses = clients.get(client);
@@ -56,7 +65,7 @@ export function subscribeRealtimeQuery(client: QueryClient, businessId: string, 
       // when a retry gets an error response, such as the 502 of a deploy. A new
       // stream takes its place then, a little later after each failure in a row.
       next.addEventListener("error", () => {
-        if (source === next && next.readyState === EventSource.CLOSED) reopen(Math.min(RETRY_MAX_MS, 1_000 * 2 ** failures++));
+        if (source === next && next.readyState === EventSource.CLOSED) reopen(spread(Math.min(RETRY_MAX_MS, 1_000 * 2 ** failures++)));
       });
     };
     const reopen = (delayMs: number) => {

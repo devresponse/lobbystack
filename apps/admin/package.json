@@ -8,7 +8,7 @@
     "build": "NODE_ENV=production next build",
     "start": "next start",
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
-    "lint": "node --max-old-space-size=4096 node_modules/eslint/bin/eslint.js .",
+    "lint": "next typegen && node --max-old-space-size=4096 node_modules/eslint/bin/eslint.js .",
     "test": "vitest run --passWithNoTests",
     "e2e": "playwright test",
     "e2e:access-gate": "playwright test --config playwright.access-gate.config.ts",

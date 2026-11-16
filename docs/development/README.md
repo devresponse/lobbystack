@@ -7,7 +7,7 @@ How to work on the code: set up a checkout, run the checks a pull request needs,
 - Use Node 26, as CI does, and pnpm 12.15.0 (`packageManager` in `package.json`).
 - `pnpm env:generate` writes `.env` with new random secrets. Keep your own keys and overrides in `.env.local`, which wins over `.env` and which Git and Docker both ignore.
 - Build `@lobbystack/telemetry` before the first `pnpm dev`, and again after changing it: the admin loads it from its build output. In a fresh checkout, `pnpm build` once also builds the packages some tests import.
-- Git ignores `apps/admin/next-env.d.ts`. Next writes it whenever `next dev`, `next build` or `next typegen` runs, and the admin's `typecheck` script runs `next typegen` before `tsc`, so a fresh checkout and CI get it too.
+- Git ignores `apps/admin/next-env.d.ts`. Next writes it whenever `next dev`, `next build` or `next typegen` runs, and the admin's `typecheck` and `lint` scripts run `next typegen` first, so a fresh checkout and CI get it too.
 - To run the whole stack in Docker, debug in VS Code, or take real calls on your desktop through a tunnel, follow [run and debug on your desktop](../voice/local-debugging.md).
 
 ## Run the checks before a pull request
@@ -77,6 +77,8 @@ The admin's ESLint reads the TypeScript program (`recommendedTypeChecked` with `
 Both are errors. React's `act` is allowed to float, because with a synchronous callback React's own documentation says not to await it, and `checksVoidReturn.attributes` is off, because `onSubmit={async () => …}` is how React is written.
 
 Reading the program costs about 45 seconds and more memory than Node gives a script by default, so `apps/admin`'s `lint` script starts ESLint through `node --max-old-space-size=4096` rather than the usual shim. Leave that in place; without it the run dies with a heap error that looks nothing like a lint failure.
+
+The script runs `next typegen` first, as `typecheck` does, so lint reads the same program wherever it runs. The four route files under `app/.well-known` are in that program only through the route types Next generates, because `**/*.ts` in `tsconfig.json` doesn't reach into a folder whose name starts with a dot. On a checkout where nothing had generated them, ESLint stopped on those four files with "was not found by the project service". Fork PR #204 passed its own checks that way, where the typecheck ran first, and then failed the release gate, whose `pnpm lint` is the first thing to run after the install. Since fork PR #209 CI's `checks` job lints before it typechecks, so a pull request meets the checkout the gate does.
 
 **The rules turned off in `eslint.config.mjs` carry a count, and the count only goes down.** Eleven of the set's rules, from `require-await` at 566 hits and `no-unsafe-member-access` at 328 down to three, are each a piece of work of their own, and leaving them on as warnings would bury the two that matter. Their counts on 2026-11-16 are written beside them. Take a family on, fix it, delete its line; never raise a number, and never add a line without one.
 

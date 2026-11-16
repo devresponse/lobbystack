@@ -39,8 +39,11 @@ jobs:
       - name: Fail on High advisories in the services' production dependencies
         run: pnpm --filter "@lobbystack/admin..." --filter "@lobbystack/worker..." audit --prod --audit-level high
       - run: pnpm test:build-config
-      - run: pnpm typecheck
+      # Lint comes before anything has generated Next's route types, which is
+      # how the release gate's `pnpm lint` finds the checkout. After the
+      # typecheck it passed here and failed there.
       - run: pnpm --filter @lobbystack/admin --filter @lobbystack/landing lint
+      - run: pnpm typecheck
       - run: pnpm telemetry:coverage
       - run: pnpm build
       - name: Verify the committed embed loader matches the build

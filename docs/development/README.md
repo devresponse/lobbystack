@@ -31,6 +31,23 @@ pnpm build
 
 CI runs on every pull request and every push to `main`, to a release branch such as `releases/r2` or to a development branch such as `develop/r2` ([overview](../project/overview.md#make-a-change)).
 
+## Keep a module small enough to read
+
+A file here may be 800 lines and a function 150, and `scripts/module-size-budget.json` records a ceiling for each of the 16 files and 47 functions already past that. The technical audit (AUDIT-013) found billing, calls and the v1 API, where a mistake costs money or a call, living in the hardest files in the repository to read, and named the cause: nothing pushed back, so every new operation landed where related code already was.
+
+`scripts/module-size.test.ts` fails when a file or function crosses a threshold for the first time, and when a listed one grows past its ceiling. The ceilings only come down: when something shrinks, the test says so and `pnpm module-size:update` writes the smaller number. That is all the update does. It refuses to raise a ceiling or to add an entry, and writes nothing when anything has grown, so a ceiling raised on purpose is a hand edit of the file that a reviewer sees. Ceilings are rounded up to the next 25 lines, so an ordinary one-line fix in a long file is never a failing build; a feature that adds real length to one is.
+
+**When a change wants more room than a ceiling allows, take the seam instead of raising the number.** The audit named four that already exist:
+
+- `packages/domain/src/server/publicApi/operations.ts` and `packages/shared/src/publicApi/schemas.ts` split by v1 resource, behind an index file;
+- `dispatchJob` in `apps/worker/src/handlers.ts` into a map from job type to a handler module;
+- billing reconciliation in `packages/domain/src/server/billing.ts` into one handler per event type;
+- `createReceptionistTools` in `packages/agent-core/src/tools.ts` by tool.
+
+Do each when a feature touches that file anyway, not as a change of its own: a split that nothing needed is a large diff with nothing to review it against. `apps/landing` is outside the budget: the fork doesn't publish it, and what is long there is the legal texts and the SEO page copy, which are text rather than logic.
+
+A formatter is the other half of the audit's recommendation and isn't adopted yet. It belongs in one commit per package, each recorded in `.git-blame-ignore-revs`, and it should wait until no long-lived branch is open against that package.
+
 ## Search for what the person typed
 
 Text from a search box goes through `searchPattern` (`@lobbystack/db`) before it reaches `ilike`. `%` and `_` are wildcards in SQL's `LIKE` and `\` is its escape character, so without it a search for `50%` matched everything beginning "50", `o_t` matched "out" and "oat" alike, and a term ending in a backslash failed with a PostgreSQL error (the technical audit's AUDIT-012). `scripts/search-pattern.test.ts` reads the source and fails on a `LIKE` pattern built by interpolation, so the next search can't repeat it.

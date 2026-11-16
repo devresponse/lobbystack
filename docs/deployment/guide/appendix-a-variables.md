@@ -8,9 +8,24 @@ For a deployment set up with `devops/bootstrap.mjs`, [Bootstrap script variables
 
 **A setting that is on or off**
 
-A true/false setting takes `true`, `false`, `1`, `0`, `yes`, `no`, `on` or `off`, in any case and with spaces around it, so `TRUE` and `1` both mean on. The admin and the worker refuse to start when one holds anything else, such as `SMTP_SECURE=ssl`, and the startup line names every setting they couldn't read. They are `BETTER_AUTH_USE_SECURE_COOKIES`, `BRAND_REQUIRED`, `CONTENT_RETENTION_ENABLED`, `LIVE_PROTOTYPE_ENABLED`, `LIVE_RECORDED_GREETING`, `LOBBYSTACK_CERTIFICATION_MODE`, `LOBBYSTACK_MAINTENANCE_MODE`, `POLAR_ACCEPT_LEGACY_BUSINESS_IDS`, `REQUIRE_EMAIL_VERIFICATION`, `S3_FORCE_PATH_STYLE`, `SMTP_SECURE`, `WIDGET_KEY_ISSUANCE_ENABLED` and `WIDGET_TURNSTILE`, listed with their defaults in `packages/shared/src/env.ts`.
+A true/false setting takes `true`, `false`, `1`, `0`, `yes`, `no`, `on` or `off`, in any case and with spaces around it, so `TRUE` and `1` both mean on. The admin and the worker refuse to start when one holds anything else, such as `SMTP_SECURE=ssl`, and the startup line names every setting they couldn't read. They are `BETTER_AUTH_USE_SECURE_COOKIES`, `BRAND_REQUIRED`, `CONTENT_RETENTION_ENABLED`, `CSP_SCRIPT_NONCE`, `CSP_SCRIPT_NONCE_ENFORCED`, `LIVE_PROTOTYPE_ENABLED`, `LIVE_RECORDED_GREETING`, `LOBBYSTACK_CERTIFICATION_MODE`, `LOBBYSTACK_MAINTENANCE_MODE`, `POLAR_ACCEPT_LEGACY_BUSINESS_IDS`, `REQUIRE_EMAIL_VERIFICATION`, `S3_FORCE_PATH_STYLE`, `SMTP_SECURE`, `WIDGET_KEY_ISSUANCE_ENABLED` and `WIDGET_TURNSTILE`, listed with their defaults in `packages/shared/src/env.ts`.
 
 Before fork PR #195 each was its own comparison with the word `true`, so `1` or `TRUE` quietly meant off.
+
+**Stop an injected script from running (fork PR #203)**
+
+The admin's Content Security Policy allows inline scripts, which means it would not stop one that was injected. `CSP_SCRIPT_NONCE=true` replaces that with a value the server makes fresh for each page and puts on its own scripts, so no other script can run. Because one script the admin writes without that value would leave a blank page, it arrives in two steps:
+
+1. `CSP_SCRIPT_NONCE=true` alone: nothing new is blocked. The browser is told the stricter rule as a report, and its console names anything that would have been blocked.
+2. `CSP_SCRIPT_NONCE=true` and `CSP_SCRIPT_NONCE_ENFORCED=true`: the stricter rule applies.
+
+Turn on the first on one deployment, sign in, and open the dashboard, a business's public page and the website widget with the browser's console showing ([8.1](part-8-troubleshooting.md#81-where-to-find-the-reason)). A line that says "violates the following Content Security Policy directive" names something the second step would block; send it to someone technical before going further. With none, add the second. Unset, both leave the policy exactly as it was.
+
+Three things to know while you look:
+
+- **The sign-in pages and the help center keep the policy they have, in both steps.** They are the same for every visitor and built ahead of time, so there is no fresh value to put on them. Their console says nothing about either step.
+- **An address that doesn't exist shows lines in the first step, and that is expected.** The "This page could not be found." page is built ahead of time as well. In the second step its scripts are blocked and it reads the same.
+- **A browser older than Safari 15.4 (March 2022) or Firefox 108 (December 2022) applies the second step during the first.** It doesn't understand the part of the first step's rule that holds the block back. It still opens every page, as the admin's own scripts carry the value in both steps.
 
 **How to read the tables**
 

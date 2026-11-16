@@ -95,6 +95,31 @@ Tests for a module-level singleton need `vi.resetModules()` and a dynamic `await
 - **Timing-sensitive tests flake under load.** Wait on the condition, such as `vi.getTimerCount()`, rather than on time. A test that does seconds of real work can pass on its own and still time out after Vitest's 5 seconds in CI, where the admin's and the worker's tests share the runner. Keep its input small: since fork PR #172 the worker's 25-page OCR test renders two-inch pages, not letter-size ones.
 - **Trivy, CodeQL and the dependency audit** can fail a pull request on things it didn't change ([overview](../project/overview.md#make-a-change)).
 
+## Give an inline script the nonce
+
+The Content Security Policy sends `script-src 'self' 'unsafe-inline'`, which would not stop an injected script from running (the technical audit's AUDIT-008). Two settings replace that with a per-request nonce, in steps, because a single inline script without the nonce is a blank screen:
+
+| `CSP_SCRIPT_NONCE` | `CSP_SCRIPT_NONCE_ENFORCED` | What a browser gets |
+|---|---|---|
+| unset | unset | Today's policy. Nothing extra is sent and no nonce is made. |
+| `true` | unset | Nothing new is blocked. The strict policy goes out as `Content-Security-Policy-Report-Only`, so a browser names what *would* have been blocked. |
+| `true` | `true` | The strict policy is enforced and the report-only header stops. |
+
+`apps/admin/proxy.ts` makes the nonce and hands it to the page through `NONCE_HEADER` (`@/lib/locale-request`). **A component that writes its own inline `<script>` must take the nonce and set it**, as `profile-page.tsx` does for its JSON-LD block; read it with `(await headers()).get(NONCE_HEADER)`. Styles keep `'unsafe-inline'`: a style can't run code, and Tailwind writes a screen's chart colours inline.
+
+Four things about it are not obvious. A browser found the first two, which the header tests had passed:
+
+- **Next takes the nonce from the policy the proxy enforces.** It copies the proxy's response headers over the request's before it reads the request's policy, and it looks at the report-only header only when nothing is enforced. So in the middle step the enforced policy names the nonce without acting on it: `script-src` names it, and `script-src-elem` and `script-src-attr` follow, saying what `script-src` said before. A browser that knows those two (Chrome 75, Firefox 108, Safari 15.4) asks them about every script and every handler, and asks `script-src` only about `eval`. An older browser enforces the nonce from the middle step on. Without this the report named every script Next wrote.
+- **A page built ahead of time gets no nonce and keeps today's policy.** Its HTML was written during the build, so there is no request in which Next could put a nonce on its scripts, and a shared cache may store it. Enforced on such a page, the strict policy blocks every script: a sign-in page nobody can sign in on. Those pages are the public ones under a language, such as `/en/login`, `/en/signup` and the help center (`isCanonicalPublicPath` in `@/lib/locale-path`). `pnpm admin:prerender-check`, part of `pnpm build`, fails when a page is prerendered outside that set. The widget's loader, `/embed.js`, gets no nonce either: it is a script file that caches hand to every site's visitors.
+- **Next's own 404 and its last-resort error page are built ahead of time too**, and the proxy can't tell beforehand that an address will get one. Their scripts are blocked once the policy is enforced. The 404 still reads "This page could not be found.", and on the error page reloading does what its Retry button would.
+- **The report says nothing about `eval`.** Every step refuses `eval`, as today's policy does, and zod asks whether it may as each page loads. Left in the report, that would be a line in every page's console.
+
+`'strict-dynamic'` trusts a script that a running script adds. So the nonce stops injected markup (an inline `<script>`, an `onclick`, a `javascript:` link), not what a script that is already running goes on to do.
+
+`pnpm --filter @lobbystack/admin e2e:script-nonce` runs `e2e/script-nonce.e2e.ts` against two servers of its own, one in each step. On a rendered page every script carries the request's nonce, the page still works and the policies report nothing; then injected markup runs only while the policy isn't enforced, and the report names it. `scripts/e2e-local.sh` runs it after the other journeys, so CI's `e2e` job does too.
+
+Turn it on in reporting mode on one deployment first, look at a browser's console on the dashboard, a business's public page and the widget, then enforce ([Appendix A](../deployment/guide/appendix-a-variables.md)).
+
 ## Let PostgreSQL hold the values
 
 A query is written with Drizzle's query builder, or as a `sql` template from `drizzle-orm` where the builder can't say it. Either way every value goes in as `${value}` and reaches PostgreSQL as a bind parameter. `sql.raw` is only for text fixed in the file, such as a column name chosen from a list the code itself holds; it never takes anything a caller supplied. An ESLint rule in the admin refuses a template literal passed straight to `.execute(`, which is how the finance export built its five queries before the technical audit's AUDIT-010: each value was quoted by a `replaceAll("'", "''")` written beside it, safe as written and one forgotten call away from an injection.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isCanonicalPublicPath,
   isHelpRoutePath,
   isLegacyPublicRoutePath,
   isPublicRoutePath,
@@ -32,6 +33,16 @@ describe("locale paths", () => {
     expect(isTokenBearingRoute("/fr/reset-password/token", new URLSearchParams())).toBe(true);
     expect(isTokenBearingRoute("/en/verify-email", new URLSearchParams("token=private"))).toBe(true);
     expect(isTokenBearingRoute("/en/login", new URLSearchParams())).toBe(false);
+  });
+
+  it("knows a public page under its language from one without, and from the dashboard", () => {
+    for (const path of ["/en/login", "/fr/signup", "/sr/reset-password/token", "/en/help", "/en/help/rules", "/en/help.md"]) {
+      expect(isCanonicalPublicPath(path), path).toBe(true);
+    }
+    // /login is on its way to /en/login; the others are rendered for one request.
+    for (const path of ["/login", "/help", "/", "/calls", "/settings/plan", "/profile/acme", "/embed/wk_live_abc", "/api/calls", "/de/login"]) {
+      expect(isCanonicalPublicPath(path), path).toBe(false);
+    }
   });
 
   it("knows the help center's addresses, with or without a language", () => {

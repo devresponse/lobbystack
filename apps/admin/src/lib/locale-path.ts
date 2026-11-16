@@ -45,6 +45,16 @@ export function isHelpRoutePath(pathname: string): boolean {
   return section === "help" || section === "help.md";
 }
 
+/**
+ * Whether the address is a public page under its language, such as /en/login
+ * or /en/help/rules. These are the pages built ahead of time: the same HTML
+ * for every visitor, which shared caches may store. Anything decided for one
+ * request, such as a cookie or a script nonce, has no place on them.
+ */
+export function isCanonicalPublicPath(pathname: string): boolean {
+  return localeFromPathname(pathname) !== null && isPublicRoutePath(pathname);
+}
+
 export function isLegacyPublicRoutePath(pathname: string): boolean {
   return localeFromPathname(pathname) === null && isPublicRoutePath(pathname);
 }

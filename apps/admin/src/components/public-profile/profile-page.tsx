@@ -44,6 +44,8 @@ export type ProfilePageProps = {
   receptionistToken?: string | null;
   /** Who answers the page and who else the visitor can pick; null when there's nobody else to choose. */
   picker?: ReceptionistPickerChoices | null;
+  /** The request's CSP nonce, when the deployment uses one, for the one inline script this page writes (AUDIT-008). */
+  nonce?: string | undefined;
   /** Whether this is a receptionist's own page rather than the business page. */
   receptionistPage?: boolean;
 };
@@ -74,7 +76,7 @@ function ContactRow({ icon, children }: { icon: ReactNode; children: ReactNode }
   return <div className={`flex min-h-[52px] items-center gap-4 border-b ${HAIRLINE} py-1.5`}>{icon}{children}</div>;
 }
 
-export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent, brand, mapsEmbedKey, languageNames, receptionistToken = null, picker = null, receptionistPage = false }: ProfilePageProps) {
+export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent, brand, mapsEmbedKey, languageNames, nonce, receptionistToken = null, picker = null, receptionistPage = false }: ProfilePageProps) {
   const clock = { locale, timezone: profile.timezone, now, t };
   const status = statusLine(profile, clock);
   const phone = profile.phone ? { href: `tel:${profile.phone}`, display: phoneDisplay(profile.phone, profile.address?.countryCode) } : null;
@@ -97,7 +99,7 @@ export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent
 
   return (
     <div style={style} className="flex min-h-svh flex-col bg-[#fff] font-sans text-[17px] leading-[1.55] text-[#000] antialiased [color-scheme:light]">
-      {profile.published ? (receptionistPage ? null : <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: localBusinessJsonLd(profile, pageUrl) }} />) : (
+      {profile.published ? (receptionistPage ? null : <script type="application/ld+json" nonce={nonce} dangerouslySetInnerHTML={{ __html: localBusinessJsonLd(profile, pageUrl) }} />) : (
         <div className="bg-[#000] text-[#fff]">
           <p className="mx-auto flex w-full max-w-[1280px] flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-[15px] leading-[22px] sm:px-8 lg:px-12">
             {t("preview.banner")}

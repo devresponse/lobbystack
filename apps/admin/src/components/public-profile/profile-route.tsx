@@ -12,7 +12,7 @@ import { loadBranding } from "@/lib/branding";
 import { brandLogoSrc } from "@/lib/branding-snapshot";
 import { createWorkerDomainContext } from "@/lib/domain-context";
 import { LOCALE_LABEL_KEYS, SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/locale";
-import { localeFromRequestHeaders } from "@/lib/locale-request";
+import { localeFromRequestHeaders, NONCE_HEADER } from "@/lib/locale-request";
 import { profileAlternates, profileDescription, profileTitle, receptionistPageDescription, receptionistPageTitle, receptionistPageUrl, receptionistPicker } from "@/lib/public-profile-page";
 import { serverTranslator } from "@/lib/server-translation";
 import { createReceptionistPageToken } from "@/lib/widget-keys";
@@ -113,6 +113,7 @@ export async function renderProfileRoute(slug: string, handle: string | null): P
       brand={{ appName: branding.appName, logoSrc: brandLogoSrc(branding), invertLogo: !branding.logoUrl, siteUrl: brandLinks().siteUrl }}
       mapsEmbedKey={process.env.GOOGLE_MAPS_EMBED_API_KEY?.trim() || null}
       languageNames={Object.fromEntries(SUPPORTED_LOCALES.map((language) => [language, languageName(LOCALE_LABEL_KEYS[language])])) as Record<SupportedLocale, string>}
+      nonce={(await headers()).get(NONCE_HEADER) ?? undefined}
       receptionistToken={pageToken(access, profile.published && Boolean(profile.widgetKey))}
       picker={receptionistPicker(profile)}
       receptionistPage={receptionistPage}

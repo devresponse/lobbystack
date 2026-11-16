@@ -1,19 +1,20 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
-import { users } from "@lobbystack/db";
-import { isInterfaceLocale } from "@lobbystack/shared";
-import { asApiResponse, jsonError, readJson, requireApiSession } from "@/lib/api-helpers";
+import { readUserInterfaceLocale, setUserInterfaceLocale } from "@lobbystack/domain";
+import { asApiResponse, requireApiSession } from "@/lib/api-helpers";
+import { parseBody } from "@/lib/request-input";
 import { getAuthDatabase } from "@/lib/auth";
 import { SUPPORTED_LOCALES } from "@/lib/locale";
 
 export const dynamic = "force-dynamic";
 
+const localeChoice = z.object({ locale: z.enum(SUPPORTED_LOCALES, `locale must be one of ${SUPPORTED_LOCALES.join(", ")}.`) });
+
 export async function GET(request: Request) {
   try {
     const session = await requireApiSession(request);
-    const [user] = await getAuthDatabase().db.select({ locale: users.preferredLocale }).from(users).where(eq(users.id, session.user.id)).limit(1);
-    return NextResponse.json({ locale: user?.locale ?? "en" });
+    return NextResponse.json({ locale: await readUserInterfaceLocale(getAuthDatabase().db, { userId: session.user.id }) ?? "en" });
   } catch (error) {
     return asApiResponse(error);
   }
@@ -22,10 +23,9 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const session = await requireApiSession(request);
-    const body = await readJson(request) as { locale?: string };
-    if (!isInterfaceLocale(body.locale)) return jsonError(`locale must be one of ${SUPPORTED_LOCALES.join(", ")}.`, 400);
-    await getAuthDatabase().db.update(users).set({ preferredLocale: body.locale, updatedAt: new Date() }).where(eq(users.id, session.user.id));
-    return NextResponse.json({ locale: body.locale });
+    const { locale } = await parseBody(request, localeChoice);
+    await setUserInterfaceLocale(getAuthDatabase().db, { userId: session.user.id, locale });
+    return NextResponse.json({ locale });
   } catch (error) {
     return asApiResponse(error);
   }

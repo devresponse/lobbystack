@@ -10,6 +10,26 @@ import { defineConfig, globalIgnores } from "eslint/config"
  * Static analysis for the admin app. Type checking stays in `pnpm typecheck`;
  * this config covers the runtime hazards TypeScript cannot see.
  */
+
+/**
+ * The routes that still select from tables themselves (AUDIT-014). Each one moves
+ * into a domain function shared with the v1 API; this list only ever gets shorter,
+ * and nothing is added to it.
+ */
+const routesStillQueryingTables = [
+  "app/api/activation/route.ts",
+  "app/api/affiliate/route.ts",
+  "app/api/agent/route.ts",
+  "app/api/billing/checkout/route.ts",
+  "app/api/billing/portal/route.ts",
+  "app/api/billing/route.ts",
+  "app/api/businesses/cancellation/route.ts",
+  "app/api/integrations/route.ts",
+  "app/api/phone-numbers/route.ts",
+  "app/api/team/route.ts",
+  "app/api/webhooks/resend/route.ts",
+  "app/api/widget/lead/route.ts",
+]
 export default defineConfig([
   globalIgnores([".next/**", "node_modules/**", "test-results/**", "playwright-report/**", "next-env.d.ts"]),
   {
@@ -32,6 +52,24 @@ export default defineConfig([
       // Server actions and route handlers legitimately accept untyped payloads.
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    },
+  },
+  {
+    /**
+     * A dashboard route asks the domain, which is also what the v1 API asks, so one
+     * question has one answer (AUDIT-014). These exports of @lobbystack/db are not
+     * tables, so a route may still open a transaction or check the database is up.
+     */
+    files: ["app/api/**/*.ts"],
+    ignores: ["**/*.test.ts", ...routesStillQueryingTables],
+    rules: {
+      "no-restricted-imports": ["error", {
+        paths: [{
+          name: "@lobbystack/db",
+          allowImportNames: ["databaseHealthCheck", "enqueueOutbox", "withBusinessTransaction", "withDispatcherTransaction", "DatabaseTransaction"],
+          message: "Ask the domain for the data instead of selecting from a table here: packages/domain/src/server. See docs/reference/routes.md.",
+        }],
+      }],
     },
   },
   {

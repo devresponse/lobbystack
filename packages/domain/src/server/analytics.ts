@@ -1,6 +1,6 @@
 import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
-import { appointments, calls, conversations, messages, withBusinessTransaction } from "@lobbystack/db";
+import { appointments, calls, conversations, dashboardAggregatesQuery, messages, withBusinessTransaction, type DashboardAggregates, type DatabaseTransaction } from "@lobbystack/db";
 import { MAX_PHONE_CALL_MS } from "@lobbystack/shared";
 
 import { requireBusinessMembership } from "../authz";
@@ -228,4 +228,15 @@ export async function getAnalytics(context: DomainContext, input: AnalyticsInput
       channels,
     };
   });
+}
+
+/**
+ * The counts behind the dashboard's home screen: calls, messages and
+ * appointments for the last 30 days against the 30 before them, and twelve
+ * months of call totals for the chart.
+ */
+export async function readDashboardAggregatesInTransaction(tx: DatabaseTransaction, input: { businessId: string; currentStart: Date; previousStart: Date; chartStart: Date }): Promise<DashboardAggregates | undefined> {
+  const result = await tx.execute(dashboardAggregatesQuery(input));
+  const [aggregates] = result.rows as unknown as [DashboardAggregates];
+  return aggregates;
 }

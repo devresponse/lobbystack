@@ -1,9 +1,7 @@
-import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { widgetKeys } from "@lobbystack/db";
-import { insertWidgetKeyInTransaction, readEntryPointReceptionist, setWidgetKeyReceptionistInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "@lobbystack/domain";
+import { findWidgetKeyInTransaction, insertWidgetKeyInTransaction, listWidgetKeysInTransaction, readEntryPointReceptionist, setWidgetKeyReceptionistInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch, type WidgetKeyRow } from "@lobbystack/domain";
 import { isWidgetKeyIssuanceEnabled, widgetConfigSchema } from "@lobbystack/shared";
 
 import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
@@ -16,8 +14,6 @@ export const dynamic = "force-dynamic";
 // chats (receptionistId; a new key names the default one unless the body
 // names another). The dashboard alone sees and changes it: the API's widget
 // key fields stay as they were.
-
-type WidgetKeyRow = typeof widgetKeys.$inferSelect;
 
 /** A key as the dashboard shows it, with who answers its chats. */
 function dashboardRecord(row: WidgetKeyRow) {
@@ -42,7 +38,7 @@ function allowedOrigins(value: string[]): string[] {
 export async function GET(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
-      const rows = await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, businessId)).orderBy(desc(widgetKeys.createdAt));
+      const rows = await listWidgetKeysInTransaction(tx, { businessId });
       // The key is public (it sits in the website's script tag), so the dashboard can show its snippet again. Older keys kept only a hash.
       return { keys: rows.map((row) => ({ ...dashboardRecord(row), key: row.status === "revoked" ? null : row.keyValue })) };
     }));
@@ -70,7 +66,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json(await withOperatorTransaction(request, async ({ session, businessId, tx }) => {
       const { id } = parseQuery(request, widgetKeyId);
       const body = await parseBody(request, widgetKeyUpdate);
-      const existing = (await tx.select({ id: widgetKeys.id, status: widgetKeys.status }).from(widgetKeys).where(and(eq(widgetKeys.id, id), eq(widgetKeys.businessId, businessId))).limit(1))[0];
+      const existing = await findWidgetKeyInTransaction(tx, { businessId, widgetKeyId: id });
       if (!existing) throw jsonError("The widget key was not found.", 404, "not_found");
       // A revoked key may sit on a page someone else controls, so it stays off, as through the API.
       if (existing.status === "revoked" && body.status !== undefined && body.status !== "revoked") throw jsonError("A revoked widget key can't be turned back on. Create a new one.", 409);
@@ -85,7 +81,7 @@ export async function PATCH(request: Request) {
       if (receptionistId !== undefined) await setWidgetKeyReceptionistInTransaction(tx, { businessId, actorUserId: session.user.id, widgetKeyId: existing.id, receptionistId });
       const row = Object.keys(patch).length
         ? await updateWidgetKeyInTransaction(tx, { businessId, widgetKeyId: id, patch })
-        : (await tx.select().from(widgetKeys).where(and(eq(widgetKeys.id, existing.id), eq(widgetKeys.businessId, businessId))).limit(1))[0] ?? null;
+        : await findWidgetKeyInTransaction(tx, { businessId, widgetKeyId: existing.id });
       if (!row) throw new Error("The widget key could not be updated.");
       return { ok: true, record: dashboardRecord(row) };
     }, { minimumRole: "business_admin" }));

@@ -38,6 +38,12 @@ Every dashboard route under `apps/admin/app/api` reads its body with `parseBody(
 
 A dashboard screen takes the type of what it loads from the function that builds it, rather than declaring the shape again: `type Call = Jsonified<CallListItem>` in `live-calls-surface.tsx`, where `CallListItem` comes from `@lobbystack/domain` and `Jsonified` from `@lobbystack/shared` turns each `Date` into the ISO string JSON sends. Leave a domain function's return type to be inferred from its query instead of annotating it `Record<string, unknown>`, and export a named type beside it. `apps/admin/src/lib/dashboard-contract.test-d.ts` holds the assertions that hold this together; `pnpm typecheck` checks them, no test run needed.
 
+## Ask the domain, never a table
+
+A dashboard route under `apps/admin/app/api` gets its data from a function in `packages/domain/src/server`, the same place the v1 API gets it, so a question has one answer and the two can't drift. An ESLint rule enforces it: `@lobbystack/db` gives a route `withBusinessTransaction`, `withDispatcherTransaction`, `enqueueOutbox`, `databaseHealthCheck` and the `DatabaseTransaction` type, and no tables. When a route already holds a transaction, write the domain function to take it first and name it `…InTransaction`, as `readBusinessHoursPageInTransaction` does, so the read runs under the business's row-level security with everything else the request does. A route test that mocks `@lobbystack/domain` should pass such a function through from the real module (`...await original<typeof import("@lobbystack/domain")>()`), so the test still checks the query the screen depends on.
+
+The routes that haven't moved yet are listed in `routesStillQueryingTables` in `apps/admin/eslint.config.mjs`. Take one off the list when you move it; nothing goes on it.
+
 ## Know what trips the checks up
 
 - **The worker's docx heap test** (`apps/worker/src/documentExtraction.process.test.ts`) can fail on a small machine. `pnpm test` runs the packages' tests side by side and stops them all at the first failure, so the admin's tests then don't finish: run them on their own with `pnpm --filter @lobbystack/admin test`, and say so in the pull request's testing notes.

@@ -699,3 +699,25 @@ export async function revokeInvitation(
     if (!await revokeInvitationInTransaction(tx, { ...input, audit: operatorAudit(input.userId) })) throw new Error("Invitation not found or already resolved.");
   });
 }
+
+/** The interface language a person chose, or null when they have never chosen one. */
+export async function readUserInterfaceLocale(authDb: Database, input: { userId: string }): Promise<string | null> {
+  const [row] = await authDb.select({ locale: users.preferredLocale }).from(users).where(eq(users.id, input.userId)).limit(1);
+  return row?.locale ?? null;
+}
+
+/** Saves the interface language a person chose. The caller checks it is one the app has. */
+export async function setUserInterfaceLocale(authDb: Database, input: { userId: string; locale: string }): Promise<void> {
+  await authDb.update(users).set({ preferredLocale: input.locale, updatedAt: new Date() }).where(eq(users.id, input.userId));
+}
+
+/** Whether the business lets the browser send usage telemetry. Null when the business is gone. */
+export async function readBusinessTelemetryPreferenceInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<boolean | null> {
+  const [row] = await tx.select({ telemetryEnabled: businesses.telemetryEnabled }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
+  return row?.telemetryEnabled ?? null;
+}
+
+/** Turns the browser's usage telemetry on or off for the business. */
+export async function setBusinessTelemetryPreferenceInTransaction(tx: DatabaseTransaction, input: { businessId: string; telemetryEnabled: boolean }): Promise<void> {
+  await tx.update(businesses).set({ telemetryEnabled: input.telemetryEnabled, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
+}

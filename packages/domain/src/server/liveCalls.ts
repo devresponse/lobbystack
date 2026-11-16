@@ -1,6 +1,6 @@
-import { and, asc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 
-import { billingUsageEvents, calls, contacts, enqueueOutbox, transcripts, withBusinessTransaction, type NewOutboxMessage } from "@lobbystack/db";
+import { billingUsageEvents, calls, contacts, enqueueOutbox, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
 import { MAX_PHONE_CALL_MS } from "@lobbystack/shared";
 
 import { reserveOutboundCallAttempt } from "./billing";
@@ -361,4 +361,18 @@ export async function lastLiveCallSequence(context: DomainContext, input: { busi
 export function orphanedLiveCallSeconds(call: Pick<OpenLiveCall, "startedAt" | "lastActivityAt" | "reservedSeconds">): number {
   const evidenceSeconds = Math.max(0, (call.lastActivityAt.getTime() - call.startedAt.getTime()) / 1_000);
   return boundedReconciledVoiceSeconds({ reservedSeconds: call.reservedSeconds, mediaDurationSeconds: evidenceSeconds }) ?? 0;
+}
+
+/** Which of these calls have already ended, so the dashboard can drop them from its live list. */
+export async function endedCallIdsInTransaction(tx: DatabaseTransaction, input: { businessId: string; callIds: string[] }): Promise<string[]> {
+  if (!input.callIds.length) return [];
+  const rows = await tx.select({ id: calls.id }).from(calls)
+    .where(and(eq(calls.businessId, input.businessId), inArray(calls.id, input.callIds), isNotNull(calls.endedAt)));
+  return rows.map((row) => row.id);
+}
+
+/** How many of a business's calls are in progress, as the dashboard's live counter shows. */
+export async function countCallsInProgressInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<number> {
+  const [row] = await tx.select({ count: count() }).from(calls).where(and(eq(calls.businessId, input.businessId), eq(calls.status, "started")));
+  return Number(row?.count ?? 0);
 }

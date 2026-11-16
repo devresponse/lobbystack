@@ -1,12 +1,6 @@
-import { and, count, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import {
-  dashboardAggregatesQuery,
-  type DashboardAggregates,
-  calls,
-} from "@lobbystack/db";
-import { listHandoffConversations, listOpenVoiceFollowUps, listRecentCalls, listUpcomingAppointments } from "@lobbystack/domain";
+import { countCallsInProgressInTransaction, listHandoffConversations, listOpenVoiceFollowUps, listRecentCalls, listUpcomingAppointments, readDashboardAggregatesInTransaction } from "@lobbystack/domain";
 import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
@@ -40,11 +34,10 @@ export async function GET(request: Request) {
       const previousStart = new Date(now.getTime() - 60 * DAY_MS);
       const chartStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
 
-      const aggregateResult = await tx.execute(dashboardAggregatesQuery({ businessId, currentStart, previousStart, chartStart }));
-      const [aggregates] = aggregateResult.rows as unknown as [DashboardAggregates];
+      const aggregates = await readDashboardAggregatesInTransaction(tx, { businessId, currentStart, previousStart, chartStart });
       const recentCalls = await listRecentCalls(tx, businessId);
       const upcoming = await listUpcomingAppointments(tx, businessId, now);
-      const liveCallCount = await tx.select({ count: count() }).from(calls).where(and(eq(calls.businessId, businessId), eq(calls.status, "started")));
+      const liveCalls = await countCallsInProgressInTransaction(tx, { businessId });
       const handoffConversations = await listHandoffConversations(tx, businessId);
       const voiceFollowUps = await listOpenVoiceFollowUps(tx, businessId);
 
@@ -70,7 +63,7 @@ export async function GET(request: Request) {
           appointments: { total: aggregates?.appointmentsCurrent ?? 0, deltaPercent: percentageDelta(aggregates?.appointmentsCurrent ?? 0, aggregates?.appointmentsPrevious ?? 0) },
           averageDuration: { totalSeconds: currentDuration, deltaSeconds: currentDuration - previousDuration },
         },
-        liveCalls: Number(liveCallCount[0]?.count ?? 0),
+        liveCalls,
         monthlyCalls,
         recentCalls: recentCalls.map((call) => ({
           id: call.id,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { snapshotForReceptionist } from "@lobbystack/domain";
-import { isUuid, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { envFlag, isUuid, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
 import { loadValidBusinessSnapshot } from "@/lib/business-snapshot";
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     const businessId = await withOperatorTransaction(request, async ({ businessId }) => businessId, { minimumRole: "business_admin" });
     // The dashboard asks on every page, so with GPT-Live off this answers off,
     // not the other GPT-Live routes' 404, an error in the browser's console.
-    if (process.env.LIVE_PROTOTYPE_ENABLED !== "true") return NextResponse.json({ status: "off" satisfies GreetingRecordingStatus });
+    if (!envFlag(process.env, "LIVE_PROTOTYPE_ENABLED")) return NextResponse.json({ status: "off" satisfies GreetingRecordingStatus });
     const stored = await loadValidBusinessSnapshot(businessId) as BusinessContextSnapshot | null;
     if (!stored) return NextResponse.json({ status: "off" satisfies GreetingRecordingStatus });
     let status = await greetingRecordingStatus(snapshotForReceptionist(stored, receptionistId));

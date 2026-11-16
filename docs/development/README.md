@@ -55,6 +55,12 @@ A dashboard route under `apps/admin/app/api` gets its data from a function in `p
 
 The routes that haven't moved yet are listed in `routesStillQueryingTables` in `apps/admin/eslint.config.mjs`. Take one off the list when you move it; nothing goes on it.
 
+## Read a setting one way
+
+A true/false setting is read with `envFlag(env, "NAME")` from `@lobbystack/shared`, never with a comparison of your own. It accepts `true`, `false`, `1`, `0`, `yes`, `no`, `on` and `off`, in any case, and throws when the value is neither, so a mistake can't read as off. Add a new one to `booleanSettings` in `packages/shared/src/env.ts` with what it means when unset; that record is the single place the names and defaults live, and `booleanSettingErrors` checks all of them as the admin and the worker start. The deployment guide's [variables appendix](../deployment/guide/appendix-a-variables.md) lists them for operators.
+
+Settings that are not true/false are still read where they are used (the technical audit's AUDIT-017); a typed module per service follows.
+
 ## Know what trips the checks up
 
 - **The worker's docx heap test** (`apps/worker/src/documentExtraction.process.test.ts`) can fail on a small machine. `pnpm test` runs the packages' tests side by side and stops them all at the first failure, so the admin's tests then don't finish: run them on their own with `pnpm --filter @lobbystack/admin test`, and say so in the pull request's testing notes.

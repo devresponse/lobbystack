@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { LIVE_MODEL } from "./session";
+import { envFlag } from "@lobbystack/shared";
 
 /**
  * A recording of the call's opening, played into a call the moment it
@@ -28,7 +29,7 @@ export const GREETING_RECORDING_TTL_SECONDS = 7 * 24 * 60 * 60;
  * which it skips on about one call in three, so the switch is on by default.
  */
 export function recordedGreetingEnabled(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  return env.LIVE_RECORDED_GREETING?.trim().toLowerCase() !== "false";
+  return envFlag(env, "LIVE_RECORDED_GREETING");
 }
 
 /**

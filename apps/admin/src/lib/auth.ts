@@ -21,6 +21,7 @@ import { hashReplacementPassword, isLegacyScryptHash, meetsPasswordRequirements,
 import { readyRedis } from "./redis";
 import { trustedClientIp, trustedClientIpFromHeaders, trustedClientIpHeader } from "./trusted-client-ip";
 import { verifyTurnstile } from "./turnstile";
+import { envFlag } from "@lobbystack/shared";
 
 let instance: any;
 let databaseRolesReady: Promise<void> | undefined;
@@ -252,9 +253,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
   if (process.env.NODE_ENV === "production" && !process.env.BETTER_AUTH_SECRET) {
     throw new Error("BETTER_AUTH_SECRET is required in production.");
   }
-  const secureCookies = process.env.BETTER_AUTH_USE_SECURE_COOKIES === undefined
-    ? process.env.NODE_ENV === "production"
-    : process.env.BETTER_AUTH_USE_SECURE_COOKIES === "true";
+  const secureCookies = envFlag(process.env, "BETTER_AUTH_USE_SECURE_COOKIES");
   const trustedIpHeader = trustedClientIpHeader();
   const database = getAuthDatabase();
   const secondaryStorage = getAuthSecondaryStorage();

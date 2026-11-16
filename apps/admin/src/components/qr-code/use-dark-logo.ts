@@ -44,9 +44,10 @@ export function useDarkLogo(src: string | null): boolean {
   useEffect(() => {
     if (!src) return;
     let cancelled = false;
-    logoIsDark(src).catch(() => true).then((value) => {
-      if (!cancelled) setDark({ src, dark: value });
-    });
+    logoIsDark(src)
+      .then((value) => { if (!cancelled) setDark({ src, dark: value }); })
+      // A logo the page can't look at counts as dark, so it keeps its white tile.
+      .catch(() => { if (!cancelled) setDark({ src, dark: true }); });
     return () => {
       cancelled = true;
     };

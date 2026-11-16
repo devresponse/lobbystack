@@ -1,6 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-const mocks = vi.hoisted(() => ({ redis: { eval: vi.fn() } as { eval: ReturnType<typeof vi.fn> } | undefined }));
+/** How the limiter calls EVAL: the script, how many keys follow, then the keys and their arguments. */
+type EvalCall = (script: string, numKeys: number, ...rest: string[]) => Promise<number>;
+
+const mocks = vi.hoisted(() => ({ redis: { eval: vi.fn<EvalCall>() } as { eval: Mock<EvalCall> } | undefined }));
 vi.mock("./redis", () => ({ readyRedis: async () => mocks.redis, closeRedis: vi.fn() }));
 
 import { clientIpDigest, enforceFixedWindow, fixedWindowLimit, type FixedWindowLimit } from "./fixed-window-limit";
@@ -28,7 +31,7 @@ function memoryEval(store: Map<string, number>, ttls: Map<string, number>) {
 }
 
 beforeEach(() => {
-  mocks.redis = { eval: vi.fn() };
+  mocks.redis = { eval: vi.fn<EvalCall>() };
 });
 afterEach(() => {
   vi.unstubAllEnvs();

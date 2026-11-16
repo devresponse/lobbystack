@@ -26,6 +26,8 @@ describe("widget loader", () => {
     expect(response.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
     // The prelude runs as script and fills the global the loader reads.
     const scope: Record<string, unknown> = {};
+    // The point of the test: the prelude has to run as script, the way a browser runs it.
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
     new Function("window", body.split("\n")[0]!)(scope);
     expect(scope.__lobbyStackWidgetAppearance).toEqual({ "wk_live_abc-_1": { color: "#112233", position: "bottom-left" } });
   });

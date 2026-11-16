@@ -86,6 +86,8 @@ Give neither `webhooks:read`. Polar lists each webhook with its signing secret, 
 
 Every call to Polar asks for API version `2026-10` in its `Polar-Version` header, and `pnpm billing apply` makes the webhook send that version's payloads, or moves it to them. A new Polar version changes nothing until a release moves `POLAR_API_VERSION` in `packages/shared/src/billing.ts`. Polar answers 404 to every call that names a version it no longer serves, so move it, after reading Polar's changelog, before Polar retires `2026-10`.
 
+Billing checks each answer it reads from Polar as it comes in (`packages/providers/src/polar/polarBilling.ts`). A subscription has to carry its `id`, `status` and `product_id`, a customer its `id`, a checkout its `id` and `url`, and a billing portal session its `customer_portal_url`, and every field billing reads has to be of the type it expects. A field Polar adds is ignored. An answer that fails raises `PolarResponseError`, which names the answer and the fields and never their values: `Polar's subscription is missing or mistypes: product_id.` The request or job that asked fails with it, and a job is tried again like any other. That error in the logs means Polar's answers have changed shape, so read Polar's changelog against the version above.
+
 ## Route billing requests
 
 The Next.js app exposes four billing entry points.

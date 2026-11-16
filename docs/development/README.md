@@ -44,6 +44,18 @@ Reading the program costs about 45 seconds and more memory than Node gives a scr
 
 **The rules turned off in `eslint.config.mjs` carry a count, and the count only goes down.** Eleven of the set's rules, from `require-await` at 566 hits and `no-unsafe-member-access` at 328 down to three, are each a piece of work of their own, and leaving them on as warnings would bury the two that matter. Their counts on 2026-11-16 are written beside them. Take a family on, fix it, delete its line; never raise a number, and never add a line without one.
 
+## Check a provider's answer where it comes in
+
+What a provider sends back is `unknown` until something has checked it. `(await response.json()) as Subscription` tells the compiler a shape nobody looked at, and on the day the provider changes that shape the mistake turns up as an `undefined` in billing, far from the call. This is the second half of the technical audit's AUDIT-020.
+
+Polar's billing client, `packages/providers/src/polar/polarBilling.ts`, is the pattern to copy:
+
+- `request` returns `unknown`, so the compiler refuses any use of an answer that a schema hasn't read.
+- Each answer billing reads has a zod schema that names only the fields billing reads. A field the provider adds is ignored. A field billing can do without may be missing or null, but never of another type.
+- An answer that fails raises `PolarResponseError` with the answer's name and the fields: `Polar's subscription is missing or mistypes: product_id.` The values stay out of the message, because an answer can hold a customer's email and the message goes to the logs.
+
+Stripe, Twilio and the embedding provider come through their SDKs' own types, and Polar's webhooks and catalog calls already read each field as `unknown`. Two hand-written clients still cast what they fetch: Google Calendar (`packages/providers/src/google/calendar.ts`, five answers) and Firecrawl (`packages/providers/src/crawling/firecrawl.ts`, one). Give a client its schemas when you next change it.
+
 ## See how much the tests cover
 
 `pnpm test:coverage` runs the admin, worker, `db` and `domain` suites with coverage and prints one table for the four. Every source file counts, not only the ones a test imported, so an untested file shows as zero instead of vanishing. The settings live in `vitest.coverage.mts` and the table comes from `scripts/coverage-summary.mjs`.

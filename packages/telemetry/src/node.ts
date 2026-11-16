@@ -403,16 +403,39 @@ export function errorText(error: unknown): string {
 }
 
 /**
+ * A log line's fields. `level` and `message` are the line's own keys, so a
+ * field written here can't use those names: call it `detail`, or what it is.
+ */
+export type LogFields = Record<string, unknown> & { level?: never; message?: never };
+
+// The compiler only sees the names written in a call. A field can still
+// arrive as `level` or `message` inside an object that's spread or passed
+// whole, such as a provider's error body, and is then kept under these names.
+// `fieldMessage` is masked in the OTel export, as every key with "message" in
+// its name is.
+const RESERVED_LOG_KEYS = new Map([["level", "fieldLevel"], ["message", "fieldMessage"]]);
+
+/** The key a field is logged under: its own, unless that is one of the line's. */
+function logFieldKey(key: string, fields: Record<string, unknown>): string {
+  let name = RESERVED_LOG_KEYS.get(key);
+  if (!name) return key;
+  // A field that already has the other name keeps it.
+  while (fields[name] !== undefined) name += "_";
+  return name;
+}
+
+/**
  * Prints one JSON line with the current call's IDs and the active trace, and
  * exports the same record as an OTel log. Railway reads `level` and `message`
- * and makes every other field filterable, such as `@callId:<id>`. A value
- * under `error` is reduced to its redacted message. Never pass transcript
- * text, phone numbers or other customer content.
+ * and makes every other field filterable, such as `@callId:<id>`. Searches
+ * and alerts go by the event name in `message`, so no field can replace it
+ * or the severity. A value under `error` is reduced to its redacted message.
+ * Never pass transcript text, phone numbers or other customer content.
  */
-export function logEvent(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
+export function logEvent(level: LogLevel, message: string, fields: LogFields = {}): void {
   const record: Record<string, unknown> = { ...currentCallContext() };
   for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) record[key] = key === "error" || value instanceof Error ? errorText(value) : value;
+    if (value !== undefined) record[logFieldKey(key, fields)] = key === "error" || value instanceof Error ? errorText(value) : value;
   }
   const spanContext = trace.getActiveSpan()?.spanContext();
   if (spanContext && isSpanContextValid(spanContext)) record.traceId = spanContext.traceId;

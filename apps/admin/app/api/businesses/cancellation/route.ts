@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     const [owner] = await getAuthDatabase().db.select({ locale: users.preferredLocale }).from(users).where(eq(users.id, session.user.id)).limit(1);
     const requested = await requestBusinessCancellation(createDomainContext(), { userId: session.user.id, businessId, confirmName: body.confirmName, locale: normalizeInterfaceLocale(owner?.locale) ?? undefined });
     logEvent("info", "business.cancellation_requested", { businessId, userId: session.user.id });
-    if (!requested.inboxNotified) logEvent("warn", "business.cancellation_inbox_missing", { businessId, message: "No inbox heard about this cancellation request: set the brand's contactEmail or FEEDBACK_TO_EMAIL." });
+    if (!requested.inboxNotified) logEvent("warn", "business.cancellation_inbox_missing", { businessId, detail: "No inbox heard about this cancellation request: set the brand's contactEmail or FEEDBACK_TO_EMAIL." });
     return NextResponse.json({ email: requested.email, expiresAt: requested.expiresAt.toISOString() });
   } catch (error) {
     return asApiResponse(error);

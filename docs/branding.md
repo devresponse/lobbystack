@@ -38,7 +38,7 @@ After changing anything under `brands/`, run `pnpm brands:build`. It checks ever
 
 The build reads only the images `brand.json` names, so a folder can also keep images used elsewhere. AlloPlace's holds `logo-zapier.png`, the 256×256 logo uploaded by hand in Zapier's developer dashboard ([`integrations/zapier/README.md`](../integrations/zapier/README.md)).
 
-RealInfoBot's three images share one icon, its sign with a QR code and an orange pointer. `logo.png` is that sign on a white tile with rounded corners, 256 pixels square, so it still shows on a dark tab strip or in dark mode. `logo-email.png` is the same tile at 96 pixels, and `og.png` shows the sign beside the words REAL INFO BOT. They were made from the brand's original artwork, which isn't in the repository.
+RealInfoBot's three images share one icon, its sign with a QR code and an orange pointer. `logo.png` is that sign on a white tile with rounded corners, 256 pixels square, so it still shows on a dark tab strip or in dark mode. `logo-email.png` is the same tile at 96 pixels, and `og.png` shows the sign beside the words REAL INFO BOT. They were made from the brand's original artwork, `real-info-bot.png`, which the folder holds since 2026-11-16: the sign and the words on a transparent background, 1832 by 503 pixels. Beside it are two 120-pixel squares on white for the logo field of Google's sign-in consent screen, which is filled in by hand in Google's console: `real-info-bot-google-120-icon.png` is the sign alone, and `real-info-bot-google-120.png` is the whole logo. `brand.json` names none of the three, so the build neither reads nor copies them.
 
 The repository is public, so everything in a brand folder is public too.
 

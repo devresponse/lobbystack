@@ -25,6 +25,7 @@ pnpm build
 - The `replacement:*` checks commit their rows. After several runs on one database, `pnpm replacement:recovery` fails with "Outbox dispatcher did not claim the recovery message"; CI runs it on a fresh, seeded database, so reproduce it that way.
 - When you change GPT-Live's instructions, the call controller or how calls end, run `pnpm voice:eval` before opening the pull request and `pnpm voice:call` against a test deployment before merging ([voice testing](../voice/testing.md)). Both need an OpenAI key.
 - Every new telemetry event needs a test that it fires from its real code path.
+- A call from a server to another service needs a time limit: Node's `fetch` has none short of 300 seconds. Use `fetchWithTimeout` (`@lobbystack/shared`), which gives a call 15 seconds unless you pass another limit, or write a `signal` in the `fetch` call. Since fork PR #189, `scripts/outbound-fetch.test.ts` fails on a `fetch` without one in the worker, the admin's `app/api` and the server packages (the technical audit's AUDIT-023). The admin's `src/` isn't read, since its browser code calls `fetch` too.
 - A log line's own keys are `level` and `message`, so `logEvent` doesn't compile with a field of either name: call it `detail`, or what it is ([telemetry](../telemetry/architecture.md#follow-one-call)).
 
 CI runs on every pull request and every push to `main`, to a release branch such as `releases/r2` or to a development branch such as `develop/r2` ([overview](../project/overview.md#make-a-change)).

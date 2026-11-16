@@ -1,4 +1,4 @@
-import { assertCertificationCalendar } from "@lobbystack/shared";
+import { assertCertificationCalendar, fetchWithTimeout } from "@lobbystack/shared";
 import { DateTime } from "luxon";
 
 export class GoogleOAuthRefreshError extends Error {
@@ -14,6 +14,7 @@ export type GoogleCalendarConfig = {
   redirectUri: string;
 };
 
+/** Every call to Google gets fetchWithTimeout's 15 seconds, so a stalled Google ends a request or a job instead of holding it. */
 export class GoogleCalendarProvider {
   constructor(private readonly config: GoogleCalendarConfig) {}
 
@@ -30,7 +31,7 @@ export class GoogleCalendarProvider {
   }
 
   async exchangeCode(code: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number }> {
-    const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, client_id: this.config.clientId, client_secret: this.config.clientSecret, redirect_uri: this.config.redirectUri, grant_type: "authorization_code" }) });
+    const response = await fetchWithTimeout("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, client_id: this.config.clientId, client_secret: this.config.clientSecret, redirect_uri: this.config.redirectUri, grant_type: "authorization_code" }) });
     if (!response.ok) {
       throw new Error(`Google OAuth token exchange failed with status ${response.status}.`);
     }
@@ -40,8 +41,8 @@ export class GoogleCalendarProvider {
   }
 
   async refreshAccessToken(input: { refreshToken: string }): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST", signal: AbortSignal.timeout(15_000),
+    const response = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
+      method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: input.refreshToken, client_id: this.config.clientId, client_secret: this.config.clientSecret }),
     });
@@ -52,7 +53,7 @@ export class GoogleCalendarProvider {
   }
 
   async getAccount(input: { accessToken: string }): Promise<{ id: string; email?: string }> {
-    const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${input.accessToken}` } });
+    const response = await fetchWithTimeout("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${input.accessToken}` } });
     if (!response.ok) {
       throw new Error(`Google account lookup failed with status ${response.status}.`);
     }
@@ -62,7 +63,7 @@ export class GoogleCalendarProvider {
   }
 
   async listCalendars(input: { accessToken: string }): Promise<Array<{ id: string; summary: string; primary: boolean; accessRole?: string }>> {
-    const response = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", { headers: { authorization: `Bearer ${input.accessToken}` } });
+    const response = await fetchWithTimeout("https://www.googleapis.com/calendar/v3/users/me/calendarList", { headers: { authorization: `Bearer ${input.accessToken}` } });
     if (!response.ok) throw Object.assign(new Error(`Google Calendar discovery failed with status ${response.status}.`), { responseStatus: response.status });
     const payload = (await response.json()) as { items?: Array<{ id?: string; summary?: string; primary?: boolean; accessRole?: string }> };
     return (payload.items ?? []).flatMap((calendar) => calendar.id && calendar.summary ? [{ id: calendar.id, summary: calendar.summary, primary: calendar.primary === true, ...(calendar.accessRole ? { accessRole: calendar.accessRole } : {}) }] : []);
@@ -82,7 +83,7 @@ export class GoogleCalendarProvider {
       url.searchParams.set("maxResults", "2500");
       url.searchParams.set("fields", "timeZone,nextPageToken,items(id,start,end,status,transparency,attendees(self,responseStatus))");
       if (pageToken) url.searchParams.set("pageToken", pageToken);
-      const response = await fetch(url, { headers: { authorization: `Bearer ${input.accessToken}` }, signal: AbortSignal.timeout(15_000) });
+      const response = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${input.accessToken}` } });
       if (!response.ok) throw new Error(`Google Calendar availability request failed with status ${response.status}.`);
       const payload = (await response.json()) as {
         timeZone?: string;
@@ -113,7 +114,7 @@ export class GoogleCalendarProvider {
     assertCertificationCalendar(input.calendarId);
     const method = input.eventId ? "PUT" : "POST";
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events${input.eventId ? `/${encodeURIComponent(input.eventId)}` : ""}`;
-    const response = await fetch(url, { method, signal: AbortSignal.timeout(15_000), headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ ...(input.clientEventId && !input.eventId ? { id: input.clientEventId } : {}), summary: input.title, description: input.description, start: { dateTime: input.startsAt }, end: { dateTime: input.endsAt } }) });
+    const response = await fetchWithTimeout(url, { method, headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ ...(input.clientEventId && !input.eventId ? { id: input.clientEventId } : {}), summary: input.title, description: input.description, start: { dateTime: input.startsAt }, end: { dateTime: input.endsAt } }) });
     if (!response.ok) {
       if (!input.eventId && input.clientEventId && response.status === 409) return await this.upsertEvent({ ...input, eventId: input.clientEventId });
       throw new Error(`Google Calendar event write failed with status ${response.status}.`);
@@ -124,7 +125,7 @@ export class GoogleCalendarProvider {
 
   async deleteEvent(input: { accessToken: string; calendarId: string; eventId: string }): Promise<void> {
     assertCertificationCalendar(input.calendarId);
-    const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`, { method: "DELETE", headers: { authorization: `Bearer ${input.accessToken}` }, signal: AbortSignal.timeout(15_000) });
+    const response = await fetchWithTimeout(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`, { method: "DELETE", headers: { authorization: `Bearer ${input.accessToken}` } });
     if (!response.ok && response.status !== 404 && response.status !== 410) throw new Error(`Google Calendar event deletion failed with status ${response.status}.`);
   }
 }

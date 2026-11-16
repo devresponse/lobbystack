@@ -1,6 +1,8 @@
+import { fork } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
 const textMimeTypes = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
@@ -43,7 +45,7 @@ export function assertDocxInflatesWithin(body: Uint8Array, limit = maxInflatedDo
 
 export type DocumentInput = { body: Uint8Array; contentType: string };
 export type OcrRecorder = (durationMs: number, attributes: { source_type: string; page_count?: number }) => void;
-type ThreadMessage = { ocr: Parameters<OcrRecorder> } | { text: string } | { pdfReaderFailed: string };
+type ChildMessage = { ocr: Parameters<OcrRecorder> } | { text: string } | { pdfReaderFailed: string } | { failed: string };
 
 /**
  * The original reader: pdf-parse's text, and OCR only when no page has text.
@@ -216,9 +218,9 @@ function ocrPdfWordLines(page: OcrBlocks, imageHeight: number): PdfTextItem[][] 
 class ScannedPdfTooLongError extends Error {}
 
 /**
- * The improved reader couldn't read a PDF, so extractDocumentTextInThread has the original read it in
- * a new thread: pdf.js 6 leaves its worker code and canvas classes on globalThis, where pdf-parse's
- * pdf.js 5 would find them and refuse to run.
+ * The improved reader couldn't read a PDF, so extractDocumentTextInChildProcess has the original read
+ * it in a new process: pdf.js 6 leaves its worker code and canvas classes on globalThis, where
+ * pdf-parse's pdf.js 5 would find them and refuse to run.
  */
 class ImprovedPdfReaderError extends Error {}
 
@@ -279,8 +281,8 @@ export async function extractPdfTextImproved(body: Uint8Array, recordOcr: OcrRec
 
 /**
  * Reads a PDF with the improved reader, unless KNOWLEDGE_PDF_READER is "original" (or "default").
- * When the improved reader fails, extractDocumentTextInThread has the original read the PDF in a new
- * thread, so a PDF the improved reader can't read is no worse off than before.
+ * When the improved reader fails, extractDocumentTextInChildProcess has the original read the PDF in
+ * a new process, so a PDF the improved reader can't read is no worse off than before.
  */
 async function extractPdfText(body: Uint8Array, recordOcr: OcrRecorder): Promise<string> {
   if (["original", "default"].includes(process.env.KNOWLEDGE_PDF_READER?.trim().toLowerCase() ?? "")) return await extractPdfTextDefault(body, recordOcr);
@@ -315,57 +317,136 @@ export async function extractDocumentText(input: DocumentInput, recordOcr: OcrRe
   throw new Error(`Unsupported knowledge document content type: ${contentType || "unknown"}.`);
 }
 
+// How often the parent reads the extraction process's resident size, in milliseconds.
+const memoryCheckIntervalMs = 100;
+// Enough of the extraction process's last words to explain why it stopped.
+const maxChildStderrLength = 4000;
+// Tells this module, run as a process of its own, that it is the one doing the extraction.
+const extractionArgument = "--extract-document";
+
 /**
- * Extracts text in a worker thread with its own heap limit and deadline, so a
- * crafted file that exhausts the parser's heap kills only this thread, not the
- * process that also runs live calls and every other job.
- * shortcut: the limit covers the V8 heap, not ArrayBuffers. .docx entries are
- * capped above, but a PDF's compressed streams are not; run extraction in a
- * child process with a memory limit if PDF bombs become a real threat.
+ * The document passed one of the limits below. It would pass it again on every attempt, and each
+ * attempt costs the machine that memory or that time again, so the job doesn't retry it.
  */
-export async function extractDocumentTextInThread(input: DocumentInput, recordOcr: OcrRecorder, limits = { maxHeapMb: 512, timeoutMs: 5 * 60_000 }): Promise<string> {
+export class ExtractionLimitError extends Error {}
+
+/** What one extraction may use: a V8 heap cap, a resident-memory cap, and a deadline. */
+export type ExtractionLimits = { maxHeapMb: number; maxMemoryMb: number; timeoutMs: number };
+
+/**
+ * Comfortably above what the heaviest real documents need, measured on Node 26: a 25-page scan read
+ * by OCR peaks at about 320 MB, a 500-page text PDF at about 240 MB, and a 100-megapixel photo at
+ * about 1,050 MB. A PDF whose compressed streams inflate to gigabytes passes the cap in seconds.
+ */
+export const defaultExtractionLimits: ExtractionLimits = { maxHeapMb: 512, maxMemoryMb: 2048, timeoutMs: 5 * 60_000 };
+
+/** The limits, with KNOWLEDGE_EXTRACTION_MAX_MEMORY_MB raising or lowering the resident-memory cap. */
+export function extractionLimits(env: NodeJS.ProcessEnv = process.env): ExtractionLimits {
+  const configured = Number(env.KNOWLEDGE_EXTRACTION_MAX_MEMORY_MB);
+  return { ...defaultExtractionLimits, ...(Number.isFinite(configured) && configured > 0 ? { maxMemoryMb: Math.floor(configured) } : {}) };
+}
+
+/** The process's resident size in MB, on Linux. Elsewhere, and once it has gone, undefined. */
+function residentMemoryMb(pid: number | undefined): number | undefined {
+  if (pid === undefined) return undefined;
   try {
-    return await extractInThread(input, recordOcr, limits, process.env);
+    const kb = /^VmRSS:\s+(\d+)/mu.exec(readFileSync(`/proc/${pid}/status`, "utf8"))?.[1];
+    return kb === undefined ? undefined : Number(kb) / 1024;
+  } catch {
+    return undefined;
+  }
+}
+
+function stoppedError(limits: ExtractionLimits, overMemory: boolean, code: number | null, signal: NodeJS.Signals | null, stderr: string): Error {
+  if (overMemory) return new ExtractionLimitError(`Document extraction reached its ${limits.maxMemoryMb} MB memory limit.`);
+  // V8 prints why and aborts when the heap cap is reached.
+  if (signal === "SIGABRT" || stderr.includes("heap out of memory")) return new ExtractionLimitError(`Document extraction reached its ${limits.maxHeapMb} MB heap memory limit.`);
+  // Nothing here sends SIGKILL but the cap above, so the system did: almost always its own memory limit.
+  if (signal === "SIGKILL") return new Error("Document extraction was killed by the system, which is what it does when the machine runs out of memory.");
+  const lastLine = stderr.trim().split("\n").pop();
+  return new Error(`Document extraction stopped${signal ? ` with ${signal}` : ` with code ${code}`}.${lastLine ? ` ${lastLine.slice(0, 300)}` : ""}`);
+}
+
+/**
+ * Extracts text in a process of its own, under a heap cap, a resident-memory cap and a deadline, so a
+ * crafted file that exhausts the parser's memory takes only that process, not the one that also runs
+ * live calls and every other job. A worker thread could not do this: its heap limit doesn't cover the
+ * ArrayBuffers a PDF's inflated streams and a page's pixels live in (AUDIT-025).
+ */
+export async function extractDocumentTextInChildProcess(input: DocumentInput, recordOcr: OcrRecorder, limits: ExtractionLimits = extractionLimits()): Promise<string> {
+  try {
+    return await extractInChildProcess(input, recordOcr, limits, process.env);
   } catch (error) {
     if (!(error instanceof ImprovedPdfReaderError)) throw error;
     console.warn(JSON.stringify({ event: "knowledge.pdf_reader_fallback", message: error.message }));
-    return await extractInThread(input, recordOcr, limits, { ...process.env, KNOWLEDGE_PDF_READER: "original" });
+    return await extractInChildProcess(input, recordOcr, limits, { ...process.env, KNOWLEDGE_PDF_READER: "original" });
   }
 }
 
-async function extractInThread(input: DocumentInput, recordOcr: OcrRecorder, limits: { maxHeapMb: number; timeoutMs: number }, env: NodeJS.ProcessEnv): Promise<string> {
-  // The build emits this module as its own entry beside index.js; dev and tests load the .ts source.
-  const thread = new Worker(new URL(`./documentExtraction.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url), {
-    workerData: { documentExtraction: input },
-    resourceLimits: { maxOldGenerationSizeMb: limits.maxHeapMb },
+async function extractInChildProcess(input: DocumentInput, recordOcr: OcrRecorder, limits: ExtractionLimits, env: NodeJS.ProcessEnv): Promise<string> {
+  // The build emits this module as its own entry beside index.js; dev and tests run the .ts source, which Node reads as it is.
+  const entry = fileURLToPath(new URL(`./documentExtraction.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
+  const child = fork(entry, [extractionArgument], {
     env,
+    // The body and the text it becomes cross as binary, not as JSON.
+    serialization: "advanced",
+    execArgv: [`--max-old-space-size=${limits.maxHeapMb}`],
+    stdio: ["ignore", "inherit", "pipe", "ipc"],
   });
+  let stderr = "";
+  child.stderr?.on("data", (chunk: Buffer) => {
+    // The parser's own warnings stay in the worker's log, as they did from a thread.
+    process.stderr.write(chunk);
+    stderr = `${stderr}${chunk.toString("utf8")}`.slice(-maxChildStderrLength);
+  });
+  let overMemory = false;
+  const memoryCheck = setInterval(() => {
+    if ((residentMemoryMb(child.pid) ?? 0) <= limits.maxMemoryMb) return;
+    overMemory = true;
+    child.kill("SIGKILL");
+  }, memoryCheckIntervalMs);
   let timer: NodeJS.Timeout | undefined;
   try {
     return await new Promise<string>((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error(`Document extraction timed out after ${limits.timeoutMs} ms.`)), limits.timeoutMs);
-      thread.on("message", (message: ThreadMessage) => {
+      timer = setTimeout(() => reject(new ExtractionLimitError(`Document extraction timed out after ${limits.timeoutMs} ms.`)), limits.timeoutMs);
+      child.on("message", (message: ChildMessage) => {
         if ("ocr" in message) recordOcr(...message.ocr);
         else if ("pdfReaderFailed" in message) reject(new ImprovedPdfReaderError(message.pdfReaderFailed));
+        else if ("failed" in message) reject(new Error(message.failed));
         else resolve(message.text);
       });
-      thread.on("error", reject);
-      thread.on("exit", (code) => reject(new Error(`Document extraction thread exited with code ${code}.`)));
+      child.on("error", reject);
+      child.on("exit", (code, signal) => reject(stoppedError(limits, overMemory, code, signal, stderr)));
+      child.send(input, (error) => {
+        if (error) reject(error);
+      });
     });
   } finally {
     clearTimeout(timer);
-    await thread.terminate();
+    clearInterval(memoryCheck);
+    child.kill("SIGKILL");
   }
 }
 
-if (!isMainThread && workerData?.documentExtraction) {
-  const post = (message: ThreadMessage) => parentPort?.postMessage(message);
+if (process.argv[2] === extractionArgument && process.send) {
+  // If the machine runs out of memory, the kernel takes this process first, never the worker holding calls.
   try {
-    const text = await extractDocumentText(workerData.documentExtraction, (...ocr) => post({ ocr }));
-    if (text.length > maxExtractedTextLength) throw new Error(`Extracted text is longer than ${maxExtractedTextLength} characters.`);
-    post({ text });
-  } catch (error) {
-    if (!(error instanceof ImprovedPdfReaderError)) throw error;
-    post({ pdfReaderFailed: error.message });
+    writeFileSync("/proc/self/oom_score_adj", "1000");
+  } catch {
+    // Not Linux, or not allowed: the caps above still hold.
   }
+  const post = (message: ChildMessage) => void process.send?.(message);
+  process.once("message", (input: DocumentInput) => {
+    void (async () => {
+      try {
+        const text = await extractDocumentText(input, (...ocr) => post({ ocr }));
+        if (text.length > maxExtractedTextLength) throw new Error(`Extracted text is longer than ${maxExtractedTextLength} characters.`);
+        post({ text });
+      } catch (error) {
+        if (error instanceof ImprovedPdfReaderError) post({ pdfReaderFailed: error.message });
+        else post({ failed: error instanceof Error ? error.message : String(error) });
+      }
+      // The caller kills this process as soon as it has the answer, so nothing else needs to end here.
+    })();
+  });
 }

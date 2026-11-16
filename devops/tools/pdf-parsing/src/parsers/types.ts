@@ -1,8 +1,8 @@
 /** One file to read, as the worker gets it from storage: its bytes and content type. */
 export type ParseInput = { body: Uint8Array; contentType: string };
 
-/** The worker's own limits for one extraction thread: a heap cap and a deadline. */
-export type ParseLimits = { maxHeapMb: number; timeoutMs: number };
+/** The worker's own limits for one extraction process: a heap cap, a memory cap and a deadline. */
+export type ParseLimits = { maxHeapMb: number; maxMemoryMb: number; timeoutMs: number };
 
 /** How the pdfjs reader marks where each page starts. */
 export type PageMarkers = "line" | "heading" | "none";

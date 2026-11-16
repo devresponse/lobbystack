@@ -35,7 +35,8 @@ parse:
   --truth <folder>           Where <document>.html, .md or .txt hold each document's correct text. Default: the input folder
   --recursive                Also read the PDFs in subfolders.
   --timeout-ms <ms>          Deadline for one document, as the worker's. Default: 300000
-  --max-heap-mb <mb>         Heap cap for one document's thread, as the worker's. Default: 512
+  --max-heap-mb <mb>         Heap cap for one document's process, as the worker's. Default: 512
+  --max-memory-mb <mb>       Memory cap for one document's process, as the worker's. Default: 2048
   --ocr-max-pages <n>        pdfjs: pages without text to read by OCR. Default: 50
   --page-markers <style>     pdfjs: line ([Page 2 of 9]), heading (## Page 2 of 9) or none. Default: line
 
@@ -110,6 +111,7 @@ async function main(argv: string[]): Promise<number> {
         recursive: { type: "boolean" },
         "timeout-ms": { type: "string" },
         "max-heap-mb": { type: "string" },
+        "max-memory-mb": { type: "string" },
         "ocr-max-pages": { type: "string" },
         "page-markers": { type: "string" },
       });
@@ -128,7 +130,7 @@ async function main(argv: string[]): Promise<number> {
         parsers: chosenParsers(text(values, "parser")),
         truthFolder,
         recursive: values.recursive === true,
-        options: { limits: { timeoutMs: count(values, "timeout-ms", 300_000), maxHeapMb: count(values, "max-heap-mb", 512) }, ocrMaxPages: count(values, "ocr-max-pages", 50), pageMarkers: markers as PageMarkers },
+        options: { limits: { timeoutMs: count(values, "timeout-ms", 300_000), maxHeapMb: count(values, "max-heap-mb", 512), maxMemoryMb: count(values, "max-memory-mb", 2048) }, ocrMaxPages: count(values, "ocr-max-pages", 50), pageMarkers: markers as PageMarkers },
         log,
       };
       await mkdir(output, { recursive: true });

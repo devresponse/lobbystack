@@ -19,7 +19,7 @@ pnpm test
 pnpm build
 ```
 
-- After changing migrations, roles or row-level security, also run `pnpm db:check` and `pnpm db:verify-rls`.
+- After changing migrations, roles or row-level security, also run `pnpm db:check`, `pnpm db:compare-schema` and `pnpm db:verify-rls`, and `pnpm db:freeze-migrations` when you add a migration file ("[Change the schema in two places](#change-the-schema-in-two-places)").
 - The public API's rate limit is tested against a real Redis when `REDIS_TEST_URL` is set, as CI's database job does; without it that one test skips.
 - The database integration tests run with `pnpm test:reliability` and need `LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL`, pointing at a dedicated database whose name contains `test`. Without it they skip. The admin's sign-in tests also need `LOBBYSTACK_AUTH_TEST_DATABASE_URL`, which only CI's database job sets, so set it when you change sign-in emails or the users table.
 - `pnpm e2e:local` runs the browser tests against a local stack in Docker.
@@ -54,6 +54,14 @@ A dashboard screen takes the type of what it loads from the function that builds
 A dashboard route under `apps/admin/app/api` gets its data from a function in `packages/domain/src/server`, the same place the v1 API gets it, so a question has one answer and the two can't drift. An ESLint rule enforces it: `@lobbystack/db` gives a route `withBusinessTransaction`, `withDispatcherTransaction`, `enqueueOutbox`, `databaseHealthCheck` and the `DatabaseTransaction` type, and no tables. When a route already holds a transaction, write the domain function to take it first and name it `…InTransaction`, as `readBusinessHoursPageInTransaction` does, so the read runs under the business's row-level security with everything else the request does. A route test that mocks `@lobbystack/domain` should pass such a function through from the real module (`...await original<typeof import("@lobbystack/domain")>()`), so the test still checks the query the screen depends on.
 
 The routes that haven't moved yet are listed in `routesStillQueryingTables` in `apps/admin/eslint.config.mjs`. Take one off the list when you move it; nothing goes on it.
+
+## Change the schema in two places
+
+The database is built by the SQL migrations in `packages/db/migrations`, and typed by the Drizzle schema in `packages/db/src/schema/index.ts`. Neither is generated from the other, so a migration that adds a column and a schema that doesn't declare it both look fine on their own, and only a query that touches the column notices (the technical audit's AUDIT-015). Write both halves in the same pull request.
+
+`pnpm db:compare-schema` reads `pg_catalog` from a migrated database and compares it with the schema, column by column: names, types, nullability and the columns each index covers. CI's database job runs it after migrating, so a half-written change fails there rather than in production. Indexes are matched by what they cover, not by their names, because the same unique index is a named index in Drizzle and an inline `UNIQUE` constraint under a generated name in SQL; an index over an expression, such as the GIN index on `to_tsvector(title)`, lives in SQL alone and is not compared.
+
+**A migration that has run is history.** `packages/db/migrations/checksums.json` freezes each file's checksum, and `packages/db/src/migrations/checksums.test.ts` fails when one changes. A database that already applied the old text keeps it, and the migrator can only warn, so editing an applied migration guarantees two databases that will never agree. Add a new migration instead. After adding one, run `pnpm db:freeze-migrations` and commit the manifest with it.
 
 ## Read a setting one way
 

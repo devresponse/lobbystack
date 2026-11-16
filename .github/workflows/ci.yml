@@ -152,6 +152,8 @@ jobs:
             pnpm --filter @lobbystack/db exec tsx src/cli.ts bootstrap
           done
       - run: pnpm db:check
+      - name: Compare the Drizzle schema with the migrated database
+        run: pnpm db:compare-schema
       - run: pnpm db:verify-rls
       - name: Test transactional reliability with PostgreSQL roles
         run: pnpm test:reliability

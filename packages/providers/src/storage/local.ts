@@ -32,15 +32,50 @@ type StoredMetadata = {
   checksum?: string;
 };
 
-export class LocalStorageValidationError extends Error {}
+/**
+ * A refusal the caller earned, with the status it deserves and a message that
+ * says only what the caller already knows. Before this, the route sent back
+ * whatever a file-system or driver error happened to say, and chose the status
+ * by searching that text for "token" or "range" (AUDIT-009): a message with
+ * the word "token" in it became a 403 whatever had gone wrong, and internal
+ * paths reached anyone probing the route. Anything that isn't one of these is
+ * a server fault and belongs in the logs with an error ID, not in the answer.
+ */
+export class LocalStorageRefusal extends Error {
+  constructor(message: string, readonly status: 400 | 403 | 416) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+/** The upload didn't match what the signed request promised. */
+export class LocalStorageValidationError extends LocalStorageRefusal {
+  constructor(message: string) {
+    super(message, 400);
+  }
+}
+
+/** The token was missing, forged, expired, or asked for something it doesn't cover. */
+export class LocalStorageTokenError extends LocalStorageRefusal {
+  constructor(message = "Invalid storage token.") {
+    super(message, 403);
+  }
+}
+
+/** The byte range asked for isn't one this object can satisfy. */
+export class LocalStorageRangeError extends LocalStorageRefusal {
+  constructor() {
+    super("Invalid byte range.", 416);
+  }
+}
 
 function validatedSegments(key: string): string[] {
   if (!key || key.includes("\0") || key.includes("\\") || isAbsolute(key)) {
-    throw new Error("Invalid storage key.");
+    throw new LocalStorageTokenError("Invalid storage key.");
   }
   const segments = key.split("/");
   if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
-    throw new Error("Invalid storage key.");
+    throw new LocalStorageTokenError("Invalid storage key.");
   }
   return segments;
 }
@@ -50,7 +85,7 @@ export function resolveStoragePath(rootPath: string, namespace: "objects" | "met
   const candidate = resolve(root, ...validatedSegments(key)) + (namespace === "metadata" ? ".json" : "");
   const pathFromRoot = relative(root, candidate);
   if (!pathFromRoot || pathFromRoot === ".." || pathFromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(pathFromRoot)) {
-    throw new Error("Invalid storage key.");
+    throw new LocalStorageTokenError("Invalid storage key.");
   }
   return candidate;
 }
@@ -66,40 +101,40 @@ function encodeToken(claims: LocalStorageToken, secret: string): string {
 
 export function verifyLocalStorageToken(token: string, secret: string, expectedOperation: LocalStorageOperation): LocalStorageToken {
   const [payload, providedSignature, extra] = token.split(".");
-  if (!payload || !providedSignature || extra) throw new Error("Invalid storage token.");
+  if (!payload || !providedSignature || extra) throw new LocalStorageTokenError();
   const expectedSignature = signature(payload, secret);
   const provided = Buffer.from(providedSignature);
   const expected = Buffer.from(expectedSignature);
-  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) throw new Error("Invalid storage token.");
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) throw new LocalStorageTokenError();
 
   let value: unknown;
   try {
     value = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
-    throw new Error("Invalid storage token.");
+    throw new LocalStorageTokenError();
   }
-  if (!value || typeof value !== "object") throw new Error("Invalid storage token.");
+  if (!value || typeof value !== "object") throw new LocalStorageTokenError();
   const claims = value as Partial<LocalStorageToken>;
   if (claims.operation !== expectedOperation || typeof claims.key !== "string" || typeof claims.expiresAt !== "number" || claims.expiresAt < Math.floor(Date.now() / 1000)) {
-    throw new Error("Invalid or expired storage token.");
+    throw new LocalStorageTokenError("Invalid or expired storage token.");
   }
   validatedSegments(claims.key);
-  if (claims.contentType !== undefined && typeof claims.contentType !== "string") throw new Error("Invalid storage token.");
-  if (claims.length !== undefined && (!Number.isSafeInteger(claims.length) || claims.length < 0)) throw new Error("Invalid storage token.");
-  if (claims.checksum !== undefined && typeof claims.checksum !== "string") throw new Error("Invalid storage token.");
-  if (claims.range !== undefined && typeof claims.range !== "string") throw new Error("Invalid storage token.");
+  if (claims.contentType !== undefined && typeof claims.contentType !== "string") throw new LocalStorageTokenError();
+  if (claims.length !== undefined && (!Number.isSafeInteger(claims.length) || claims.length < 0)) throw new LocalStorageTokenError();
+  if (claims.checksum !== undefined && typeof claims.checksum !== "string") throw new LocalStorageTokenError();
+  if (claims.range !== undefined && typeof claims.range !== "string") throw new LocalStorageTokenError();
   return claims as LocalStorageToken;
 }
 
 function byteRange(range: string | undefined, length: number): { start: number; end: number } | undefined {
   if (!range) return undefined;
   const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-  if (!match || (!match[1] && !match[2]) || length === 0) throw new Error("Invalid byte range.");
+  if (!match || (!match[1] && !match[2]) || length === 0) throw new LocalStorageRangeError();
   const startText = match[1] ?? "";
   const endText = match[2] ?? "";
   const start = startText ? Number(startText) : Math.max(0, length - Number(endText));
   const end = endText && startText ? Math.min(length - 1, Number(endText)) : length - 1;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= length) throw new Error("Invalid byte range.");
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= length) throw new LocalStorageRangeError();
   return { start, end };
 }
 

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lobbystack/providers", async () => await import("../../../../../../packages/providers/src/index"));
+vi.mock("@lobbystack/providers/storage/local", async () => await import("../../../../../../packages/providers/src/storage/local"));
 
 import { createStorageProvider } from "@lobbystack/providers";
 import { GET, PUT } from "./route";
@@ -87,4 +88,30 @@ describe("local storage HTTP route", { concurrent: false }, () => {
     expect(response.status).toBe(400);
     await expect(storage.headObject({ key: "business/attachment/object/file.txt" })).resolves.toBeNull();
   });
+});
+
+// AUDIT-009: both catch blocks used to answer with the exception's own text and
+// pick the status by searching it, so a file-system message reached the caller
+// and any message holding "token" became a 403.
+describe("what the local storage route says when something goes wrong", { concurrent: false }, () => {
+  it("answers 416 for a range this object can't satisfy", async () => {
+    const storage = createStorageProvider();
+    const body = new TextEncoder().encode("twelve bytes");
+    const upload = await storage.createUpload({ key: "business/attachment/object/short.txt", contentType: "text/plain", length: body.byteLength });
+    await PUT(new Request(upload.url, { method: "PUT", headers: { "content-type": "text/plain" }, body }));
+
+    const url = await storage.createDownloadUrl({ key: "business/attachment/object/short.txt", expiresInSeconds: 60 });
+    const response = await GET(new Request(url, { headers: { range: "bytes=900-999" } }));
+
+    expect(response.status).toBe(416);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid byte range." });
+  });
+
+  it("answers 403 when no token is given at all", async () => {
+    const response = await GET(new Request("http://localhost:3000/api/storage/local"));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "Missing storage token." });
+  });
+
 });

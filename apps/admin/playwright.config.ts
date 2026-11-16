@@ -35,7 +35,9 @@ export default defineConfig({
   // Operator fixtures share persisted active-workspace state across spec files.
   ...(process.env.PARITY_OPERATOR_USER_ID ? { workers: 1 } : {}),
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // The JSON report says which journeys needed a retry; scripts/flaky-journeys.mjs
+  // lists them, so a retry that turned green is still visible (AUDIT-021).
+  reporter: process.env.CI ? [["github"], ["json", { outputFile: "playwright-report/results.json" }]] : "list",
   use: {
     baseURL,
     trace: "retain-on-failure",

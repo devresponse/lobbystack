@@ -1,3 +1,5 @@
 import { defineConfig } from "vitest/config";
 
-export default defineConfig({ test: { include: ["src/**/*.test.{ts,tsx}"] } });
+import { coverageConfig } from "../../vitest.coverage.mjs";
+
+export default defineConfig({ test: { include: ["src/**/*.test.{ts,tsx}"], coverage: coverageConfig } });

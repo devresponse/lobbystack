@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
+import { coverageConfig } from "../../vitest.coverage.mjs";
+
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const src = fileURLToPath(new URL("./src", import.meta.url));
 
@@ -39,5 +41,6 @@ export default defineConfig({
     // flaky when all workspaces run concurrently under `pnpm -r test`.
     testTimeout: 20000,
     hookTimeout: 20000,
+    coverage: coverageConfig,
   },
 });

@@ -20,6 +20,7 @@ pnpm build
 ```
 
 - After changing migrations, roles or row-level security, also run `pnpm db:check` and `pnpm db:verify-rls`.
+- The public API's rate limit is tested against a real Redis when `REDIS_TEST_URL` is set, as CI's database job does; without it that one test skips.
 - The database integration tests run with `pnpm test:reliability` and need `LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL`, pointing at a dedicated database whose name contains `test`. Without it they skip. The admin's sign-in tests also need `LOBBYSTACK_AUTH_TEST_DATABASE_URL`, which only CI's database job sets, so set it when you change sign-in emails or the users table.
 - `pnpm e2e:local` runs the browser tests against a local stack in Docker.
 - The `replacement:*` checks commit their rows. After several runs on one database, `pnpm replacement:recovery` fails with "Outbox dispatcher did not claim the recovery message"; CI runs it on a fresh, seeded database, so reproduce it that way.
@@ -29,6 +30,16 @@ pnpm build
 - A log line's own keys are `level` and `message`, so `logEvent` doesn't compile with a field of either name: call it `detail`, or what it is ([telemetry](../telemetry/architecture.md#follow-one-call)).
 
 CI runs on every pull request and every push to `main`, to a release branch such as `releases/r2` or to a development branch such as `develop/r2` ([overview](../project/overview.md#make-a-change)).
+
+## See how much the tests cover
+
+`pnpm test:coverage` runs the admin, worker, `db` and `domain` suites with coverage and prints one table for the four. Every source file counts, not only the ones a test imported, so an untested file shows as zero instead of vanishing. The settings live in `vitest.coverage.mts` and the table comes from `scripts/coverage-summary.mjs`.
+
+The integration suites skip themselves without a test database, so `packages/domain` and `packages/db` read lower than what CI's database job exercises; the admin and worker figures are the real ones.
+
+There is no threshold yet (AUDIT-021). CI's `coverage` job publishes the same table in its summary and keeps each package's `lcov.info` as an artifact for 14 days. It is deliberately outside the `validate` gate for now, so a coverage run never blocks a release; once the numbers have been watched for a month, the measured figures become each package's floor and the job joins the gate.
+
+Coverage measures the Vitest suites only. The browser journeys are not counted, and a journey that passed only after a retry is named under **Flaky journeys** in the e2e job's summary (`scripts/flaky-journeys.mjs`), so a retry that turned green is still visible.
 
 ## Check what a request sends
 

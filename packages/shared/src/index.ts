@@ -380,6 +380,16 @@ export const widgetLeadFormConfigSchema = z.object({
   showBeforeChat: z.boolean().optional(),
 });
 
+/**
+ * What a value becomes after a JSON round trip: a Date arrives as its ISO string, and
+ * everything else keeps its shape. A browser types a dashboard response as
+ * `Jsonified<T>` of the domain's own return type, instead of declaring it again (AUDIT-018).
+ */
+export type Jsonified<T> = T extends Date ? string
+  : T extends readonly (infer Item)[] ? Array<Jsonified<Item>>
+  : T extends object ? { [Key in keyof T]: Jsonified<T[Key]> }
+  : T;
+
 export const widgetConfigSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional(),
   position: z.enum(widgetPositions).optional(),

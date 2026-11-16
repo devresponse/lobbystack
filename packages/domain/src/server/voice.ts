@@ -450,7 +450,7 @@ export async function recordCallProviderPricing(
 export async function listCalls(
   context: DomainContext,
   input: { userId: string; businessId: string; search?: string; limit?: number; offset?: number; receptionistId?: string | null | undefined },
-): Promise<{ calls: Array<Record<string, unknown>>; pagination: { limit: number; offset: number; total: number; hasNext: boolean } }> {
+) {
   if (input.receptionistId && !isUuid(input.receptionistId)) throw Object.assign(new Error("receptionist must be a receptionist id."), { status: 400, code: "invalid_receptionist" });
   return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, input);
@@ -522,19 +522,18 @@ export async function listCalls(
   });
 }
 
+/**
+ * What the Calls page is sent. Taken from the query itself, so a renamed column is a
+ * compile error on the screen rather than an empty cell (AUDIT-018). Over HTTP the dates
+ * become ISO strings: a browser reads it as `Jsonified<CallListPage>`.
+ */
+export type CallListPage = Awaited<ReturnType<typeof listCalls>>;
+export type CallListItem = CallListPage["calls"][number];
+
 export async function getCallDetail(
   context: DomainContext,
   input: { userId: string; businessId: string; callId: string },
-): Promise<{
-  call: Record<string, unknown>;
-  contact: Record<string, unknown> | null;
-  outcome: string | null;
-  timeline: Array<{ type: string; at: Date | null; status: string }>;
-  transcript: Array<Record<string, unknown>>;
-  recording: { state: RecordingState; objectId?: string; contentType?: string; retentionUntil?: Date };
-  appointments: Array<Record<string, unknown>>;
-  followUpTasks: Array<Record<string, unknown>>;
-} | null> {
+) {
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, input);
     const row = (await tx.select({
@@ -764,3 +763,6 @@ export async function listOpenVoiceFollowUps(tx: DatabaseTransaction, businessId
     appointment: appointmentId && appointmentStartsAt && appointmentTimezone && appointmentStatus ? { id: appointmentId, startsAt: appointmentStartsAt, timezone: appointmentTimezone, status: appointmentStatus, serviceName: appointmentServiceName, contactName: appointmentContactName } : null,
   }));
 }
+
+/** What one call's page is sent, from the query itself, as `CallListPage` is. */
+export type CallDetail = NonNullable<Awaited<ReturnType<typeof getCallDetail>>>;

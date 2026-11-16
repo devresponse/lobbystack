@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   concurrentIndexName,
+  CONTRACT_MIGRATIONS,
+  contractsWithoutTheirExpand,
   LEGACY_BASELINE_MIGRATIONS,
+  narrowsTheSchema,
   RAW_MIGRATIONS,
   ROLE_MIGRATION,
   SCHEMA_MIGRATIONS,
@@ -48,5 +51,46 @@ describe("raw migration manifest", () => {
       .toBe("product_events_business_sent_idx");
     expect(concurrentIndexName("-- lobbystack:concurrent-index product-events;drop table users"))
       .toBeUndefined();
+  });
+});
+
+// AUDIT-024: a migration that takes something away breaks the release still
+// serving while the deploy finishes, and nothing recorded which release had to
+// run in between.
+describe("expand and contract", () => {
+  const sqlFiles = readdirSync(migrationsDirectory).filter((file) => file.endsWith(".sql")).sort();
+
+  it("declares every migration that drops a column or a table, or sets one not null", () => {
+    const narrowing = sqlFiles.filter((file) => narrowsTheSchema(readFileSync(`${migrationsDirectory}/${file}`, "utf8")));
+
+    expect(narrowing.filter((file) => !(file in CONTRACT_MIGRATIONS))).toEqual([]);
+  });
+
+  it("declares nothing that takes nothing away", () => {
+    const declared = Object.keys(CONTRACT_MIGRATIONS);
+
+    expect(declared.filter((file) => !narrowsTheSchema(readFileSync(`${migrationsDirectory}/${file}`, "utf8")))).toEqual([]);
+  });
+
+  it("names an expand migration that exists and runs first, and says why when there is none", () => {
+    for (const [file, { expand, why }] of Object.entries(CONTRACT_MIGRATIONS)) {
+      expect(RAW_MIGRATIONS, file).toContain(file);
+      expect(why.length, file).toBeGreaterThan(40);
+      if (expand === null) continue;
+      expect(RAW_MIGRATIONS, file).toContain(expand);
+      const order: readonly string[] = RAW_MIGRATIONS;
+      expect(order.indexOf(expand), file).toBeLessThan(order.indexOf(file));
+    }
+  });
+
+  it("catches a contract migration pending in the same run as its expand half", () => {
+    expect(contractsWithoutTheirExpand(["0146_billing_provider.sql", "0147_billing_provider_contract.sql"])).toEqual([
+      { contract: "0147_billing_provider_contract.sql", expand: "0146_billing_provider.sql" },
+    ]);
+  });
+
+  it("lets the contract migration through once its expand half has already run", () => {
+    expect(contractsWithoutTheirExpand(["0147_billing_provider_contract.sql"])).toEqual([]);
+    expect(contractsWithoutTheirExpand(["0040_embedding_fingerprints.sql"])).toEqual([]);
   });
 });

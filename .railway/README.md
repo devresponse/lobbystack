@@ -30,7 +30,7 @@ Only CI moves `production`. On every push to `main`, the `migrate-production` jo
 
 Store a production project token in the GitHub `production` environment as `RAILWAY_PRODUCTION_TOKEN`. Restrict that environment to the `main` branch. Do not store database credentials in GitHub; the migrator reads its preserved variables from Railway.
 
-To pause automatic application releases, disable **Auto Deploy** on both services. A failed check or migration leaves `production` where it was, so the previous deployments keep running. For an application regression, roll each affected service back to its previous successful Railway deployment, or point `production` at an earlier commit. Keep migrations backward-compatible with that version.
+To pause automatic application releases, disable **Auto Deploy** on both services. A failed check or migration leaves `production` where it was, so the previous deployments keep running. For an application regression, roll each affected service back to its previous successful Railway deployment, or point `production` at an earlier commit. Keep migrations backward-compatible with that version: a migration that drops a column or a table, or makes one NOT NULL, goes in `CONTRACT_MIGRATIONS` (`packages/db/src/migrations/raw-migrations.ts`) beside the migration that added its replacement, and migrate refuses to apply both in one run on a database that is already serving.
 
 The definition pins Redis to `redis:7-alpine`. The Redis helper in the importer selected version 8 during the first preview; reject that upgrade in an infrastructure import.
 

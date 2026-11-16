@@ -1,6 +1,6 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, registerPoolMetrics, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer, recordedGreetingEnabled } from "@lobbystack/agent-core";
-import { assertProductionSecrets, brandEmailLogo, brandStartupReport, currentBrand, emailSender, isMaintenanceMode } from "@lobbystack/shared";
+import { assertProductionSecrets, booleanSettingErrors, brandEmailLogo, brandStartupReport, currentBrand, emailSender, envFlag, isMaintenanceMode } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, jobQueues, type FleetQueueCounts, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
@@ -39,7 +39,7 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
     host,
     // A deploy template can leave optional inputs blank, so "" counts as unset.
     port: Number(process.env.SMTP_PORT || 587),
-    secure: process.env.SMTP_SECURE === "true",
+    secure: envFlag(process.env, "SMTP_SECURE"),
     username: process.env.SMTP_USERNAME ?? "",
     password: process.env.SMTP_PASSWORD ?? "",
     from: emailSender(process.env),
@@ -102,6 +102,11 @@ async function main(): Promise<void> {
     "OTP_HASH_SECRET",
     ...(process.env.STORAGE_PROVIDER === "s3" ? [] : ["LOCAL_STORAGE_SIGNING_SECRET"]),
   ]);
+  // A true/false setting whose value is neither, such as SMTP_SECURE=ssl, used to
+  // read as off and say nothing (AUDIT-017). Now the worker refuses to start, and
+  // names every setting it can't read.
+  const settingErrors = booleanSettingErrors(process.env);
+  if (settingErrors.length) throw new Error(settingErrors.join(" "));
   // The brand emails and texts go out under, from APP_BASE_URL like the admin's.
   const brand = brandStartupReport(currentBrand());
   console.info(brand.info);

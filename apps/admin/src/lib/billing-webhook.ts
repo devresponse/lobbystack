@@ -6,7 +6,7 @@ import { hasLinkedPackPrice, polarProductLinks, readBillingCatalogSnapshot, stor
 import { BillingWebhookRefusal, type BillingWebhookRefusalReason } from "@lobbystack/providers/billing/errors";
 import { createBillingProvider, readBillingProviderId } from "@lobbystack/providers/billing/factory";
 import type { BillingProviderId, BillingWebhook } from "@lobbystack/providers/billing/types";
-import { STRIPE_PACK_WEBHOOK_EVENTS } from "@lobbystack/shared";
+import { envFlag, STRIPE_PACK_WEBHOOK_EVENTS } from "@lobbystack/shared";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { runAfterResponse } from "@/lib/after-response";
 import { getDispatcherDatabase, getWorkerDatabase } from "@/lib/api-helpers";
@@ -90,7 +90,7 @@ export async function handleBillingWebhook(request: Request, webhookFor: () => B
     // The live Polar organization also serves staging. UUID references are safe
     // everywhere; legacy Convex references are resolved only during production
     // cutover when the environment explicitly enables compatibility routing.
-    const allowLegacyReference = webhook.provider === "polar" && process.env.POLAR_ACCEPT_LEGACY_BUSINESS_IDS === "true";
+    const allowLegacyReference = webhook.provider === "polar" && envFlag(process.env, "POLAR_ACCEPT_LEGACY_BUSINESS_IDS");
     // A Stripe charge names only its customer, whose metadata names the business: the provider reads it back.
     // A dispute names neither, only its payment: a prepaid pack's payment names the business, and any other stays unattributed.
     // A deployment that never linked a pack's price sold no pack, so it asks Stripe nothing about a dispute, as before packs.

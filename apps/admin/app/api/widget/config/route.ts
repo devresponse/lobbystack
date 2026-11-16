@@ -7,6 +7,7 @@ import { createWorkerDomainContext } from "@/lib/domain-context";
 import { resolveWidgetSessionAccess } from "@/lib/widget-access";
 import { requestIpHash } from "@/lib/widget-keys";
 import { enforceWidgetRateLimits } from "@/lib/widget-policy";
+import { envFlag } from "@lobbystack/shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
       businessSlug: session.businessSlug,
       // A call button shows only when a call can start: the business has a
       // number, this deployment runs live calls, and it has minutes left.
-      voiceEnabled: Boolean(snapshot?.contactChannels?.phoneNumber) && process.env.LIVE_PROTOTYPE_ENABLED === "true" && Boolean(process.env.OPENAI_API_KEY) && voiceBilling.allowed,
+      voiceEnabled: Boolean(snapshot?.contactChannels?.phoneNumber) && envFlag(process.env, "LIVE_PROTOTYPE_ENABLED") && Boolean(process.env.OPENAI_API_KEY) && voiceBilling.allowed,
       // The call says it's with an AI and recorded unless the business turned
       // that off, and the line under the call button says so before it starts.
       recordingNotice: snapshot?.recordingNotice !== false,

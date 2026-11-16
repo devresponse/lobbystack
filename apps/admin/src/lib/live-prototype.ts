@@ -6,6 +6,7 @@ import OpenAI from "openai";
 
 import { jsonError } from "./api-helpers";
 import type { RecordedGreeting } from "./live-greeting";
+import { envFlag } from "@lobbystack/shared";
 
 /** `resume` marks a retried webhook delivery's attach to a call that may be under way. */
 // receptionistId: the receptionist answering, whose view of the snapshot the worker's agent uses; the default one without it.
@@ -20,7 +21,7 @@ const ATTACH_RETRY_DELAYS_MS = [250, 750];
 let client: OpenAI | undefined;
 
 export function requireLivePrototype(): void {
-  if (process.env.LIVE_PROTOTYPE_ENABLED !== "true") throw jsonError("The GPT-Live prototype is off.", 404, "live_prototype_disabled");
+  if (!envFlag(process.env, "LIVE_PROTOTYPE_ENABLED")) throw jsonError("The GPT-Live prototype is off.", 404, "live_prototype_disabled");
 }
 
 export function getLiveClient(): OpenAI {

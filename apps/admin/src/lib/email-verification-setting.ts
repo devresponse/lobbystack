@@ -1,13 +1,14 @@
+import { envFlag } from "@lobbystack/shared";
 type Environment = Readonly<Record<string, string | undefined>>;
 
 /**
  * Whether a new account, and an account that never entered its code, needs the
  * code emailed to its address before it can sign in: on unless
- * REQUIRE_EMAIL_VERIFICATION is "false". Off, anyone can sign up with an
+ * REQUIRE_EMAIL_VERIFICATION turns it off. Off, anyone can sign up with an
  * address they don't own and use the instance, so it's on by default.
  */
 export function emailVerificationRequired(env: Environment = process.env): boolean {
-  return env.REQUIRE_EMAIL_VERIFICATION?.trim().toLowerCase() !== "false";
+  return envFlag(env, "REQUIRE_EMAIL_VERIFICATION");
 }
 
 /**

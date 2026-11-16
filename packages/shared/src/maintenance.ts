@@ -1,4 +1,6 @@
-/** Maintenance is deliberately opt-in; any value other than the exact flag keeps normal operation. */
+import { envFlag } from "./env";
+
+/** Maintenance is deliberately opt-in: unset keeps normal operation. */
 export function isMaintenanceMode(environment: Readonly<Record<string, string | undefined>>): boolean {
-  return environment.LOBBYSTACK_MAINTENANCE_MODE === "true";
+  return envFlag(environment, "LOBBYSTACK_MAINTENANCE_MODE");
 }

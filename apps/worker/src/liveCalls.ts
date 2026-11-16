@@ -20,7 +20,7 @@ import {
   type OpenLiveCall,
 } from "@lobbystack/domain";
 import { renewVoicePresenceGateway, updateVoicePresence } from "@lobbystack/jobs";
-import { callOpening, isUuid, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, envFlag, isUuid, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent, recordException, reportError, setSpanAttributes, withCallContext, withOpenSpan, type CallContext, type Span } from "@lobbystack/telemetry/node";
 import OpenAI from "openai";
 
@@ -175,7 +175,7 @@ export function liveDrainTimeoutMs(env: NodeJS.ProcessEnv = process.env): number
 }
 
 export function isLivePrototypeEnabled(): boolean {
-  return process.env.LIVE_PROTOTYPE_ENABLED === "true";
+  return envFlag(process.env, "LIVE_PROTOTYPE_ENABLED");
 }
 
 function tokenMatches(presented: string | undefined): boolean {

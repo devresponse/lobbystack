@@ -1,9 +1,13 @@
+import { envFlag } from "./env";
+
 type Environment = Record<string, string | undefined>;
 
 export function isCertificationMode(source: Environment = process.env): boolean {
-  const value = source.LOBBYSTACK_CERTIFICATION_MODE?.trim().toLowerCase();
-  if (value && value !== "true" && value !== "false") throw new Error("INVALID_CERTIFICATION_MODE");
-  return value === "true";
+  try {
+    return envFlag(source, "LOBBYSTACK_CERTIFICATION_MODE");
+  } catch {
+    throw new Error("INVALID_CERTIFICATION_MODE");
+  }
 }
 
 export function assertCertificationRecipient(kind: "email" | "phone", recipient: string, source: Environment = process.env): void {

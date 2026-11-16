@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
-import { auditLogs, businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, receptionistProfiles, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, receptionistProfiles, searchPattern, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { isUuid, PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
@@ -588,7 +588,7 @@ export async function listConversationsInTransaction(tx: DatabaseTransaction, fi
       filters.archived ? isNotNull(conversations.archivedAt) : isNull(conversations.archivedAt),
       filters.receptionistId ? eq(conversations.receptionistId, filters.receptionistId) : undefined,
       filters.channel === "web_chat" ? eq(conversations.channel, "web_chat") : filters.channel === "sms" ? ne(conversations.channel, "web_chat") : undefined,
-      filters.search ? or(...[contacts.name, contacts.phone, widgetVisitors.name, widgetVisitors.email, latest.body].map((column) => ilike(column, `%${filters.search}%`))) : undefined,
+      filters.search ? or(...[contacts.name, contacts.phone, widgetVisitors.name, widgetVisitors.email, latest.body].map((column) => ilike(column, searchPattern(filters.search!)))) : undefined,
     ))
     .orderBy(desc(latest.createdAt), desc(conversations.id)).limit(filters.limit + 1).offset(filters.offset);
   return { messages: rows.slice(0, filters.limit), hasNext: rows.length > filters.limit };

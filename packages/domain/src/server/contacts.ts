@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 
-import { appointments, calls, contacts, conversations, enqueueOutbox, messages, services, staff, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { appointments, calls, contacts, conversations, enqueueOutbox, messages, searchPattern, services, staff, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { contactPasscodeStatusInTransaction } from "./contactPasscodes";
@@ -57,7 +57,7 @@ export async function listContacts(
     const limit = Math.min(Math.max(Math.trunc(input.limit ?? 50), 1), 100);
     const offset = Math.max(Math.trunc(input.offset ?? 0), 0);
     const search = input.search?.trim();
-    const filter = and(eq(contacts.businessId, input.businessId), ...(search ? [or(ilike(contacts.name, `%${search}%`), ilike(contacts.phone, `%${search}%`), ilike(contacts.email, `%${search}%`))!] : []));
+    const filter = and(eq(contacts.businessId, input.businessId), ...(search ? [or(...[contacts.name, contacts.phone, contacts.email].map((column) => ilike(column, searchPattern(search))))!] : []));
     const contactConversationIds = contactConversationIdsSql(input.businessId, sql`"contacts"."id"`);
     // Match the original contact activity order; profile edits are not interactions.
     const lastInteractionAt = sql<Date>`greatest(

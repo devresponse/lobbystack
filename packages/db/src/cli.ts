@@ -14,6 +14,7 @@ import { createDatabaseClient, databaseHealthCheck } from "./client";
 import { readMigrationChecksums } from "./migrations/checksums";
 import {
   concurrentIndexName,
+  contractsWithoutTheirExpand,
   MIGRATION_JOURNAL_TABLE,
   LEGACY_BASELINE_MIGRATIONS,
   ROLE_MIGRATION,
@@ -59,6 +60,24 @@ async function main(): Promise<void> {
           // replaying DDL against live tables.
           await baselineExistingMigrations(lockedMigrator, applied);
           console.log(`Baselined ${LEGACY_BASELINE_MIGRATIONS.length} previously-applied migrations into ${MIGRATION_JOURNAL_TABLE}.`);
+        }
+        // Expand and contract, enforced (AUDIT-024). A database that has
+        // already run migrations has a release serving against it, and that
+        // release keeps answering requests until the new containers are ready.
+        // Applying a contract migration together with the expand migration it
+        // depends on takes the columns away under that release and removes the
+        // way back to it. A database with nothing applied has no release to
+        // break.
+        const together = applied.size === 0
+          ? []
+          : contractsWithoutTheirExpand([ROLE_MIGRATION, ...SCHEMA_MIGRATIONS].filter((file) => !applied.has(file)));
+        if (together.length && !allowContractWithExpand(process.env)) {
+          const pairs = together.map(({ contract, expand }) => `${contract} needs the release containing ${expand} to be running first`);
+          throw new Error(
+            `Refusing to apply a contract migration in the same run as the expand migration it depends on: ${pairs.join("; ")}. ` +
+            "Deploy the expand release, let it finish, then deploy this one. " +
+            "If this database never ran the release in between and nothing is serving against it, set LOBBYSTACK_ALLOW_CONTRACT_WITH_EXPAND=true for this run.",
+          );
         }
         await applyRawMigration(lockedMigrator, ROLE_MIGRATION, applied);
         await migrate(lockedMigrator.db, { migrationsFolder: "./migrations/generated" });
@@ -355,6 +374,11 @@ async function main(): Promise<void> {
     await migrator.pool.end().catch(() => undefined);
     await shutdownTelemetry();
   }
+}
+
+/** The operator's deliberate override, for a database nothing is serving yet. */
+function allowContractWithExpand(source: Readonly<Record<string, string | undefined>>): boolean {
+  return ["true", "1", "yes", "on"].includes((source.LOBBYSTACK_ALLOW_CONTRACT_WITH_EXPAND ?? "").trim().toLowerCase());
 }
 
 async function ensureMigrationJournal(client: ReturnType<typeof createDatabaseClient>): Promise<void> {

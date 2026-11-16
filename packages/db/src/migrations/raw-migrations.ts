@@ -164,6 +164,64 @@ export function concurrentIndexName(contents: string): string | undefined {
   return CONCURRENT_INDEX_DIRECTIVE.exec(contents)?.[1];
 }
 
+/**
+ * A migration that takes something away — a column, a table, or the freedom to
+ * leave a column null — breaks the release that is still serving while the
+ * deploy finishes, unless that release had already stopped using it. Expand and
+ * contract is how that is avoided: one release adds the replacement, the next
+ * one takes the old thing away.
+ *
+ * Nothing used to record which release had to run in between (AUDIT-024), and
+ * nothing stopped both from landing in one run, which is exactly what happens
+ * when a deployment that follows a branch catches up after several merges. Each
+ * contract migration names its expand half here, and `migrate` refuses to apply
+ * the two together on a database that is already serving.
+ *
+ * `expand: null` means the file takes away nothing a running release could be
+ * using; `why` says how that was established. Every migration that drops a
+ * column or a table, or sets a column NOT NULL, must appear here: a test reads
+ * the files and fails on one that doesn't.
+ */
+export const CONTRACT_MIGRATIONS: Record<string, { expand: string | null; why: string }> = {
+  "0040_embedding_fingerprints.sql": {
+    expand: null,
+    why: "The same file adds embedding_status, fills it and gives it a default, so a release that doesn't know the column still inserts rows.",
+  },
+  "0119_whole_annual_per_month.sql": {
+    expand: null,
+    why: "per_month is dropped and added again in one transaction, because PostgreSQL 16 can't change a generated column's expression. No release ever sees it missing.",
+  },
+  "0143_receptionists_cleanup.sql": {
+    expand: "0137_receptionist_entry_points.sql",
+    why: "Removes what 0133 and 0137 kept for the release before them, whose code still named a business's own summary and recording notice.",
+  },
+  "0147_billing_provider_contract.sql": {
+    expand: "0146_billing_provider.sql",
+    why: "Drops the Polar columns 0146 kept beside their provider-neutral twins. A release older than 0146's still reads the Polar ones.",
+  },
+};
+
+/** The statements that take something away. A file holding one must be declared above. */
+const NARROWING_STATEMENT = /\bdrop\s+column\b|\bdrop\s+table\b|\bset\s+not\s+null\b|\brename\s+(?:column|to)\b/i;
+
+export function narrowsTheSchema(contents: string): boolean {
+  return NARROWING_STATEMENT.test(contents);
+}
+
+/**
+ * The contract migrations in `pending` whose expand half is pending too. On a
+ * database that is already serving, applying both in one run leaves the release
+ * still answering requests without the columns it reads, and takes the rollback
+ * away with it.
+ */
+export function contractsWithoutTheirExpand(pending: readonly string[]): Array<{ contract: string; expand: string }> {
+  const pendingSet = new Set(pending);
+  return pending.flatMap((file) => {
+    const expand = CONTRACT_MIGRATIONS[file]?.expand;
+    return expand && pendingSet.has(expand) ? [{ contract: file, expand }] : [];
+  });
+}
+
 export const RAW_MIGRATIONS = [ROLE_MIGRATION, ...SCHEMA_MIGRATIONS] as const;
 
 // The migration journal was introduced after 0052. Databases that predate the

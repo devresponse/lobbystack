@@ -73,6 +73,19 @@ export default defineConfig([
     },
   },
   {
+    // AUDIT-010: a query built as a template string puts whatever is
+    // interpolated into it straight into the SQL. `sql` from drizzle-orm makes
+    // every value a bind parameter; `sql.raw` is for fixed text written here.
+    files: ["**/*.ts", "**/*.tsx"],
+    ignores: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": ["error", {
+        selector: "CallExpression[callee.property.name='execute'] > TemplateLiteral",
+        message: "Write the query as a drizzle `sql` template, so each value is a bind parameter rather than text in the SQL.",
+      }],
+    },
+  },
+  {
     // This primitive forwards htmlFor and children from its call sites.
     files: ["src/components/ui/label.tsx"],
     rules: { "jsx-a11y/label-has-associated-control": "off" },

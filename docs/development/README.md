@@ -95,6 +95,10 @@ Tests for a module-level singleton need `vi.resetModules()` and a dynamic `await
 - **Timing-sensitive tests flake under load.** Wait on the condition, such as `vi.getTimerCount()`, rather than on time. A test that does seconds of real work can pass on its own and still time out after Vitest's 5 seconds in CI, where the admin's and the worker's tests share the runner. Keep its input small: since fork PR #172 the worker's 25-page OCR test renders two-inch pages, not letter-size ones.
 - **Trivy, CodeQL and the dependency audit** can fail a pull request on things it didn't change ([overview](../project/overview.md#make-a-change)).
 
+## Let PostgreSQL hold the values
+
+A query is written with Drizzle's query builder, or as a `sql` template from `drizzle-orm` where the builder can't say it. Either way every value goes in as `${value}` and reaches PostgreSQL as a bind parameter. `sql.raw` is only for text fixed in the file, such as a column name chosen from a list the code itself holds; it never takes anything a caller supplied. An ESLint rule in the admin refuses a template literal passed straight to `.execute(`, which is how the finance export built its five queries before the technical audit's AUDIT-010: each value was quoted by a `replaceAll("'", "''")` written beside it, safe as written and one forgotten call away from an injection.
+
 ## Keep a transaction's queries in order
 
 Never start several queries at once on one transaction, as `Promise.all` over `tx` does. A transaction is one pooled connection: `pg` queues the queries and prints a deprecation warning ("client already executing a query"), and its next major version will refuse them. Fork PR #48 removed 18 such places, and `scripts/transaction-queries.test.ts` now fails on any `Promise.all` or `Promise.allSettled` that starts two or more queries on a transaction (a parameter named `tx`, typed `DatabaseTransaction`, or the first parameter of a `*transaction(` callback). Await the queries one after the other: it costs the same round trips.

@@ -96,8 +96,8 @@ Railway deploys each push only when a GitHub account linked to the Railway proje
 
 4. Open the fork's **Actions** tab. GitHub runs no checks in a new fork until its owner allows them, so click **I understand my workflows, go ahead and enable them** *(not tried)*. In `devresponse/lobbystack` itself, they're already on.
    - The checks then run on every push to `main`, and take about 10 minutes. Until they pass, a commit shows no green check mark, and [5.2](part-5-production.md#52-production-on-railway) and [7.1](part-7-operations.md#71-release-a-new-version) release only a commit that shows one.
-   - They need no secrets of yours: the jobs that use secrets run only in the original repository, or when someone starts them by hand (`.github/workflows/ci.yml:172`, `.github/workflows/replacement-platform.yml:143`).
-   - The original's automatic production release job (`migrate-production`) runs only in `lobbystack/lobbystack`, so in the fork nothing releases production for you (`.github/workflows/ci.yml:170-172`).
+   - They need no secrets of yours: the jobs that use secrets run only in the original repository, or when someone starts them by hand (`.github/workflows/ci.yml:215`, `.github/workflows/replacement-platform.yml:145`).
+   - The original's automatic production release job (`migrate-production`) runs only in `lobbystack/lobbystack`, so in the fork nothing releases production for you (`.github/workflows/ci.yml:212-215`).
 
 **Choose the version**
 

@@ -4,12 +4,13 @@ on:
   pull_request:
   # Every push to main runs, docs-only ones included: a run releases only when
   # main has not moved past it, so a skipped run would strand the release before it.
-  # Release branches such as releases/r2 run the same checks, because
-  # deployments build from them too.
+  # Release branches such as releases/r2, and development branches such as
+  # develop/r2, run the same checks, because deployments build from them too.
   push:
     branches:
       - main
       - "releases/**"
+      - "develop/**"
 
 permissions:
   contents: read
@@ -189,10 +190,11 @@ jobs:
     uses: ./.github/workflows/runtime-images.yml
 
   # Post-merge certification. Releases wait for it, so production only moves
-  # once every check on the commit has passed. Release branches get it too, so
-  # what their deployments build from is certified the same way.
+  # once every check on the commit has passed. Release and development
+  # branches get it too, so what their deployments build from is certified the
+  # same way, and a failure shows on develop before it reaches a release.
   replacement:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/'))
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/') || startsWith(github.ref, 'refs/heads/develop/'))
     uses: ./.github/workflows/replacement-platform.yml
 
   validate:

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import journeys from "./playwright.config";
+import { journeyReporters } from "./playwright-journey-report";
 
 // The same build as the other browser journeys, started twice more: once with
 // the script nonce reported on (CSP_SCRIPT_NONCE) and once with it enforced
@@ -24,8 +25,7 @@ export default defineConfig({
   ...journeys,
   testMatch: "**/script-nonce.e2e.ts",
   testIgnore: [],
-  // Its own report, beside the other journeys' rather than over it.
-  ...(process.env.CI ? { reporter: [["github"], ["json", { outputFile: "playwright-report/results-script-nonce.json" }]] } : {}),
+  reporter: journeyReporters("script-nonce"),
   projects: steps.map((step) => ({ name: step.name, use: { ...devices["Desktop Chrome"], baseURL: step.baseURL } })),
   webServer: steps.map((step) => ({
     ...server,

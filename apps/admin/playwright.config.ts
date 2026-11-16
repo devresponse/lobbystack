@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { roleDatabaseUrl } from "./playwright-database-url";
+import { journeyReporters } from "./playwright-journey-report";
 import { playwrightTestSecrets } from "./playwright-test-secrets";
 
 function replacementEnvironment(): Record<string, string> {
@@ -38,7 +39,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   // The JSON report says which journeys needed a retry; scripts/flaky-journeys.mjs
   // lists them, so a retry that turned green is still visible (AUDIT-021).
-  reporter: process.env.CI ? [["github"], ["json", { outputFile: "playwright-report/results.json" }]] : "list",
+  reporter: journeyReporters("journeys"),
   use: {
     baseURL,
     trace: "retain-on-failure",

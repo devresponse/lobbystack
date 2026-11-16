@@ -7,6 +7,7 @@ import { configuredAppOrigins } from "@/lib/app-origins";
 import { LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE_SECONDS, localeTag } from "@/lib/locale";
 import { DEFAULT_HELP_LOCALE, helpLocaleFor, isHelpLocale } from "@/lib/help/locales";
 import {
+  isCanonicalPublicPath,
   isHelpRoutePath,
   isLegacyPublicRoutePath,
   isPublicRoutePath,
@@ -17,13 +18,14 @@ import {
 import {
   LOCALE_HEADER,
   LOCALE_SOURCE_HEADER,
+  NONCE_HEADER,
   PATHNAME_HEADER,
   type NegotiatedLocale,
   localeFromCookieHeader,
   negotiateLocale,
 } from "@/lib/locale-request";
 
-import { brandLogoSecurityHeaders, embeddableSecurityHeaders, entryLinkSecurityHeaders, isEmbeddablePath, isEntryLinkPath, isPublicProfilePath, publicProfileSecurityHeaders, securityHeaders } from "./security-headers";
+import { brandLogoSecurityHeaders, cspScriptNonceState, embeddableSecurityHeaders, entryLinkSecurityHeaders, isEmbeddablePath, isEntryLinkPath, isPublicProfilePath, publicProfileSecurityHeaders, securityHeaders } from "./security-headers";
 
 const stateChangingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // /api/v1 and /api/mcp authenticate with bearer API keys only, never cookies, so they need no CSRF
@@ -68,7 +70,7 @@ function applyResponsePolicy(
   for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
   if (process.env.NODE_ENV === "production") response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   if (cacheControl) response.headers.set("Cache-Control", cacheControl);
-  if (localeFromPathname(request.nextUrl.pathname) && isPublicRoutePath(request.nextUrl.pathname)) {
+  if (isCanonicalPublicPath(request.nextUrl.pathname)) {
     response.headers.set("Content-Language", localeTag(locale.locale));
     response.headers.set("Vary", "Accept-Encoding");
   }
@@ -98,7 +100,7 @@ function cacheControlForRequest(pathname: string, searchParams: URLSearchParams)
   if (pathname.startsWith("/api/") || pathname.startsWith("/embed/")) {
     return "private, no-store";
   }
-  if (localeFromPathname(pathname) && isPublicRoutePath(pathname)) {
+  if (isCanonicalPublicPath(pathname)) {
     return "public, s-maxage=300, stale-while-revalidate=3600";
   }
   if (!isPublicRoutePath(pathname) && pathname !== "/embed.js") return "private, no-store";
@@ -123,14 +125,38 @@ function hasValidCsrfOrigin(request: NextRequest): boolean {
   return origin !== null && configuredOrigins(request).has(origin.replace(/\/$/, ""));
 }
 
+/**
+ * A fresh nonce per request, for the policy that replaces `'unsafe-inline'`
+ * (AUDIT-008). It is made only when a setting asks for one, so a deployment
+ * that hasn't turned it on pays nothing and gets byte-for-byte the policy it
+ * had before.
+ *
+ * A public page under its language gets none, whatever the settings say. Its
+ * HTML was written at build time, so Next has no request in which to put a
+ * nonce on its scripts, and under the strict policy every one of them would be
+ * blocked: a sign-in page nobody can sign in on. A shared cache may also store
+ * the response, and a nonce handed to everyone is not a nonce. Those pages keep
+ * the policy they had. `scripts/verify-admin-prerender.ts` fails the build if a
+ * page is ever prerendered outside that set.
+ *
+ * The widget's loader gets none for the second reason: it is a script file
+ * that caches hand to every site's visitors, and a policy sent with a script
+ * file governs nothing.
+ */
+function scriptNonce(pathname: string): string | undefined {
+  if (cspScriptNonceState(process.env) === "off" || isCanonicalPublicPath(pathname) || pathname === "/embed.js") return undefined;
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64");
+}
+
 export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
+  const nonce = scriptNonce(pathname);
   const headers = isEmbeddablePath(pathname)
-    ? embeddableSecurityHeaders()
+    ? embeddableSecurityHeaders(process.env, nonce)
     : pathname === BRAND_LOGO_PATH
       ? brandLogoSecurityHeaders()
-      : isPublicProfilePath(pathname) ? publicProfileSecurityHeaders()
-        : isEntryLinkPath(pathname) ? entryLinkSecurityHeaders() : securityHeaders();
+      : isPublicProfilePath(pathname) ? publicProfileSecurityHeaders(process.env, nonce)
+        : isEntryLinkPath(pathname) ? entryLinkSecurityHeaders(process.env, nonce) : securityHeaders(process.env, nonce);
 
   // The access gate (PROTECTION_TOKEN, docs/features/access-gate.md) answers
   // first, before maintenance mode, so a closed address says the same 404
@@ -141,7 +167,7 @@ export function proxy(request: NextRequest): NextResponse {
     return accessGateResponse(accessDeniedResponse(), headers);
   }
   if (access.outcome === "grant") return accessGateResponse(accessGrantedResponse(request, access.token), headers);
-  const response = route(request, headers, access.outcome);
+  const response = route(request, headers, access.outcome, nonce);
   // A test deployment stays out of search results, the widget's and the API's answers included.
   if (access.outcome !== "off") response.headers.set("X-Robots-Tag", ACCESS_GATE_ROBOTS);
   return response;
@@ -149,7 +175,7 @@ export function proxy(request: NextRequest): NextResponse {
 
 // Everything the proxy did before the access gate. `access` is "pass" for an
 // address the gate let through: its answer is one visitor's alone.
-function route(request: NextRequest, headers: Record<string, string>, access: "off" | "open" | "pass"): NextResponse {
+function route(request: NextRequest, headers: Record<string, string>, access: "off" | "open" | "pass", nonce?: string): NextResponse {
   const { pathname } = request.nextUrl;
   const gated = access === "pass";
   // A page a shared cache could store would reach a stranger without the cookie.
@@ -230,6 +256,15 @@ function route(request: NextRequest, headers: Record<string, string>, access: "o
   requestHeaders.set(LOCALE_HEADER, locale.locale);
   requestHeaders.set(LOCALE_SOURCE_HEADER, locale.source);
   requestHeaders.set(PATHNAME_HEADER, pathname);
+  if (nonce) {
+    requestHeaders.set(NONCE_HEADER, nonce);
+    // Next puts the nonce on the scripts it writes by reading it out of the
+    // request's policy, and before it looks it copies this response's policy
+    // over the request's. So the policy enforced here is the one Next reads,
+    // and it carries the nonce in both steps (security-headers.ts). Setting it
+    // on the request too is what Next's guide does, for a host that doesn't copy.
+    requestHeaders.set("Content-Security-Policy", headers["Content-Security-Policy"] ?? "");
+  }
   // The token a script sent has done its work, and an open route never needed it:
   // pages, routes and their error reports never see it.
   if (access !== "off") requestHeaders.delete(ACCESS_HEADER);

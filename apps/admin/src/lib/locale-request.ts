@@ -12,6 +12,8 @@ export const LOCALE_HEADER = "x-lobbystack-locale";
 export const LOCALE_SOURCE_HEADER = "x-lobbystack-locale-source";
 /** Request header carrying the pathname so server components can scope translations. */
 export const PATHNAME_HEADER = "x-lobbystack-pathname";
+/** The request header the proxy hands its CSP nonce down on, for a page that writes its own inline script (AUDIT-008). */
+export const NONCE_HEADER = "x-lobbystack-nonce";
 
 export type LocaleSource = "path" | "query" | "cookie" | "header" | "default";
 

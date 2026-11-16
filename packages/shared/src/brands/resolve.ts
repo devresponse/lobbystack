@@ -1,3 +1,5 @@
+import { envFlag } from "../env";
+
 import { BILLING_PROFILE_HASHES, BRAND_ACCOUNT_LIMITS, BRAND_BILLING_PLANS, BRAND_INDEX, BRAND_PLAN_DISPLAYS, BRANDS } from "./generated";
 import type { BrandAccountLimits, BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex, BrandPlanDisplay } from "./types";
 
@@ -198,7 +200,7 @@ export function brandStartupReport(brand: ResolvedBrand, environment: Record<str
       ? `[brand] brand.unmatched: no brand in brands/index.json claims ${brand.host}, so the default ${brand.id} brand stands in.`
       : `[brand] brand.base_url_missing: APP_BASE_URL is missing or isn't a URL, so the default ${brand.id} brand stands in. Set it to the dashboard's address, such as https://app.example.com.`);
   }
-  const required = environment.BRAND_REQUIRED === "true" && !brandFileMatched(brand);
+  const required = envFlag(environment, "BRAND_REQUIRED") && !brandFileMatched(brand);
   const how = brand.source === "only" ? "only brand" : `${brand.source}${brand.domain ? ` ${brand.domain}` : ""}`;
   return {
     info: `[brand] ${brand.id} (${how}), shown as ${brand.appName}`,

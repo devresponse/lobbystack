@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
+import { getScriptNonceFromHeader } from "next/dist/server/app-render/get-script-nonce-from-header";
 import { config, proxy } from "./proxy";
 
 afterEach(() => {
@@ -354,6 +355,7 @@ it("leaves the routes other services call open, with their answers as they were"
     ["POST", "/api/auth/oauth2/token"],
     ["PUT", "/api/storage/local?token=signed"],
     ["GET", "/api/internal/finance/export"],
+    ["GET", "/api/internal/fleet?token=its-own-token&worker=2"],
   ];
   for (const [method, path] of open) {
     const response = proxy(new NextRequest(`http://localhost:3210${path}`, { method, headers: { origin: "https://customer.example" } }));
@@ -432,3 +434,115 @@ it("warns about a token that doesn't match, once a minute at most and never with
   expect(lines()).toHaveLength(2);
   expect(JSON.parse(lines()[1]!)).toMatchObject({ message: "access_gate.wrong_token", via: "header", notLogged: 1 });
 });
+
+// AUDIT-008: Next puts the nonce on the scripts it writes by reading it out of
+// the request's policy, after copying this response's headers over the
+// request's (resolve-routes.ts, parse-request-headers.ts). So what Next finds
+// is whatever the proxy enforces, and only without one, what it reports on.
+const requestOverride = (response: Response, name: string) => response.headers.get(`x-middleware-request-${name}`);
+const nonceNextReads = (response: Response): string | undefined => {
+  const policy = response.headers.get("content-security-policy") || response.headers.get("content-security-policy-report-only");
+  return policy ? getScriptNonceFromHeader(policy) : undefined;
+};
+
+it("sends no nonce and today's policy until a deployment turns the setting on", () => {
+  const response = proxy(new NextRequest("http://localhost:3210/calls"));
+
+  expect(response.headers.get("content-security-policy")).toContain("script-src 'self' 'unsafe-inline'");
+  expect(response.headers.get("content-security-policy-report-only")).toBeNull();
+  expect(requestOverride(response, "x-lobbystack-nonce")).toBeNull();
+  expect(nonceNextReads(response)).toBeUndefined();
+});
+
+it("gives each request its own nonce, and hands it to the page and to Next", () => {
+  vi.stubEnv("CSP_SCRIPT_NONCE", "true");
+
+  const first = proxy(new NextRequest("http://localhost:3210/calls"));
+  const second = proxy(new NextRequest("http://localhost:3210/calls"));
+  const nonce = requestOverride(first, "x-lobbystack-nonce");
+
+  expect(nonce).toMatch(/^[A-Za-z0-9+/]{22}==$/);
+  expect(requestOverride(second, "x-lobbystack-nonce")).not.toBe(nonce);
+  expect(first.headers.get("content-security-policy-report-only")).toContain(`'nonce-${nonce}' 'strict-dynamic'`);
+  // While it only reports, scripts and handlers are still asked about 'unsafe-inline'...
+  expect(first.headers.get("content-security-policy")).toContain("script-src-elem 'self' 'unsafe-inline'");
+  expect(first.headers.get("content-security-policy")).toContain("script-src-attr 'unsafe-inline'");
+  // ...and Next still finds the nonce, or the report would name every script it wrote.
+  expect(nonceNextReads(first)).toBe(nonce);
+  expect(requestOverride(first, "content-security-policy")).toBe(first.headers.get("content-security-policy"));
+});
+
+it("enforces the strict policy once the second setting is on", () => {
+  vi.stubEnv("CSP_SCRIPT_NONCE", "true");
+  vi.stubEnv("CSP_SCRIPT_NONCE_ENFORCED", "true");
+
+  const response = proxy(new NextRequest("http://localhost:3210/calls"));
+  const nonce = requestOverride(response, "x-lobbystack-nonce");
+
+  expect(response.headers.get("content-security-policy")).toContain(`'nonce-${nonce}' 'strict-dynamic'`);
+  expect(response.headers.get("content-security-policy")).not.toContain("'unsafe-inline' https://");
+  expect(response.headers.get("content-security-policy-report-only")).toBeNull();
+  expect(nonceNextReads(response)).toBe(nonce);
+  expect(requestOverride(response, "content-security-policy")).toBe(response.headers.get("content-security-policy"));
+});
+
+// The sign-in pages and the help center are written at build time, so there is
+// no request in which Next could put a nonce on their scripts. Under the strict
+// policy every script on them would be blocked: nobody could sign in.
+it.each(["/en/login", "/fr/signup", "/es/forgot-password", "/sr/accept-invite", "/en/help", "/en/help/rules"])(
+  "leaves %s, which is built ahead of time, on the policy it had, whatever the settings say",
+  (path) => {
+    vi.stubEnv("CSP_SCRIPT_NONCE", "true");
+    vi.stubEnv("CSP_SCRIPT_NONCE_ENFORCED", "true");
+
+    const response = proxy(new NextRequest(`http://localhost:3210${path}`));
+
+    expect(response.headers.get("content-security-policy")).toContain("script-src 'self' 'unsafe-inline'");
+    expect(response.headers.get("content-security-policy")).not.toContain("nonce-");
+    expect(response.headers.get("content-security-policy-report-only")).toBeNull();
+    expect(requestOverride(response, "x-lobbystack-nonce")).toBeNull();
+    expect(requestOverride(response, "content-security-policy")).toBeNull();
+  },
+);
+
+it("reports on nothing for a page built ahead of time, so its console stays quiet while the rest is watched", () => {
+  vi.stubEnv("CSP_SCRIPT_NONCE", "true");
+
+  const response = proxy(new NextRequest("http://localhost:3210/en/login"));
+
+  expect(response.headers.get("content-security-policy-report-only")).toBeNull();
+  expect(requestOverride(response, "x-lobbystack-nonce")).toBeNull();
+});
+
+// The widget's loader caches itself for every site that embeds it (its route
+// sets the header, not the proxy), so it is the other answer that gets none.
+it("puts no nonce on the widget's loader, a script file that shared caches store", () => {
+  vi.stubEnv("CSP_SCRIPT_NONCE", "true");
+  vi.stubEnv("CSP_SCRIPT_NONCE_ENFORCED", "true");
+
+  const response = proxy(new NextRequest("http://localhost:3210/embed.js"));
+
+  expect(response.headers.get("content-security-policy")).not.toContain("nonce-");
+  expect(response.headers.get("content-security-policy-report-only")).toBeNull();
+  expect(requestOverride(response, "x-lobbystack-nonce")).toBeNull();
+  // The chat it opens is a page rendered for one visitor, and does get one.
+  expect(proxy(new NextRequest("http://localhost:3210/embed/wk_live_abc")).headers.get("content-security-policy")).toContain("'strict-dynamic'");
+});
+
+// A nonce is one request's. A response a shared cache may hand to the next
+// visitor must never carry one, in the header that enforces or the one that reports.
+it.each(["/en/login", "/en/help", "/calls", "/profile/acme", "/embed/wk_live_abc", "/api/calls", "/"])(
+  "never puts a nonce on an answer a shared cache may store: %s",
+  (path) => {
+    vi.stubEnv("CSP_SCRIPT_NONCE", "true");
+    vi.stubEnv("CSP_SCRIPT_NONCE_ENFORCED", "true");
+
+    const response = proxy(new NextRequest(`http://localhost:3210${path}`));
+    const shared = (response.headers.get("cache-control") ?? "").includes("public");
+    const carriesNonce = (response.headers.get("content-security-policy") ?? "").includes("nonce-");
+
+    expect(shared && carriesNonce, `${path} is ${response.headers.get("cache-control")}`).toBe(false);
+    // And the pages rendered for one request are the ones that get it.
+    if (!shared && !path.startsWith("/api/")) expect(carriesNonce, path).toBe(true);
+  },
+);

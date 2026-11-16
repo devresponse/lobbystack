@@ -1,4 +1,6 @@
-import { assertCertificationBillingSandbox, assertCertificationRecipient, POLAR_API_VERSION } from "@lobbystack/shared";
+import { z } from "zod";
+
+import { assertCertificationBillingSandbox, assertCertificationRecipient, fetchWithTimeout, POLAR_API_VERSION } from "@lobbystack/shared";
 
 export type PolarBillingConfig = {
   accessToken: string;
@@ -24,18 +26,58 @@ export class PolarRequestError extends Error {
   }
 }
 
+/**
+ * An answer Polar gave as a success that isn't what billing reads: which
+ * answer, and the fields that are missing or of another type. Their values
+ * stay out of it, because an answer can hold a customer's email.
+ */
+export class PolarResponseError extends Error {
+  constructor(readonly answer: string, readonly fields: readonly string[]) {
+    super(`Polar's ${answer} is missing or mistypes: ${fields.join(", ")}.`);
+    this.name = "PolarResponseError";
+  }
+}
+
+/**
+ * What billing reads from each of Polar's answers, checked as the answer comes
+ * in (AUDIT-020). A field Polar adds is ignored. One of these missing, or of
+ * another type, is refused here by name, where it would otherwise turn up
+ * later as an `undefined` in a plan change. The fields without `nullish` are
+ * the ones billing can't go on without; Polar's API version 2026-10 sends
+ * every one of them.
+ */
+const subscriptionAnswer = z.object({
+  id: z.string().min(1),
+  status: z.string().min(1),
+  product_id: z.string().min(1),
+  cancel_at_period_end: z.boolean().nullish(),
+  ended_at: z.string().nullish(),
+  pending_update: z.object({ product_id: z.string().nullish() }).nullish(),
+  discount_id: z.string().nullish(),
+  current_period_end: z.string().nullish(),
+});
+const customerAnswer = z.object({ id: z.string().min(1), external_id: z.string().nullish() });
+const checkoutAnswer = z.object({ id: z.string().min(1), url: z.string().min(1) });
+const customerSessionAnswer = z.object({ customer_portal_url: z.string().min(1) });
+
+/** The answer as its schema reads it, or a PolarResponseError naming what is wrong with it. */
+function read<T>(answer: string, schema: z.ZodType<T>, body: unknown): T {
+  const parsed = schema.safeParse(body);
+  if (parsed.success) return parsed.data;
+  // An answer that is no object at all has no field to name.
+  throw new PolarResponseError(answer, [...new Set(parsed.error.issues.map((issue) => issue.path.join(".") || "the whole body"))]);
+}
+
 /** A Polar customer, which a checkout is made out to. */
 export type PolarCustomer = { id: string; externalId: string | null };
 
-type PolarCustomerBody = { id: string; external_id?: string | null };
-
-function customerFrom(body: PolarCustomerBody): PolarCustomer {
+function customerFrom(answer: unknown): PolarCustomer {
+  const body = read("customer", customerAnswer, answer);
   return { id: body.id, externalId: body.external_id ?? null };
 }
 
-type PolarSubscriptionBody = { id: string; status: string; product_id: string; cancel_at_period_end?: boolean; ended_at?: string | null; pending_update?: { product_id?: string | null } | null; discount_id?: string | null; current_period_end?: string | null };
-
-function subscriptionFrom(body: PolarSubscriptionBody): PolarSubscription {
+function subscriptionFrom(answer: unknown): PolarSubscription {
+  const body = read("subscription", subscriptionAnswer, answer);
   return { id: body.id, status: body.status, productId: body.product_id, cancelAtPeriodEnd: body.cancel_at_period_end === true, endedAt: body.ended_at ?? null, pendingProductId: body.pending_update?.product_id ?? null, discountId: body.discount_id ?? null, currentPeriodEnd: body.current_period_end ?? null };
 }
 
@@ -57,19 +99,20 @@ async function requestError(response: Response): Promise<PolarRequestError> {
 export class PolarBillingProvider {
   constructor(private readonly config: PolarBillingConfig) {}
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  /** Polar's answer to a request it accepted, as it came: `unknown`, so nothing reads it before a schema has. */
+  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
     assertCertificationBillingSandbox(this.config.baseUrl ?? "https://api.polar.sh");
-    const response = await fetch(`${this.config.baseUrl ?? "https://api.polar.sh"}${path}`, { ...init, signal: AbortSignal.timeout(15_000), headers: { authorization: `Bearer ${this.config.accessToken}`, "content-type": "application/json", "polar-version": POLAR_API_VERSION, ...(init.headers ?? {}) } });
+    const response = await fetchWithTimeout(`${this.config.baseUrl ?? "https://api.polar.sh"}${path}`, { ...init, headers: { authorization: `Bearer ${this.config.accessToken}`, "content-type": "application/json", "polar-version": POLAR_API_VERSION, ...(init.headers ?? {}) } });
     if (!response.ok) {
       throw await requestError(response);
     }
-    return (await response.json()) as T;
+    return await response.json();
   }
 
   /** The subscription, or null when Polar doesn't know it. Needs subscriptions:read or subscriptions:write. */
   async getSubscription(subscriptionId: string): Promise<PolarSubscription | null> {
     try {
-      return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`));
+      return subscriptionFrom(await this.request(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`));
     } catch (error) {
       if (error instanceof PolarRequestError && error.status === 404) return null;
       throw error;
@@ -122,13 +165,13 @@ export class PolarBillingProvider {
   }
 
   private async patchSubscription(subscriptionId: string, body: Record<string, unknown>): Promise<PolarSubscription> {
-    return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "PATCH", body: JSON.stringify(body) }));
+    return subscriptionFrom(await this.request(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "PATCH", body: JSON.stringify(body) }));
   }
 
   /** The customer with this external ID, or null when Polar has none. Needs customers:read or customers:write. */
   async findCustomerByExternalId(externalId: string): Promise<PolarCustomer | null> {
     try {
-      return customerFrom(await this.request<PolarCustomerBody>(`/v1/customers/external/${encodeURIComponent(externalId)}`));
+      return customerFrom(await this.request(`/v1/customers/external/${encodeURIComponent(externalId)}`));
     } catch (error) {
       if (error instanceof PolarRequestError && error.status === 404) return null;
       throw error;
@@ -147,7 +190,7 @@ export class PolarBillingProvider {
    */
   async createCustomer(input: { externalId: string; email: string; name: string | null }): Promise<PolarCustomer> {
     assertCertificationRecipient("email", input.email);
-    return customerFrom(await this.request<PolarCustomerBody>("/v1/customers/", { method: "POST", body: JSON.stringify({ type: "team", external_id: input.externalId, ...(input.name ? { name: input.name.slice(0, 256) } : {}), owner: { email: input.email, external_id: input.externalId } }) }));
+    return customerFrom(await this.request("/v1/customers/", { method: "POST", body: JSON.stringify({ type: "team", external_id: input.externalId, ...(input.name ? { name: input.name.slice(0, 256) } : {}), owner: { email: input.email, external_id: input.externalId } }) }));
   }
 
   /**
@@ -163,7 +206,7 @@ export class PolarBillingProvider {
   async createCheckout(input: { productId: string; customer: { id: string } | { email: string; externalId: string }; metadata: Record<string, string>; discountId?: string | null; successUrl: string; returnUrl: string }): Promise<{ checkoutUrl: string; checkoutId: string }> {
     if ("email" in input.customer) assertCertificationRecipient("email", input.customer.email);
     const customer = "id" in input.customer ? { customer_id: input.customer.id } : { customer_email: input.customer.email, external_customer_id: input.customer.externalId };
-    const result = await this.request<{ url: string; id: string }>(`/v1/checkouts/`, { method: "POST", body: JSON.stringify({ products: [input.productId], ...customer, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.discountId ? { discount_id: input.discountId } : {}), metadata: input.metadata }) });
+    const result = read("checkout", checkoutAnswer, await this.request(`/v1/checkouts/`, { method: "POST", body: JSON.stringify({ products: [input.productId], ...customer, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.discountId ? { discount_id: input.discountId } : {}), metadata: input.metadata }) }));
     return { checkoutUrl: result.url, checkoutId: result.id };
   }
 
@@ -179,7 +222,7 @@ export class PolarBillingProvider {
    * individual customer's page is its owner's. Needs customer_sessions:write.
    */
   async createCustomerPortalSession(input: { externalCustomerId: string; externalMemberId?: string; returnUrl: string }): Promise<{ url: string }> {
-    const result = await this.request<{ customer_portal_url: string }>("/v1/customer-sessions/", { method: "POST", body: JSON.stringify({ external_customer_id: input.externalCustomerId, ...(input.externalMemberId ? { external_member_id: input.externalMemberId } : {}), return_url: input.returnUrl }) });
+    const result = read("customer session", customerSessionAnswer, await this.request("/v1/customer-sessions/", { method: "POST", body: JSON.stringify({ external_customer_id: input.externalCustomerId, ...(input.externalMemberId ? { external_member_id: input.externalMemberId } : {}), return_url: input.returnUrl }) }));
     return { url: result.customer_portal_url };
   }
 }

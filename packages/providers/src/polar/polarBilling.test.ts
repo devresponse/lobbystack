@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PolarBillingProvider, PolarRequestError } from "./polarBilling";
+import { PolarBillingProvider, PolarRequestError, PolarResponseError } from "./polarBilling";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -191,5 +191,75 @@ describe("PolarBillingProvider", () => {
     const refusal = await provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-pro", prorationBehavior: "invoice" }).catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(PolarRequestError);
     expect(refusal).toMatchObject({ status: 403, errorName: "AlreadyCanceledSubscription", message: "Polar request failed with status 403." });
+  });
+
+  // AUDIT-020: an answer is checked where it comes in, so a shape Polar
+  // changed is an error naming the field, not an `undefined` in a plan change.
+  describe("an answer that isn't what billing reads", () => {
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+    const answers = (body: unknown) => vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body }));
+    const subscription = { id: "sub-1", status: "active", product_id: "product-pro", cancel_at_period_end: false, ended_at: null, pending_update: null, discount_id: null, current_period_end: "2026-12-01T00:00:00Z" };
+    const refusalOf = async (call: Promise<unknown>) => await call.then(() => null, (error: unknown) => error);
+
+    it("refuses a subscription without its product, by the field's name", async () => {
+      const { product_id: _productId, ...withoutProduct } = subscription;
+      answers(withoutProduct);
+
+      const refusal = await refusalOf(provider.getSubscription("sub-1"));
+
+      expect(refusal).toBeInstanceOf(PolarResponseError);
+      expect(refusal).toMatchObject({ answer: "subscription", fields: ["product_id"], message: "Polar's subscription is missing or mistypes: product_id." });
+    });
+
+    it("refuses a field of another type, a nested one by its path, and names each field once", async () => {
+      answers({ ...subscription, status: 7, cancel_at_period_end: "yes", pending_update: { product_id: 42 } });
+
+      await expect(refusalOf(provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-pro", prorationBehavior: "invoice" }))).resolves.toMatchObject({ fields: ["status", "cancel_at_period_end", "pending_update.product_id"] });
+    });
+
+    it("keeps what an answer holds out of the error, which goes to the logs", async () => {
+      answers({ id: 12, external_id: "business:1", email: "owner@example.com" });
+
+      const refusal = await refusalOf(provider.findCustomerByExternalId("business:1"));
+
+      expect(refusal).toMatchObject({ answer: "customer", fields: ["id"] });
+      expect(JSON.stringify(refusal) + String(refusal)).not.toMatch(/owner@example\.com|business:1/);
+    });
+
+    it("refuses a checkout without its page, a portal session without its page and a customer without its ID", async () => {
+      answers({ id: "checkout-1" });
+      await expect(refusalOf(provider.createCheckout({ productId: "product-1", customer: { id: "customer-1" }, metadata: {}, successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan" }))).resolves.toMatchObject({ answer: "checkout", fields: ["url"] });
+
+      answers({ id: "session-1", token: "not-for-the-logs", customer_portal_url: "" });
+      await expect(refusalOf(provider.createCustomerPortalSession({ externalCustomerId: "business:1", returnUrl: "https://app.example/settings/plan" }))).resolves.toMatchObject({ answer: "customer session", fields: ["customer_portal_url"] });
+
+      answers({ external_id: "business:1" });
+      await expect(refusalOf(provider.createCustomer({ externalId: "business:1", email: "owner@example.com", name: null }))).resolves.toMatchObject({ answer: "customer", fields: ["id"] });
+    });
+
+    it("refuses an answer that is no object at all", async () => {
+      for (const body of [null, "ok", []]) {
+        answers(body);
+        await expect(refusalOf(provider.getSubscription("sub-1"))).resolves.toMatchObject({ answer: "subscription", fields: ["the whole body"] });
+      }
+    });
+
+    it("takes an answer with fields it doesn't read, and one whose optional fields are missing or null", async () => {
+      answers({ ...subscription, seats: 3, customer: { email: "owner@example.com" }, pending_update: { id: "update-1", applies_at: "2026-12-01T00:00:00Z", product_id: null, seats: null } });
+      await expect(provider.getSubscription("sub-1")).resolves.toEqual({ id: "sub-1", status: "active", productId: "product-pro", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: null, currentPeriodEnd: "2026-12-01T00:00:00Z" });
+
+      answers({ id: "sub-1", status: "canceled", product_id: "product-pro" });
+      await expect(provider.getSubscription("sub-1")).resolves.toEqual({ id: "sub-1", status: "canceled", productId: "product-pro", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: null, currentPeriodEnd: null });
+
+      answers({ id: "customer-1" });
+      await expect(provider.findCustomerByExternalId("business:1")).resolves.toEqual({ id: "customer-1", externalId: null });
+    });
+
+    it("leaves alone the answers billing reads nothing from", async () => {
+      answers({ unexpected: true });
+
+      await expect(provider.recordUsage({ eventName: "billing.voice_minutes", externalCustomerId: "business:1", quantity: 1, timestamp: "2026-09-08T00:00:00.000Z", idempotencyKey: "voice:call-1", businessId: "1", usageKind: "voice_seconds" })).resolves.toBeUndefined();
+      await expect(provider.revokeSubscription("sub-1")).resolves.toBeUndefined();
+    });
   });
 });

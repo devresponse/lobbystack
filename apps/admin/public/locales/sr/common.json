@@ -55,7 +55,13 @@
   "errorBoundary": {
     "title": "Nešto nije u redu",
     "description": "Ponovo učitajte kontrolnu tablu i pokušajte još jednom. Greška je prijavljena.",
-    "reload": "Ponovo učitaj"
+    "reload": "Ponovo učitaj",
+    "screenTitle": "Ovaj ekran nije učitan",
+    "screenDescription": "Ostatak kontrolne table i dalje radi, pa možete nastaviti na drugom mestu. Greška je prijavljena.",
+    "retry": "Pokušajte ponovo",
+    "reference": "Referenca za podršku: {{digest}}",
+    "partTitle": "Ovaj deo nije učitan",
+    "partDescription": "Ostatak ekrana i dalje radi."
   },
   "feedback": {
     "trigger": "Povratne informacije",

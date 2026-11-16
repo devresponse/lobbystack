@@ -2,7 +2,7 @@
 
 The scalability review of 2026-10-18 found that the single database isn't the first limit: database connections, the one admin process, background jobs that run for each business, and the shared provider accounts bite first ([scalability](../reviews/scalability-2026-10-18.md)). Its roadmap hardens one stack, then makes it survive a failure, then splits businesses into cells.
 
-- **Status:** started. Apart from billing fixes, fork PR #168 made two admins and two workers possible: smaller connection pools on each copy, a database made with room for 200 connections, a minute for the old admin to finish at a release, and new calls spread over the worker's copies ([replicas review](../reviews/replicas-2026-11-13.md)). Since fork PR #182 on `develop/r2`, `devops/scale.mjs` sets the number of copies after its checks ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)). Phase 1 holds most of the near-term value and needs no new service except PgBouncer.
+- **Status:** started. Apart from billing fixes, fork PR #168 made two admins and two workers possible: smaller connection pools on each copy, a database made with room for 200 connections, a minute for the old admin to finish at a release, and new calls spread over the worker's copies ([replicas review](../reviews/replicas-2026-11-13.md)). Since fork PR #182 on `develop/r2`, `devops/scale.mjs` sets the number of copies after its checks ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)). Since fork PR #185, every copy reports what it's doing, and one address on the admin answers for all of them ([watch the copies](#watch-the-copies)). Phase 1 holds most of the near-term value and needs no new service except PgBouncer.
 - **Effort:** not estimated in days; each item is a pull request or a setting of its own.
 - **Measured:** one admin process served about 400 people chatting at once in a local test, slowed at 600 and failed at 800 ([widget scalability](../reviews/widget-scalability-2026-10-15.md#know-the-answer)).
 
@@ -25,6 +25,19 @@ The scalability review of 2026-10-18 found that the single database isn't the fi
 - **Two admin copies** once connections are pooled, with a drain on shutdown. Possible since fork PR #168, after a rehearsal on a test environment ([replicas review](../reviews/replicas-2026-11-13.md#know-the-recommendations)).
 - **Cloudflare caching** `/embed.js` and the public profile pages ([protect the widget](protect-the-deployment.md)).
 - **Running usage counters** in place of replaying a business's month for each reservation, and batched Polar events.
+
+## Watch the copies
+
+A study on 2026-11-15 looked at how to see each copy of the admin and the worker on Railway, how busy it is, and when another is needed. Railway shows each copy's processor and memory, restarts a crashed copy, and checks a service's health only during a deploy; it has no way to see what a copy is doing, and nothing outside could see the worker at all. The study's steps:
+
+| Step | Work | Status |
+| --- | --- | --- |
+| 1 | No code: Railway's project webhook and its monitors, an uptime check on the ready check, PostHog's error and log alerts, and PostHog's metrics turned on | Not done on any deployment ([open items](../project/open-items.md#do-these-on-the-demo-after-deploys)) |
+| 2 | A name for each copy on every metric, log record and error, a heartbeat from each copy, one status address for all of them, gauges for calls, queues, database connections and how busy a copy's thread is, and the scale script's view of each copy | Built in fork PR #185 on `develop/r2` ([watch every copy](../features/observability.md#watch-every-copy)); since fork PR #186 a copy that died stays listed for 24 hours with its last report; tried on a computer, not yet on Railway |
+| 3 | A PostHog dashboard and alerts on those metrics | Not started |
+| Later | A limit of calls for each worker, with a new call sent to the least busy copy; a watchdog that restarts a copy whose thread is stuck; a load test with two copies of each | Not started |
+
+The study also keeps the replicas review's advice: a fixed two admins and two workers, and no copies added or taken away by load, since a worker can't hand its calls to another.
 
 Before revenue depends on it, ask Polar to confirm in writing that an AI receptionist that rents phone numbers is accepted under its acceptable use policy, which prohibits telecommunication services.
 

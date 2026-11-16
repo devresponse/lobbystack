@@ -3,6 +3,7 @@ import {
   cloudBillingPlanSlugs,
   type CloudBillingPlanSlug,
 } from "./billing";
+import { envFlag } from "./env";
 
 export { FREE_CONTENT_RETENTION_MAX_DAYS, MIN_BILLABLE_VOICE_DURATION_SECONDS, contentRetentionDaysForPlan } from "./billing";
 
@@ -102,5 +103,5 @@ export function isWidgetKeyIssuanceEnabled(
   source: Record<string, string | undefined> = {},
 ): boolean {
   if (!isProductCapabilityRestricted("website_chat")) return true;
-  return source.WIDGET_KEY_ISSUANCE_ENABLED === "true";
+  return envFlag(source, "WIDGET_KEY_ISSUANCE_ENABLED");
 }

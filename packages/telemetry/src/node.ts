@@ -6,6 +6,8 @@ import {
   SpanStatusCode,
   trace,
   metrics,
+  type Meter,
+  type MeterProvider,
   type Span,
   type SpanOptions,
 } from "@opentelemetry/api";
@@ -20,7 +22,8 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { BatchSpanProcessor, type ReadableSpan, type Span as SdkSpan, type SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
-import { monitorEventLoopDelay } from "node:perf_hooks";
+import { hostname } from "node:os";
+import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { format } from "node:util";
 
 import { addIdsToCallContext, callContextSpanAttributes, CALL_CONTEXT_SPAN_ATTRIBUTES, currentCallContext, type CallContext } from "./callContext.js";
@@ -39,6 +42,7 @@ export type TraceContextCarrier = Record<string, string>;
 
 let sdk: NodeSDK | undefined;
 let activeLogRecordProcessors: LogRecordProcessor[] = [];
+let activeMetricReader: PeriodicExportingMetricReader | undefined;
 let initialized = false;
 let stopRuntimeMetrics: (() => void) | undefined;
 let restoreConsole: (() => void) | undefined;
@@ -191,6 +195,8 @@ export async function initializeTelemetry(
     "service.namespace": "lobbystack",
     "service.name": serviceName,
     "service.version": serviceVersion(),
+    // Which copy of the service sent it, on every metric, log and trace.
+    "service.instance.id": serviceInstance().id,
     "deployment.environment": process.env.NODE_ENV ?? "development",
   });
   // The OTLP exporters read OTEL_EXPORTER_OTLP_HEADERS from the environment.
@@ -208,15 +214,17 @@ export async function initializeTelemetry(
   ];
   activeLogRecordProcessors = logRecordProcessors;
 
+  const metricReader = new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter({ url: `${endpoint}/v1/metrics` }),
+    exportIntervalMillis: 15_000,
+  });
+  activeMetricReader = metricReader;
   sdk = new NodeSDK({
     resource,
     spanProcessors: [new CallContextSpanProcessor(), new RedactingSpanProcessor(), new BatchSpanProcessor(new OTLPTraceExporter({ url: `${endpoint}/v1/traces` }))],
     logRecordProcessors,
     instrumentations: [new HttpInstrumentation({ ignoreOutgoingRequestHook: isStorageHttpRequest }), new UndiciInstrumentation({ ignoreRequestHook: isStorageHttpRequest })],
-    metricReader: new PeriodicExportingMetricReader({
-      exporter: new OTLPMetricExporter({ url: `${endpoint}/v1/metrics` }),
-      exportIntervalMillis: 15_000,
-    }),
+    metricReader,
   });
 
   try {
@@ -229,6 +237,11 @@ export async function initializeTelemetry(
     const external = meter.createObservableGauge("process.memory.external_bytes", { unit: "By" });
     const arrayBuffers = meter.createObservableGauge("process.memory.array_buffers_bytes", { unit: "By" });
     const eventLoop = meter.createObservableGauge("process.event_loop.delay_p99_ms", { unit: "ms" });
+    // How busy the process's one thread was since the last export, from 0 to 1.
+    // The delay above includes its own 20 ms sampling step, so it reads about
+    // 20 on an idle process; this reads 0.
+    const utilization = meter.createObservableGauge("process.event_loop.utilization", { unit: "1" });
+    let lastUtilization = performance.eventLoopUtilization();
     const callback: Parameters<typeof meter.addBatchObservableCallback>[0] = result => {
       const memory = process.memoryUsage();
       result.observe(heap, memory.heapUsed);
@@ -237,8 +250,11 @@ export async function initializeTelemetry(
       result.observe(arrayBuffers, memory.arrayBuffers);
       if (delay.count > 0) result.observe(eventLoop, delay.percentile(99) / 1_000_000);
       delay.reset();
+      const currentUtilization = performance.eventLoopUtilization();
+      result.observe(utilization, performance.eventLoopUtilization(currentUtilization, lastUtilization).utilization);
+      lastUtilization = currentUtilization;
     };
-    const runtimeMetrics = [heap, rss, external, arrayBuffers, eventLoop];
+    const runtimeMetrics = [heap, rss, external, arrayBuffers, eventLoop, utilization];
     meter.addBatchObservableCallback(callback, runtimeMetrics);
     stopRuntimeMetrics = () => { delay.disable(); meter.removeBatchObservableCallback(callback, runtimeMetrics); };
     restoreConsole = forwardConsoleToLogs();
@@ -249,8 +265,32 @@ export async function initializeTelemetry(
 }
 
 // Match the admin's releaseVersion(): SERVICE_VERSION can go stale on Railway.
-function serviceVersion(): string {
-  return process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RAILWAY_DEPLOYMENT_ID || process.env.SERVICE_VERSION || "development";
+function serviceVersion(env: Record<string, string | undefined> = process.env): string {
+  return env.RAILWAY_GIT_COMMIT_SHA || env.RAILWAY_DEPLOYMENT_ID || env.SERVICE_VERSION || "development";
+}
+
+export type ServiceInstance = {
+  /** Which copy of its service this process is. */
+  id: string;
+  /** The release it runs: on Railway, the commit. */
+  release: string;
+  /** Railway's deployment. Copies of one deployment share it, and every deploy makes a new one. */
+  deployment?: string;
+  region?: string;
+};
+
+/**
+ * Which copy of its service this process is. Railway runs copies (replicas)
+ * of a service and names each one in RAILWAY_REPLICA_ID. Elsewhere the host
+ * name tells them apart: under Docker Compose that is the container's ID.
+ */
+export function serviceInstance(env: Record<string, string | undefined> = process.env): ServiceInstance {
+  return {
+    id: env.RAILWAY_REPLICA_ID?.trim() || hostname(),
+    release: serviceVersion(env),
+    ...(env.RAILWAY_DEPLOYMENT_ID ? { deployment: env.RAILWAY_DEPLOYMENT_ID } : {}),
+    ...(env.RAILWAY_REPLICA_REGION ? { region: env.RAILWAY_REPLICA_REGION } : {}),
+  };
 }
 
 const SEVERITY = { info: SeverityNumber.INFO, warn: SeverityNumber.WARN, error: SeverityNumber.ERROR } as const;
@@ -279,23 +319,76 @@ export async function shutdownTelemetry(): Promise<void> {
   const activeSdk = sdk;
   sdk = undefined;
   activeLogRecordProcessors = [];
+  activeMetricReader = undefined;
   initialized = false;
 
   const shutdown = Promise.allSettled(activeSdk ? [activeSdk.shutdown()] : []);
   await Promise.race([shutdown, new Promise<void>((resolve) => setTimeout(resolve, 5_000))]);
   logs.disable();
+  // The SDK leaves its meter provider registered, and a later start could not register its own.
+  if (activeSdk) metrics.disable();
 }
 
 export async function forceFlushTelemetryLogs(): Promise<void> {
   await Promise.all(activeLogRecordProcessors.map((processor) => processor.forceFlush()));
 }
 
+/** Collects every metric now and exports it, instead of at the next 15-second export. */
+export async function forceFlushTelemetryMetrics(): Promise<void> {
+  await activeMetricReader?.forceFlush();
+}
+
 export function getTracer(name = "lobbystack"): ReturnType<typeof trace.getTracer> {
   return trace.getTracer(name);
 }
 
-export function getMeter(name = "lobbystack"): ReturnType<typeof metrics.getMeter> {
-  return metrics.getMeter(name);
+/**
+ * A meter whose counters, histograms and gauges record whenever they were
+ * made. OpenTelemetry hands out instruments that record nothing until the SDK
+ * has started, and never swaps them afterwards, so a module that makes its
+ * instruments as it loads would keep those: the worker loads @lobbystack/db
+ * and its job handlers before it starts telemetry. Each instrument made here
+ * finds the real one on first use, and again when the SDK starts or stops.
+ * Observable instruments and their callbacks go straight to the SDK: make
+ * those after telemetry has started.
+ */
+export function getMeter(name = "lobbystack"): Meter {
+  const late = <T>(make: (meter: Meter) => T): (() => T) => {
+    let provider: MeterProvider | undefined;
+    let instrument: T | undefined;
+    return () => {
+      const active = metrics.getMeterProvider();
+      if (active !== provider || instrument === undefined) {
+        provider = active;
+        instrument = make(active.getMeter(name));
+      }
+      return instrument;
+    };
+  };
+  const current = () => metrics.getMeter(name);
+  return {
+    createCounter(instrumentName, options) {
+      const real = late((meter) => meter.createCounter(instrumentName, options));
+      return { add: (value, attributes, activeContext) => real().add(value, attributes, activeContext) };
+    },
+    createUpDownCounter(instrumentName, options) {
+      const real = late((meter) => meter.createUpDownCounter(instrumentName, options));
+      return { add: (value, attributes, activeContext) => real().add(value, attributes, activeContext) };
+    },
+    createHistogram(instrumentName, options) {
+      const real = late((meter) => meter.createHistogram(instrumentName, options));
+      return { record: (value, attributes, activeContext) => real().record(value, attributes, activeContext) };
+    },
+    createGauge(instrumentName, options) {
+      const real = late((meter) => meter.createGauge(instrumentName, options));
+      return { record: (value, attributes, activeContext) => real().record(value, attributes, activeContext) };
+    },
+    createObservableGauge: (instrumentName, options) => current().createObservableGauge(instrumentName, options),
+    createObservableCounter: (instrumentName, options) => current().createObservableCounter(instrumentName, options),
+    createObservableUpDownCounter: (instrumentName, options) => current().createObservableUpDownCounter(instrumentName, options),
+    addBatchObservableCallback: (callback, observables) => current().addBatchObservableCallback(callback, observables),
+    removeBatchObservableCallback: (callback, observables) => current().removeBatchObservableCallback(callback, observables),
+  };
 }
 
 export function getLogger(name = "lobbystack"): Logger {
@@ -310,16 +403,39 @@ export function errorText(error: unknown): string {
 }
 
 /**
+ * A log line's fields. `level` and `message` are the line's own keys, so a
+ * field written here can't use those names: call it `detail`, or what it is.
+ */
+export type LogFields = Record<string, unknown> & { level?: never; message?: never };
+
+// The compiler only sees the names written in a call. A field can still
+// arrive as `level` or `message` inside an object that's spread or passed
+// whole, such as a provider's error body, and is then kept under these names.
+// `fieldMessage` is masked in the OTel export, as every key with "message" in
+// its name is.
+const RESERVED_LOG_KEYS = new Map([["level", "fieldLevel"], ["message", "fieldMessage"]]);
+
+/** The key a field is logged under: its own, unless that is one of the line's. */
+function logFieldKey(key: string, fields: Record<string, unknown>): string {
+  let name = RESERVED_LOG_KEYS.get(key);
+  if (!name) return key;
+  // A field that already has the other name keeps it.
+  while (fields[name] !== undefined) name += "_";
+  return name;
+}
+
+/**
  * Prints one JSON line with the current call's IDs and the active trace, and
  * exports the same record as an OTel log. Railway reads `level` and `message`
- * and makes every other field filterable, such as `@callId:<id>`. A value
- * under `error` is reduced to its redacted message. Never pass transcript
- * text, phone numbers or other customer content.
+ * and makes every other field filterable, such as `@callId:<id>`. Searches
+ * and alerts go by the event name in `message`, so no field can replace it
+ * or the severity. A value under `error` is reduced to its redacted message.
+ * Never pass transcript text, phone numbers or other customer content.
  */
-export function logEvent(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
+export function logEvent(level: LogLevel, message: string, fields: LogFields = {}): void {
   const record: Record<string, unknown> = { ...currentCallContext() };
   for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) record[key] = key === "error" || value instanceof Error ? errorText(value) : value;
+    if (value !== undefined) record[logFieldKey(key, fields)] = key === "error" || value instanceof Error ? errorText(value) : value;
   }
   const spanContext = trace.getActiveSpan()?.spanContext();
   if (spanContext && isSpanContextValid(spanContext)) record.traceId = spanContext.traceId;
@@ -420,6 +536,8 @@ async function reportException(level: "error" | "warning", error: unknown, prope
     service,
     environment: process.env.RAILWAY_ENVIRONMENT_NAME ?? process.env.NODE_ENV,
     release: serviceVersion(),
+    // Which copy of the service reported it.
+    replica: serviceInstance().id,
     alertable: !warning,
     ...(cause ? { cause } : {}),
   };

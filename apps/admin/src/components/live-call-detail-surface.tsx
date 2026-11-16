@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { CallRecordingPlayer } from "@/components/audio/call-recording-player";
+import { SurfaceErrorBoundary } from "@/components/surface-error-boundary";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { useReceptionistChoices } from "@/components/receptionists/receptionist-choices";
 import { BackLink, DetailSection, MetadataField, truncateId, useCopiedField } from "@/components/detail-fields";
@@ -39,34 +40,12 @@ import { useTelemetry } from "@/components/product-analytics";
 import { formatDateTime } from "@/lib/locale";
 import { subscribeRealtimeQuery } from "@/lib/realtime-query";
 
-type Detail = {
-  call: {
-    id: string;
-    legacyConvexId: string | null;
-    providerCallId: string;
-    provider: string;
-    transport: string;
-    status: string;
-    disposition: string | null;
-    transferState: string | null;
-    startedAt: string;
-    endedAt: string | null;
-    providerDurationSeconds: number | null;
-    gatewaySessionId: string | null;
-    twilioCallSid?: string | null;
-    /** When an owner or admin archived the call, which hides it from the Calls list. */
-    archivedAt?: string | null;
-    /** The receptionist that answered; a call from before receptionists shows the default one. */
-    receptionist?: { id: string; name: string | null } | null;
-  };
-  contact: { id: string; name: string | null; phone: string | null; email: string | null; blockedAt: string | null } | null;
-  outcome: string | null;
-  timeline: Array<{ type: string; at: string | null; status: string }>;
-  transcript: Array<{ id: string; sequence: number; speaker: string; text: string; confidence: number | null; final: boolean; createdAt: string }>;
-  recording: { state: "available" | "pending" | "expired" | "missing"; objectId?: string; contentType?: string };
-  appointments: Array<{ id: string; startsAt: string; endsAt: string; timezone: string; status: string; serviceName: string; staffName: string }>;
-  followUpTasks: Array<{ id: string; title: string; body: string; status: string; request?: string | null; createdAt: string; updatedAt: string }>;
-};
+import type { CallDetail } from "@lobbystack/domain";
+import type { Jsonified } from "@lobbystack/shared";
+
+/** What `GET /api/calls/{callId}` sends, as `getCallDetail` builds it and JSON delivers it (AUDIT-018). */
+type Detail = Jsonified<CallDetail>;
+
 
 function formatDate(value: string, locale: string): string {
   return formatDateTime(value, locale, { dateStyle: "medium", timeStyle: "short" });
@@ -258,7 +237,8 @@ function RecordingTab({ detail, src }: { detail: Detail; src: string | null }) {
   if (!src) {
     return <div className="flex flex-col items-center gap-2 py-16 text-center"><Headphones className="size-8 text-muted-foreground/40" /><p className="type-empty-description">{detail.recording.state === "pending" ? t("detail.recording.pending") : t("detail.recording.unavailable")}</p></div>;
   }
-    return <div className="py-4"><Card className="ph-no-capture" size="sm"><CallRecordingPlayer className="px-4 py-0" downloadLabel={t("actions.download")} initialDurationSeconds={detail.call.providerDurationSeconds ?? 0} pauseLabel={t("actions.pause")} playLabel={t("actions.play")} src={src} /></Card></div>;
+    // The player decodes audio from the provider; a file it can't read must not take the transcript and the details with it.
+    return <div className="py-4"><SurfaceErrorBoundary><Card className="ph-no-capture" size="sm"><CallRecordingPlayer className="px-4 py-0" downloadLabel={t("actions.download")} initialDurationSeconds={detail.call.providerDurationSeconds ?? 0} pauseLabel={t("actions.pause")} playLabel={t("actions.play")} src={src} /></Card></SurfaceErrorBoundary></div>;
 }
 
 function DetailsTab({ detail, marking, onCompleteFollowUp }: { detail: Detail; marking: string | undefined; onCompleteFollowUp: (inboxItemId: string) => void }) {

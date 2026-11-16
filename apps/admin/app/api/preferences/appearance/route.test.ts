@@ -7,7 +7,8 @@ vi.mock("@/lib/api-helpers", () => ({
   jsonError: (message: string) => new Error(message),
   readJson: vi.fn(),
 }));
-vi.mock("@lobbystack/domain", () => ({
+vi.mock("@lobbystack/domain", async (original) => ({
+  ...await original<typeof import("@lobbystack/domain")>(),
   requireBusinessMembership: mocks.requireBusinessMembership,
   hasMinimumRole: () => true,
 }));

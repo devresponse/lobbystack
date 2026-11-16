@@ -1,12 +1,7 @@
 import { z } from "zod";
 
 import type { DatabaseTransaction } from "@lobbystack/db";
-import {
-  contentRetentionDaysForPlan,
-  type BillingPlanSlug,
-  type ContentRetentionCategory,
-  type ContentRetentionOverrides,
-} from "@lobbystack/shared";
+import { contentRetentionDaysForPlan, envFlag, type BillingPlanSlug, type ContentRetentionCategory, type ContentRetentionOverrides } from "@lobbystack/shared";
 
 import { loadBillingContext } from "./usage";
 
@@ -29,7 +24,7 @@ export type { ContentRetentionCategory };
 // Content retention is on by default. `CONTENT_RETENTION_ENABLED=false` is the
 // only escape hatch that disables it deployment-wide.
 export function isContentRetentionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CONTENT_RETENTION_ENABLED !== "false";
+  return envFlag(env, "CONTENT_RETENTION_ENABLED");
 }
 
 // Optional per-category day override for the paid defaults. Free stays capped at

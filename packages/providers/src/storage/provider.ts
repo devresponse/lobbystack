@@ -3,6 +3,7 @@ import { dirname, isAbsolute, parse, resolve } from "node:path";
 
 import { LocalStorageProvider } from "./local";
 import { S3StorageProvider } from "./s3";
+import { envFlag } from "@lobbystack/shared";
 
 export type RuntimeStorageProvider = LocalStorageProvider | S3StorageProvider;
 
@@ -44,7 +45,7 @@ export function createStorageProvider(source: NodeJS.ProcessEnv = process.env, o
       region: source.S3_REGION || "us-east-1",
       ...(source.S3_ENDPOINT ? { endpoint: source.S3_ENDPOINT } : {}),
       ...(accessKeyId && secretAccessKey ? { accessKeyId, secretAccessKey } : {}),
-      forcePathStyle: source.S3_FORCE_PATH_STYLE === "true",
+      forcePathStyle: envFlag(source, "S3_FORCE_PATH_STYLE"),
       ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : {}),
     });
   }

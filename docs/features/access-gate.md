@@ -77,6 +77,7 @@ These answer without the cookie, because the caller is a provider's server, a vi
 | `/api/mcp`, the four `/.well-known/oauth-…` addresses, and `/api/auth/oauth2/token`, `register`, `revoke` and `introspect` | AI assistants' servers | An OAuth token or an API key |
 | `/api/storage/local` | An upload or download on a deployment that keeps files on its disk | A signed token in the address |
 | `/api/internal/finance/export` | The finance export, off unless `FINANCE_EXPORT_ENABLED=true` | `FINANCE_EXPORT_TOKEN` |
+| `/api/internal/fleet` | An uptime check and `devops/scale.mjs`, which ask it whether every copy of the admin and the worker runs; off unless `FLEET_STATUS_TOKEN` is set (fork PR #185, [watch every copy](observability.md#watch-every-copy)) | `FLEET_STATUS_TOKEN` |
 
 - **Files that never pass through the proxy** answer as before: the build's files under `/_next/static/`, `/_next/image`, the favicon, `/locales/`, `/brand/` and the logo file. They hold code, interface text and logos, and no business data. Emails load their logo from `/brand/`, so they keep it. `/_next/image` fetches the address it's given through the proxy with no cookie, so a closed page answers it the 404 whether the page exists or not.
 - **Everything else is closed:** the sign-in and sign-up pages and the rest of `/api/auth/`, the dashboard and its API, onboarding, businesses' public pages, receptionist pages and QR links (`/profile/`, `/q/`), prospect demos, the help center, and `/api/widget-keys`, which sits beside an open address.

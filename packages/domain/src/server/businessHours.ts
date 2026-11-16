@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { countKnowledgeTokens } from "../knowledgeRanking";
-import { businesses, businessHours, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import type { HoursWindow } from "@lobbystack/shared";
+import { businesses, businessHours, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { normalizeBookingMode, type BookingMode, type HoursWindow } from "@lobbystack/shared";
 
 import { normalizeHoursWindows, sameHoursWindows } from "../hours";
 import { enqueueBusinessSummaryRefresh } from "./businessSummary";
@@ -25,6 +25,7 @@ const HOURS_MAX_SNIPPETS = 40;
 const HOURS_MAX_CHUNKS = 300;
 
 export type HoursSource = "none" | "generated" | "operator";
+export type BusinessHoursPage = { timezone: string; hoursSource: HoursSource; bookingMode: BookingMode; hours: HoursWindow[] };
 export type BusinessHoursSourceText = { title: string; text: string };
 
 /** Schedules an hours extraction after knowledge changed, batched like the summary. Call it in the same transaction as the change. */
@@ -182,4 +183,19 @@ export async function markBusinessHoursChecked(context: DomainContext, input: { 
   await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     await tx.update(businesses).set({ hoursFingerprint: input.fingerprint }).where(and(eq(businesses.id, input.businessId), ne(businesses.hoursSource, "operator")));
   });
+}
+
+/**
+ * What the dashboard's opening hours page shows: the business's timezone, who
+ * set the hours, the default receptionist's booking mode, and the windows
+ * themselves. Null when the business is gone.
+ */
+export async function readBusinessHoursPageInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<BusinessHoursPage | null> {
+  const [business] = await tx.select({ timezone: businesses.timezone, hoursSource: businesses.hoursSource }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
+  if (!business) return null;
+  const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours)
+    .where(eq(businessHours.businessId, input.businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
+  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles)
+    .where(and(eq(receptionistProfiles.businessId, input.businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
+  return { timezone: business.timezone, hoursSource: business.hoursSource as HoursSource, bookingMode: normalizeBookingMode(profile?.bookingMode), hours };
 }

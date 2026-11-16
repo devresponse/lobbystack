@@ -112,6 +112,7 @@ Webhook deliveries refuse private, loopback, link-local and cloud metadata addre
 | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP base URL. LobbyStack appends `/v1/traces`, `/v1/metrics`, and `/v1/logs`. Leave empty to disable export. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Optional comma-separated `key=value` headers sent with each OTLP request. For PostHog, use `Authorization=Bearer your_posthog_project_token_here`. |
+| `FLEET_STATUS_TOKEN` | Optional, on the admin. At least 32 characters; use random letters and digits, which an address carries as they are. With it set, `GET /api/internal/fleet` lists every running copy of the admin and the worker with its load, and each queue's jobs, to a request that sends the token as `Authorization: Bearer <the token>` or as `?token=<the token>`. It answers `503` when a copy stopped reporting without shutting down, when a worker isn't ready, or when fewer copies run than the `admin` and `worker` query parameters expect, so an uptime check can watch it. Unset, or with a shorter token, the address answers `404`. The token opens nothing else. The repository's `docs/features/observability.md` describes the answer. |
 
 An empty OTLP endpoint does not disable container stdout logs, application health endpoints, direct product analytics, or direct error reporting.
 

@@ -12,6 +12,7 @@ import { createWorkerDomainContext } from "@/lib/domain-context";
 import { reportServerError } from "@/lib/error-reporting";
 import { recordedGreetingFor, type RecordedGreeting } from "@/lib/live-greeting";
 import { attachWorkerToLiveSession, getLiveClient } from "@/lib/live-prototype";
+import { envFlag } from "@lobbystack/shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ function twilioCallSidFromSipHeaders(headers: Array<{ name: string; value: strin
 // We pick the business from the dialled number, accept with client delegation,
 // and hand the session to the worker.
 export async function POST(request: Request) {
-  if (process.env.LIVE_PROTOTYPE_ENABLED !== "true") return new NextResponse(null, { status: 404 });
+  if (!envFlag(process.env, "LIVE_PROTOTYPE_ENABLED")) return new NextResponse(null, { status: 404 });
   const timing = createTiming();
   const client = getLiveClient();
   let event;

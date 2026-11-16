@@ -271,6 +271,9 @@ POSTHOG_PROJECT_TOKEN=
 # underscores, dots or tildes. Given here, it closes the deployment to strangers by itself, with or
 # without PROTECT=yes in the settings file, and up makes none (docs/features/access-gate.md).
 PROTECTION_TOKEN=
+# The fleet status address's token, to reuse one an uptime check already carries: 32 or more
+# letters, digits, dashes, underscores, dots or tildes. Empty, up makes one (docs/features/observability.md).
+FLEET_STATUS_TOKEN=
 # For connect: the incoming-call webhook's signing secret (whsec_...), once it exists.
 OPENAI_WEBHOOK_SECRET=
 
@@ -315,7 +318,7 @@ const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|[rs]k_(?:live|test)_[A-Za-z0-9]{1
 const SECRET_KEYS = new Set(["OPENAI_API_KEY", "TWILIO_AUTH_TOKEN", "SMTP_PASSWORD", "TURNSTILE_SECRET_KEY", "POLAR_ADMIN_TOKEN",
   "POLAR_WORKER_TOKEN", "OPENAI_WEBHOOK_SECRET", "RAILWAY_API_TOKEN", "OPENAI_ADMIN_KEY", "TWILIO_MAIN_AUTH_TOKEN", "RESEND_ADMIN_KEY",
   "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY", "STRIPE_ADMIN_KEY", "STRIPE_WORKER_KEY", "STRIPE_API_KEY",
-  "POLAR_SETUP_TOKEN", "POLAR_WEBHOOK_SECRET", "POSTHOG_PERSONAL_API_KEY"]);
+  "POLAR_SETUP_TOKEN", "POLAR_WEBHOOK_SECRET", "POSTHOG_PERSONAL_API_KEY", "FLEET_STATUS_TOKEN"]);
 
 function hide(value) {
   if (typeof value === "string" && value.length >= 8) hiddenValues.add(value);
@@ -2465,6 +2468,8 @@ function variableSections(run) {
       // The access gate (PROTECT=yes, or a PROTECTION_TOKEN in the secrets file): the admin answers 404 to every page
       // without the access link.
       ...(protectOn(run) ? { PROTECTION_TOKEN: x("PROTECTION_TOKEN") } : {}),
+      // Opens the fleet status address, GET /api/internal/fleet, to an uptime check and to devops/scale.mjs.
+      FLEET_STATUS_TOKEN: x("FLEET_STATUS_TOKEN"),
       WORKER_INTERNAL_URL: "http://${{worker.RAILWAY_PRIVATE_DOMAIN}}:3002",
       DATABASE_URL: role("lobbystack_app", "LOBBYSTACK_APP_PASSWORD"),
       LOBBYSTACK_AUTH_PASSWORD: "${{Postgres.LOBBYSTACK_AUTH_PASSWORD}}", LOBBYSTACK_WORKER_PASSWORD: "${{Postgres.LOBBYSTACK_WORKER_PASSWORD}}",
@@ -2522,8 +2527,27 @@ async function secretsStep(run) {
   });
 }
 
+// The admin lists every copy of the admin and the worker, with what each is doing, at GET /api/internal/fleet: for
+// an uptime check, which can't reach the worker otherwise, and for devops/scale.mjs (docs/features/observability.md,
+// "Watch every copy"). The address is off until the admin has a FLEET_STATUS_TOKEN, so the script gives it one. The
+// token opens nothing else, and the address names no business or caller.
+const FLEET_STATUS_TOKEN_SHAPE = /^[A-Za-z0-9._~-]{32,}$/;
+
+async function fleetTokenStep(run) {
+  // The token goes in with the variables. A deployment whose variables were set before this step existed keeps them
+  // as they are, and gets the token when they run again (redo <settings file> variables).
+  if (run.state.done.variables && !run.state.done["fleet.token"]) return;
+  await step(run, "fleet.token", "The fleet status address's token (FLEET_STATUS_TOKEN on the admin, 64 hex characters)", async () => {
+    const fromSecretsFile = fromFile("FLEET_STATUS_TOKEN");
+    if (fromSecretsFile && !FLEET_STATUS_TOKEN_SHAPE.test(fromSecretsFile)) throw new Error(`FLEET_STATUS_TOKEN in ${config.file} must be at least 32 letters, digits, dashes, underscores, dots or tildes: the characters an address carries as they are`);
+    // Kept, given, or already on the admin (an uptime check may carry it in its address), else new.
+    return { FLEET_STATUS_TOKEN: v(run, "FLEET_STATUS_TOKEN") ?? fromSecretsFile ?? (await railwayVariable(run, "admin", "FLEET_STATUS_TOKEN")) ?? randomBytes(32).toString("hex") };
+  });
+}
+
 async function variableSteps(run) {
   await secretsStep(run);
+  await fleetTokenStep(run);
   // A dry run names each service's variables, never a value.
   if (dryRun && !run.state.done.variables) {
     for (const [service, variables] of Object.entries(perService(variableSections(run)))) console.log(`    ${service}: ${Object.keys(variables).join(", ")}`);
@@ -3319,6 +3343,7 @@ const PASSED_ON = {
   "twilio.tollfree": ["variables"],
   "secrets": ["variables"],
   "protection": ["variables"],
+  "fleet.token": ["variables"],
   "connect.webhook": ["connect.variables"],
   "connect.platformKey": ["connect.variables"],
   "connect.billing.apply": ["connect.billing.secret", "connect.billing.verify"],
@@ -3343,6 +3368,11 @@ function redo(run, wanted) {
     console.log(!protectOn(run) ? "  forgot the access gate's token. PROTECT isn't yes and the secrets file has no PROTECTION_TOKEN, so up puts none on the admin."
       : givenProtectionToken() ? `  forgot the access gate's token, so up takes the one in ${config.file}. If that is another token, then once the admin deploys with it, the old access link and the browsers that used it get 404: send out the new link.`
       : "  forgot the access gate's token, so up makes a new one. Once the admin deploys with it, the old access link and the browsers that used it get 404: send out the new link.");
+  }
+  // Redone to change the token, so the kept one doesn't stay either.
+  if (matches.includes("fleet.token")) {
+    delete run.state.values.FLEET_STATUS_TOKEN;
+    console.log("  forgot the fleet status address's token, so up takes the secrets file's FLEET_STATUS_TOKEN, else the one the admin has on Railway, else makes a new one. Give an uptime check that carries the old token the new one.");
   }
   // Redoing the project step means a new project, such as after deleting the old one in Railway:
   // forget the old project's IDs and address too, or the next steps would keep using them.

@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DatabaseClient, DatabaseRole } from "@lobbystack/db";
 
-const mocks = vi.hoisted(() => ({ getDatabase: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getDatabase: vi.fn(), closeDatabases: vi.fn(async () => undefined) }));
 
 vi.mock("@lobbystack/telemetry/node", async (importOriginal) => ({
   ...await importOriginal<typeof import("@lobbystack/telemetry/node")>(),
   initializeTelemetry: vi.fn(),
   shutdownTelemetry: vi.fn(),
 }));
-vi.mock("@/lib/databases", () => ({ getDatabase: mocks.getDatabase }));
+vi.mock("@/lib/databases", () => ({ getDatabase: mocks.getDatabase, closeDatabases: mocks.closeDatabases }));
 
 import { register } from "../../instrumentation";
 
@@ -70,6 +70,13 @@ describe("production database role startup validation", () => {
     for (const role of ["lobbystack_app", "lobbystack_auth", "lobbystack_worker", "lobbystack_dispatcher"]) {
       expect(mocks.getDatabase).toHaveBeenCalledWith(role);
     }
+  });
+
+  it("closes the check's pools once the roles are asserted, since the routes never use them", async () => {
+    await expect(register()).resolves.toBeUndefined();
+    expect(mocks.closeDatabases).toHaveBeenCalledTimes(1);
+    // After every role answered, not while one is still asked.
+    expect(mocks.closeDatabases.mock.invocationCallOrder[0]).toBeGreaterThan(Math.max(...mocks.getDatabase.mock.invocationCallOrder));
   });
 
   it("rejects startup when a runtime role resolves to the privileged base role", async () => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { config as loadEnv } from "dotenv";
@@ -11,13 +11,24 @@ import type { PoolClient } from "pg";
 import { initializeTelemetry, shutdownTelemetry } from "@lobbystack/telemetry/node";
 
 import { createDatabaseClient, databaseHealthCheck } from "./client";
+import { readMigrationChecksums } from "./migrations/checksums";
 import {
   concurrentIndexName,
+  contractsWithoutTheirExpand,
   MIGRATION_JOURNAL_TABLE,
   LEGACY_BASELINE_MIGRATIONS,
   ROLE_MIGRATION,
   SCHEMA_MIGRATIONS,
 } from "./migrations/raw-migrations";
+import {
+  compareSchemas,
+  DATABASE_COLUMNS_QUERY,
+  DATABASE_INDEXES_QUERY,
+  describeCodeTables,
+  describeDatabaseTables,
+  type ColumnRow,
+  type IndexRow,
+} from "./schema-drift";
 import { businesses, schema } from "./schema";
 
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -50,6 +61,24 @@ async function main(): Promise<void> {
           await baselineExistingMigrations(lockedMigrator, applied);
           console.log(`Baselined ${LEGACY_BASELINE_MIGRATIONS.length} previously-applied migrations into ${MIGRATION_JOURNAL_TABLE}.`);
         }
+        // Expand and contract, enforced (AUDIT-024). A database that has
+        // already run migrations has a release serving against it, and that
+        // release keeps answering requests until the new containers are ready.
+        // Applying a contract migration together with the expand migration it
+        // depends on takes the columns away under that release and removes the
+        // way back to it. A database with nothing applied has no release to
+        // break.
+        const together = applied.size === 0
+          ? []
+          : contractsWithoutTheirExpand([ROLE_MIGRATION, ...SCHEMA_MIGRATIONS].filter((file) => !applied.has(file)));
+        if (together.length && !allowContractWithExpand(process.env)) {
+          const pairs = together.map(({ contract, expand }) => `${contract} needs the release containing ${expand} to be running first`);
+          throw new Error(
+            `Refusing to apply a contract migration in the same run as the expand migration it depends on: ${pairs.join("; ")}. ` +
+            "Deploy the expand release, let it finish, then deploy this one. " +
+            "If this database never ran the release in between and nothing is serving against it, set LOBBYSTACK_ALLOW_CONTRACT_WITH_EXPAND=true for this run.",
+          );
+        }
         await applyRawMigration(lockedMigrator, ROLE_MIGRATION, applied);
         await migrate(lockedMigrator.db, { migrationsFolder: "./migrations/generated" });
         for (const fileName of SCHEMA_MIGRATIONS) {
@@ -81,6 +110,24 @@ async function main(): Promise<void> {
           updated += 1;
         }
         console.log(`Database role logins configured for ${updated} roles.`);
+        break;
+      }
+      case "freeze-migrations": {
+        const migrationsDirectory = resolve("migrations");
+        const onDisk = readMigrationChecksums(migrationsDirectory);
+        await writeFile(join(migrationsDirectory, "checksums.json"), `${JSON.stringify(onDisk, null, 2)}\n`);
+        console.log(`Froze ${Object.keys(onDisk).length} migrations in migrations/checksums.json.`);
+        break;
+      }
+      case "compare-schema": {
+        const columns = await migrator.db.execute<ColumnRow>(sql.raw(DATABASE_COLUMNS_QUERY));
+        const indexes = await migrator.db.execute<IndexRow>(sql.raw(DATABASE_INDEXES_QUERY));
+        const differences = compareSchemas(describeCodeTables(schema), describeDatabaseTables(columns.rows, indexes.rows));
+        if (differences.length) {
+          for (const difference of differences) console.error(`schema drift: ${difference}`);
+          throw new Error(`The Drizzle schema and the database disagree in ${differences.length} place${differences.length === 1 ? "" : "s"}.`);
+        }
+        console.log(`The Drizzle schema matches the database: ${Object.keys(schema).length} tables compared.`);
         break;
       }
       case "check": {
@@ -327,6 +374,11 @@ async function main(): Promise<void> {
     await migrator.pool.end().catch(() => undefined);
     await shutdownTelemetry();
   }
+}
+
+/** The operator's deliberate override, for a database nothing is serving yet. */
+function allowContractWithExpand(source: Readonly<Record<string, string | undefined>>): boolean {
+  return ["true", "1", "yes", "on"].includes((source.LOBBYSTACK_ALLOW_CONTRACT_WITH_EXPAND ?? "").trim().toLowerCase());
 }
 
 async function ensureMigrationJournal(client: ReturnType<typeof createDatabaseClient>): Promise<void> {

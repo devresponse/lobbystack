@@ -97,7 +97,7 @@ Then carry on from step 16 below.
 **Point production at the `production` branch**
 
 7. On `migrate`, `admin` and `worker`, open **Settings**, and in the source settings *(**Service Source**; the branch field's name not confirmed)* change the branch from `main` to `production`. Otherwise production's first deploy builds `main`.
-   - Leave **Wait for CI** off, as on test. You move `production` only to a commit whose checks have passed, and pushes to `production` start no checks of their own (`.github/workflows/ci.yml:3-12`).
+   - Leave **Wait for CI** off, as on test. You move `production` only to a commit whose checks have passed, and pushes to `production` start no checks of their own (`.github/workflows/ci.yml:3-13`).
 8. Open `admin` > **Settings** > **Networking**. If it lists the test environment's address or domain, remove it from production *(whether a copy brings addresses along: not confirmed)*. An address that's new to production, ending in `.up.railway.app`, can stay: LobbyStack answers only at `APP_BASE_URL`.
 
 **Replace the copied values**
@@ -199,7 +199,7 @@ Railway's backups stay inside the project, so they go with it if the project or 
     3. Enter the URL `https://app.example.com/api/health/ready`, the keyword `"ok":true`, and the condition **keyword does not exist**, which raises the alarm when the keyword goes missing *(the labels as UptimeRobot's help pages give them)*.
     4. Keep the 5-minute interval, check that your email is among the alert contacts, and click **Create monitor**. Install UptimeRobot's phone app and sign in, to get the alerts there too.
 
-    It notices a dashboard that stops answering, and a database, Redis or bucket that the dashboard can't reach. It can't see the worker, which has no public address: a stopped worker shows up as Railway's crash notice (step 23) and as calls nobody answers ([7.10](part-7-operations.md#710-health-checks-and-uptime-monitoring)).
+    It notices a dashboard that stops answering, and a database, Redis or bucket that the dashboard can't reach. It can't see the worker, which has no public address: a stopped worker shows up as Railway's crash notice (step 23) and as calls nobody answers ([7.10](part-7-operations.md#710-health-checks-and-uptime-monitoring)). Since fork PR #185 on `develop/r2`, a second monitor on the admin's fleet status address sees the worker too, and every copy of both services ([7.10](part-7-operations.md#710-health-checks-and-uptime-monitoring), "Watch every copy").
 25. On production's **Observability** tab, add a **Disk usage** widget for the Postgres volume and a **RAM** widget for the worker, and on each, open the three-dot menu and choose **Add monitor**, such as disk above 80% *(the widgets' names not confirmed)*. A full volume stops the database. Monitors email you, and need the Pro plan.
 
 **Spending**

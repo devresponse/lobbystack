@@ -1,11 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
-import { widgetKeys } from "@lobbystack/db";
-import { insertWidgetKeyInTransaction, readEntryPointReceptionist, setWidgetKeyReceptionistInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "@lobbystack/domain";
+import { findWidgetKeyInTransaction, insertWidgetKeyInTransaction, listWidgetKeysInTransaction, readEntryPointReceptionist, setWidgetKeyReceptionistInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch, type WidgetKeyRow } from "@lobbystack/domain";
 import { isWidgetKeyIssuanceEnabled, widgetConfigSchema } from "@lobbystack/shared";
 
-import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
+import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
+import { jsonError, parseBody, parseQuery } from "@/lib/request-input";
 import { normalizeOrigin, serializeWidgetKeyConfig } from "@/lib/widget-keys";
 
 export const dynamic = "force-dynamic";
@@ -15,30 +15,30 @@ export const dynamic = "force-dynamic";
 // names another). The dashboard alone sees and changes it: the API's widget
 // key fields stay as they were.
 
-type WidgetKeyRow = typeof widgetKeys.$inferSelect;
-
 /** A key as the dashboard shows it, with who answers its chats. */
 function dashboardRecord(row: WidgetKeyRow) {
   return { ...serializeWidgetKeyConfig(row), receptionistId: row.receptionistId };
 }
 
-function parseAllowedOrigins(value: unknown): string[] {
-  if (!Array.isArray(value)) throw new Error("allowedOrigins must be an array of origin strings.");
-  const origins = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => normalizeOrigin(item.trim()));
-  return [...new Set(origins)];
-}
+const labelField = z.string("A label is text.").trim().max(120, "A label can be 120 characters at most.");
+const originsField = z.array(z.string("Each allowed origin is a website address, such as https://example.com."), "allowedOrigins must be a list of website addresses.");
+// The domain says what a receptionist id is, and answers 400 invalid_receptionist, as the v1 API does.
+const receptionistField = z.unknown().optional();
 
-function parseConfig(value: unknown): Record<string, unknown> {
-  if (value === undefined) return {};
-  const parsed = widgetConfigSchema.safeParse(value);
-  if (!parsed.success) throw new Error("The widget configuration is invalid.");
-  return parsed.data as unknown as Record<string, unknown>;
+const widgetKeyCreate = z.object({ label: labelField.optional(), allowedOrigins: originsField.optional(), config: widgetConfigSchema.optional(), receptionistId: receptionistField });
+const widgetKeyUpdate = z.object({ label: labelField.nullish(), allowedOrigins: originsField.optional(), config: widgetConfigSchema.optional(), status: z.enum(["active", "disabled", "revoked"], "status is active, disabled or revoked.").optional(), receptionistId: receptionistField })
+  .refine((body) => Object.values(body).some((value) => value !== undefined), { error: "Name at least one field to change." });
+const widgetKeyId = z.object({ id: z.string("A widget key id is required.").trim().min(1, "A widget key id is required.") });
+
+/** The origins the key may be used from: blank entries dropped, each written the one way, each once. */
+function allowedOrigins(value: string[]): string[] {
+  return [...new Set(value.filter((item) => item.trim().length > 0).map((item) => normalizeOrigin(item.trim())))];
 }
 
 export async function GET(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
-      const rows = await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, businessId)).orderBy(desc(widgetKeys.createdAt));
+      const rows = await listWidgetKeysInTransaction(tx, { businessId });
       // The key is public (it sits in the website's script tag), so the dashboard can show its snippet again. Older keys kept only a hash.
       return { keys: rows.map((row) => ({ ...dashboardRecord(row), key: row.status === "revoked" ? null : row.keyValue })) };
     }));
@@ -49,12 +49,11 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ session, businessId, tx }) => {
       if (!isWidgetKeyIssuanceEnabled(process.env)) throw jsonError("New website chat widgets are not available yet.", 403, "widget_issuance_disabled");
-      const body = await readJson(request) as { label?: string; allowedOrigins?: string[]; config?: Record<string, unknown>; receptionistId?: unknown };
-      const allowedOrigins = parseAllowedOrigins(body.allowedOrigins ?? []);
-      const config = parseConfig(body.config);
-      const label = typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 120) : undefined;
-      const receptionistId = body.receptionistId !== undefined && body.receptionistId !== null ? readEntryPointReceptionist(body.receptionistId) : undefined;
-      const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId, label, allowedOrigins, config });
+      const body = await parseBody(request, widgetKeyCreate);
+      const config = (body.config ?? {}) as Record<string, unknown>;
+      const label = body.label || undefined;
+      const receptionistId = body.receptionistId === undefined || body.receptionistId === null ? undefined : readEntryPointReceptionist(body.receptionistId);
+      const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId, label, allowedOrigins: allowedOrigins(body.allowedOrigins ?? []), config });
       if (receptionistId === undefined) return { ok: true, key: { id: row.id, key }, record: dashboardRecord(row) };
       const answering = await setWidgetKeyReceptionistInTransaction(tx, { businessId, actorUserId: session.user.id, widgetKeyId: row.id, receptionistId });
       return { ok: true, key: { id: row.id, key }, record: { ...dashboardRecord(row), receptionistId: answering.receptionistId } };
@@ -65,30 +64,24 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ session, businessId, tx }) => {
-      const url = new URL(request.url);
-      const id = url.searchParams.get("id");
-      if (!id) throw new Error("A widget key id is required.");
-      const body = await readJson(request) as { label?: string | null; allowedOrigins?: string[]; config?: Record<string, unknown>; status?: string; receptionistId?: unknown };
-      const existing = (await tx.select({ id: widgetKeys.id, status: widgetKeys.status }).from(widgetKeys).where(and(eq(widgetKeys.id, id), eq(widgetKeys.businessId, businessId))).limit(1))[0];
-      if (!existing) throw new Error("The widget key was not found.");
-      const allowedOrigins = body.allowedOrigins !== undefined ? parseAllowedOrigins(body.allowedOrigins) : undefined;
-      const config = body.config !== undefined ? parseConfig(body.config) : undefined;
-      const status = body.status === "active" || body.status === "disabled" || body.status === "revoked" ? body.status : undefined;
-      if (status !== undefined && status !== "active" && status !== "disabled" && status !== "revoked") throw new Error("status is invalid.");
+      const { id } = parseQuery(request, widgetKeyId);
+      const body = await parseBody(request, widgetKeyUpdate);
+      const existing = await findWidgetKeyInTransaction(tx, { businessId, widgetKeyId: id });
+      if (!existing) throw jsonError("The widget key was not found.", 404, "not_found");
       // A revoked key may sit on a page someone else controls, so it stays off, as through the API.
-      if (existing.status === "revoked" && status !== undefined && status !== "revoked") throw jsonError("A revoked widget key can't be turned back on. Create a new one.", 409);
+      if (existing.status === "revoked" && body.status !== undefined && body.status !== "revoked") throw jsonError("A revoked widget key can't be turned back on. Create a new one.", 409);
       const patch: WidgetKeyPatch = {};
-      if (status !== undefined) patch.status = status;
-      if (allowedOrigins !== undefined) patch.allowedOrigins = allowedOrigins;
-      if (config !== undefined) patch.config = config;
-      if (body.label !== undefined) patch.label = body.label === null ? null : body.label.trim().slice(0, 120);
-      const receptionistId = body.receptionistId !== undefined ? readEntryPointReceptionist(body.receptionistId) : undefined;
-      if (Object.keys(patch).length === 0 && receptionistId === undefined) throw new Error("At least one field is required.");
+      if (body.status !== undefined) patch.status = body.status;
+      if (body.allowedOrigins !== undefined) patch.allowedOrigins = allowedOrigins(body.allowedOrigins);
+      if (body.config !== undefined) patch.config = body.config as Record<string, unknown>;
+      if (body.label !== undefined) patch.label = body.label === null ? null : body.label;
+      const receptionistId = body.receptionistId === undefined ? undefined : readEntryPointReceptionist(body.receptionistId);
+      if (Object.keys(patch).length === 0 && receptionistId === undefined) throw jsonError("Name at least one field to change.", 400, "invalid_request");
       // Who answers first, so the row the update returns names it.
       if (receptionistId !== undefined) await setWidgetKeyReceptionistInTransaction(tx, { businessId, actorUserId: session.user.id, widgetKeyId: existing.id, receptionistId });
       const row = Object.keys(patch).length
         ? await updateWidgetKeyInTransaction(tx, { businessId, widgetKeyId: id, patch })
-        : (await tx.select().from(widgetKeys).where(and(eq(widgetKeys.id, existing.id), eq(widgetKeys.businessId, businessId))).limit(1))[0] ?? null;
+        : await findWidgetKeyInTransaction(tx, { businessId, widgetKeyId: existing.id });
       if (!row) throw new Error("The widget key could not be updated.");
       return { ok: true, record: dashboardRecord(row) };
     }, { minimumRole: "business_admin" }));

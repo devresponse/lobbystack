@@ -8,6 +8,7 @@ import { rlsContextStatement, type RlsContext } from "./rls/context";
 import { schema } from "./schema";
 import { instrumentPool } from "./instrumentation";
 import { poolMax } from "./pool-budget";
+import { trackPool } from "./pool-usage";
 
 export type Database = NodePgDatabase<typeof schema>;
 export type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -81,6 +82,7 @@ export function createDatabaseClient(
 ): DatabaseClient {
   const pool = new Pool(poolConfig(role, source));
   instrumentPool(pool, role, { query: queryDurationHistogram, wait: poolWaitHistogram });
+  trackPool(pool, role);
   pool.on("error", (error) => {
     recordException(error, { service: "database", operation: "pool_error", role });
   });
@@ -88,6 +90,33 @@ export function createDatabaseClient(
   const db = drizzle(pool, { schema });
   return { pool, db, role };
 }
+
+/** 10, 20 and 40 ms, plus up to half of each again, chosen per attempt. */
+export function retryDelayMs(attempt: number, random: () => number = Math.random): number {
+  const base = 10 * 2 ** attempt;
+  return Math.round(base + random() * base * 0.5);
+}
+
+/**
+ * The errors PostgreSQL raises when it gave up on a transaction rather than on
+ * the work it was doing, so re-running the callback is the right answer
+ * (AUDIT-016).
+ *
+ * 40P01 is a deadlock: two transactions each waiting for a lock the other
+ * holds, and PostgreSQL ends one of them. Eighty-four explicit row and
+ * advisory locks keep that rare, but it does happen, and it used to reach the
+ * caller as a 500.
+ *
+ * 40001 is a serialization failure. No transaction here sets an isolation
+ * level, so all run at READ COMMITTED, where it isn't raised for ordinary
+ * write conflicts. It stays because it costs nothing and is what a stricter
+ * isolation level would raise.
+ *
+ * Re-running is safe: the callback runs again in full, and the work it leaves
+ * behind for other services goes through the outbox, which is written in the
+ * same transaction and so is rolled back with it.
+ */
+const RETRYABLE_TRANSACTION_ERRORS = new Set(["40001", "40P01"]);
 
 export async function withBusinessTransaction<T>(
   db: Database,
@@ -110,6 +139,7 @@ export async function withBusinessTransaction<T>(
       },
     });
 
+
     try {
       const result = await db.transaction(async (tx) => {
         await tx.execute(rlsContextStatement(context));
@@ -128,16 +158,22 @@ export async function withBusinessTransaction<T>(
         actorType: context.actorType,
       });
       span.recordException(error instanceof Error ? error : new Error(String(error)));
+      const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
+      // A deadlock that was retried away leaves no other trace; the SQLSTATE on
+      // the span is how it can be counted.
+      if (code !== undefined) span.setAttribute("db.response.status_code", code);
       span.end();
-      const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
-      if (code !== "40001" || attempt >= maxRetries) {
+      if (code === undefined || !RETRYABLE_TRANSACTION_ERRORS.has(code) || attempt >= maxRetries) {
         transactionDurationHistogram.record(Date.now() - startedAt, {
           actor_type: context.actorType,
           outcome: "error",
         });
         throw error;
       }
-      await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+      // Spread the wait. Both transactions in a deadlock are told at the same
+      // moment, and the one that was ended would otherwise come straight back
+      // into the same order of locks.
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt)));
     }
   }
 

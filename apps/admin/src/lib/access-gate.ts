@@ -56,6 +56,7 @@ const OPEN_PATHS = new Set([
   "/api/auth/oauth2/introspect",
   "/api/storage/local", // an upload or download by its signed address
   "/api/internal/finance/export", // the finance export, by its own bearer token
+  "/api/internal/fleet", // the fleet status address an uptime check watches, by its own token
 ]);
 
 /** Whether an address answers without the cookie while the gate is on. */

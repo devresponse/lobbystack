@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { roleDatabaseUrl } from "./playwright-database-url";
+import { journeyReporters } from "./playwright-journey-report";
 import { playwrightTestSecrets } from "./playwright-test-secrets";
 
 function replacementEnvironment(): Record<string, string> {
@@ -30,12 +31,15 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.e2e.ts",
   // access-gate.e2e.ts needs a server started with PROTECTION_TOKEN: playwright.access-gate.config.ts runs it.
-  testIgnore: ["**/visual-parity.e2e.ts", "**/new-operator-visual.e2e.ts", "**/loading-parity.e2e.ts", "**/invitation-parity.e2e.ts", "**/access-gate.e2e.ts"],
+  // script-nonce.e2e.ts needs servers started with CSP_SCRIPT_NONCE: playwright.script-nonce.config.ts runs it.
+  testIgnore: ["**/visual-parity.e2e.ts", "**/new-operator-visual.e2e.ts", "**/loading-parity.e2e.ts", "**/invitation-parity.e2e.ts", "**/access-gate.e2e.ts", "**/script-nonce.e2e.ts"],
   fullyParallel: false,
   // Operator fixtures share persisted active-workspace state across spec files.
   ...(process.env.PARITY_OPERATOR_USER_ID ? { workers: 1 } : {}),
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // The JSON report says which journeys needed a retry; scripts/flaky-journeys.mjs
+  // lists them, so a retry that turned green is still visible (AUDIT-021).
+  reporter: journeyReporters("journeys"),
   use: {
     baseURL,
     trace: "retain-on-failure",

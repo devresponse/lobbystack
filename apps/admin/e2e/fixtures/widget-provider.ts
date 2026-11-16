@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 type ChatMessage = { role: string; content?: string | null; tool_calls?: unknown[] };
 type ChatRequest = { model: string; messages: ChatMessage[]; tools?: Array<{ function: { name: string } }> };
@@ -31,7 +31,7 @@ function scriptedTurn(body: ChatRequest): ScriptedTurn {
 
 export async function startWidgetProvider(): Promise<{ server: Server; requests: string[] }> {
   const requests: string[] = [];
-  const server = createServer(async (request, response) => {
+  const answer = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const url = new URL(request.url ?? "/", "http://localhost:18090");
     if (url.pathname === "/widget-host") {
       const key = url.searchParams.get("key") ?? "";
@@ -59,6 +59,14 @@ export async function startWidgetProvider(): Promise<{ server: Server; requests:
       response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage })}\n\n`);
     }
     response.end("data: [DONE]\n\n");
+  };
+  // A rejection here would end the whole fixture process, taking the run's other
+  // tests with it, so a request that fails fails on its own.
+  const server = createServer((request, response) => {
+    void answer(request, response).catch(() => {
+      if (!response.headersSent) response.writeHead(500);
+      response.end();
+    });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(18090, "0.0.0.0", resolve); });
   return { server, requests };

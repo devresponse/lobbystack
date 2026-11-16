@@ -1214,6 +1214,115 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(2 * (connectionBudget("admin", world.variables.admin) + connectionBudget("worker", world.variables.worker))).toBeLessThanOrEqual(100 - 3);
   });
 
+  // The fleet status address (docs/features/observability.md, "Watch every copy"): the admin's FLEET_STATUS_TOKEN, which
+  // opens GET /api/internal/fleet to an uptime check and to devops/scale.mjs.
+  const fleetTokenShape = /^[0-9a-f]{64}$/;
+  const fleetStep = "The fleet status address's token (FLEET_STATUS_TOKEN on the admin, 64 hex characters)";
+  /** Up with everything made, but no variables set and nothing deployed yet. */
+  function beforeTheVariables() {
+    const state = stateAfterUp();
+    for (const id of ["variables", "deploy.databases", "deploy.migrate", "deploy.admin", "deploy.worker"]) delete state.done[id];
+    writeState(state);
+  }
+
+  it("gives a new deployment's admin the token of its fleet status address before its first deploy, and keeps it from run to run", async () => {
+    writeSettings();
+    beforeTheVariables();
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain(`+ ${fleetStep}`);
+    const state = readState();
+    const token = String(state.values.FLEET_STATUS_TOKEN);
+    expect(token).toMatch(fleetTokenShape);
+    for (const id of ["fleet.token", "variables", "deploy.admin"]) expect(state.done[id], id).toBeTruthy();
+    // Only the admin has it, and it went in before the admin's first deploy, which then started with it.
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBe(token);
+    expect(world.deployments.admin[0]?.id).toBe("admin-deployment-2");
+    for (const service of ["Postgres", "Redis", "migrate", "worker"] as const) expect(world.variables[service].FLEET_STATUS_TOKEN, service).toBeUndefined();
+    expect(readFileSync(`${settings()}.vars`, "utf8")).toContain(`FLEET_STATUS_TOKEN=${token}\n`);
+    // Neither the screen nor the log ever has it.
+    expect(result.out).not.toContain(token);
+    expect(logText()).not.toContain(token);
+
+    // The token stays from run to run, so an uptime check that carries it keeps working.
+    const again = await bootstrap(["up", settings(), "--yes"]);
+    expect(again.code, again.out).toBe(0);
+    expect(again.out).toContain(`= ${fleetStep} (done`);
+    expect(readState().values.FLEET_STATUS_TOKEN).toBe(token);
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBe(token);
+  });
+
+  it("leaves a deployment made before the fleet status address as it is, and brings its admin the token when the variables run again", async () => {
+    writeSettings();
+    railwayAfterUp();
+    writeState(stateAfterUp());
+    const plain = await bootstrap(["up", settings(), "--yes"]);
+    expect(plain.code, plain.out).toBe(0);
+    expect(plain.out).not.toContain("fleet status address");
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBeUndefined();
+    expect(readState().done["fleet.token"]).toBeUndefined();
+    expect(readState().values.FLEET_STATUS_TOKEN).toBeUndefined();
+
+    const redo = await bootstrap(["redo", settings(), "variables"]);
+    expect(redo.code, redo.out).toBe(0);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain(`+ ${fleetStep}`);
+    const token = String(readState().values.FLEET_STATUS_TOKEN);
+    expect(token).toMatch(fleetTokenShape);
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBe(token);
+    expect(result.out).toMatch(/~ admin: .*FLEET_STATUS_TOKEN.* \(Railway deploys it again\)/);
+    expect(world.deployments.admin[0]?.status).toBe("DEPLOYING");
+    expect(result.out).not.toContain(token);
+  });
+
+  it("keeps the fleet status token the admin has already, and after a redo takes the secrets file's or refuses one too short", async () => {
+    // Set by hand on the admin, and an uptime check carries it in its address.
+    const byHand = "set-by-hand-".padEnd(40, "u");
+    writeSettings();
+    railwayAfterUp();
+    world.variables.admin.FLEET_STATUS_TOKEN = byHand;
+    world.running.admin = { ...world.variables.admin };
+    writeState(stateAfterUp());
+    expect((await bootstrap(["redo", settings(), "variables"])).code).toBe(0);
+    const kept = await bootstrap(["up", settings(), "--yes"]);
+    expect(kept.code, kept.out).toBe(0);
+    expect(kept.out).toContain("FLEET_STATUS_TOKEN: found on Railway's admin service");
+    expect(readState().values.FLEET_STATUS_TOKEN).toBe(byHand);
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBe(byHand);
+    expect(kept.out).not.toContain(byHand);
+    expect(logText()).not.toContain(byHand);
+
+    // A token of the operator's own, in the secrets file: the kept one stays until its step is redone.
+    const own = "own.fleet~token-".padEnd(36, "k");
+    writeSettings({}, { FLEET_STATUS_TOKEN: own });
+    const unchanged = await bootstrap(["up", settings(), "--yes"]);
+    expect(unchanged.code, unchanged.out).toBe(0);
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBe(byHand);
+
+    const redo = await bootstrap(["redo", settings(), "fleet.token"]);
+    expect(redo.code, redo.out).toBe(0);
+    expect(redo.out).toContain("fleet.token: runs again next time");
+    expect(redo.out).toContain("variables: runs again next time, to pass on what it uses");
+    expect(redo.out).toContain("forgot the fleet status address's token");
+    expect(readState().values.FLEET_STATUS_TOKEN).toBeUndefined();
+    const changed = await bootstrap(["up", settings(), "--yes"]);
+    expect(changed.code, changed.out).toBe(0);
+    expect(readState().values.FLEET_STATUS_TOKEN).toBe(own);
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBe(own);
+    expect(changed.out).not.toContain(own);
+    expect(logText()).not.toContain(own);
+
+    // Fewer than 32 characters would leave the address off, so the script stops before it sets anything.
+    writeSettings({}, { FLEET_STATUS_TOKEN: "too-short" });
+    expect((await bootstrap(["redo", settings(), "fleet.token"])).code).toBe(0);
+    const refused = await bootstrap(["up", settings(), "--yes"]);
+    expect(refused.code, refused.out).toBe(1);
+    expect(refused.out).toContain("FLEET_STATUS_TOKEN in");
+    expect(refused.out).toContain("must be at least 32 letters, digits, dashes, underscores, dots or tildes");
+    expect(world.variables.admin.FLEET_STATUS_TOKEN).toBe(own);
+  });
+
   // The access gate (docs/features/access-gate.md): the admin's PROTECTION_TOKEN and the access link. PROTECT=yes in the
   // settings file closes a deployment with a token the script makes, and a PROTECTION_TOKEN in the secrets file closes it
   // by itself.

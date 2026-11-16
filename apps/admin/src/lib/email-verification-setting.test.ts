@@ -7,12 +7,18 @@ describe("emailVerificationRequired", () => {
     ["unset", true, {}],
     ["empty", true, { REQUIRE_EMAIL_VERIFICATION: "" }],
     ["true", true, { REQUIRE_EMAIL_VERIFICATION: "true" }],
-    // Only "false" turns it off, so a typo keeps the code.
-    ["a typo", true, { REQUIRE_EMAIL_VERIFICATION: "flase" }],
+    ["on", true, { REQUIRE_EMAIL_VERIFICATION: "YES" }],
     ["false", false, { REQUIRE_EMAIL_VERIFICATION: "false" }],
     ["false with spaces and capitals", false, { REQUIRE_EMAIL_VERIFICATION: " False " }],
+    ["off", false, { REQUIRE_EMAIL_VERIFICATION: "0" }],
   ])("%s: required is %s", (_label, required, env) => {
     expect(emailVerificationRequired(env)).toBe(required);
+  });
+
+  // AUDIT-017: a typo used to keep the code on and say nothing. The admin now
+  // refuses to start, so nobody runs a server whose setting nobody can read.
+  it("refuses a typo instead of guessing", () => {
+    expect(() => emailVerificationRequired({ REQUIRE_EMAIL_VERIFICATION: "flase" })).toThrow("REQUIRE_EMAIL_VERIFICATION must be");
   });
 });
 

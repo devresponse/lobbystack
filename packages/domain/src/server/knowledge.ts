@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, desc, eq, ilike, lt, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, ilike, isNull, lt, ne, sql, type SQL } from "drizzle-orm";
 
 import { agentRules, businessContextSnapshots, businessHours, businesses, businessPublicProfiles, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { FULL_CRAWL_PAGE_LIMIT, isUuid, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeRuntimeLocale, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, publicProfilePath, type BusinessContextSnapshot } from "@lobbystack/shared";
@@ -966,4 +966,37 @@ export class KnowledgeStorageLimitError extends Error {
     super(knowledgeStorageLimitMessage(limitBytes));
     this.name = "KnowledgeStorageLimitError";
   }
+}
+
+/**
+ * The knowledge sources the dashboard lists, in title order, each with the
+ * website import that produced it and the first 500 characters of its text.
+ */
+export async function listKnowledgeDocumentsInTransaction(tx: DatabaseTransaction, input: { businessId: string }) {
+  return await tx.select({
+    ...getTableColumns(knowledgeDocuments),
+    websiteImport: sql<{ id: string; status: string; websiteUrl: string; importedCount: number; indexedCount: number; documentCount: number; crawlFinishedCount: number | null; crawlTotalCount: number | null } | null>`(select json_build_object('id', ingestion.id, 'status', ingestion.status, 'websiteUrl', ingestion.website_url, 'importedCount', ingestion.imported_count, 'indexedCount', ingestion.indexed_count, 'documentCount', ingestion.indexed_count, 'crawlFinishedCount', nullif(ingestion.imported_count, 0), 'crawlTotalCount', nullif(ingestion.imported_count, 0)) from website_ingestion_jobs ingestion where ingestion.root_document_id = knowledge_documents.id and ingestion.business_id = knowledge_documents.business_id limit 1)`,
+    textContent: sql<string>`coalesce((select left(preview.content, 500) from knowledge_chunks as preview where preview.document_id = knowledge_documents.id and preview.business_id = knowledge_documents.business_id order by preview.sequence limit 1), '')`,
+  }).from(knowledgeDocuments).where(eq(knowledgeDocuments.businessId, input.businessId)).orderBy(asc(knowledgeDocuments.title));
+}
+
+export type KnowledgeEmbeddingStatus = { fingerprint: string | null; total: number; matching: number; completed: number; pending: number; failed: number; missing: number };
+
+/**
+ * How much of a business's knowledge is embedded with the model in use. A chunk
+ * embedded by an earlier model counts as pending, since search only reads the
+ * ones whose fingerprint matches.
+ */
+export async function readKnowledgeEmbeddingStatusInTransaction(tx: DatabaseTransaction, input: { businessId: string; fingerprint: string | null }): Promise<KnowledgeEmbeddingStatus> {
+  const chunksWhere = (...conditions: Array<SQL | undefined>) => tx.select({ count: count() }).from(knowledgeChunks).where(and(eq(knowledgeChunks.businessId, input.businessId), ...conditions));
+  const [total] = await chunksWhere();
+  const [matching] = input.fingerprint
+    ? await chunksWhere(eq(knowledgeChunks.embeddingFingerprint, input.fingerprint), eq(knowledgeChunks.embeddingStatus, "completed"))
+    : [{ count: 0 }];
+  const [failed] = await chunksWhere(eq(knowledgeChunks.embeddingStatus, "failed"));
+  const [missing] = await chunksWhere(isNull(knowledgeChunks.embeddingFingerprint));
+  const totalCount = Number(total?.count ?? 0);
+  const matchingCount = Number(matching?.count ?? 0);
+  const failedCount = Number(failed?.count ?? 0);
+  return { fingerprint: input.fingerprint, total: totalCount, matching: matchingCount, completed: matchingCount, pending: Math.max(0, totalCount - matchingCount - failedCount), failed: failedCount, missing: Number(missing?.count ?? 0) };
 }

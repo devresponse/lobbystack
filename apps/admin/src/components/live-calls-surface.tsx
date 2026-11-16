@@ -33,30 +33,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { CallOutcome } from "../../../../packages/domain/src/server/callOutcome";
+import type { CallListItem } from "@lobbystack/domain";
+import type { Jsonified } from "@lobbystack/shared";
 import { formatCallOutcomeSummary } from "@/lib/call-outcome";
 import { intlLocale, formatDateTime } from "@/lib/locale";
 import { getChannelLabel, getContactDisplayName, hasDisplayablePhone, normalizeChannel } from "@/lib/contact-display";
 import { formatPhoneNumberDisplay } from "@/lib/phone";
 
-type Call = {
-  outcome: CallOutcome;
-  id: string;
-  providerCallId: string;
-  status: string;
-  transport?: string | null;
-  disposition: string | null;
-  reason: string | null;
-  startedAt: string;
-  providerDurationSeconds: number | null;
-  contactName: string | null;
-  contactPhone: string | null;
-  contactEmail?: string | null;
-  recordingState: "available" | "pending" | "expired" | "missing";
-  transcriptPreview: string | null;
-  /** The receptionist that answered; a call from before receptionists shows the default one. */
-  receptionist?: { id: string; name: string | null } | null;
-};
+/** One row of `GET /api/calls`, as `listCalls` builds it and JSON delivers it (AUDIT-018). */
+type Call = Jsonified<CallListItem>;
 
 function callerName(call: Call, locale: string, t: (key: string) => string): string {
   return getContactDisplayName({ name: call.contactName, phone: call.contactPhone, email: call.contactEmail, channels: [call.transport] }, locale, t);

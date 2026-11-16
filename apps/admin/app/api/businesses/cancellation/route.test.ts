@@ -54,7 +54,8 @@ describe("asking to cancel a business through the API", () => {
     fixture.request.mockResolvedValue({ email: "owner@example.test", expiresAt, inboxNotified: false });
     const response = await POST(cancelRequest({ confirmName: "Studio" }));
     expect(response.status).toBe(200);
-    expect(fixture.log).toHaveBeenCalledWith("warn", "business.cancellation_inbox_missing", expect.objectContaining({ businessId: "business_1" }));
+    // What to set goes in `detail`: a field called `message` used to replace the event name in the line.
+    expect(fixture.log).toHaveBeenCalledWith("warn", "business.cancellation_inbox_missing", { businessId: "business_1", detail: expect.stringContaining("FEEDBACK_TO_EMAIL") });
   });
 
   it("counts every try against the person, 5 an hour, since each sends two emails", async () => {

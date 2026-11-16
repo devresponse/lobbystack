@@ -10,6 +10,10 @@ import { getSession, type Session } from "./auth";
 import { getDatabase } from "./databases";
 import { reportServerError } from "./error-reporting";
 import { PATHNAME_HEADER } from "./locale-request";
+import { jsonError } from "./request-input";
+
+// A route reads what it was sent through these, which need neither the database nor the session.
+export { jsonError, parseBody, parseQuery, readJson } from "./request-input";
 
 export function getAppDatabase() {
   return getDatabase("lobbystack_app");
@@ -29,18 +33,6 @@ export function getFinanceExportDatabase() {
     throw new Error("Finance export database role is not configured.");
   }
   return getDatabase("lobbystack_finance_export");
-}
-
-export function jsonError(message: string, status = 400, code?: string): NextResponse {
-  return NextResponse.json({ error: message, ...(code ? { code } : {}) }, { status });
-}
-
-export async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    throw jsonError("Invalid JSON body.", 400, "invalid_json");
-  }
 }
 
 export async function requireApiSession(request: Request): Promise<NonNullable<Session>> {

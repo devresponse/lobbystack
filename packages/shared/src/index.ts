@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export { isMaintenanceMode } from "./maintenance";
+export { fetchWithTimeout, OUTBOUND_FETCH_TIMEOUT_MS } from "./outboundFetch";
 export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, isRuntimeLocale, normalizeInterfaceLocale, normalizeRuntimeLocale, runtimeLocaleEndonyms, runtimeLocaleNames, runtimeLocales } from "./locales";
 export type { InterfaceLocale, RuntimeLocale } from "./locales";
 import { interfaceLocales, type InterfaceLocale, type RuntimeLocale } from "./locales";
@@ -379,6 +380,16 @@ export const widgetLeadFormConfigSchema = z.object({
   showBeforeChat: z.boolean().optional(),
 });
 
+/**
+ * What a value becomes after a JSON round trip: a Date arrives as its ISO string, and
+ * everything else keeps its shape. A browser types a dashboard response as
+ * `Jsonified<T>` of the domain's own return type, instead of declaring it again (AUDIT-018).
+ */
+export type Jsonified<T> = T extends Date ? string
+  : T extends readonly (infer Item)[] ? Array<Jsonified<Item>>
+  : T extends object ? { [Key in keyof T]: Jsonified<T[Key]> }
+  : T;
+
 export const widgetConfigSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional(),
   position: z.enum(widgetPositions).optional(),
@@ -464,6 +475,7 @@ export * from "./billingDisplay";
 export * from "./billingCodes";
 export * from "./product-capabilities";
 export { normalizeAuthEmail } from "./auth";
+export { booleanSettingErrors, booleanSettings, envFlag, BOOLEAN_SETTING_VALUES, type BooleanSetting } from "./env";
 export { assertProductionSecrets } from "./productionSecrets";
 
 export { isBusinessOpen, isTransferPermitted, normalizeTransferMode } from "./transferPolicy";

@@ -53,7 +53,8 @@ vi.mock("@/lib/api-helpers", async (original) => ({
 vi.mock("@/lib/domain-context", () => ({ createDomainContext: () => ({ db: "app" }) }));
 vi.mock("@lobbystack/domain", async (importOriginal) => {
   const domain = await importOriginal<typeof import("@lobbystack/domain")>();
-  return { recordReceptionistJoin: domain.recordReceptionistJoin, appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, setConversationArchived: mocks.setConversationArchived, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction, loadSmsReachInTransaction: mocks.loadSmsReachInTransaction };
+  // The list and thread queries live in the domain (AUDIT-014), so the real ones run here and these tests still read the SQL they build.
+  return { listConversationsInTransaction: domain.listConversationsInTransaction, readConversationThreadInTransaction: domain.readConversationThreadInTransaction, appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, setConversationArchived: mocks.setConversationArchived, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction, loadSmsReachInTransaction: mocks.loadSmsReachInTransaction };
 });
 
 import { GET, PATCH, POST } from "./route";

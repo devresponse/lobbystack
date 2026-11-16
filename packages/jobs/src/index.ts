@@ -114,4 +114,5 @@ export function isKnownJobType(value: string): value is JobType {
 }
 
 export * from "./voicePresence";
+export * from "./fleet";
 export { logRedisErrors } from "./redisErrors";

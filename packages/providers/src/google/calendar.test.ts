@@ -98,6 +98,28 @@ describe("GoogleCalendarProvider", () => {
     expect(request.mock.calls[0]?.[1]).toMatchObject({ method: "DELETE" });
   });
 
+  it("gives every call to Google 15 seconds, the code exchange, the account lookup and the calendar list included", async () => {
+    const limit = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => ({ ok: true, status: 200, json: async () => ({ access_token: "access", expires_in: 3600, sub: "account", items: [], id: "event-1" }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new GoogleCalendarProvider({ clientId: "client", clientSecret: "secret", redirectUri: "https://app.example/oauth" });
+    const event = { accessToken: "access", calendarId: "primary" };
+
+    await provider.exchangeCode("code");
+    await provider.refreshAccessToken({ refreshToken: "refresh" });
+    await provider.getAccount({ accessToken: "access" });
+    await provider.listCalendars({ accessToken: "access" });
+    await provider.getBusyBlocks({ ...event, startsAt: "2026-08-12T00:00:00.000Z", endsAt: "2026-08-13T00:00:00.000Z" });
+    await provider.upsertEvent({ ...event, title: "Appointment", startsAt: "2026-08-12T10:00:00.000Z", endsAt: "2026-08-12T10:30:00.000Z" });
+    await provider.deleteEvent({ ...event, eventId: "event-1" });
+
+    // Without a limit a stalled Google holds the request for undici's 300 seconds.
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    for (const [, init] of fetchMock.mock.calls) expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(limit.mock.calls).toEqual(Array.from({ length: 7 }, () => [15_000]));
+    limit.mockRestore();
+  });
+
   it("discovers calendars without exposing access tokens", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ items: [{ id: "primary", summary: "Personal", primary: true, accessRole: "owner" }, { id: "team", summary: "Team", primary: false, accessRole: "writer" }] }) });
     vi.stubGlobal("fetch", fetchMock);

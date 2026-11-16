@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
+import { coverageConfig } from "../../vitest.coverage.mjs";
+
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
 export default defineConfig({
@@ -18,5 +20,6 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.{ts,tsx}"],
     environment: "node",
+    coverage: coverageConfig,
   },
 });

@@ -1,21 +1,23 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
-import { hasMinimumRole, requireBusinessMembership } from "@lobbystack/domain";
-import { businesses } from "@lobbystack/db";
-import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
+import { hasMinimumRole, readBusinessTelemetryPreferenceInTransaction, requireBusinessMembership, setBusinessTelemetryPreferenceInTransaction } from "@lobbystack/domain";
+import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
+import { jsonError, parseBody } from "@/lib/request-input";
 import { runtimeDeploymentMode } from "@/lib/deployment-mode";
 
 export const dynamic = "force-dynamic";
+
+const telemetryChoice = z.object({ telemetryEnabled: z.boolean("telemetryEnabled is true or false.") });
 
 export async function GET(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ session, businessId, tx }) => {
       const membership = await requireBusinessMembership(tx, { userId: session.user.id, businessId });
-      const row = (await tx.select({ telemetryEnabled: businesses.telemetryEnabled }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
-      if (!row) throw jsonError("Business not found.", 404);
       // Browser telemetry stamps this on every event once the workspace opts in.
-      return { ...row, canManageTenant: hasMinimumRole(membership.role, "business_admin"), deploymentMode: runtimeDeploymentMode() };
+      const telemetryEnabled = await readBusinessTelemetryPreferenceInTransaction(tx, { businessId });
+      if (telemetryEnabled === null) throw jsonError("Business not found.", 404);
+      return { telemetryEnabled, canManageTenant: hasMinimumRole(membership.role, "business_admin"), deploymentMode: runtimeDeploymentMode() };
     }));
   } catch (error) { return asApiResponse(error); }
 }
@@ -23,10 +25,9 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
-      const body = await readJson(request) as { telemetryEnabled?: boolean };
-      if (!body || typeof body.telemetryEnabled !== "boolean") throw jsonError("telemetryEnabled must be a boolean.");
-      await tx.update(businesses).set({ telemetryEnabled: body.telemetryEnabled, updatedAt: new Date() }).where(eq(businesses.id, businessId));
-      return { telemetryEnabled: body.telemetryEnabled };
+      const { telemetryEnabled } = await parseBody(request, telemetryChoice);
+      await setBusinessTelemetryPreferenceInTransaction(tx, { businessId, telemetryEnabled });
+      return { telemetryEnabled };
     }, { minimumRole: "business_admin" }));
   } catch (error) { return asApiResponse(error); }
 }

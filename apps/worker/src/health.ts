@@ -6,6 +6,8 @@ export type WorkerHealthState = {
   database: boolean;
   storage: boolean;
   activeJobs: number;
+  /** The calls this copy holds. */
+  liveCalls: number;
   /** Shutting down: readiness fails so nothing new is sent here. */
   draining: boolean;
 };

@@ -69,6 +69,16 @@ A true/false setting is read with `envFlag(env, "NAME")` from `@lobbystack/share
 
 Settings that are not true/false are still read where they are used (the technical audit's AUDIT-017); a typed module per service follows.
 
+## Let one screen fail without the dashboard
+
+There are three error boundaries, nearest first:
+
+- `apps/admin/src/components/surface-error-boundary.tsx` wraps one panel of a screen built from parts that don't depend on each other, such as the call chart on Home and the recording player on a call. The panel is replaced by a short message with a retry; the rest of the screen carries on. A page that *is* one surface needs no wrapper, since the route boundary below already says the same thing in the same place.
+- `apps/admin/app/(dashboard)/error.tsx` catches anything a dashboard screen throws. Next renders it inside `(dashboard)/layout.tsx`, so the navigation stays and the operator can go elsewhere. It shows the error's `digest`, which is what support can look up in the logs.
+- `apps/admin/app/error.tsx` and `global-error.tsx` sit above that layout and replace everything. They are for a failure in the shell itself.
+
+Every one of them reports through `captureBrowserError`, which redacts URLs, tokens and email addresses before PostHog sees them. Data errors are not what these are for: a failed request belongs to the surface's own TanStack Query state, which can say what failed and offer a retry in place (the technical audit's AUDIT-019).
+
 ## Share one Redis connection, never one per request
 
 A long-lived Redis connection belongs to the process, not to the request that needed it first. `apps/admin/src/lib/realtime-subscriber.ts` is the pattern: one ioredis subscriber for the whole admin process, a `Map` of channel to listeners, subscribe on a channel's first listener and unsubscribe on its last, one `ping` timer for the connection rather than one per stream, and every listener told when the connection drops so each request can end cleanly. Anything that keeps a connection open for as long as a browser tab is open needs a cap too: `MAX_STREAMS_PER_USER` answers 429 rather than letting one account hold the pool. Where a browser reconnects on a timer, spread the wait (`spread` in `apps/admin/src/lib/realtime-query.ts`), so a redeploy doesn't bring every tab back in the same instant.

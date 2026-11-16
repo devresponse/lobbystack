@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { CallRecordingPlayer } from "@/components/audio/call-recording-player";
+import { SurfaceErrorBoundary } from "@/components/surface-error-boundary";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { useReceptionistChoices } from "@/components/receptionists/receptionist-choices";
 import { BackLink, DetailSection, MetadataField, truncateId, useCopiedField } from "@/components/detail-fields";
@@ -236,7 +237,8 @@ function RecordingTab({ detail, src }: { detail: Detail; src: string | null }) {
   if (!src) {
     return <div className="flex flex-col items-center gap-2 py-16 text-center"><Headphones className="size-8 text-muted-foreground/40" /><p className="type-empty-description">{detail.recording.state === "pending" ? t("detail.recording.pending") : t("detail.recording.unavailable")}</p></div>;
   }
-    return <div className="py-4"><Card className="ph-no-capture" size="sm"><CallRecordingPlayer className="px-4 py-0" downloadLabel={t("actions.download")} initialDurationSeconds={detail.call.providerDurationSeconds ?? 0} pauseLabel={t("actions.pause")} playLabel={t("actions.play")} src={src} /></Card></div>;
+    // The player decodes audio from the provider; a file it can't read must not take the transcript and the details with it.
+    return <div className="py-4"><SurfaceErrorBoundary><Card className="ph-no-capture" size="sm"><CallRecordingPlayer className="px-4 py-0" downloadLabel={t("actions.download")} initialDurationSeconds={detail.call.providerDurationSeconds ?? 0} pauseLabel={t("actions.pause")} playLabel={t("actions.play")} src={src} /></Card></SurfaceErrorBoundary></div>;
 }
 
 function DetailsTab({ detail, marking, onCompleteFollowUp }: { detail: Detail; marking: string | undefined; onCompleteFollowUp: (inboxItemId: string) => void }) {

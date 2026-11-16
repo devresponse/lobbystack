@@ -55,7 +55,13 @@
   "errorBoundary": {
     "title": "Une erreur est survenue",
     "description": "Rechargez le tableau de bord et réessayez. L’erreur a été signalée.",
-    "reload": "Recharger"
+    "reload": "Recharger",
+    "screenTitle": "Cet écran ne s’est pas chargé",
+    "screenDescription": "Le reste du tableau de bord fonctionne toujours, vous pouvez donc continuer ailleurs. L’erreur a été signalée.",
+    "retry": "Réessayer",
+    "reference": "Référence pour l’assistance : {{digest}}",
+    "partTitle": "Cette partie ne s’est pas chargée",
+    "partDescription": "Le reste de l’écran fonctionne toujours."
   },
   "feedback": {
     "trigger": "Feedback",

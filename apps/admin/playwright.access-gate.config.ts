@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 import { ACCESS_GATE_E2E_TOKEN } from "./e2e/fixtures/access-gate";
 import journeys from "./playwright.config";
+import { journeyReporters } from "./playwright-journey-report";
 
 // The same build as the other browser journeys, started with the access gate
 // on (PROTECTION_TOKEN, docs/features/access-gate.md). It listens on the next
@@ -15,6 +16,7 @@ export default defineConfig({
   ...journeys,
   testMatch: "**/access-gate.e2e.ts",
   testIgnore: [],
+  reporter: journeyReporters("access-gate"),
   use: { ...journeys.use, baseURL },
   webServer: {
     ...server,

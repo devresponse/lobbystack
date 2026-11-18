@@ -44,6 +44,7 @@ function sortedDifference(left: string[], right: string[]): string[] {
 
 for (const path of [
   "Dockerfile.admin",
+  "Dockerfile.control",
   "Dockerfile.migrator",
   "Dockerfile.worker",
   "docker-compose.yml",
@@ -63,6 +64,7 @@ for (const path of [
   "packages/domain/src/index.ts",
   "apps/admin/app/api/health/live/route.ts",
   "apps/admin/app/api/health/ready/route.ts",
+  "apps/control/app/api/health/live/route.ts",
   "apps/worker/src/health.ts",
 ]) {
   requireFile(path);

@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [admin, worker, migrator]
+        service: [admin, worker, migrator, control]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4

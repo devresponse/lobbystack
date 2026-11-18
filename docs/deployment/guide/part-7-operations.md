@@ -21,6 +21,7 @@ These are the jobs that keep an instance working once it's live. Most steps come
 | An owner who canceled their account wants it back | [7.27](#727-reactivate-a-canceled-business) |
 | A test environment should start again with no data | [7.28](#728-reset-a-test-environment) |
 | A test environment's address should be closed to strangers | [4.12](part-4-test-environment.md#412-close-a-test-deployment-to-strangers) |
+| You want to see every business and account on the instance at once | [4.13](part-4-test-environment.md#413-add-the-control-panel-optional) |
 
 **Signing in to the database**
 

@@ -5,6 +5,7 @@
 - `apps/admin/`: Next.js operator dashboard, authentication, and HTTP API. Hosts the embeddable widget API (`/api/widget/*`), the loader (`/embed.js`), and the widget iframe app (`/embed/[key]`) in addition to the dashboard.
 - `apps/worker/`: asynchronous jobs, transactional outbox dispatch, and GPT-Live calls. The admin asks it to attach to each session at `/internal/live/attach`; it answers delegated requests, saves transcripts, and finishes the call. Phone calls reach GPT-Live through a Twilio Elastic SIP trunk; see `docs/voice/runtime.md`.
 - `apps/landing/`: the original project's marketing site, which this fork doesn't publish.
+- `apps/control/`: the control panel, a small read-only Next.js app that shows the deployment's operator every business and account. It reads the database only as `lobbystack_control` (migration 0153), from SQL in `apps/control/src/lib/queries.ts`, so a column it reads must be granted to that role in a migration. Cloudflare Access sits in front of it; see `docs/features/control-panel.md`.
 - `packages/db/`: Drizzle schema, PostgreSQL migrations, role-specific clients, and RLS helpers.
 - `packages/domain/`: durable business logic shared by admin and worker runtimes. Widget conversations use the `web_chat` channel and key on `widget_visitor_id` (no phone required).
 - `packages/agent-core/`: the receptionist agent (AI SDK `ToolLoopAgent`) shared by website chat and calls, its tools, and the GPT-Live session config and call controller.
@@ -22,6 +23,7 @@
 - `pnpm db:migrate`: apply PostgreSQL migrations.
 - `pnpm --filter @lobbystack/telemetry build`: build the telemetry package, which the admin loads from its build output. Run it again after you change `packages/telemetry`.
 - `pnpm dev`: run admin, worker, and landing apps. Browser calls need `LIVE_PROTOTYPE_ENABLED=true` and `OPENAI_API_KEY` on admin and worker.
+- `pnpm dev:control`: run the control panel on `CONTROL_PORT` (13003). Set `LOBBYSTACK_CONTROL_PASSWORD` and run `pnpm --filter @lobbystack/db exec tsx src/cli.ts bootstrap` once so its role can sign in, and `CONTROL_DEV_ADMIN_EMAIL` to open it without Cloudflare Access.
 - `pnpm typecheck`: typecheck all active workspaces and scripts.
 - `pnpm test`: run all Vitest suites.
 - `pnpm build`: build every workspace package and app (also copies the embed loader into the admin standalone output).
@@ -30,7 +32,7 @@
 
 ## Next.js MCP server
 
-`.mcp.json` registers `next-devtools`, a Model Context Protocol (MCP) server from the `next-devtools-mcp` package. It works with `apps/admin`, the only Next.js app. `apps/landing` runs on Astro, so the server doesn't cover it. Use it like this:
+`.mcp.json` registers `next-devtools`, a Model Context Protocol (MCP) server from the `next-devtools-mcp` package. It works with `apps/admin` and `apps/control`, the Next.js apps; these steps use the admin. `apps/landing` runs on Astro, so the server doesn't cover it. Use it like this:
 
 - Call `nextjs_docs` before you write Next.js code or answer a Next.js question, then read the guide it points to in `apps/admin/node_modules/next/dist/docs/`. Those docs match the installed Next.js version, so use them over memory or web results.
 - Start the admin dev server with `pnpm dev:admin` or `pnpm dev`. It listens on `ADMIN_PORT`, which the generated `.env` sets to 13000.

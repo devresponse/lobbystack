@@ -9,6 +9,7 @@ const SECTIONS = [
   { href: "/accounts", label: "Accounts" },
   { href: "/usage", label: "Usage" },
   { href: "/billing", label: "Billing" },
+  { href: "/system", label: "System health" },
 ];
 
 /** The section links, the current one marked. The panel's only client component. */

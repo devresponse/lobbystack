@@ -35,6 +35,39 @@ export function duration(seconds: number | null | undefined): string {
   return hours ? `${hours}:${rest}` : rest;
 }
 
+/** A size in bytes, in powers of 1,000 as hosts show them: 950 B, 3.4 MB, 1.2 GB. */
+export function bytes(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+  const units = ["B", "kB", "MB", "GB", "TB"];
+  let amount = Math.max(0, value);
+  let unit = 0;
+  while (amount >= 1000 && unit < units.length - 1) {
+    amount /= 1000;
+    unit += 1;
+  }
+  return `${unit === 0 ? whole.format(amount) : oneDecimal.format(amount)} ${units[unit]}`;
+}
+
+/** A share from 0 to 1 as a percentage: 42%, or <1% for a little above nothing. */
+export function percent(share: number | null | undefined): string {
+  if (share === null || share === undefined || !Number.isFinite(share)) return "-";
+  const value = share * 100;
+  return value > 0 && value < 1 ? "<1%" : `${whole.format(value)}%`;
+}
+
+/** A length of time in seconds, roughly: 45 s, 12 min, 3 h 5 min, 2 d 4 h. */
+export function span(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "-";
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 60) return `${total} s`;
+  const minutesTotal = Math.floor(total / 60);
+  if (minutesTotal < 60) return `${minutesTotal} min`;
+  const hours = Math.floor(minutesTotal / 60);
+  if (hours < 24) return minutesTotal % 60 ? `${hours} h ${minutesTotal % 60} min` : `${hours} h`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 ? `${days} d ${hours % 24} h` : `${days} d`;
+}
+
 const currencies = new Map<string, Intl.NumberFormat>();
 
 /** An amount in cents of a currency, such as $49.00 or CA$87.00. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ago, change, compact, count, counted, date, dateTime, duration, minutes, money, monthName, signInMethods, usd, words } from "./format";
+import { ago, bytes, change, compact, count, counted, date, dateTime, duration, minutes, money, monthName, percent, signInMethods, span, usd, words } from "./format";
 
 describe("how the panel writes things", () => {
   it("writes numbers", () => {
@@ -61,5 +61,22 @@ describe("how the panel writes things", () => {
     expect(change(110, 100)).toBe("+10%");
     expect(change(97, 100)).toBe("-3%");
     expect(change(5, 0)).toBeNull();
+  });
+
+  it("writes sizes, shares and lengths of time for the health page", () => {
+    expect(bytes(950)).toBe("950 B");
+    expect(bytes(3_400_000)).toBe("3.4 MB");
+    expect(bytes(1_234_567_890)).toBe("1.2 GB");
+    expect(bytes(null)).toBe("-");
+    expect(percent(0.4237)).toBe("42%");
+    expect(percent(0.004)).toBe("<1%");
+    expect(percent(0)).toBe("0%");
+    expect(percent(Number.NaN)).toBe("-");
+    expect(span(45)).toBe("45 s");
+    expect(span(12 * 60 + 5)).toBe("12 min");
+    expect(span(3 * 3600 + 5 * 60)).toBe("3 h 5 min");
+    expect(span(2 * 86_400)).toBe("2 d");
+    expect(span(2 * 86_400 + 4 * 3600 + 59)).toBe("2 d 4 h");
+    expect(span(-3)).toBe("0 s");
   });
 });

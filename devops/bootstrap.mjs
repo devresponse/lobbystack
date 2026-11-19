@@ -40,7 +40,9 @@
 //   OPENAI_ADMIN_KEY        an OpenAI admin key (platform.openai.com/settings/organization/admin-keys)
 //   TWILIO_MAIN_ACCOUNT_SID, TWILIO_MAIN_AUTH_TOKEN   the main Twilio account, which owns the subaccounts
 //   RESEND_ADMIN_KEY        a Resend key with full access, only to make the domain and the sending key
-//   CLOUDFLARE_API_TOKEN    Zone DNS edit on the zone, and Turnstile Sites write on the account
+//   CLOUDFLARE_API_TOKEN    Zone DNS edit on the zone, and Turnstile Sites write on the account; with CONTROL=yes
+//                           also Cloudflare Tunnel edit, Access: Apps and Policies edit, and Access: Organizations,
+//                           Identity Providers, and Groups read on the account
 //   POSTHOG_PERSONAL_API_KEY  a PostHog personal API key with organization:read, project:read and project:write
 //                           (us.posthog.com/settings/user-api-keys, or eu.), unless POSTHOG=no
 // In cloud mode with Polar, connect also runs pnpm billing, with the deployment's own Polar token when Polar lets
@@ -68,7 +70,7 @@ const URLS = {
   // PostHog's address comes from POSTHOG (us, eu or a self-hosted instance), so this one only replaces it in tests.
   posthog: process.env.BOOTSTRAP_POSTHOG_URL ?? null,
 };
-// The BOOTSTRAP_*_URL variables, BOOTSTRAP_APP_URL and BOOTSTRAP_RAILWAY_CLI exist for tests against stand-ins.
+// The BOOTSTRAP_*_URL variables, BOOTSTRAP_APP_URL, BOOTSTRAP_CONTROL_URL and BOOTSTRAP_RAILWAY_CLI exist for tests against stand-ins.
 const RAILWAY_CLI = process.env.BOOTSTRAP_RAILWAY_CLI ?? "railway";
 const POLAR_SERVERS = { sandbox: "https://sandbox-api.polar.sh", live: "https://api.polar.sh" };
 // The version pnpm billing asks Polar for (POLAR_API_VERSION in packages/shared/src/billing.ts), so lists come back alike.
@@ -189,6 +191,18 @@ RESEND_REGION=us-east-1
 CLOUDFLARE_ZONE=
 CLOUDFLARE_ACCOUNT_ID=
 
+# The control panel, the operator's read-only view of every business and account (docs/features/control-panel.md):
+# yes or no. With yes, up adds two Railway services, control (the panel, with no public address) and cloudflared (a
+# Cloudflare Tunnel's connector), and in Cloudflare the tunnel, CONTROL_HOST's DNS record and a Cloudflare Access
+# application that lets only CONTROL_ADMIN_EMAILS in. It needs CLOUDFLARE_ZONE, CLOUDFLARE_ACCOUNT_ID, Cloudflare Zero
+# Trust (its free plan) and more permissions on CLOUDFLARE_API_TOKEN (devops/bootstrap.md). No line counts as no.
+CONTROL=yes
+# The panel's address, one level under CLOUDFLARE_ZONE, such as control.example.com: Cloudflare's free certificate
+# covers no deeper. Empty: control.<zone> in production, else control-<APP_BASE_URL's first part, or NAME>.<zone>.
+CONTROL_HOST=
+# Who may open the panel: emails, separated by commas. Empty: OPERATOR_EMAIL.
+CONTROL_ADMIN_EMAILS=
+
 # Twilio's shared toll-free number, only with DEPLOYMENT_MODE=cloud: buy (the script buys one),
 # a number you already have in the subaccount (+18445550123), or empty for none.
 TWILIO_TOLLFREE=
@@ -279,6 +293,7 @@ OPENAI_WEBHOOK_SECRET=
 
 # Optional: the 13 platform secrets, to reuse ones already made (64 hex characters each).
 # Left out, the script makes new ones. POSTGRES_PASSWORD, REDIS_PASSWORD, ENCRYPTION_KEY, ...
+# With CONTROL=yes, LOBBYSTACK_CONTROL_PASSWORD too: the control panel's database password.
 `;
 
 const SECRETS = ["POSTGRES_PASSWORD", "LOBBYSTACK_AUTH_PASSWORD", "LOBBYSTACK_APP_PASSWORD", "LOBBYSTACK_WORKER_PASSWORD",
@@ -318,7 +333,8 @@ const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|[rs]k_(?:live|test)_[A-Za-z0-9]{1
 const SECRET_KEYS = new Set(["OPENAI_API_KEY", "TWILIO_AUTH_TOKEN", "SMTP_PASSWORD", "TURNSTILE_SECRET_KEY", "POLAR_ADMIN_TOKEN",
   "POLAR_WORKER_TOKEN", "OPENAI_WEBHOOK_SECRET", "RAILWAY_API_TOKEN", "OPENAI_ADMIN_KEY", "TWILIO_MAIN_AUTH_TOKEN", "RESEND_ADMIN_KEY",
   "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY", "STRIPE_ADMIN_KEY", "STRIPE_WORKER_KEY", "STRIPE_API_KEY",
-  "POLAR_SETUP_TOKEN", "POLAR_WEBHOOK_SECRET", "POSTHOG_PERSONAL_API_KEY", "FLEET_STATUS_TOKEN"]);
+  "POLAR_SETUP_TOKEN", "POLAR_WEBHOOK_SECRET", "POSTHOG_PERSONAL_API_KEY", "FLEET_STATUS_TOKEN", "LOBBYSTACK_CONTROL_PASSWORD",
+  "CONTROL_TUNNEL_TOKEN", "TUNNEL_TOKEN"]);
 
 function hide(value) {
   if (typeof value === "string" && value.length >= 8) hiddenValues.add(value);
@@ -487,6 +503,10 @@ const NAMES = {
   RESEND_KEY_NAME: (base) => base,
   TURNSTILE_WIDGET_NAME: (base) => base,
   POSTHOG_PROJECT_NAME: (base) => base,
+  // The control panel's things in Cloudflare. Every example of a tunnel's name has no spaces, so neither has this one.
+  CONTROL_TUNNEL_NAME: (base) => `${base.replace(/[^A-Za-z0-9._-]+/g, "-")}-control-panel`,
+  CONTROL_ACCESS_APP_NAME: (base) => `${base} control panel`,
+  CONTROL_ACCESS_POLICY_NAME: (base) => `${base} control panel admins`,
 };
 const nameFor = (run, key) => v(run, key) ?? NAMES[key](baseName(run.settings));
 
@@ -542,6 +562,7 @@ function nameLines(run) {
     ["Turnstile widget", "TURNSTILE_WIDGET_NAME", not.turnstile],
     ["Resend key", "RESEND_KEY_NAME", not.resend],
     ["PostHog project", "POSTHOG_PROJECT_NAME", not.posthog],
+    ...(controlOn(run) ? [["Cloudflare tunnel", "CONTROL_TUNNEL_NAME", null]] : []),
   ];
   const lines = [`names: ${shown.map(([label, key, how]) => (how ? `${label} ${how}` : `${label} "${nameFor(run, key)}"`)).join(", ")}`];
   const kept = shown.filter(([, key, how]) => !how && v(run, key) && v(run, key) !== NAMES[key](base));
@@ -641,6 +662,24 @@ function loadRun(file, { log = true } = {}) {
   if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
   else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
   if (s.CLOUDFLARE_ACCOUNT_ID && !/^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ACCOUNT_ID)) problems.push("CLOUDFLARE_ACCOUNT_ID is the 32-character Account ID from the zone's Overview page");
+  // The control panel: off unless the file says yes, so a deployment made before it gets one only when asked. init
+  // writes CONTROL=yes, so every new deployment has one.
+  const controlWord = String(s.CONTROL || "no").toLowerCase();
+  if (!["yes", "no", "true", "false", "on", "off", "1", "0"].includes(controlWord)) problems.push("CONTROL is yes or no");
+  s.CONTROL = ["yes", "true", "on", "1"].includes(controlWord);
+  s.CONTROL_HOST = hostOf(s.CONTROL_HOST);
+  s.CONTROL_EMAILS = [...new Set(String(s.CONTROL_ADMIN_EMAILS || s.OPERATOR_EMAIL || "").split(/[\s,;]+/).map((email) => email.toLowerCase()).filter(Boolean))];
+  if (s.CONTROL) {
+    if (!s.CLOUDFLARE_ZONE || !s.CLOUDFLARE_ACCOUNT_ID) problems.push("CONTROL=yes needs CLOUDFLARE_ZONE and CLOUDFLARE_ACCOUNT_ID: the panel is reached only through a Cloudflare Tunnel, with Cloudflare Access in front. Fill them in, or set CONTROL=no");
+    if (s.CONTROL_HOST && !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(s.CONTROL_HOST)) problems.push("CONTROL_HOST is the control panel's address, such as control.example.com, with no path");
+    else if (s.CONTROL_HOST && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(zone) && !s.CONTROL_HOST.endsWith(`.${zone}`)) problems.push(`CONTROL_HOST must be under CLOUDFLARE_ZONE (${s.CLOUDFLARE_ZONE}), where the script writes its DNS record`);
+    else if (s.CONTROL_HOST && s.CONTROL_HOST === s.CUSTOM_HOST) problems.push("CONTROL_HOST must differ from APP_BASE_URL's address: the panel has an address of its own");
+    else if (s.CONTROL_HOST && zone && s.CONTROL_HOST.slice(0, -(zone.length + 1)).includes(".")) console.warn(`Warning: CONTROL_HOST (${s.CONTROL_HOST}) is more than one level under ${zone}, which Cloudflare's free certificate doesn't cover: browsers will refuse the panel unless the zone has a certificate for it (Advanced Certificate Manager).`);
+    const notEmails = s.CONTROL_EMAILS.filter((email) => !/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(email));
+    if (notEmails.length) problems.push(`CONTROL_ADMIN_EMAILS is emails separated by commas, and ${notEmails.join(", ")} ${notEmails.length === 1 ? "isn't one" : "aren't"}`);
+  } else if (settings.CONTROL_HOST || settings.CONTROL_ADMIN_EMAILS) {
+    console.warn("Warning: CONTROL_HOST and CONTROL_ADMIN_EMAILS are read only with CONTROL=yes.");
+  }
   // Empty, it comes from the worker's Polar token (polar.tokens).
   if (s.POLAR_ORGANIZATION_ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.POLAR_ORGANIZATION_ID)) problems.push("POLAR_ORGANIZATION_ID is the Polar organization's ID, a UUID, or empty to take it from the worker's token");
   if (s.TWILIO_TOLLFREE && s.TWILIO_TOLLFREE !== "buy" && !/^\+\d{8,15}$/.test(s.TWILIO_TOLLFREE)) problems.push("TWILIO_TOLLFREE is buy, a number such as +18445550123, or empty");
@@ -1205,6 +1244,10 @@ async function up(run) {
     console.log("\nAccess gate");
     await protectionStep(run);
   }
+  if (controlOn(run)) {
+    console.log("\nControl panel");
+    await controlSteps(run);
+  }
   console.log("\nVariables");
   await variableSteps(run);
   console.log("\nDeploy");
@@ -1217,7 +1260,7 @@ async function up(run) {
     const first = railwayHost && railwayHost !== host ? ` (https://${railwayHost} answers first, while DNS spreads and Railway issues the certificate)` : "";
     // connect's Polar billing works with the operator key, which acts as OPERATOR_EMAIL's account: signing up first saves a wait there.
     const next = s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "polar" ? `, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL} with the 6-digit code from the email\n(connect sets Polar up with a key that acts as that account). Then run:` : ", run:";
-    console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}${next}\n  node devops/bootstrap.mjs connect ${run.file}${accessLines(run)}${protectionLeftOn(run) ? `\n\n${protectionLeftOn(run)}` : ""}${openByHand(run, "up")}`);
+    console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}${next}\n  node devops/bootstrap.mjs connect ${run.file}${accessLines(run)}${controlLines(run)}${protectionLeftOn(run) ? `\n\n${protectionLeftOn(run)}` : ""}${controlLeftOn(run) ? `\n\n${controlLeftOn(run)}` : ""}${openByHand(run, "up")}`);
   }
 }
 
@@ -1721,7 +1764,17 @@ async function dnsRecords(run, records) {
     if (record.type === "CNAME") record.content = norm(record.content);
     const existing = (await cloudflare(`/zones/${zone}/dns_records?type=${record.type}&name=${encodeURIComponent(record.name)}`)) ?? [];
     const same = (item) => norm(item.content.replace(/^"|"$/g, "")) === record.content && (record.priority === undefined || item.priority === record.priority);
-    if (existing.some((item) => same(item) || (record.onlyIfNone && item.content.includes("v=DMARC1")))) {
+    // Records are made DNS only, but for the control panel's, which Cloudflare proxies to its tunnel. A record that says
+    // neither keeps what it has, so one proxied by hand stays proxied.
+    const { onlyIfNone, proxied: wanted, ...body } = record;
+    const proxied = wanted ?? false;
+    const unproxied = wanted === undefined ? undefined : existing.find((item) => same(item) && Boolean(item.proxied) !== wanted);
+    if (unproxied) {
+      await cloudflare(`/zones/${zone}/dns_records/${unproxied.id}`, { method: "PATCH", body: { proxied } });
+      console.log(`  ~ ${record.type} ${record.name} (${proxied ? "now proxied by Cloudflare" : "now DNS only"})`);
+      continue;
+    }
+    if (existing.some((item) => same(item) || (onlyIfNone && item.content.includes("v=DMARC1")))) {
       console.log(`  = ${record.type} ${record.name}`);
       continue;
     }
@@ -1734,17 +1787,16 @@ async function dnsRecords(run, records) {
         console.log(`  - ${others.map((item) => item.type).join(", ")} ${record.name} (replaced by the CNAME)`);
       }
     }
-    const { onlyIfNone, ...body } = record;
     // A name holds one CNAME, one DKIM key, one SPF record and one Railway check: an old one is updated, not doubled.
     const kind = (content) => (content.includes("v=spf1") ? "spf" : content.includes("railway-verify=") ? "railway" : record.name.includes("._domainkey.") ? "dkim" : null);
     const replace = record.type === "CNAME" ? existing[0] : record.type === "TXT" && kind(record.content) ? existing.find((item) => kind(item.content) === kind(record.content)) : null;
     if (replace) {
       if (record.type === "CNAME") await confirm(`${record.name} points to ${replace.content} now. Point it to ${record.content} instead? Visitors to that address then reach this deployment.`);
-      await cloudflare(`/zones/${zone}/dns_records/${replace.id}`, { method: "PATCH", body: { ...body, ttl: 1, proxied: false } });
+      await cloudflare(`/zones/${zone}/dns_records/${replace.id}`, { method: "PATCH", body: { ...body, ttl: 1, proxied } });
       console.log(`  ~ ${record.type} ${record.name} (updated)`);
       continue;
     }
-    await cloudflare(`/zones/${zone}/dns_records`, { method: "POST", body: { ...body, ttl: 1, proxied: false } });
+    await cloudflare(`/zones/${zone}/dns_records`, { method: "POST", body: { ...body, ttl: 1, proxied } });
     console.log(`  + ${record.type} ${record.name}`);
   }
 }
@@ -2010,7 +2062,8 @@ async function railwaySteps(run) {
   }
   await step(run, "railway.services", "Services Postgres, Redis, migrate, admin and worker", async () => {
     const view = await projectView(run);
-    const ids = {};
+    // The control panel's services keep their IDs (control.services).
+    const ids = { ...v(run, "RAILWAY_SERVICE_IDS") };
     for (const service of SERVICES) {
       if (view.services[service.name]) {
         ids[service.name] = view.services[service.name];
@@ -2409,6 +2462,224 @@ async function pageAnswer(host) {
 /** Why a deployment that should be closed still answers, for connect and doctor. */
 const stillOpen = (run, host, status) => `${protectedBy(run)}, but https://${host}/login answers ${status} without the access link, so the deployment is open to anyone. Either the admin's deploy with PROTECTION_TOKEN hasn't finished, or ${run.settings.REPO}@${run.settings.BRANCH} is from before the access gate: bring that branch up to date (sync a fork with the repository it follows), and Railway deploys it`;
 
+// ---------------------------------------------------------------- the control panel
+
+// The control panel (docs/features/control-panel.md) is the operator's read-only view of every business and account.
+// It runs as the Railway service control, which has no public address, and reads the database as lobbystack_control,
+// a role that can read and nothing else. Only Cloudflare reaches it: the cloudflared service keeps a Cloudflare Tunnel
+// open from inside the project, and Cloudflare sends CONTROL_HOST's requests down it once Cloudflare Access has signed
+// the visitor in as one of CONTROL_ADMIN_EMAILS. The panel checks Access's token on every request too.
+const controlOn = (run) => !run.template && run.settings.CONTROL;
+const CONTROL_SERVICES = [{ name: "control" }, { name: "cloudflared", image: "cloudflare/cloudflared:latest" }];
+// The image starts cloudflared --no-autoupdate, which a start command replaces. The connector reads TUNNEL_TOKEN.
+const CLOUDFLARED_START = "cloudflared tunnel --no-autoupdate run";
+// The control service on the project's private network, which Railway names after the service. The panel listens on
+// every address, since that network is IPv6.
+const CONTROL_ORIGIN = "http://control.railway.internal:3000";
+
+/** CONTROL_HOST, else control.<zone> in production, else an address of the deployment's own one level under the zone. */
+function wantedControlHost(s) {
+  if (s.CONTROL_HOST) return s.CONTROL_HOST;
+  const zone = String(s.CLOUDFLARE_ZONE).toLowerCase();
+  if (s.ENVIRONMENT === "production") return `control.${zone}`;
+  // control-demo.example.com for demo.example.com: Cloudflare's free certificate covers no deeper than one level.
+  const part = s.CUSTOM_HOST && s.CUSTOM_HOST.endsWith(`.${zone}`) ? s.CUSTOM_HOST.slice(0, -(zone.length + 1)).replace(/\./g, "-") : s.NAME;
+  return part ? `control-${part}.${zone}` : `control.${zone}`;
+}
+
+/** The panel's address: the one its steps were done for, which stays until control.tunnel is redone, else the wanted one. */
+const controlHost = (run) => v(run, "CONTROL_HOST") ?? wantedControlHost(run.settings);
+
+/** Whether the steps have made everything the panel's variables need, so that they, and its deploys, can go ahead. */
+const controlReady = (run) => controlOn(run) && (dryRun || ["control.services", "control.settings", "control.password", "control.tunnel", "control.access"].every((id) => run.state.done[id]));
+
+/** What up and status say once nothing asks for the panel on a deployment an earlier run gave one: the script deletes nothing. */
+function controlLeftOn(run) {
+  return !controlOn(run) && !run.template && run.state.done["control.services"]
+    ? `Nothing asks for the control panel any more (CONTROL isn't yes in ${run.file}), but an earlier run set it up${v(run, "CONTROL_HOST") ? ` at https://${v(run, "CONTROL_HOST")}` : ""}, and the script deletes nothing: it keeps running. To remove it, delete the control and cloudflared services in Railway, and the tunnel, its DNS record and the Access application in Cloudflare.`
+    : "";
+}
+
+/** What up says about the panel once it's set up, or "". */
+function controlLines(run) {
+  if (!controlOn(run) || !run.state.done["deploy.control"]) return "";
+  return `\n\nThe control panel: https://${controlHost(run)}, for ${v(run, "CONTROL_ACCESS_EMAILS")?.split(",").join(", ")}. Cloudflare Access signs you in first,\nand the panel answers once its build is done, in several minutes (docs/features/control-panel.md).`;
+}
+
+/** Every item of a Cloudflare list, 100 a page (a list that doesn't page comes back whole the first time). */
+async function cloudflareList(pathname) {
+  const items = [];
+  const seen = new Set();
+  for (let page = 1; page <= 50; page += 1) {
+    const result = (await cloudflare(`${pathname}${pathname.includes("?") ? "&" : "?"}per_page=100&page=${page}`)) ?? [];
+    const fresh = result.filter((item) => !seen.has(item.id));
+    for (const item of fresh) seen.add(item.id);
+    items.push(...fresh);
+    if (result.length < 100 || !fresh.length) break;
+  }
+  return items;
+}
+
+const notFound = (error) => (error.status === 404 ? null : Promise.reject(error));
+
+/** Zero Trust's settings for the account, or null while Zero Trust isn't set up there. */
+async function accessOrganization(run) {
+  let organization;
+  try {
+    organization = await cloudflare(`/accounts/${run.settings.CLOUDFLARE_ACCOUNT_ID}/access/organizations`);
+  } catch (error) {
+    // A token without the permission is refused; an account without Zero Trust has no organization to show.
+    if (!error.status || error.status === 401 || error.status === 403) throw error;
+    trace(`no Zero Trust organization: ${error.message}`);
+    return null;
+  }
+  return organization?.auth_domain ? organization : null;
+}
+
+/** Stops before anything is made when REPO@BRANCH has no control panel, as a branch from before it hasn't. */
+function controlBranchCheck(run) {
+  const s = run.settings;
+  if (dryRun || !s.STEP_GITHUB || run.state.done["deploy.control"]) return;
+  const result = runTool("gh", ["api", `repos/${s.REPO}/contents/Dockerfile.control?ref=${s.BRANCH}`, "--jq", ".name"]);
+  if (missingTool(result) || result.status === 0) return;
+  const said = `${result.stderr ?? ""}`;
+  if (/auth login|not logged in|authentication|HTTP 401/i.test(said)) return console.log(`  gh isn't signed in, so the script didn't check that ${s.REPO}@${s.BRANCH} has the control panel`);
+  if (/HTTP 404|Not Found/i.test(said)) throw new Error(`${s.REPO}@${s.BRANCH} has no control panel yet (no Dockerfile.control), so its build would fail. Bring the branch up to date (Sync fork on GitHub), or set CONTROL=no, then run again`);
+  console.log(`  couldn't check that ${s.REPO}@${s.BRANCH} has the control panel (${firstLine(result)})`);
+}
+
+async function controlSteps(run) {
+  const s = run.settings;
+  const host = controlHost(run);
+  const emails = s.CONTROL_EMAILS;
+  const id = (name) => v(run, "RAILWAY_SERVICE_IDS")?.[name];
+  if (host !== wantedControlHost(s)) {
+    console.log(`  The panel stays at https://${host}, the address its steps were done for, though the settings now give https://${wantedControlHost(s)}. To move it, run node devops/bootstrap.mjs redo ${run.file} control.tunnel, then up; then delete ${host}'s DNS record in Cloudflare.`);
+  }
+  // A new CONTROL_ADMIN_EMAILS changes who Access lets in, and then the panel's own list (see the end).
+  if (!dryRun && run.state.done["control.access"] && v(run, "CONTROL_ACCESS_EMAILS") !== emails.join(",")) {
+    delete run.state.done["control.access"];
+    save(run);
+    console.log(`  CONTROL_ADMIN_EMAILS changed, so Cloudflare Access and the panel are brought to it.`);
+  }
+  controlBranchCheck(run);
+  await step(run, "control.services", "Services control (the panel, with no public address) and cloudflared (the tunnel's connector)", async () => {
+    const view = await projectView(run);
+    const ids = { ...v(run, "RAILWAY_SERVICE_IDS") };
+    for (const service of CONTROL_SERVICES) {
+      if (view.services[service.name]) {
+        ids[service.name] = view.services[service.name];
+        console.log(`  = ${service.name}`);
+        continue;
+      }
+      const input = { projectId: v(run, "RAILWAY_PROJECT_ID"), name: service.name, ...(service.image ? { source: { image: service.image } } : {}) };
+      ids[service.name] = (await railway(Q.serviceCreate, { input })).serviceCreate.id;
+      console.log(`  + ${service.name}`);
+    }
+    return { RAILWAY_SERVICE_IDS: ids };
+  });
+  await step(run, "control.settings", "control's settings (Dockerfile.control, its health check) and cloudflared's start command", async () => {
+    const environmentId = v(run, "RAILWAY_ENVIRONMENT_ID");
+    await railway(Q.instanceUpdate, { serviceId: id("control"), environmentId, input: { healthcheckPath: "/api/health/live", healthcheckTimeout: 300, dockerfilePath: "Dockerfile.control", rootDirectory: "/" } });
+    await railway(Q.instanceUpdate, { serviceId: id("cloudflared"), environmentId, input: { startCommand: CLOUDFLARED_START } });
+  });
+  await step(run, "control.password", "The panel's database password (LOBBYSTACK_CONTROL_PASSWORD, 64 hex characters)", async () => {
+    const fromSecretsFile = fromFile("LOBBYSTACK_CONTROL_PASSWORD");
+    if (fromSecretsFile && !/^[A-Za-z0-9_-]{32,}$/.test(fromSecretsFile)) throw new Error(`LOBBYSTACK_CONTROL_PASSWORD in ${config.file} must be at least 32 letters, digits, dashes or underscores, such as 64 hex characters`);
+    // Kept, given, or already on the control service (a lost state file must not change it), else new.
+    return { LOBBYSTACK_CONTROL_PASSWORD: v(run, "LOBBYSTACK_CONTROL_PASSWORD") ?? fromSecretsFile ?? (await railwayVariable(run, "control", "LOBBYSTACK_CONTROL_PASSWORD")) ?? randomBytes(32).toString("hex") };
+  });
+  await step(run, "control.tunnel", `A Cloudflare Tunnel that sends ${host} to the panel, and its token for cloudflared`, async () => {
+    const tunnels = `/accounts/${s.CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel`;
+    const name = nameFor(run, "CONTROL_TUNNEL_NAME");
+    // The tunnel an earlier run made, by its ID, else the one with this name: names aren't unique in Cloudflare.
+    let tunnel = v(run, "CONTROL_TUNNEL_ID") && (await cloudflare(`${tunnels}/${v(run, "CONTROL_TUNNEL_ID")}`).catch(notFound));
+    if (tunnel?.deleted_at) tunnel = null;
+    tunnel ||= only((await cloudflareList(`${tunnels}?name=${encodeURIComponent(name)}&is_deleted=false`)).filter((item) => item.name === name && !item.deleted_at), `Cloudflare has tunnels named "${name}"`);
+    if (tunnel) console.log(`  = the tunnel "${tunnel.name}"`);
+    else {
+      tunnel = await cloudflare(tunnels, { method: "POST", body: { name, config_src: "cloudflare" } });
+      console.log(`  + the tunnel "${name}"`);
+    }
+    if (tunnel.config_src === "local") throw new Error(`the tunnel "${tunnel.name}" is run from a configuration file, so Cloudflare can't send ${host} down it. Rename or delete it in Cloudflare (Zero Trust > Networks > Tunnels), then run again`);
+    // The panel's address goes down the tunnel to the control service, and any other gets 404. Routes added by hand for
+    // other addresses stay; one to the panel from an address it has moved from doesn't.
+    const ingress = (await cloudflare(`${tunnels}/${tunnel.id}/configurations`).catch(notFound))?.config?.ingress ?? [];
+    const others = ingress.filter((rule) => rule.hostname && rule.hostname !== host && rule.service !== CONTROL_ORIGIN);
+    await cloudflare(`${tunnels}/${tunnel.id}/configurations`, { method: "PUT", body: { config: { ingress: [{ hostname: host, service: CONTROL_ORIGIN }, ...others, { service: "http_status:404" }] } } });
+    console.log(`  ${host} -> ${CONTROL_ORIGIN}`);
+    const token = await cloudflare(`${tunnels}/${tunnel.id}/token`);
+    if (typeof token !== "string" || !token) throw new Error(`Cloudflare gave no token for the tunnel "${tunnel.name}"`);
+    return { CONTROL_TUNNEL_ID: tunnel.id, CONTROL_TUNNEL_NAME: tunnel.name, CONTROL_TUNNEL_TOKEN: token, CONTROL_HOST: host };
+  });
+  await step(run, "control.dns", `${host}'s DNS record: a CNAME to the tunnel, proxied by Cloudflare`, async () => {
+    await dnsRecords(run, [{ type: "CNAME", name: host, content: `${v(run, "CONTROL_TUNNEL_ID")}.cfargotunnel.com`, proxied: true }]);
+  });
+  await step(run, "control.access", `Cloudflare Access in front of ${host}, which lets in ${emails.join(", ")}`, async () => {
+    const access = `/accounts/${s.CLOUDFLARE_ACCOUNT_ID}/access`;
+    // Zero Trust's team domain signs Access's tokens, which the panel checks. Cloudflare has none until it's set up.
+    let organization = await accessOrganization(run);
+    if (!organization) {
+      await byHand([
+        "Cloudflare Zero Trust isn't set up for the account yet. In Cloudflare's dashboard, open Zero Trust, pick a team name",
+        "(it becomes <team name>.cloudflareaccess.com) and the Free plan, which covers up to 50 people (devops/bootstrap.md).",
+      ]);
+      if (byHandSkipped) return {};
+      organization = await accessOrganization(run);
+      if (!organization) throw new Error("Cloudflare Zero Trust still isn't set up for the account: set it up, then run again");
+    }
+    // One policy, of its own, that lets the emails in, found by the ID an earlier run kept, else by its name.
+    const policyName = nameFor(run, "CONTROL_ACCESS_POLICY_NAME");
+    const policyBody = { name: policyName, decision: "allow", include: emails.map((email) => ({ email: { email } })), session_duration: "24h" };
+    let policy = v(run, "CONTROL_ACCESS_POLICY_ID") && (await cloudflare(`${access}/policies/${v(run, "CONTROL_ACCESS_POLICY_ID")}`).catch(notFound));
+    policy ||= only((await cloudflareList(`${access}/policies`)).filter((item) => item.name === policyName), `Cloudflare Access has policies named "${policyName}"`);
+    const policyId = policy ? policy.id : (await cloudflare(`${access}/policies`, { method: "POST", body: policyBody })).id;
+    if (policy) await cloudflare(`${access}/policies/${policyId}`, { method: "PUT", body: policyBody });
+    console.log(`  ${policy ? "=" : "+"} the policy "${policyName}", for ${emails.join(", ")}`);
+    // The application for the panel's address, by the ID an earlier run kept, else by the address: Cloudflare takes
+    // one application for an address. One the script didn't make is left as it is, unless it has the script's name.
+    const appName = nameFor(run, "CONTROL_ACCESS_APP_NAME");
+    const appBody = { name: appName, type: "self_hosted", domain: host, session_duration: "24h", app_launcher_visible: false, policies: [{ id: policyId, precedence: 1 }] };
+    let app = v(run, "CONTROL_ACCESS_APP_ID") && (await cloudflare(`${access}/apps/${v(run, "CONTROL_ACCESS_APP_ID")}`).catch(notFound));
+    let mine = Boolean(app);
+    if (!app) {
+      app = only((await cloudflareList(`${access}/apps?domain=${encodeURIComponent(host)}&exact=true`)).filter((item) => String(item.domain ?? "").toLowerCase() === host), `Cloudflare Access has applications for ${host}`);
+      mine = Boolean(app) && app.name === appName;
+    }
+    if (!app) {
+      app = await cloudflare(`${access}/apps`, { method: "POST", body: appBody });
+      mine = true;
+      console.log(`  + the application "${appName}"`);
+    } else if (mine) {
+      app = { ...app, ...(await cloudflare(`${access}/apps/${app.id}`, { method: "PUT", body: appBody })) };
+      console.log(`  = the application "${appName}"`);
+    } else if (!(app.policies ?? []).some((item) => item.id === policyId)) {
+      await byHand([`Cloudflare Access has an application for ${host} that the script didn't make, "${app.name}", which it leaves as it is.`,
+        `In Zero Trust > Access > Applications, give it the policy "${policyName}", or delete it so the script makes its own.`]);
+    } else console.log(`  = the application "${app.name}", which has the policy "${policyName}"`);
+    if (!app.aud) throw new Error(`Cloudflare gave no audience (AUD) tag for the application "${app.name}"`);
+    // Who can sign in depends on the login methods Zero Trust has. A one-time code by email suits any address.
+    const methods = await cloudflare(`${access}/identity_providers`).catch(() => null);
+    if (Array.isArray(methods) && !methods.some((method) => method.type === "onetimepin")) {
+      console.log(`  Zero Trust has no One-time PIN login${methods.length ? `, only ${methods.map((method) => method.name).join(", ")}` : ""}: if an email in CONTROL_ADMIN_EMAILS can't sign in, add One-time PIN under Zero Trust > Settings > Authentication.`);
+    }
+    return {
+      CONTROL_ACCESS_TEAM_DOMAIN: organization.auth_domain, CONTROL_ACCESS_AUD: app.aud, CONTROL_ACCESS_POLICY_ID: policyId, CONTROL_ACCESS_POLICY_NAME: policyName,
+      CONTROL_ACCESS_EMAILS: emails.join(","), ...(mine ? { CONTROL_ACCESS_APP_ID: app.id, CONTROL_ACCESS_APP_NAME: appName } : {}),
+    };
+  });
+  // The panel's variables go in with every service's, so a deployment whose variables are done runs them again when
+  // the panel's differ from the ones they last set: the first time it's ready, and after any of its steps changed one.
+  if (!dryRun && controlReady(run) && run.state.done.variables && v(run, "CONTROL_VARIABLES") !== controlDigest(run)) {
+    delete run.state.done.variables;
+    save(run);
+    console.log("  The variables are done already, so they run again below, to bring the panel's.");
+  }
+}
+
+/** A digest of the panel's variables, which the variables step keeps once it has set them. */
+const controlDigest = (run) => hashText(JSON.stringify(variableSections(run).filter(([names]) => names === "control" || names === "cloudflared")));
+
 // ---------------------------------------------------------------- variables
 
 /** The variables of guide Appendix A, for a test or a production environment, with this run's values. */
@@ -2430,6 +2701,19 @@ function variableSections(run) {
   const logs = posthog && s.POSTHOG_LOGS ? [["migrate, admin, worker", {
     OTEL_EXPORTER_OTLP_ENDPOINT: `${direct}/i`, OTEL_EXPORTER_OTLP_HEADERS: posthogToken && `Authorization=Bearer ${posthogToken}`,
   }]] : [];
+  // The control panel, once its steps have made what it needs (controlSteps). Its database password is kept on the
+  // control service, and migrate refers to it, as it does to the other roles' on Postgres: db bootstrap gives
+  // lobbystack_control its login with it. The sections come before migrate's, so a new password reaches the control
+  // service before migrate deploys again with it.
+  const control = controlReady(run) ? [
+    ["control", {
+      RAILWAY_DOCKERFILE_PATH: "Dockerfile.control", NODE_ENV: "production", PORT: "3000", HOSTNAME: "::",
+      LOBBYSTACK_CONTROL_PASSWORD: x("LOBBYSTACK_CONTROL_PASSWORD"),
+      DATABASE_URL: "postgresql://lobbystack_control:${{LOBBYSTACK_CONTROL_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack",
+      CONTROL_ACCESS_TEAM_DOMAIN: x("CONTROL_ACCESS_TEAM_DOMAIN"), CONTROL_ACCESS_AUD: x("CONTROL_ACCESS_AUD"), CONTROL_ADMIN_EMAILS: x("CONTROL_ACCESS_EMAILS"),
+    }],
+    ["cloudflared", { TUNNEL_TOKEN: x("CONTROL_TUNNEL_TOKEN") }],
+  ] : [];
   return [
     ["Postgres", {
       PGDATA: "/var/lib/postgresql/data/pgdata", POSTGRES_DB: "lobbystack", POSTGRES_USER: "postgres",
@@ -2440,11 +2724,13 @@ function variableSections(run) {
       LOBBYSTACK_WORKER_PASSWORD: x("LOBBYSTACK_WORKER_PASSWORD"), LOBBYSTACK_DISPATCHER_PASSWORD: x("LOBBYSTACK_DISPATCHER_PASSWORD"),
     }],
     ["Redis", { REDIS_PASSWORD: x("REDIS_PASSWORD") }],
+    ...control,
     ["migrate", {
       RAILWAY_DOCKERFILE_PATH: "Dockerfile.migrator", NODE_ENV: "production",
       DATABASE_URL: "postgresql://postgres:${{Postgres.POSTGRES_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack",
       LOBBYSTACK_AUTH_PASSWORD: "${{Postgres.LOBBYSTACK_AUTH_PASSWORD}}", LOBBYSTACK_APP_PASSWORD: "${{Postgres.LOBBYSTACK_APP_PASSWORD}}",
       LOBBYSTACK_WORKER_PASSWORD: "${{Postgres.LOBBYSTACK_WORKER_PASSWORD}}", LOBBYSTACK_DISPATCHER_PASSWORD: "${{Postgres.LOBBYSTACK_DISPATCHER_PASSWORD}}",
+      ...(control.length ? { LOBBYSTACK_CONTROL_PASSWORD: "${{control.LOBBYSTACK_CONTROL_PASSWORD}}" } : {}),
     }],
     ["admin, worker", {
       NODE_ENV: "production", DEPLOYMENT_MODE: s.DEPLOYMENT_MODE, LIVE_PROTOTYPE_ENABLED: "true",
@@ -2562,7 +2848,8 @@ async function variableSteps(run) {
     const wanted = perService(sections);
     // Before a service's first deploy, all of its variables go in without deploying. Once it's deployed, such as when
     // a redone step brings a new key, only what differs is set, and Railway deploys the service again with it.
-    const deployedBy = { Postgres: "deploy.databases", Redis: "deploy.databases", migrate: "deploy.migrate", admin: "deploy.admin", worker: "deploy.worker" };
+    const deployedBy = { Postgres: "deploy.databases", Redis: "deploy.databases", migrate: "deploy.migrate", admin: "deploy.admin", worker: "deploy.worker",
+      control: "deploy.control", cloudflared: "deploy.cloudflared" };
     const changed = {};
     for (const [service, variables] of Object.entries(wanted)) {
       if (!run.state.done[deployedBy[service]]) {
@@ -2584,13 +2871,17 @@ async function variableSteps(run) {
       await railway(Q.variables, { input: { ...where, serviceId: ids[service], variables: Object.fromEntries(keys.map((key) => [key, wanted[service][key]])) } });
       console.log(`  ~ ${service}: ${keys.join(", ")} (Railway deploys it again)`);
     }
-    // The worker refers to some of the admin's values, such as ${{admin.OPENAI_API_KEY}}, and sees a new one only once
-    // it deploys again.
-    const refersTo = Object.values(wanted.worker).flatMap((value) => [...String(value).matchAll(/\$\{\{admin\.(\w+)\}\}/g)].map((match) => match[1]));
-    if (changed.worker && !changed.worker.length && (changed.admin ?? []).some((key) => refersTo.includes(key))) {
-      await railway(Q.redeploy, { environmentId: where.environmentId, serviceId: ids.worker });
-      console.log("  ~ worker: deployed again, for the admin's values it refers to");
+    // A service sees a new value of another's that it refers to only once it deploys again: the worker refers to some of
+    // the admin's, such as ${{admin.OPENAI_API_KEY}}, and migrate to the control panel's database password.
+    for (const [service, keys] of Object.entries(changed)) {
+      if (keys.length) continue;
+      const from = new Set(Object.values(wanted[service]).flatMap((value) => [...String(value).matchAll(/\$\{\{([\w-]+)\.(\w+)\}\}/g)])
+        .filter(([, other, key]) => (changed[other] ?? []).includes(key)).map(([, other]) => other));
+      if (!from.size) continue;
+      await railway(Q.redeploy, { environmentId: where.environmentId, serviceId: ids[service] });
+      console.log(`  ~ ${service}: deployed again, for the new values of ${[...from].join(" and ")} that it refers to`);
     }
+    return controlReady(run) ? { CONTROL_VARIABLES: controlDigest(run) } : {};
   });
 }
 
@@ -2656,6 +2947,24 @@ async function deploySteps(run) {
       await checkTrigger(run, service);
     });
   }
+  // The control panel, once its variables are in. Its build takes minutes, like the admin's, so nothing waits for it.
+  if (!controlReady(run)) return;
+  await step(run, "deploy.control", `Connect the control panel to ${s.REPO}@${s.BRANCH}, which builds it`, async () => {
+    await railway(Q.connect, { id: ids().control, input: source });
+    await checkTrigger(run, "control");
+  });
+  await step(run, "deploy.cloudflared", "Deploy cloudflared, which connects the tunnel to Cloudflare", async () => {
+    try {
+      const id = (await railway(Q.deployService, { serviceId: ids().cloudflared, environmentId: environmentId() })).serviceInstanceDeployV2;
+      console.log("  cloudflared: deploying");
+      await waitForDeployment(run, "cloudflared", ids().cloudflared, typeof id === "string" && id ? { id } : {});
+      console.log("  cloudflared: running");
+    } catch (error) {
+      if (!error.graphql) throw error;
+      console.log(`  Railway didn't deploy it through its API (${String(error.message).split("\n")[0]}).`);
+      await byHand(["Deploy cloudflared in the project's canvas (the Deploy banner, or its Deployments > Redeploy).", "Its log then says it registered the tunnel's connections."]);
+    }
+  });
 }
 
 /**
@@ -3288,6 +3597,8 @@ async function connect(run) {
      (the project's Settings > Tokens). Delete the file once the admin has redeployed. Set what
      plan lists for Stripe's Dashboard, which Stripe's API can't, then check:
      ${billing("verify")}     (should end "Result: in sync (exit 0)")`] : []),
+    ...(controlOn(run) && run.state.done["deploy.control"] ? [`Open the control panel, https://${controlHost(run)}, and sign in through Cloudflare Access as one of
+     ${v(run, "CONTROL_ACCESS_EMAILS")?.split(",").join(", ")} (docs/features/control-panel.md).`] : []),
     `Set up the first business and buy its number (guide 6.3 and 6.4), then call it: the receptionist answers.
      If it rings with no answer, check that the webhook is in the OpenAI project ${openaiProject}.`,
     `Optional, in Git Bash: pnpm smoke:production (guide 4.9) with this deployment's values on the same line,
@@ -3315,6 +3626,8 @@ function status(run) {
   for (const [id, title] of Object.entries(run.state.byHand ?? {}).filter(([id]) => !run.state.done[id])) console.log(`  OPEN  by hand: ${id} (${title})`);
   const host = appHost(run);
   if (host) console.log(`  address: https://${host}`);
+  if (controlOn(run)) console.log(`  control panel: https://${controlHost(run)}${run.state.done["deploy.control"] ? `, behind Cloudflare Access for ${v(run, "CONTROL_ACCESS_EMAILS")?.split(",").join(", ")}` : ", once up has set it up"}`);
+  else if (controlLeftOn(run)) console.log(`  control panel: ${controlLeftOn(run)}`);
   // The one kept value that is shown: the operator sends this link to whoever should get in.
   if (protectOn(run)) console.log(`  access link (${protectedBy(run)}): ${accessLink(run) ?? `none yet: up ${givenProtectionToken() ? "puts the token on the admin" : "makes the token"} and shows the link`}`);
   else if (protectionLeftOn(run)) console.log(`  access gate: ${protectionLeftOn(run)}`);
@@ -3344,6 +3657,10 @@ const PASSED_ON = {
   "secrets": ["variables"],
   "protection": ["variables"],
   "fleet.token": ["variables"],
+  "control.services": ["control.settings", "variables", "deploy.control", "deploy.cloudflared"],
+  "control.password": ["variables"],
+  "control.tunnel": ["control.dns", "control.access", "variables"],
+  "control.access": ["variables"],
   "connect.webhook": ["connect.variables"],
   "connect.platformKey": ["connect.variables"],
   "connect.billing.apply": ["connect.billing.secret", "connect.billing.verify"],
@@ -3369,6 +3686,18 @@ function redo(run, wanted) {
       : givenProtectionToken() ? `  forgot the access gate's token, so up takes the one in ${config.file}. If that is another token, then once the admin deploys with it, the old access link and the browsers that used it get 404: send out the new link.`
       : "  forgot the access gate's token, so up makes a new one. Once the admin deploys with it, the old access link and the browsers that used it get 404: send out the new link.");
   }
+  // Redone to take another password from the secrets file: migrate gives the role it, and the panel signs in with it.
+  if (matches.includes("control.password")) {
+    delete run.state.values.LOBBYSTACK_CONTROL_PASSWORD;
+    console.log("  forgot the control panel's database password, so up takes the secrets file's LOBBYSTACK_CONTROL_PASSWORD, else the one the control service has on Railway, else makes a new one.");
+  }
+  // Redone to move the panel, so it takes the address the settings give now.
+  if (matches.includes("control.tunnel") && v(run, "CONTROL_HOST")) {
+    const was = v(run, "CONTROL_HOST");
+    delete run.state.values.CONTROL_HOST;
+    const now = controlOn(run) ? wantedControlHost(run.settings) : null;
+    console.log(`  forgot the control panel's address, ${was}, so up sets the panel up at ${now && now !== was ? `${now}, the one the settings give now. Then delete ${was}'s DNS record in Cloudflare` : "the one the settings give"}.`);
+  }
   // Redone to change the token, so the kept one doesn't stay either.
   if (matches.includes("fleet.token")) {
     delete run.state.values.FLEET_STATUS_TOKEN;
@@ -3382,7 +3711,7 @@ function redo(run, wanted) {
     // database gets the same passwords), and so do the webhook's secret and the operator key, which connect puts on
     // the new admin. Without APP_BASE_URL the address changes, and with it the toll-free number's texting URL. The
     // billing steps run again too: the new database has no plans yet, and Polar's webhook may need the new address.
-    const projectBound = (id) => /^(railway\.|deploy\.|post\.|connect\.billing\.)/.test(id) || ["turnstile", "variables", "connect.health", "connect.variables"].includes(id) || (id === "twilio.tollfree" && !run.settings.CUSTOM_HOST);
+    const projectBound = (id) => /^(railway\.|deploy\.|post\.|connect\.billing\.)/.test(id) || ["turnstile", "variables", "connect.health", "connect.variables", "control.services", "control.settings"].includes(id) || (id === "twilio.tollfree" && !run.settings.CUSTOM_HOST);
     for (const id of Object.keys(run.state.done).filter(projectBound)) {
       delete run.state.done[id];
       console.log(`  ${id}: runs again next time`);
@@ -3408,7 +3737,7 @@ const PROVIDERS = {
   Resend: { token: "RESEND_ADMIN_KEY", make: "https://resend.com/api-keys", status: "https://resend-status.com",
     needs: "a Full access key (a Sending access key can't create domains or keys)" },
   Cloudflare: { token: "CLOUDFLARE_API_TOKEN", make: "https://dash.cloudflare.com/profile/api-tokens", status: "https://www.cloudflarestatus.com",
-    needs: "Zone > DNS > Edit on the zone, and Account > Turnstile > Edit on the account" },
+    needs: "Zone > DNS > Edit on the zone, and Account > Turnstile > Edit on the account; with CONTROL=yes also Account > Cloudflare Tunnel > Edit, Account > Access: Apps and Policies > Edit, and Account > Access: Organizations, Identity Providers, and Groups > Read" },
   Stripe: { token: "STRIPE_ADMIN_KEY or STRIPE_WORKER_KEY", make: "https://dashboard.stripe.com/apikeys (Create restricted key)", status: "https://status.stripe.com",
     needs: "a restricted key of the deployment's own account and mode, with the permissions docs/providers/stripe.md lists" },
   Polar: { token: "the Polar token named above", make: "Polar: the organization's Settings > Developers > New Token", status: "https://status.polar.sh",
@@ -3454,6 +3783,36 @@ function hints(error) {
 }
 
 // ---------------------------------------------------------------- doctor
+
+/**
+ * Whether the panel is closed to everyone Cloudflare Access hasn't signed in: its address must answer with Access's
+ * sign-in, and the control service must have no address of its own on Railway.
+ */
+async function doctorControl(run, { ok, note, fix, quietGiven, bearer }) {
+  const host = controlHost(run);
+  console.log("\nThe control panel");
+  try {
+    const response = await fetch(process.env.BOOTSTRAP_CONTROL_URL ?? `https://${host}/`, { redirect: "manual" });
+    const location = response.headers.get("location") ?? "";
+    trace(`The control panel GET / -> ${response.status}`);
+    if ([301, 302, 303, 307, 308].includes(response.status) && /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com\//i.test(location)) ok(`https://${host} answers with Cloudflare Access's sign-in`);
+    else if (response.ok) fix(`https://${host} answers ${response.status} without a sign-in: Cloudflare Access isn't in front of it. Check the Access application for ${host} in Zero Trust > Access > Applications`);
+    else note(`https://${host} answers ${response.status}${location ? `, to ${location.split("?")[0]}` : ""}: normal until the DNS record has spread and cloudflared runs`);
+  } catch (error) {
+    note(`https://${host} doesn't answer yet (${error.cause?.code ?? error.message}): normal until the DNS record has spread and cloudflared runs`);
+  }
+  const token = quietGiven("RAILWAY_API_TOKEN");
+  const where = { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: v(run, "RAILWAY_SERVICE_IDS")?.control };
+  if (!token || !where.projectId || !where.environmentId || !where.serviceId) return;
+  try {
+    const domains = (await http("Railway", URLS.railway, { method: "POST", headers: bearer(token), body: { query: Q.domains, variables: where } }))?.data?.domains;
+    const own = [...(domains?.serviceDomains ?? []), ...(domains?.customDomains ?? [])].map((domain) => domain.domain);
+    if (own.length) fix(`the control service has an address of its own on Railway (${own.join(", ")}), which skips Cloudflare Access: the panel still refuses requests without Access's token, but delete it in control > Settings > Networking`);
+    else ok("the control service has no address of its own on Railway: only the tunnel reaches it");
+  } catch (error) {
+    note(`couldn't read the control service's addresses on Railway (${error.message})`);
+  }
+}
 
 /** Checks the settings, the tools and every token it can find, with read-only calls. Asks nothing and changes nothing. */
 async function doctor(run) {
@@ -3511,6 +3870,8 @@ async function doctor(run) {
     note(`access gate: on (${protectedBy(run)}), with ${token}: every page answers 404 until a browser opens the access link once`);
   }
   if (givenTokenWaits(run)) note(givenTokenWaits(run));
+  if (controlOn(run)) note(`control panel: https://${controlHost(run)}, behind Cloudflare Access for ${s.CONTROL_EMAILS.join(", ")}${run.state.done["deploy.control"] ? "" : ". up adds the control and cloudflared services, a Cloudflare Tunnel, its DNS record and an Access application"}`);
+  else if (controlLeftOn(run)) note(controlLeftOn(run));
   const done = Object.keys(run.state.done).length;
   note(done ? `${done} steps already done (status lists them)` : "nothing done yet");
   const open = Object.keys(run.state.byHand ?? {}).filter((id) => !run.state.done[id]);
@@ -3592,6 +3953,33 @@ async function doctor(run) {
       }
       return results.join(", ");
     });
+  }
+  if (controlOn(run) && quietGiven("CLOUDFLARE_API_TOKEN")) {
+    // Read-only calls show whether the token reaches each part; up needs Edit on the tunnels, applications and policies.
+    const value = quietGiven("CLOUDFLARE_API_TOKEN");
+    const account = `${URLS.cloudflare}/accounts/${s.CLOUDFLARE_ACCOUNT_ID}`;
+    const reads = [];
+    for (const [label, pathname, permission] of [
+      ["tunnels", "/cfd_tunnel?per_page=1", "Account > Cloudflare Tunnel > Edit"],
+      ["Access applications", "/access/apps?per_page=1", "Account > Access: Apps and Policies > Edit"],
+      ["Access policies", "/access/policies?per_page=1", "Account > Access: Apps and Policies > Edit"],
+    ]) {
+      try {
+        await http("Cloudflare", `${account}${pathname}`, { headers: bearer(value) });
+        reads.push(label);
+      } catch (error) {
+        fix(`Cloudflare: CLOUDFLARE_API_TOKEN can't read ${label} (${error.message}). For the control panel it needs ${permission}`);
+      }
+    }
+    if (reads.length) ok(`Cloudflare: CLOUDFLARE_API_TOKEN reads ${reads.join(", ")} (up needs Edit on them)`);
+    try {
+      const organization = (await http("Cloudflare", `${account}/access/organizations`, { headers: bearer(value) }))?.result;
+      if (organization?.auth_domain) ok(`Cloudflare: Zero Trust is set up, team domain ${organization.auth_domain}`);
+      else note("Cloudflare: Zero Trust isn't set up for the account yet: up says how, and waits");
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) fix(`Cloudflare: CLOUDFLARE_API_TOKEN can't read Zero Trust's settings (${error.message}). For the control panel it needs Account > Access: Organizations, Identity Providers, and Groups > Read`);
+      else note(`Cloudflare: Zero Trust doesn't seem set up for the account yet (${error.message}): up says how, and waits`);
+    }
   }
   if (s.DEPLOYMENT_MODE === "cloud" && s.BILLING_PROVIDER === "stripe") {
     // Each key's mode, then its account, which the two must share.
@@ -3732,6 +4120,7 @@ async function doctor(run) {
     else if (answer.closed && protectionLeftOn(run)) note(protectionLeftOn(run));
     else if (answer.closed) note(`https://${host}/login answers the access gate's 404, so PROTECTION_TOKEN is set on the admin, though PROTECT isn't yes in ${run.file} and the secrets file has no PROTECTION_TOKEN. To have the script show the access link, put the admin's token in the secrets file as PROTECTION_TOKEN and run up, which keeps it (PROTECT=yes would replace it with a new one). To open the deployment, delete PROTECTION_TOKEN from the admin's variables in Railway`);
   }
+  if (controlOn(run) && run.state.done["control.dns"]) await doctorControl(run, { ok, note, fix, quietGiven, bearer });
   console.log(fixes ? `\n${fixes} thing${fixes === 1 ? "" : "s"} to fix first (FIX above).` : `\nNothing to fix. Next: node devops/bootstrap.mjs ${run.state.done["deploy.admin"] ? "connect" : "up"} ${run.file}${run.state.done["deploy.admin"] ? "" : " --dry-run"}`);
   process.exitCode = fixes ? 1 : 0;
 }

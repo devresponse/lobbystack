@@ -7,7 +7,7 @@ How to work on the code: set up a checkout, run the checks a pull request needs,
 - Use Node 26, as CI does, and pnpm 12.15.0 (`packageManager` in `package.json`).
 - `pnpm env:generate` writes `.env` with new random secrets. Keep your own keys and overrides in `.env.local`, which wins over `.env` and which Git and Docker both ignore.
 - Build `@lobbystack/telemetry` before the first `pnpm dev`, and again after changing it: the admin loads it from its build output. In a fresh checkout, `pnpm build` once also builds the packages some tests import.
-- Git ignores `apps/admin/next-env.d.ts`. Next writes it whenever `next dev`, `next build` or `next typegen` runs, and the admin's `typecheck` and `lint` scripts run `next typegen` first, so a fresh checkout and CI get it too.
+- Git ignores `apps/admin/next-env.d.ts`, and the control panel's `apps/control/next-env.d.ts`. Next writes it whenever `next dev`, `next build` or `next typegen` runs, and each app's `typecheck` and `lint` scripts run `next typegen` first, so a fresh checkout and CI get it too.
 - To run the whole stack in Docker, debug in VS Code, or take real calls on your desktop through a tunnel, follow [run and debug on your desktop](../voice/local-debugging.md).
 
 ## Run the checks before a pull request
@@ -21,7 +21,7 @@ pnpm build
 
 - After changing migrations, roles or row-level security, also run `pnpm db:check`, `pnpm db:compare-schema` and `pnpm db:verify-rls`, and `pnpm db:freeze-migrations` when you add a migration file ("[Change the schema in two places](#change-the-schema-in-two-places)").
 - The public API's rate limit is tested against a real Redis when `REDIS_TEST_URL` is set, as CI's database job does; without it that one test skips.
-- The database integration tests run with `pnpm test:reliability` and need `LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL`, pointing at a dedicated database whose name contains `test`. Without it they skip. The admin's sign-in tests also need `LOBBYSTACK_AUTH_TEST_DATABASE_URL`, which only CI's database job sets, so set it when you change sign-in emails or the users table.
+- The database integration tests run with `pnpm test:reliability` and need `LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL`, pointing at a dedicated database whose name contains `test`. Without it they skip. `apps/control/src/lib/queries.integration.test.ts` runs every one of the control panel's queries as its role, `lobbystack_control`, in a transaction it rolls back, and with `LOBBYSTACK_CONTROL_PASSWORD`, the one `db bootstrap` gave the role, also signs in as it; CI's database job runs it ([the control panel](../features/control-panel.md#show-something-more)). The admin's sign-in tests also need `LOBBYSTACK_AUTH_TEST_DATABASE_URL`, which only CI's database job sets, so set it when you change sign-in emails or the users table.
 - `pnpm e2e:local` runs the browser tests against a local stack in Docker.
 - The `replacement:*` checks commit their rows. After several runs on one database, `pnpm replacement:recovery` fails with "Outbox dispatcher did not claim the recovery message"; CI runs it on a fresh, seeded database, so reproduce it that way.
 - When you change GPT-Live's instructions, the call controller or how calls end, run `pnpm voice:eval` before opening the pull request and `pnpm voice:call` against a test deployment before merging ([voice testing](../voice/testing.md)). Both need an OpenAI key.

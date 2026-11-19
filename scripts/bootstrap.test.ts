@@ -40,6 +40,13 @@ const posthogKey = `phx_${"k".repeat(40)}`;
 const posthogOrg = { id: "0f1e2d3c-4b5a-4968-8776-655443322110", name: "Acme Analytics" };
 const posthogToken = (id: number) => `phc_project${id}${"t".repeat(32)}`;
 const serviceIds = { Postgres: "svc-postgres", Redis: "svc-redis", migrate: "svc-migrate", admin: "svc-admin", worker: "svc-worker" };
+// The control panel's services, which a project has only once up has made them (or a test says they're there).
+const controlServiceIds = { control: "svc-control", cloudflared: "svc-cloudflared" };
+// The Cloudflare zone and account of a deployment with the control panel, the stand-in token, and Zero Trust's team domain.
+const cloudflareZone = "example.com";
+const cloudflareAccount = "0123456789abcdef0123456789abcdef";
+const cloudflareToken = "cloudflare-stand-in-token";
+const teamDomain = "acme-team.cloudflareaccess.com";
 const platformSecrets = Object.fromEntries(["POSTGRES_PASSWORD", "LOBBYSTACK_AUTH_PASSWORD", "LOBBYSTACK_APP_PASSWORD", "LOBBYSTACK_WORKER_PASSWORD",
   "LOBBYSTACK_DISPATCHER_PASSWORD", "REDIS_PASSWORD", "BETTER_AUTH_SECRET", "ENCRYPTION_KEY", "INTERNAL_SERVICE_SECRET", "INTERNAL_SERVICE_TOKEN",
   "NUMBER_CLAIM_TOKEN_SECRET", "OTP_HASH_SECRET", "WIDGET_SESSION_SECRET"].map((key) => [key, randomBytes(32).toString("hex")])) as Record<string, string>;
@@ -167,10 +174,28 @@ main().then((code) => {
 // ---------------------------------------------------------------- the stand-ins
 
 type Vars = Record<string, string>;
-type Service = keyof typeof serviceIds;
+type Service = keyof typeof serviceIds | keyof typeof controlServiceIds;
 type Deployment = { id: string; status: "DEPLOYING" | "SUCCESS"; polls: number };
 type Webhook = { id: string; url: string; secret: string; organization_id: string };
 type PostHogProject = { id: number; name: string; api_token: string; is_demo: boolean; ingested_event: boolean; session_recording_opt_in: boolean; recording_domains: string[] };
+type Ingress = { hostname?: string; service: string };
+type Tunnel = { id: string; name: string; config_src: string; deleted_at: string | null; ingress: Ingress[]; token: string };
+type DnsRecord = { id: string; type: string; name: string; content: string; proxied: boolean; ttl: number };
+type AccessPolicy = { id: string; name: string; decision: string; include: Array<{ email: { email: string } }>; session_duration?: string | undefined };
+type AccessApp = { id: string; aud: string; name: string; domain: string; type: string; session_duration?: string | undefined; app_launcher_visible?: boolean | undefined; policies: Array<{ id: string; precedence?: number }> };
+/** Cloudflare as the deployment's token sees it: the zone's DNS records, the account's tunnels and Zero Trust. */
+type CloudflareWorld = {
+  records: DnsRecord[];
+  tunnels: Tunnel[];
+  /** Zero Trust's settings, null while it isn't set up for the account. */
+  organization: { name: string; auth_domain: string } | null;
+  policies: AccessPolicy[];
+  apps: AccessApp[];
+  identityProviders: Array<{ id: string; name: string; type: string }>;
+  /** Paths under the account that the token may not use: they answer 403. */
+  forbidden: string[];
+  calls: string[];
+};
 type World = {
   /** Each service's variables on Railway, and those its live deployment started with. */
   variables: Record<Service, Vars>;
@@ -191,17 +216,27 @@ type World = {
    * limit its features show when that differs, and its projects.
    */
   posthog: { limit: number | null | undefined; shownLimit?: number | null; membershipLevel: number; projects: PostHogProject[]; calls: string[] };
+  /** The control panel's services that the project has, the image of one made from an image, and each service's settings. */
+  made: Set<Service>;
+  images: Partial<Record<Service, string>>;
+  settings: Record<Service, Record<string, unknown>>;
+  /** The control service's own addresses on Railway, which it shouldn't have. */
+  controlDomains: Array<{ id: string; domain: string; targetPort: number }>;
+  cloudflare: CloudflareWorld;
 };
 
-const services = Object.keys(serviceIds) as Service[];
-const serviceOf = (id: unknown) => services.find((name) => serviceIds[name] === id);
+const allServiceIds: Record<Service, string> = { ...serviceIds, ...controlServiceIds };
+const services = Object.keys(allServiceIds) as Service[];
+const serviceOf = (id: unknown) => services.find((name) => allServiceIds[name] === id);
+const isControlService = (service: Service): service is keyof typeof controlServiceIds => service in controlServiceIds;
 
 function freshWorld(): World {
   const each = <T>(make: (service: Service) => T) => Object.fromEntries(services.map((service) => [service, make(service)])) as Record<Service, T>;
   return {
     variables: each(() => ({})),
     running: each(() => ({})),
-    deployments: each((service) => [{ id: `${service}-deployment-1`, status: "SUCCESS", polls: 0 }]),
+    // The control panel's services start with no deployment.
+    deployments: each((service) => (isControlService(service) ? [] : [{ id: `${service}-deployment-1`, status: "SUCCESS", polls: 0 }])),
     refuse: null,
     organizations: new Map([[polarTokens.admin, acme], [polarTokens.worker, acme], [polarTokens.setup, acme], [polarTokens.other, other]]),
     webhookTokens: new Set([polarTokens.setup, polarTokens.other]),
@@ -209,6 +244,12 @@ function freshWorld(): World {
     ownerInactiveAnswers: 0,
     polarVersions: [],
     posthog: { limit: 6, membershipLevel: 15, projects: [], calls: [] },
+    made: new Set(),
+    images: {},
+    settings: each(() => ({})),
+    controlDomains: [],
+    cloudflare: { records: [], tunnels: [], organization: { name: "Acme", auth_domain: teamDomain }, policies: [], apps: [],
+      identityProviders: [{ id: "idp-otp", name: "One-time PIN", type: "onetimepin" }], forbidden: [], calls: [] },
   };
 }
 
@@ -219,26 +260,39 @@ function deploy(service: Service) {
   list.unshift({ id: `${service}-deployment-${list.length + 1}`, status: "DEPLOYING", polls: 0 });
 }
 
-type GraphQL = { query?: string; variables?: { id?: string; serviceId?: string; input?: { serviceId?: string; variables?: Vars; skipDeploys?: boolean } } };
+type GraphQL = {
+  query?: string;
+  variables?: { id?: string; serviceId?: string; input?: { serviceId?: string; variables?: Vars; skipDeploys?: boolean; name?: string; source?: { image?: string } } & Record<string, unknown> };
+};
 
 function railwayAnswer(body: GraphQL | null): unknown {
   const operation = /^(?:query|mutation) (\w+)/.exec(body?.query ?? "")?.[1];
   const variables = body?.variables ?? {};
   if (operation === "project") {
     return { data: { project: { id: "proj-1", name: "acme-test", deletedAt: null,
-      services: { edges: services.map((name) => ({ node: { id: serviceIds[name], name } })) },
+      services: { edges: services.filter((name) => !isControlService(name) || world.made.has(name)).map((name) => ({ node: { id: allServiceIds[name], name } })) },
       environments: { edges: [{ node: { id: "env-1", name: "test" } }] },
       volumes: { edges: [] },
       buckets: { edges: [{ node: { id: "bucket-1", name: "Bucket" } }] } } } };
   }
-  if (operation === "domains") return { data: { domains: { serviceDomains: [{ id: "domain-1", domain: railwayHost, targetPort: 3000 }], customDomains: [] } } };
+  if (operation === "domains") {
+    const serviceDomains = variables.serviceId === controlServiceIds.control ? world.controlDomains : [{ id: "domain-1", domain: railwayHost, targetPort: 3000 }];
+    return { data: { domains: { serviceDomains, customDomains: [] } } };
+  }
   if (operation === "workspace") return { data: { workspace: { name: "Acme's workspace" } } };
+  if (operation === "serviceCreate") {
+    const name = variables.input?.name as Service | undefined;
+    if (!name || !isControlService(name) || world.made.has(name)) return { errors: [{ message: `the stand-in doesn't make a service named ${name ?? "?"}` }] };
+    world.made.add(name);
+    if (variables.input?.source?.image) world.images[name] = variables.input.source.image;
+    return { data: { serviceCreate: { id: allServiceIds[name], name } } };
+  }
   const service = serviceOf(variables.serviceId ?? variables.input?.serviceId ?? variables.id);
   if (!service) return { errors: [{ message: `the stand-in has no ${operation ?? "such call"} for that service` }] };
   if (operation === "variables") return { data: { variables: { ...world.variables[service] } } };
   if (operation === "serviceConnect") {
     deploy(service);
-    return { data: { serviceConnect: { id: serviceIds[service] } } };
+    return { data: { serviceConnect: { id: allServiceIds[service] } } };
   }
   if (operation === "variableCollectionUpsert") {
     const values = variables.input?.variables ?? {};
@@ -246,6 +300,10 @@ function railwayAnswer(body: GraphQL | null): unknown {
     Object.assign(world.variables[service], values);
     if (!variables.input?.skipDeploys) deploy(service);
     return { data: { variableCollectionUpsert: true } };
+  }
+  if (operation === "serviceInstanceUpdate") {
+    Object.assign(world.settings[service], variables.input);
+    return { data: { serviceInstanceUpdate: true } };
   }
   if (operation === "serviceInstanceRedeploy") {
     deploy(service);
@@ -340,6 +398,105 @@ function posthogAnswer(method: string, url: URL, token: string, body: PostHogBod
   return [404, { type: "invalid_request", code: "not_found", detail: "Not found.", attr: null }];
 }
 
+type CloudflareBody = Record<string, unknown> | null;
+
+/**
+ * Cloudflare's API as the token sees it: the zone's DNS records, and in the account the tunnels, Zero Trust's settings,
+ * Access's reusable policies and applications, and its login methods. Answers wear Cloudflare's envelope.
+ */
+function cloudflareAnswer(method: string, url: URL, token: string, body: CloudflareBody): [number, unknown] {
+  const cf = world.cloudflare;
+  const path = url.pathname.slice("/cloudflare".length);
+  cf.calls.push(`${method} ${path}`);
+  const ok = (result: unknown): [number, unknown] => [200, { success: true, errors: [], messages: [], result }];
+  const refuse = (status: number, code: number, message: string): [number, unknown] => [status, { success: false, errors: [{ code, message }], messages: [], result: null }];
+  if (token !== cloudflareToken) return refuse(401, 10000, "Authentication error");
+  const query = url.searchParams;
+  if (method === "GET" && path === "/zones") return ok(query.get("name") === cloudflareZone ? [{ id: "zone-1", name: cloudflareZone }] : []);
+  const record = /^\/zones\/zone-1\/dns_records(?:\/([\w-]+))?$/.exec(path);
+  if (record) {
+    const found = record[1] ? cf.records.find((item) => item.id === record[1]) : undefined;
+    if (record[1] && !found) return refuse(404, 81044, "Record does not exist.");
+    if (method === "GET") return ok(cf.records.filter((item) => (!query.get("type") || item.type === query.get("type")) && (!query.get("name") || item.name === query.get("name"))));
+    if (method === "POST") {
+      const made = { id: `record-${cf.records.length + 1}`, type: String(body?.type), name: String(body?.name), content: String(body?.content), proxied: body?.proxied === true, ttl: Number(body?.ttl ?? 1) };
+      cf.records.push(made);
+      return ok(made);
+    }
+    if (method === "PATCH" && found) return ok(Object.assign(found, body));
+    if (method === "DELETE" && found) {
+      cf.records.splice(cf.records.indexOf(found), 1);
+      return ok({ id: found.id });
+    }
+  }
+  const prefix = `/accounts/${cloudflareAccount}`;
+  if (!path.startsWith(prefix)) return refuse(404, 7003, "Could not route to the path");
+  const rest = path.slice(prefix.length);
+  if (cf.forbidden.some((denied) => rest.startsWith(denied))) return refuse(403, 10000, "Authentication error");
+  const tunnelPath = /^\/cfd_tunnel(?:\/([\w-]+)(?:\/(configurations|token))?)?$/.exec(rest);
+  if (tunnelPath) {
+    const [, id, part] = tunnelPath;
+    if (!id && method === "GET") {
+      const name = query.get("name");
+      return ok(cf.tunnels.filter((item) => (!name || item.name === name) && (query.get("is_deleted") !== "false" || !item.deleted_at)));
+    }
+    if (!id && method === "POST") {
+      const made = { id: randomUUID(), name: String(body?.name), config_src: String(body?.config_src ?? "local"), deleted_at: null, ingress: [], token: `eyJ${randomBytes(48).toString("base64url")}` };
+      cf.tunnels.push(made);
+      return ok({ id: made.id, name: made.name, config_src: made.config_src, deleted_at: null, status: "inactive" });
+    }
+    const tunnel = cf.tunnels.find((item) => item.id === id);
+    if (!tunnel) return refuse(404, 1003, "Tunnel not found");
+    if (!part && method === "GET") return ok({ id: tunnel.id, name: tunnel.name, config_src: tunnel.config_src, deleted_at: tunnel.deleted_at });
+    if (part === "token" && method === "GET") return ok(tunnel.token);
+    if (part === "configurations" && method === "GET") return ok({ tunnel_id: tunnel.id, version: 0, config: tunnel.ingress.length ? { ingress: tunnel.ingress } : null });
+    if (part === "configurations" && method === "PUT") {
+      tunnel.ingress = ((body?.config as { ingress?: Ingress[] } | undefined)?.ingress ?? []);
+      return ok({ tunnel_id: tunnel.id, version: 1, config: { ingress: tunnel.ingress } });
+    }
+  }
+  if (rest === "/access/organizations" && method === "GET") return cf.organization ? ok(cf.organization) : refuse(404, 12106, "access.api.error.organization_not_found");
+  if (rest === "/access/identity_providers" && method === "GET") return ok(cf.identityProviders);
+  const policyPath = /^\/access\/policies(?:\/([\w-]+))?$/.exec(rest);
+  if (policyPath) {
+    const [, id] = policyPath;
+    const policy = cf.policies.find((item) => item.id === id);
+    const fields = { name: String(body?.name), decision: String(body?.decision), include: (body?.include ?? []) as AccessPolicy["include"], session_duration: body?.session_duration as string | undefined };
+    if (!id && method === "GET") return ok(cf.policies);
+    if (!id && method === "POST") {
+      const made = { id: randomUUID(), ...fields };
+      cf.policies.push(made);
+      return ok(made);
+    }
+    if (!policy) return refuse(404, 12130, "access.api.error.not_found");
+    if (method === "GET") return ok(policy);
+    if (method === "PUT") return ok(Object.assign(policy, fields));
+  }
+  const appPath = /^\/access\/apps(?:\/([\w-]+))?$/.exec(rest);
+  if (appPath) {
+    const [, id] = appPath;
+    const app = cf.apps.find((item) => item.id === id);
+    const fields = { name: String(body?.name), domain: String(body?.domain), type: String(body?.type), session_duration: body?.session_duration as string | undefined,
+      app_launcher_visible: body?.app_launcher_visible as boolean | undefined, policies: (body?.policies ?? []) as AccessApp["policies"] };
+    if (!id && method === "GET") return ok(cf.apps.filter((item) => !query.get("domain") || item.domain === query.get("domain")));
+    // One application for an address.
+    const taken = (domain: string) => cf.apps.some((item) => item !== app && item.domain === domain);
+    if (!id && method === "POST") {
+      if (taken(fields.domain)) return refuse(400, 12130, "access.api.error.conflict: an application for this domain already exists");
+      const made = { id: randomUUID(), aud: randomBytes(32).toString("hex"), ...fields };
+      cf.apps.push(made);
+      return ok(made);
+    }
+    if (!app) return refuse(404, 12130, "access.api.error.not_found");
+    if (method === "GET") return ok(app);
+    if (method === "PUT") {
+      if (taken(fields.domain)) return refuse(400, 12130, "access.api.error.conflict: an application for this domain already exists");
+      return ok(Object.assign(app, fields));
+    }
+  }
+  return refuse(404, 7003, `the stand-in has no ${method} ${path}`);
+}
+
 function adminAnswer(path: string, key: string): [number, unknown] {
   if (path === "/api/health/ready") return [200, { ok: true, brand: "acme" }];
   // The keys of the admin's live deployment, as PLATFORM_API_KEYS has them.
@@ -377,6 +534,14 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     if (request.headers["x-stand-in-caller"] !== "pnpm") world.polarVersions.push(Array.isArray(version) ? version.join(",") : version);
     answer = polarAnswer(request.method ?? "GET", url.pathname.slice("/polar".length), token, body as FakeWebhookRequest | null);
   } else if (url.pathname.startsWith("/posthog/")) answer = posthogAnswer(request.method ?? "GET", url, token, body as PostHogBody);
+  else if (url.pathname.startsWith("/cloudflare/")) answer = cloudflareAnswer(request.method ?? "GET", url, token, body as CloudflareBody);
+  else if (url.pathname === "/control/") {
+    // The control panel's address: Cloudflare Access's sign-in once an application covers it, else the panel itself.
+    const covered = world.cloudflare.apps.some((app) => app.domain === world.cloudflare.records.find((item) => item.type === "CNAME" && item.proxied)?.name);
+    response.writeHead(covered ? 302 : 200, covered ? { location: `https://${teamDomain}/cdn-cgi/access/login/panel?kid=x` } : { "content-type": "text/html" });
+    response.end(covered ? "" : "<html>the panel</html>");
+    return;
+  }
   else if (url.pathname === "/app/login") {
     // A page request that carries nothing: the access gate's 404 once the admin's live deployment has PROTECTION_TOKEN
     // (apps/admin/src/lib/access-gate.ts), else the sign-in page's redirect to its language.
@@ -487,6 +652,9 @@ function bootstrap(args: string[], { input = "", env = {} }: { input?: string; e
         BOOTSTRAP_POLAR_URL: `${base}/polar`,
         BOOTSTRAP_POSTHOG_URL: `${base}/posthog`,
         BOOTSTRAP_APP_URL: `${base}/app`,
+        BOOTSTRAP_CLOUDFLARE_URL: `${base}/cloudflare`,
+        BOOTSTRAP_CONTROL_URL: `${base}/control/`,
+        CLOUDFLARE_API_TOKEN: cloudflareToken,
         BOOTSTRAP_POLL_MS: "1",
         BOOTSTRAP_RAILWAY_CLI: join(dir, "no-railway-cli"),
         RAILWAY_API_TOKEN: "railway-stand-in-token",
@@ -1699,5 +1867,308 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(world.variables.admin.PROTECTION_TOKEN).toBeUndefined();
     expect((await bootstrap(["status", settings()])).out).not.toContain("access gate");
     expect((await bootstrap(["doctor", settings()])).out).not.toContain("access gate");
+  });
+
+  // ---------------------------------------------------------------- the control panel
+
+  const panelHost = "control-acme-test.example.com";
+  const panelOrigin = "http://control.railway.internal:3000";
+  const panelSteps = ["control.services", "control.settings", "control.password", "control.tunnel", "control.dns", "control.access", "deploy.control", "deploy.cloudflared"];
+  const withControl = (changes: Record<string, string | undefined> = {}) => ({ CONTROL: "yes", CLOUDFLARE_ZONE: cloudflareZone, CLOUDFLARE_ACCOUNT_ID: cloudflareAccount, ...changes });
+
+  /** Every deployment the stand-in has started is live, with the variables Railway has now. */
+  function settle() {
+    for (const service of services) {
+      for (const deployment of world.deployments[service]) deployment.status = "SUCCESS";
+      world.running[service] = { ...world.variables[service] };
+    }
+  }
+
+  /** A deployment that is up, every service with the variables up gives it, and no control panel. */
+  async function upWithoutControl() {
+    writeSettings();
+    railwayAfterUp();
+    const state = stateAfterUp();
+    delete state.done.variables;
+    writeState(state);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    settle();
+  }
+
+  /** The same deployment once up has given it the control panel. */
+  async function controlAfterUp() {
+    await upWithoutControl();
+    writeSettings(withControl());
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    settle();
+    return result;
+  }
+
+  it("leaves the control panel out unless the settings file says CONTROL=yes", async () => {
+    writeSettings({ CLOUDFLARE_ZONE: cloudflareZone, CLOUDFLARE_ACCOUNT_ID: cloudflareAccount });
+    railwayAfterUp();
+    writeState(stateAfterUp());
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).not.toContain("Control panel");
+    expect(world.made.size).toBe(0);
+    expect(world.cloudflare.calls).toEqual([]);
+    expect(Object.keys(readState().done).filter((id) => panelSteps.includes(id))).toEqual([]);
+    expect((await bootstrap(["status", settings()])).out).not.toContain("control panel");
+  });
+
+  it("refuses CONTROL=yes without Cloudflare's zone and account, an address outside the zone, and emails that aren't", async () => {
+    writeSettings({ CONTROL: "yes" });
+    const bare = await bootstrap(["status", settings()]);
+    expect(bare.code, bare.out).toBe(1);
+    expect(bare.out).toContain("CONTROL=yes needs CLOUDFLARE_ZONE and CLOUDFLARE_ACCOUNT_ID");
+    writeSettings(withControl({ CONTROL_HOST: "control.example.org", CONTROL_ADMIN_EMAILS: "ops@example.com, not-an-email" }));
+    const wrong = await bootstrap(["status", settings()]);
+    expect(wrong.code, wrong.out).toBe(1);
+    expect(wrong.out).toContain("CONTROL_HOST must be under CLOUDFLARE_ZONE (example.com)");
+    expect(wrong.out).toContain("CONTROL_ADMIN_EMAILS is emails separated by commas, and not-an-email isn't one");
+    writeSettings(withControl({ CONTROL: "maybe" }));
+    expect((await bootstrap(["status", settings()])).out).toContain("CONTROL is yes or no");
+    // An address two levels under the zone works only with a certificate of its own, so it's a warning.
+    writeSettings(withControl({ CONTROL_HOST: "https://Panel.Ops.example.com/" }));
+    const deep = await bootstrap(["status", settings()]);
+    expect(deep.code, deep.out).toBe(0);
+    expect(deep.out).toContain("CONTROL_HOST (panel.ops.example.com) is more than one level under example.com");
+    expect(deep.out).toContain("control panel: https://panel.ops.example.com, once up has set it up");
+    // Production's is control.<zone>, on a domain brands/index.json gives the brand.
+    const [domain, brand] = Object.entries((JSON.parse(readFileSync(join(repoRoot, "brands", "index.json"), "utf8")) as { domains: Record<string, string> }).domains)[0] ?? [];
+    expect(domain && brand, "brands/index.json gives a brand a domain").toBeTruthy();
+    writeSettings(withControl({ ENVIRONMENT: "production", BRAND: brand, APP_BASE_URL: `app.${domain}`, CLOUDFLARE_ZONE: domain }));
+    const production = await bootstrap(["status", settings()]);
+    expect(production.code, production.out).toBe(0);
+    expect(production.out).toContain(`control panel: https://control.${domain}, once up has set it up`);
+  });
+
+  it("gives a deployment that is up the control panel: its services, the tunnel, the DNS record, Access, the variables and the deploys", async () => {
+    await upWithoutControl();
+    const before = { admin: world.deployments.admin.length, worker: world.deployments.worker.length, migrate: world.deployments.migrate.length };
+    writeSettings(withControl());
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    const state = readState();
+    for (const id of panelSteps) expect(state.done[id], id).toBeTruthy();
+    // Railway: the panel, built from Dockerfile.control and with no address of its own, and the tunnel's connector.
+    expect([...world.made].sort()).toEqual(["cloudflared", "control"]);
+    expect(world.images.cloudflared).toBe("cloudflare/cloudflared:latest");
+    expect(world.settings.control).toEqual({ dockerfilePath: "Dockerfile.control", rootDirectory: "/", healthcheckPath: "/api/health/live", healthcheckTimeout: 300 });
+    expect(world.settings.cloudflared).toEqual({ startCommand: "cloudflared tunnel --no-autoupdate run" });
+    // Cloudflare: a tunnel that sends only the panel's address to the control service, ...
+    expect(world.cloudflare.tunnels).toHaveLength(1);
+    const tunnel = world.cloudflare.tunnels[0];
+    expect(tunnel).toMatchObject({ name: "acme-test-control-panel", config_src: "cloudflare" });
+    expect(tunnel?.ingress).toEqual([{ hostname: panelHost, service: panelOrigin }, { service: "http_status:404" }]);
+    // ... the address's CNAME to the tunnel, proxied, and Access in front of it, for the operator's email only.
+    expect(world.cloudflare.records).toEqual([expect.objectContaining({ type: "CNAME", name: panelHost, content: `${tunnel?.id}.cfargotunnel.com`, proxied: true })]);
+    expect(world.cloudflare.policies).toHaveLength(1);
+    const policy = world.cloudflare.policies[0];
+    expect(policy).toMatchObject({ name: "acme-test control panel admins", decision: "allow", include: [{ email: { email: "ops@example.com" } }] });
+    expect(world.cloudflare.apps).toHaveLength(1);
+    const app = world.cloudflare.apps[0];
+    expect(app).toMatchObject({ name: "acme-test control panel", domain: panelHost, type: "self_hosted", policies: [{ id: policy?.id, precedence: 1 }] });
+    // The panel's variables, and migrate's, which gives lobbystack_control its login once migrate deploys again with it.
+    const password = String(state.values.LOBBYSTACK_CONTROL_PASSWORD);
+    expect(password).toMatch(/^[0-9a-f]{64}$/);
+    expect(world.variables.control).toEqual({
+      RAILWAY_DOCKERFILE_PATH: "Dockerfile.control", NODE_ENV: "production", PORT: "3000", HOSTNAME: "::", LOBBYSTACK_CONTROL_PASSWORD: password,
+      DATABASE_URL: "postgresql://lobbystack_control:${{LOBBYSTACK_CONTROL_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack",
+      CONTROL_ACCESS_TEAM_DOMAIN: teamDomain, CONTROL_ACCESS_AUD: app?.aud, CONTROL_ADMIN_EMAILS: "ops@example.com",
+    });
+    expect(world.variables.cloudflared).toEqual({ TUNNEL_TOKEN: tunnel?.token });
+    expect(world.variables.migrate.LOBBYSTACK_CONTROL_PASSWORD).toBe("${{control.LOBBYSTACK_CONTROL_PASSWORD}}");
+    expect(result.out).toContain("The variables are done already, so they run again below, to bring the panel's.");
+    expect(result.out).toContain("~ migrate: LOBBYSTACK_CONTROL_PASSWORD (Railway deploys it again)");
+    expect(world.deployments.migrate).toHaveLength(before.migrate + 1);
+    // Nothing else changed, so the admin and the worker don't deploy again.
+    expect(result.out).toContain("= admin: unchanged");
+    expect(result.out).toContain("= worker: unchanged");
+    expect(world.deployments.admin).toHaveLength(before.admin);
+    expect(world.deployments.worker).toHaveLength(before.worker);
+    // The panel builds from the repository, and the connector runs.
+    expect(world.deployments.control).toHaveLength(1);
+    expect(world.deployments.cloudflared[0]?.status).toBe("SUCCESS");
+    expect(result.out).toContain(`The control panel: https://${panelHost}, for ops@example.com.`);
+    expect(readFileSync(`${settings()}.vars`, "utf8")).toContain(`[cloudflared]\nTUNNEL_TOKEN=${tunnel?.token}\n`);
+    // Neither the screen nor the log ever has the password or the tunnel's token.
+    for (const secret of [password, String(tunnel?.token)]) {
+      expect(result.out).not.toContain(secret);
+      expect(logText()).not.toContain(secret);
+    }
+
+    // Again: every step is done, so nothing is called, made or deployed.
+    settle();
+    const counts = { calls: world.cloudflare.calls.length, migrate: world.deployments.migrate.length, control: world.deployments.control.length };
+    const again = await bootstrap(["up", settings(), "--yes"]);
+    expect(again.code, again.out).toBe(0);
+    expect(again.out).not.toContain("run again below");
+    expect(world.cloudflare.calls).toHaveLength(counts.calls);
+    expect(world.deployments.migrate).toHaveLength(counts.migrate);
+    expect(world.deployments.control).toHaveLength(counts.control);
+
+    expect((await bootstrap(["status", settings()])).out).toContain(`control panel: https://${panelHost}, behind Cloudflare Access for ops@example.com`);
+    const doctor = await bootstrap(["doctor", settings()]);
+    expect(doctor.out).toContain(`ok     https://${panelHost} answers with Cloudflare Access's sign-in`);
+    expect(doctor.out).toContain("ok     the control service has no address of its own on Railway: only the tunnel reaches it");
+    expect(doctor.out).toContain("ok     Cloudflare: CLOUDFLARE_API_TOKEN reads tunnels, Access applications, Access policies (up needs Edit on them)");
+    expect(doctor.out).toContain(`ok     Cloudflare: Zero Trust is set up, team domain ${teamDomain}`);
+    // A token without the tunnel permission, and an address of the panel's own on Railway, are both things to fix.
+    world.cloudflare.forbidden = ["/cfd_tunnel"];
+    world.controlDomains = [{ id: "domain-2", domain: "control-production.up.railway.app", targetPort: 3000 }];
+    const worse = await bootstrap(["doctor", settings()]);
+    expect(worse.out).toContain("FIX    Cloudflare: CLOUDFLARE_API_TOKEN can't read tunnels (Cloudflare refused GET /cloudflare/accounts/");
+    expect(worse.out).toContain("For the control panel it needs Account > Cloudflare Tunnel > Edit");
+    expect(worse.out).toContain("FIX    the control service has an address of its own on Railway (control-production.up.railway.app)");
+  });
+
+  it("sets a new deployment's panel up before migrate's first deploy, which then gives the role its login, and lists it in a dry run", async () => {
+    writeSettings(withControl());
+    const state = stateAfterUp();
+    for (const id of ["variables", "deploy.databases", "deploy.migrate", "deploy.admin", "deploy.worker"]) delete state.done[id];
+    writeState(state);
+    const dry = await bootstrap(["up", settings(), "--dry-run"]);
+    expect(dry.code, dry.out).toBe(0);
+    expect(dry.out).toContain("~ Services control (the panel, with no public address) and cloudflared (the tunnel's connector)");
+    expect(dry.out).toContain("control: RAILWAY_DOCKERFILE_PATH, NODE_ENV, PORT, HOSTNAME, LOBBYSTACK_CONTROL_PASSWORD, DATABASE_URL, CONTROL_ACCESS_TEAM_DOMAIN");
+    expect(dry.out).toContain("~ Deploy cloudflared, which connects the tunnel to Cloudflare");
+    expect(world.made.size).toBe(0);
+    expect(world.cloudflare.calls).toEqual([]);
+
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    for (const id of panelSteps) expect(readState().done[id], id).toBeTruthy();
+    // Every variable went in before the first deploys, so migrate's first deploy already had the panel's password.
+    expect(result.out).not.toContain("run again below");
+    expect(world.running.migrate.LOBBYSTACK_CONTROL_PASSWORD).toBe("${{control.LOBBYSTACK_CONTROL_PASSWORD}}");
+    expect(world.deployments.migrate).toHaveLength(2);
+    expect(world.variables.control.LOBBYSTACK_CONTROL_PASSWORD).toMatch(/^[0-9a-f]{64}$/);
+    expect(world.deployments.control).toHaveLength(1);
+    expect(world.deployments.cloudflared).toHaveLength(1);
+    expect(result.out).toContain(`The control panel: https://${panelHost}, for ops@example.com.`);
+  });
+
+  it("brings a new CONTROL_ADMIN_EMAILS to Cloudflare Access and to the panel, which deploys again", async () => {
+    await controlAfterUp();
+    writeSettings(withControl({ CONTROL_ADMIN_EMAILS: "ops@example.com, Owner@Example.com" }));
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("CONTROL_ADMIN_EMAILS changed, so Cloudflare Access and the panel are brought to it.");
+    expect(world.cloudflare.policies).toHaveLength(1);
+    expect(world.cloudflare.policies[0]?.include).toEqual([{ email: { email: "ops@example.com" } }, { email: { email: "owner@example.com" } }]);
+    expect(world.cloudflare.apps).toHaveLength(1);
+    expect(world.variables.control.CONTROL_ADMIN_EMAILS).toBe("ops@example.com,owner@example.com");
+    expect(result.out).toContain("~ control: CONTROL_ADMIN_EMAILS (Railway deploys it again)");
+    expect(world.deployments.control).toHaveLength(2);
+    expect(result.out).toContain("= migrate: unchanged");
+  });
+
+  it("waits for Zero Trust to be set up by hand, and sets the rest of the deployment up meanwhile", async () => {
+    world.cloudflare.organization = null;
+    await upWithoutControl();
+    writeSettings(withControl());
+    const first = await bootstrap(["up", settings(), "--yes"]);
+    expect(first.code, first.out).toBe(0);
+    expect(first.out).toContain("Cloudflare Zero Trust isn't set up for the account yet.");
+    expect(first.out).toContain(`- control.access: Cloudflare Access in front of ${panelHost}, which lets in ops@example.com`);
+    let state = readState();
+    for (const id of ["control.services", "control.settings", "control.password", "control.tunnel", "control.dns"]) expect(state.done[id], id).toBeTruthy();
+    for (const id of ["control.access", "deploy.control", "deploy.cloudflared"]) expect(state.done[id], id).toBeUndefined();
+    // The panel's variables wait for Access's, and migrate's with them.
+    expect(world.variables.control).toEqual({});
+    expect(world.variables.migrate.LOBBYSTACK_CONTROL_PASSWORD).toBeUndefined();
+    expect(world.cloudflare.apps).toEqual([]);
+
+    world.cloudflare.organization = { name: "Acme", auth_domain: teamDomain };
+    const second = await bootstrap(["up", settings(), "--yes"]);
+    expect(second.code, second.out).toBe(0);
+    state = readState();
+    for (const id of panelSteps) expect(state.done[id], id).toBeTruthy();
+    expect(world.variables.control.CONTROL_ACCESS_TEAM_DOMAIN).toBe(teamDomain);
+    expect(world.variables.migrate.LOBBYSTACK_CONTROL_PASSWORD).toBe("${{control.LOBBYSTACK_CONTROL_PASSWORD}}");
+    expect(second.out).not.toContain("Still to do by hand");
+  });
+
+  it("keeps the panel at its address when CONTROL_HOST changes, until control.tunnel is redone, which moves it", async () => {
+    await controlAfterUp();
+    writeSettings(withControl({ CONTROL_HOST: "panel.example.com" }));
+    const stays = await bootstrap(["up", settings(), "--yes"]);
+    expect(stays.code, stays.out).toBe(0);
+    expect(stays.out).toContain(`The panel stays at https://${panelHost}, the address its steps were done for, though the settings now give https://panel.example.com.`);
+    expect(world.cloudflare.tunnels[0]?.ingress[0]?.hostname).toBe(panelHost);
+
+    const redo = await bootstrap(["redo", settings(), "control.tunnel"]);
+    expect(redo.code, redo.out).toBe(0);
+    expect(redo.out).toContain("control.dns: runs again next time, to pass on what it uses");
+    expect(redo.out).toContain(`forgot the control panel's address, ${panelHost}, so up sets the panel up at panel.example.com, the one the settings give now.`);
+    const moved = await bootstrap(["up", settings(), "--yes"]);
+    expect(moved.code, moved.out).toBe(0);
+    expect(world.cloudflare.tunnels).toHaveLength(1);
+    expect(world.cloudflare.tunnels[0]?.ingress).toEqual([{ hostname: "panel.example.com", service: panelOrigin }, { service: "http_status:404" }]);
+    expect(world.cloudflare.records.map((record) => record.name).sort()).toEqual(["control-acme-test.example.com", "panel.example.com"]);
+    expect(world.cloudflare.apps).toHaveLength(1);
+    expect(world.cloudflare.apps[0]?.domain).toBe("panel.example.com");
+    expect(readState().values.CONTROL_HOST).toBe("panel.example.com");
+    // The same tunnel and application: the panel's variables are as they were, so it doesn't deploy again.
+    expect(moved.out).toContain("= control: unchanged");
+    expect(world.deployments.control).toHaveLength(1);
+  });
+
+  it("finds the services, the password, the tunnel, the policy and the application again when the state file has lost them", async () => {
+    await controlAfterUp();
+    const made = { tunnel: world.cloudflare.tunnels[0]?.id, policy: world.cloudflare.policies[0]?.id, app: world.cloudflare.apps[0]?.id, password: readState().values.LOBBYSTACK_CONTROL_PASSWORD };
+    const lost = readState();
+    for (const id of panelSteps) delete lost.done[id];
+    for (const key of Object.keys(lost.values).filter((name) => /^CONTROL_|^LOBBYSTACK_CONTROL_/.test(name))) delete lost.values[key];
+    lost.values.RAILWAY_SERVICE_IDS = serviceIds;
+    writeState(lost);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("= control\n");
+    expect(result.out).toContain("LOBBYSTACK_CONTROL_PASSWORD: found on Railway's control service");
+    expect(result.out).toContain(`= the tunnel "acme-test-control-panel"`);
+    expect(result.out).toContain(`= the policy "acme-test control panel admins", for ops@example.com`);
+    expect(result.out).toContain(`= the application "acme-test control panel"`);
+    expect(world.cloudflare.tunnels.map((item) => item.id)).toEqual([made.tunnel]);
+    expect(world.cloudflare.policies.map((item) => item.id)).toEqual([made.policy]);
+    expect(world.cloudflare.apps.map((item) => item.id)).toEqual([made.app]);
+    expect(world.cloudflare.records).toHaveLength(1);
+    expect(readState().values.LOBBYSTACK_CONTROL_PASSWORD).toBe(made.password);
+    expect(world.variables.control.LOBBYSTACK_CONTROL_PASSWORD).toBe(made.password);
+  });
+
+  it("takes the secrets file's password after a redo, and deploys migrate again, which refers to it, to give it to the role", async () => {
+    await controlAfterUp();
+    const own = "c".repeat(64);
+    writeSettings(withControl(), { LOBBYSTACK_CONTROL_PASSWORD: own });
+    const redo = await bootstrap(["redo", settings(), "control.password"]);
+    expect(redo.code, redo.out).toBe(0);
+    expect(redo.out).toContain("variables: runs again next time, to pass on what it uses");
+    const migrate = world.deployments.migrate.length;
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(readState().values.LOBBYSTACK_CONTROL_PASSWORD).toBe(own);
+    expect(world.variables.control.LOBBYSTACK_CONTROL_PASSWORD).toBe(own);
+    expect(result.out).toContain("~ control: LOBBYSTACK_CONTROL_PASSWORD (Railway deploys it again)");
+    expect(result.out).toContain("~ migrate: deployed again, for the new values of control that it refers to");
+    expect(world.deployments.migrate).toHaveLength(migrate + 1);
+    expect(result.out).not.toContain(own);
+    expect(logText()).not.toContain(own);
+  });
+
+  it("says that the panel keeps running after CONTROL goes back to no, since the script deletes nothing", async () => {
+    await controlAfterUp();
+    writeSettings({ CLOUDFLARE_ZONE: cloudflareZone, CLOUDFLARE_ACCOUNT_ID: cloudflareAccount });
+    const calls = world.cloudflare.calls.length;
+    const up = await bootstrap(["up", settings(), "--yes"]);
+    expect(up.code, up.out).toBe(0);
+    expect(up.out).toContain(`Nothing asks for the control panel any more (CONTROL isn't yes in ${settings()}), but an earlier run set it up at https://${panelHost}`);
+    expect(world.cloudflare.calls).toHaveLength(calls);
+    expect(world.variables.control.CONTROL_ACCESS_AUD).toBeTruthy();
+    expect((await bootstrap(["status", settings()])).out).toContain("control panel: Nothing asks for the control panel any more");
   });
 });

@@ -11,6 +11,7 @@ import type { PoolClient } from "pg";
 import { initializeTelemetry, shutdownTelemetry } from "@lobbystack/telemetry/node";
 
 import { createDatabaseClient, databaseHealthCheck } from "./client";
+import { CONTROL_ROLE, controlRoleFailures } from "./control-role";
 import { switchOn } from "./command-switch";
 import { readMigrationChecksums } from "./migrations/checksums";
 import {
@@ -97,6 +98,8 @@ async function main(): Promise<void> {
           ["lobbystack_dispatcher", process.env.LOBBYSTACK_DISPATCHER_PASSWORD],
           ["lobbystack_readonly", process.env.LOBBYSTACK_READONLY_PASSWORD],
           ["lobbystack_finance_export", process.env.LOBBYSTACK_FINANCE_EXPORT_PASSWORD],
+          // The control panel's read-only role (migration 0153), only on a deployment that runs the panel.
+          [CONTROL_ROLE, process.env.LOBBYSTACK_CONTROL_PASSWORD],
         ];
         const existingRoles = new Set(
           (await migrator.db.execute<{ rolname: string }>(sql`select rolname from pg_roles where rolname like 'lobbystack_%'`)).rows.map((row) => row.rolname),
@@ -357,6 +360,10 @@ async function main(): Promise<void> {
         if (receptionistFailures.length > 0) {
           throw new Error(`Receptionist grant verification failed for: ${receptionistFailures.join(", ")}`);
         }
+        const controlFailures = await controlRoleFailures(migrator.db);
+        if (controlFailures.length > 0) {
+          throw new Error(`Control panel role verification failed for: ${controlFailures.join(", ")}`);
+        }
         if (switchOn(process.env.VERIFY_RLS_BEHAVIOR)) {
           await verifyRlsBehavior(migrator);
         }
@@ -532,6 +539,13 @@ async function verifyReceptionistGrants(client: ReturnType<typeof createDatabase
   return result.rows.map((row) => row.failure);
 }
 
+/** A PostgreSQL error's SQLSTATE, whether Drizzle passed it on as it is or wrapped it. */
+function sqlState(error: unknown): string | undefined {
+  const failure = error as { code?: unknown; cause?: { code?: unknown } } | null | undefined;
+  const code = failure?.code ?? failure?.cause?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
 async function verifyRlsBehavior(client: ReturnType<typeof createDatabaseClient>): Promise<void> {
   await client.db.transaction(async (tx) => {
     const ids = (await tx.execute<{
@@ -592,6 +606,25 @@ async function verifyRlsBehavior(client: ReturnType<typeof createDatabaseClient>
       const workerBusiness = (await tx.execute<{ count: string }>(sql`select count(*)::text as count from public.businesses`)).rows[0]?.count;
       if (workerBusiness !== "1") {
         throw new Error(`RLS worker-context check failed (count=${workerBusiness ?? "missing"}).`);
+      }
+
+      // The control panel's role reads every business, whatever context the
+      // session claims, and is refused any write.
+      await tx.execute(sql.raw(`set local role ${CONTROL_ROLE}`));
+      const controlBusinesses = (await tx.execute<{ count: string }>(sql`select count(*)::text as count from public.businesses where id in (${ids.business_a}::uuid, ${ids.business_b}::uuid)`)).rows[0]?.count;
+      if (controlBusinesses !== "2") {
+        throw new Error(`RLS control panel read check failed (count=${controlBusinesses ?? "missing"}).`);
+      }
+      await tx.execute(sql`savepoint control_write`);
+      let writeError: unknown;
+      try {
+        await tx.execute(sql`update public.businesses set name = name where id = ${ids.business_a}::uuid`);
+      } catch (error) {
+        writeError = error;
+      }
+      await tx.execute(sql`rollback to savepoint control_write`);
+      if (sqlState(writeError) !== "42501") {
+        throw new Error(`RLS control panel write check failed (${writeError === undefined ? "the update ran" : `SQLSTATE ${sqlState(writeError) ?? "unknown"}`}).`);
       }
     } finally {
       await tx.execute(sql.raw("reset role"));

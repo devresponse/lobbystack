@@ -23,6 +23,7 @@ apps/landing/.wrangler
 apps/landing/dist
 **/.next/
 apps/admin/next-env.d.ts
+apps/control/next-env.d.ts
 *.tsbuildinfo
 test-results/
 playwright-report/

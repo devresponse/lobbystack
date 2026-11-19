@@ -1,14 +1,19 @@
 import Link from "next/link";
 
 import { ColumnChart } from "@/components/column-chart";
-import { Empty, Panel, StatTile } from "@/components/ui";
+import { Badge, Empty, Panel, StatTile } from "@/components/ui";
 import { ago, change, compact, count, counted, minutes, monthName } from "@/lib/format";
 import { monthlyActivity, overview, recentAccounts } from "@/lib/queries";
 import { adminDatabase } from "@/lib/session";
+import { readSystemHealth } from "@/lib/system-health";
+
+// The overview waits this long at most for the admin; the System health page waits longer.
+const HEALTH_TIMEOUT_MS = 2_000;
 
 export default async function OverviewPage() {
   const db = await adminDatabase();
-  const [totals, months, signups] = await Promise.all([overview(db), monthlyActivity(db), recentAccounts(db)]);
+  const [totals, months, signups, health] = await Promise.all([overview(db), monthlyActivity(db), recentAccounts(db), readSystemHealth(db, { timeoutMs: HEALTH_TIMEOUT_MS })]);
+  const verdict = health.verdict;
   const callChange = change(totals.callsThisMonth, totals.callsSamePeriodLastMonth);
   return (
     <>
@@ -26,6 +31,16 @@ export default async function OverviewPage() {
         <StatTile label="Call minutes this month" value={minutes(totals.minutesThisMonth)} />
         <StatTile label="Active subscriptions" value={compact(totals.activeSubscriptions)} />
         <StatTile label="Phone numbers" value={compact(totals.phoneNumbers)} note={counted(totals.receptionists, "receptionist", "receptionists")} />
+        <StatTile
+          label="System health"
+          value={verdict.label}
+          note={
+            <>
+              <Badge tone={verdict.tone}>{verdict.findings.length ? `${count(verdict.findings.length)} to look at` : "every service reports"}</Badge>{" "}
+              <Link href="/system">Details</Link>
+            </>
+          }
+        />
       </div>
 
       <Panel title="Call minutes per month" aside="last 12 months">

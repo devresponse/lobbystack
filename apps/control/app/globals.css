@@ -74,7 +74,8 @@ h2 { font-size: 1.14rem; margin: 0 0 12px; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
 .panel > h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .panel > h2 small { color: var(--muted); font-weight: 400; font-size: 0.86rem; }
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 0 20px; }
+/* Two panels side by side where they fit, one under the other on a phone. */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 0 20px; }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
@@ -105,6 +106,14 @@ p.note { color: var(--muted); font-size: 0.86rem; margin: 12px 0 0; }
 .status.warning::before { background: var(--warning); }
 .status.serious::before { background: var(--serious); }
 .status.critical::before { background: var(--critical); }
+
+.verdict { border-left: 4px solid var(--axis); }
+.verdict.good { border-left-color: var(--good); }
+.verdict.warning { border-left-color: var(--warning); }
+.verdict.critical { border-left-color: var(--critical); }
+.verdict > p { margin: 0; color: var(--ink-2); }
+.findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.findings li { display: grid; grid-template-columns: 7.5rem 1fr; gap: 12px; align-items: baseline; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
 .filters input, .filters select, .filters button {

@@ -46,6 +46,13 @@ export function Status({ value }: { value: string | null | undefined }) {
   return <span className={`status ${tone}`.trim()}>{value.replaceAll("_", " ")}</span>;
 }
 
+export type Tone = "good" | "warning" | "serious" | "critical" | "neutral";
+
+/** Words beside a dot in a chosen tone, for states the Status list doesn't know. The words carry the meaning, the dot repeats it. */
+export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return <span className={`status ${tone === "neutral" ? "" : tone}`.trim()}>{children}</span>;
+}
+
 /** Previous and next links that keep the page's other filters. */
 export function Pager({ path, params, page, total, pageSize }: { path: string; params: Record<string, string>; page: number; total: number; pageSize: number }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));

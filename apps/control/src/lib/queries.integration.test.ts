@@ -76,11 +76,12 @@ describe.skipIf(!testUrl)("the panel's questions, asked as lobbystack_control", 
     await client?.end();
   });
 
-  /** Seeds, becomes the panel's role, runs the check, and leaves nothing behind. */
-  async function asControl(check: (db: Queryable, fixture: Fixture) => Promise<void>) {
+  /** Seeds, adds what `prepare` writes, becomes the panel's role, runs the check, and leaves nothing behind. */
+  async function asControl(check: (db: Queryable, fixture: Fixture) => Promise<void>, prepare?: (db: pg.Client, fixture: Fixture) => Promise<void>) {
     await client.query("begin");
     try {
       const fixture = await seed(client);
+      await prepare?.(client, fixture);
       await client.query(`set local role ${CONTROL_ROLE}`);
       await check(client, fixture);
     } finally {
@@ -164,6 +165,40 @@ describe.skipIf(!testUrl)("the panel's questions, asked as lobbystack_control", 
       expect(await queries.accountDetail(db, owner)).toMatchObject({ email: `owner-${tag}@example.com`, open_sessions: 1, sign_in_methods: "credential" });
       expect(await queries.accountDetail(db, "1 or 1=1")).toBeNull();
       expect(await queries.accountMemberships(db, owner)).toEqual([expect.objectContaining({ business_id: alder, role: "business_owner", plan })]);
+    });
+  });
+
+  it("reads PostgreSQL's own numbers and the last day's failures for the System health page", async () => {
+    await asControl(async (db) => {
+      const health = await queries.databaseHealth(db);
+      expect(health.sizeBytes).toBeGreaterThan(0);
+      expect(health.connections).toBeGreaterThanOrEqual(1);
+      expect(health.maxConnections).toBeGreaterThan(health.reservedConnections);
+      expect(health.byRole.reduce((total, row) => total + row.connections, 0)).toBe(health.connections);
+      expect(health.startedAt).toBeInstanceOf(Date);
+      expect(health.countedSince).toBeInstanceOf(Date);
+      expect(health.version).toMatch(/^\d+/);
+      expect(health.commits).toBeGreaterThan(0);
+
+      const activity = await queries.recentActivity(db);
+      expect(activity.calls).toBeGreaterThanOrEqual(5);
+      expect(activity.failedCalls).toBeGreaterThanOrEqual(1);
+      expect(activity.openCalls).toBeGreaterThanOrEqual(1);
+      expect(activity.stuckCalls).toBeGreaterThanOrEqual(1);
+      expect(activity.texts).toBeGreaterThanOrEqual(3);
+      expect(activity.failedTexts).toBeGreaterThanOrEqual(1);
+      expect(activity.stuckTexts).toBeGreaterThanOrEqual(1);
+      expect(activity.chats).toBeGreaterThanOrEqual(1);
+    }, async (db, { alder, birch }) => {
+      await db.query(`insert into calls (business_id, provider_call_id, transport, status, started_at, ended_at) values
+        ($1, $2, 'pstn', 'failed', now() - interval '1 hour', now() - interval '59 minutes'),
+        ($1, $3, 'pstn', 'started', now() - interval '3 hours', null),
+        ($4, $5, 'pstn', 'started', now() - interval '5 minutes', null)`,
+      [alder, `CA${randomUUID()}`, `CA${randomUUID()}`, birch, `CA${randomUUID()}`]);
+      const conversation = (await db.query<{ id: string }>("select id from conversations where business_id = $1 limit 1", [alder])).rows[0]?.id;
+      await db.query(`insert into messages (business_id, conversation_id, direction, channel, body, status, created_at) values
+        ($1, $2, 'outbound', 'sms', 'never shown', 'failed', now() - interval '2 hours'),
+        ($1, $2, 'outbound', 'sms', 'never shown', 'queued', now() - interval '20 minutes')`, [alder, conversation]);
     });
   });
 

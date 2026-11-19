@@ -37,6 +37,8 @@ A file here may be 800 lines and a function 150, and `scripts/module-size-budget
 
 `scripts/module-size.test.ts` fails when a file or function crosses a threshold for the first time, and when a listed one grows past its ceiling. The ceilings only come down: when something shrinks, the test says so and `pnpm module-size:update` writes the smaller number. That is all the update does. It refuses to raise a ceiling or to add an entry, and writes nothing when anything has grown, so a ceiling raised on purpose is a hand edit of the file that a reviewer sees. Ceilings are rounded up to the next 25 lines, so an ordinary one-line fix in a long file is never a failing build; a feature that adds real length to one is.
 
+Measuring parses every file the budget covers: about 2 seconds on an idle machine, and 4 on the release gate's runner, where the other test suites run beside it. So the test measures once for its two checks of the repository, and gives them a minute rather than Vitest's usual 5 seconds. Measuring twice in one test pushed it past those 5 seconds and failed a release gate on `develop/r2`.
+
 **When a change wants more room than a ceiling allows, take the seam instead of raising the number.** The audit named four that already exist:
 
 - `packages/domain/src/server/publicApi/operations.ts` and `packages/shared/src/publicApi/schemas.ts` split by v1 resource, behind an index file;

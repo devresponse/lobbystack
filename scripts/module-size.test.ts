@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { FILE_LINES, FUNCTION_LINES, budgetFrom, ceilingFor, compare, longFunctions, lowered, measure, readBudget, repositoryRoot } from "./module-size";
+import { FILE_LINES, FUNCTION_LINES, budgetFrom, ceilingFor, compare, longFunctions, lowered, measure, readBudget, repositoryRoot, type Sizes } from "./module-size";
+
+/**
+ * Measuring parses every budgeted file in the repository, which takes about 2
+ * seconds on an idle machine, 4 on the release gate's busy runner and more as
+ * the repository grows: past Vitest's 5 seconds, that is a failing gate with
+ * nothing wrong. So the repository is measured once for the two tests that
+ * read it, whichever runs first, and they get a minute.
+ */
+const REPOSITORY_TIMEOUT_MS = 60_000;
+let measured: Sizes | undefined;
+function repositorySizes(): Sizes {
+  measured ??= measure(repositoryRoot);
+  return measured;
+}
 
 describe("the size budget", () => {
   it("rounds a ceiling up to the next step, so a one-line fix is not a failing build", () => {
@@ -59,11 +73,11 @@ describe("the size budget", () => {
    * into one handler per event type.
    */
   it("holds the repository to its budget", () => {
-    expect(compare(measure(repositoryRoot), readBudget())).toEqual([]);
-  });
+    expect(compare(repositorySizes(), readBudget())).toEqual([]);
+  }, REPOSITORY_TIMEOUT_MS);
 
   it("keeps the budget file as the update script writes it", () => {
-    expect(readBudget()).toEqual(budgetFrom(measure(repositoryRoot)));
-    expect(lowered(measure(repositoryRoot), readBudget())).toEqual({ budget: readBudget(), refused: [] });
-  });
+    expect(readBudget()).toEqual(budgetFrom(repositorySizes()));
+    expect(lowered(repositorySizes(), readBudget())).toEqual({ budget: readBudget(), refused: [] });
+  }, REPOSITORY_TIMEOUT_MS);
 });

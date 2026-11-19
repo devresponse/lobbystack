@@ -120,7 +120,7 @@ Every 10 seconds each copy writes a short status, its heartbeat, to Redis in one
 
 `GET /api/internal/fleet` on the admin lists every copy from those heartbeats, with each queue's jobs (`apps/admin/src/lib/fleet-status.ts`). Any copy of the admin can answer it.
 
-It's off until the admin has a `FLEET_STATUS_TOKEN` of 32 characters or more, and takes only that token, as `Authorization: Bearer <token>` or, for an uptime check that can't send a header, as `?token=<token>`. The token opens nothing else, and the answer names no business, caller or setting. `devops/bootstrap.mjs` gives a new deployment's admin a token; anywhere else, make one as in [guide 7.10](../deployment/guide/part-7-operations.md#710-health-checks-and-uptime-monitoring).
+It's off until the admin has a `FLEET_STATUS_TOKEN` of 32 characters or more, and takes only that token, as `Authorization: Bearer <token>` or, for an uptime check that can't send a header, as `?token=<token>`. The token opens nothing else, and the answer names no business, caller or setting. `devops/bootstrap.mjs` gives a new deployment's admin a token; anywhere else, make one as in [guide 7.10](../deployment/guide/part-7-operations.md#710-health-checks-and-uptime-monitoring). Since fork PR #216, the control panel's System health page reads the address too, over Railway's private network with the same token, and shows every copy, the queues and the copies that died ([the control panel](control-panel.md#read-the-system-health-page)).
 
 ```sh
 curl -H "Authorization: Bearer <the token>" "https://<dashboard domain>/api/internal/fleet?admin=2&worker=2"

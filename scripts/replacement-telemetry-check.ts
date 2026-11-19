@@ -39,6 +39,15 @@ const storageMarker = `private-file-${randomUUID()}.pdf`;
 const storageCredential = `credential-${randomUUID()}`;
 const storageSignature = `signature-${randomUUID()}`;
 const autoHttpMarker = `auto-http-${randomUUID()}`;
+// The outage probe prints this line as it starts shutting telemetry down, and its parent times the exit from there.
+const outageShutdownLine = "telemetry-outage-shutdown-started";
+// With the receiver gone, the OTLP exporter retries a refused export, waiting a little longer each
+// time, until its own deadline, OTEL_EXPORTER_OTLP_TIMEOUT (10 seconds by default), and the process
+// can't exit while it does. So the probe's exit is timed from the start of its shutdown, which leaves
+// out how long tsx takes to start it on a busy runner, and it gets 5 seconds more than that deadline.
+// A process that the outage holds open still fails.
+const outageExitLimitMs = 15_000;
+const outageStartLimitMs = 60_000;
 
 async function readRequestBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -80,6 +89,7 @@ async function emitOutage(): Promise<void> {
   process.env.OTEL_EXPORTER_OTLP_HEADERS = `Authorization=${authorization}`;
   await initializeTelemetry({ serviceName: "lobbystack-telemetry-outage", endpoint: configuredEndpoint });
   await withSpan("telemetry.certification.exporter-outage", {}, async () => undefined);
+  console.log(outageShutdownLine);
   const outageStartedAt = Date.now();
   await shutdownTelemetry();
   if (Date.now() - outageStartedAt > 6_000) throw new Error("Telemetry exporter outage blocked shutdown.");
@@ -128,20 +138,38 @@ async function runOutageChild(root: string, endpoint: string): Promise<void> {
       },
     );
     let output = "";
-    child.stdout.on("data", (chunk) => { output += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { output += chunk.toString(); });
-    const timeout = setTimeout(() => {
+    let stdout = "";
+    const stop = (message: string) => {
       child.kill("SIGTERM");
-      reject(new Error("Telemetry exporter outage kept the certification process alive for more than 10 seconds."));
-    }, 10_000);
+      reject(new Error(message));
+    };
+    let timeout = setTimeout(
+      () => stop(`Telemetry outage probe didn't start shutting telemetry down within ${outageStartLimitMs / 1_000} seconds.`),
+      outageStartLimitMs,
+    );
+    let shutdownStarted = false;
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString();
+      stdout += chunk.toString();
+      if (shutdownStarted || !stdout.includes(outageShutdownLine)) return;
+      shutdownStarted = true;
+      clearTimeout(timeout);
+      timeout = setTimeout(
+        () => stop(`Telemetry exporter outage kept the certification process alive for more than ${outageExitLimitMs / 1_000} seconds after its shutdown began.`),
+        outageExitLimitMs,
+      );
+    });
+    child.stderr.on("data", (chunk) => { output += chunk.toString(); });
     child.once("error", (error) => {
       clearTimeout(timeout);
       reject(error);
     });
-    child.once("exit", (code) => {
+    // "close" comes after the probe's output has all been read, so its shutdown line can't arrive late.
+    child.once("close", (code) => {
       clearTimeout(timeout);
-      if (code === 0) resolve();
-      else reject(new Error(output || `Telemetry outage probe exited with ${code}.`));
+      if (code !== 0) reject(new Error(output || `Telemetry outage probe exited with ${code}.`));
+      else if (!shutdownStarted) reject(new Error("Telemetry outage probe exited without shutting telemetry down."));
+      else resolve();
     });
   });
 }

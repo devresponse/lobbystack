@@ -1979,6 +1979,8 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
       RAILWAY_DOCKERFILE_PATH: "Dockerfile.control", NODE_ENV: "production", PORT: "3000", HOSTNAME: "::", LOBBYSTACK_CONTROL_PASSWORD: password,
       DATABASE_URL: "postgresql://lobbystack_control:${{LOBBYSTACK_CONTROL_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack",
       CONTROL_ACCESS_TEAM_DOMAIN: teamDomain, CONTROL_ACCESS_AUD: app?.aud, CONTROL_ADMIN_EMAILS: "ops@example.com",
+      // The System health page asks the admin over the private network, with the admin's own fleet token.
+      CONTROL_ADMIN_URL: "http://${{admin.RAILWAY_PRIVATE_DOMAIN}}:3000", FLEET_STATUS_TOKEN: "${{admin.FLEET_STATUS_TOKEN}}",
     });
     expect(world.variables.cloudflared).toEqual({ TUNNEL_TOKEN: tunnel?.token });
     expect(world.variables.migrate.LOBBYSTACK_CONTROL_PASSWORD).toBe("${{control.LOBBYSTACK_CONTROL_PASSWORD}}");
@@ -2065,6 +2067,27 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     expect(result.out).toContain("~ control: CONTROL_ADMIN_EMAILS (Railway deploys it again)");
     expect(world.deployments.control).toHaveLength(2);
     expect(result.out).toContain("= migrate: unchanged");
+  });
+
+  it("brings the System health page's variables to a panel set up before they existed, which deploys again", async () => {
+    await controlAfterUp();
+    // A panel whose variables were set by an older script: without the admin's address and token, and with that
+    // script's digest of them.
+    const older = readState();
+    older.values.CONTROL_VARIABLES = "an older script's digest";
+    writeState(older);
+    delete world.variables.control.CONTROL_ADMIN_URL;
+    delete world.variables.control.FLEET_STATUS_TOKEN;
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("The variables are done already, so they run again below, to bring the panel's.");
+    expect(result.out).toContain("~ control: CONTROL_ADMIN_URL, FLEET_STATUS_TOKEN (Railway deploys it again)");
+    expect(world.variables.control).toMatchObject({ CONTROL_ADMIN_URL: "http://${{admin.RAILWAY_PRIVATE_DOMAIN}}:3000", FLEET_STATUS_TOKEN: "${{admin.FLEET_STATUS_TOKEN}}" });
+    expect(world.deployments.control).toHaveLength(2);
+    // The admin keeps its token, so nothing else deploys again.
+    expect(result.out).toContain("= admin: unchanged");
+    expect(result.out).toContain("= migrate: unchanged");
+    expect(readState().values.CONTROL_VARIABLES).not.toBe("an older script's digest");
   });
 
   it("waits for Zero Trust to be set up by hand, and sets the rest of the deployment up meanwhile", async () => {

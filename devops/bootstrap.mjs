@@ -2711,6 +2711,9 @@ function variableSections(run) {
       LOBBYSTACK_CONTROL_PASSWORD: x("LOBBYSTACK_CONTROL_PASSWORD"),
       DATABASE_URL: "postgresql://lobbystack_control:${{LOBBYSTACK_CONTROL_PASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/lobbystack",
       CONTROL_ACCESS_TEAM_DOMAIN: x("CONTROL_ACCESS_TEAM_DOMAIN"), CONTROL_ACCESS_AUD: x("CONTROL_ACCESS_AUD"), CONTROL_ADMIN_EMAILS: x("CONTROL_ACCESS_EMAILS"),
+      // The System health page asks the admin over the private network for its checks and its fleet status address,
+      // with the admin's own token (docs/features/control-panel.md, "Read the System health page").
+      CONTROL_ADMIN_URL: "http://${{admin.RAILWAY_PRIVATE_DOMAIN}}:3000", FLEET_STATUS_TOKEN: "${{admin.FLEET_STATUS_TOKEN}}",
     }],
     ["cloudflared", { TUNNEL_TOKEN: x("CONTROL_TUNNEL_TOKEN") }],
   ] : [];

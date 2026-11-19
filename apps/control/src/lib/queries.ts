@@ -699,3 +699,133 @@ export async function endingSoon(db: Queryable): Promise<EndingRow[]> {
     order by ends_at
   `);
 }
+
+// ---------------------------------------------------------------- system health
+
+export type DatabaseRoleConnections = { role: string; connections: number };
+
+export type DatabaseHealth = {
+  sizeBytes: number;
+  /** Every client connection to the server, from every service, the panel's own included. */
+  connections: number;
+  maxConnections: number;
+  /** Kept for superusers: the services can open maxConnections minus these. */
+  reservedConnections: number;
+  byRole: DatabaseRoleConnections[];
+  /** When PostgreSQL last started, which a restart moves. */
+  startedAt: Date | null;
+  version: string;
+  /** Since the counters were last reset, or since PostgreSQL started. */
+  commits: number;
+  rollbacks: number;
+  blocksHit: number;
+  blocksRead: number;
+  deadlocks: number;
+  tempBytes: number;
+  countedSince: Date | null;
+};
+
+/**
+ * PostgreSQL's own numbers for this database. They come from views every role
+ * may read, not from the app's tables: other roles' sessions show only whose
+ * they are, so connections are counted by role and nothing about what they run.
+ */
+export async function databaseHealth(db: Queryable): Promise<DatabaseHealth> {
+  const [row, byRole] = await Promise.all([
+    one<Record<string, unknown>>(db, `
+      select pg_database_size(current_database())::float8 as size_bytes,
+        (select count(*)::int from pg_stat_activity where usename is not null) as connections,
+        current_setting('max_connections')::int as max_connections,
+        current_setting('superuser_reserved_connections')::int as reserved_connections,
+        pg_postmaster_start_time() as started_at,
+        current_setting('server_version') as version,
+        d.xact_commit::float8 as commits, d.xact_rollback::float8 as rollbacks,
+        d.blks_hit::float8 as blocks_hit, d.blks_read::float8 as blocks_read,
+        d.deadlocks::float8 as deadlocks, d.temp_bytes::float8 as temp_bytes,
+        coalesce(d.stats_reset, pg_postmaster_start_time()) as counted_since
+      from pg_stat_database d
+      where d.datname = current_database()
+    `),
+    all<DatabaseRoleConnections>(db, `
+      select usename::text as role, count(*)::int as connections
+      from pg_stat_activity
+      where usename is not null
+      group by usename
+      order by count(*) desc, usename
+    `),
+  ]);
+  const value = (key: string) => Number(row?.[key] ?? 0);
+  const when = (key: string) => {
+    const value = row?.[key];
+    return value instanceof Date ? value : null;
+  };
+  return {
+    sizeBytes: value("size_bytes"),
+    connections: value("connections"),
+    maxConnections: value("max_connections"),
+    reservedConnections: value("reserved_connections"),
+    byRole,
+    startedAt: when("started_at"),
+    version: typeof row?.version === "string" ? row.version : "",
+    commits: value("commits"),
+    rollbacks: value("rollbacks"),
+    blocksHit: value("blocks_hit"),
+    blocksRead: value("blocks_read"),
+    deadlocks: value("deadlocks"),
+    tempBytes: value("temp_bytes"),
+    countedSince: when("counted_since"),
+  };
+}
+
+/** How long an open call or an unsent text waits before the health page calls it stuck. */
+export const STUCK_CALL_MINUTES = 120;
+export const STUCK_TEXT_MINUTES = 15;
+
+export type RecentActivity = {
+  /** Calls started in the last 24 hours, and how many of them failed. */
+  calls: number;
+  failedCalls: number;
+  /** Calls still open: started in the last two hours, and started earlier (in the last 7 days) and never closed. */
+  openCalls: number;
+  stuckCalls: number;
+  /** Texts the receptionist or a team member sent in the last 24 hours, and how many failed or weren't delivered. */
+  texts: number;
+  failedTexts: number;
+  /** Texts still waiting to go out after 15 minutes (in the last 7 days). */
+  stuckTexts: number;
+  /** Website chats started in the last 24 hours. */
+  chats: number;
+};
+
+/** What the services did lately, and what didn't go through: calls, texts and website chats. */
+export async function recentActivity(db: Queryable): Promise<RecentActivity> {
+  const row = await one<Record<string, number>>(db, `
+    select
+      (select count(*)::int from calls where started_at >= now() - interval '24 hours') as calls,
+      (select count(*)::int from calls where started_at >= now() - interval '24 hours' and status = 'failed') as failed_calls,
+      (select count(*)::int from calls
+        where status = 'started' and ended_at is null and started_at >= now() - make_interval(mins => $1)) as open_calls,
+      (select count(*)::int from calls
+        where status = 'started' and ended_at is null and started_at < now() - make_interval(mins => $1)
+          and started_at >= now() - interval '7 days') as stuck_calls,
+      (select count(*)::int from messages
+        where direction = 'outbound' and channel = 'sms' and created_at >= now() - interval '24 hours') as texts,
+      (select count(*)::int from messages
+        where direction = 'outbound' and channel = 'sms' and created_at >= now() - interval '24 hours' and status in ('failed', 'undelivered')) as failed_texts,
+      (select count(*)::int from messages
+        where direction = 'outbound' and channel = 'sms' and status in ('queued', 'sending')
+          and created_at < now() - make_interval(mins => $2) and created_at >= now() - interval '7 days') as stuck_texts,
+      (select count(*)::int from conversations where channel = 'web_chat' and created_at >= now() - interval '24 hours') as chats
+  `, [STUCK_CALL_MINUTES, STUCK_TEXT_MINUTES]);
+  const value = (key: string) => Number(row?.[key] ?? 0);
+  return {
+    calls: value("calls"),
+    failedCalls: value("failed_calls"),
+    openCalls: value("open_calls"),
+    stuckCalls: value("stuck_calls"),
+    texts: value("texts"),
+    failedTexts: value("failed_texts"),
+    stuckTexts: value("stuck_texts"),
+    chats: value("chats"),
+  };
+}

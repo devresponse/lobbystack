@@ -4,6 +4,8 @@
 
 Run `pnpm replacement:telemetry` to verify correlated traces, metrics, logs, headers, redaction, and exporter-outage behavior against a temporary local OTLP receiver.
 
+Its exporter-outage step closes the receiver, then starts a process that sends a span to it and shuts telemetry down. The step fails if the shutdown call takes more than 6 seconds, or if the process is still running 15 seconds after the shutdown began. The process stays alive while the exporter retries the export, which it does for up to its own deadline, `OTEL_EXPORTER_OTLP_TIMEOUT` (10 seconds by default). The 15 seconds count from the shutdown, not from the process's start, because starting the process through tsx takes longer on a busy machine.
+
 In staging, confirm admin, worker, voice gateway, and migrator emit the expected `service.name`, deployed `service.version`, and environment attributes. Inspect request-to-outbox-to-job-to-provider propagation and admin-to-voice propagation using the W3C trace ID.
 
 Search exported telemetry for transcript text, message bodies, prompts and model responses, phone numbers, complete email addresses, credentials, session or OAuth tokens, signed URLs, SQL bind values, and object keys. Any match fails certification.

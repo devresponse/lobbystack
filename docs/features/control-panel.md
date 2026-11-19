@@ -39,13 +39,56 @@ Six things stand between a stranger and the data, and each holds without the oth
 
 1. **Set up Cloudflare Zero Trust once for the account,** if it isn't already: in Cloudflare's dashboard open **Zero Trust**, pick a team name, which becomes `<team name>.cloudflareaccess.com`, and the **Free** plan, which covers up to 50 people. The script can't do this part, and stops to ask for it, leaving the rest of `up` to carry on.
 2. **Give `CLOUDFLARE_API_TOKEN` three more permissions** on the account: **Cloudflare Tunnel > Edit**, **Access: Apps and Policies > Edit**, and **Access: Organizations, Identity Providers, and Groups > Read** ([devops/bootstrap.md](../../devops/bootstrap.md#the-control-panel)).
-3. **Check the settings file:** `CONTROL=yes`, `CLOUDFLARE_ZONE` and `CLOUDFLARE_ACCOUNT_ID` filled in. `CONTROL_HOST` and `CONTROL_ADMIN_EMAILS` can stay empty: the address is then `control.<zone>` in production and `control-<the first part of APP_BASE_URL's address>.<zone>` otherwise, such as `control-test1.example.com` beside `test1.example.com`, and the only person let in is `OPERATOR_EMAIL`.
+3. **Fill in the five lines the panel needs in the settings file,** `.env.bootstrap-<name>`: `CONTROL=yes`, and `CLOUDFLARE_ZONE` and `CLOUDFLARE_ACCOUNT_ID` filled in. `CONTROL_HOST`, the panel's address, and `CONTROL_ADMIN_EMAILS`, who may open it, can stay empty, and the script then picks them. [Fill in the settings file](#fill-in-the-settings-file), below, says what goes in each line and what the script picks.
 4. **Run `node devops/bootstrap.mjs up .env.bootstrap-<name>`.** It adds the `control` and `cloudflared` services, the panel's database password, the tunnel and its route to the panel, the address's DNS record and the Access application with its policy, then sets the variables and deploys both services. The panel answers once its build is done, several minutes later, and `up` prints its address.
 5. **Open the address** and sign in with the one-time code Cloudflare emails you.
 
-- **The address stays one level under the zone,** because Cloudflare's free certificate covers no deeper: `control.test1.example.com` would be refused by browsers unless the zone has a certificate for it.
 - **A settings file without a `CONTROL` line counts as no,** so a deployment set up before the panel existed gets one only when its file says `CONTROL=yes` and `up` runs again. The branch it builds must have `Dockerfile.control`: `up` checks with `gh` and stops before making anything if it hasn't.
 - **Turning it off later** with `CONTROL=no` deletes nothing: `up` and `status` say the panel still runs, and what to delete in Railway and Cloudflare to remove it.
+
+### Fill in the settings file
+
+The panel's lines are in the settings file that `init` wrote for the deployment, `.env.bootstrap-<name>`, below the Cloudflare lines. One must say yes, two must be filled in, and two can stay empty:
+
+| Line | What goes there | Where to find it | If it's empty |
+| --- | --- | --- | --- |
+| `CONTROL` | `yes` | `init` writes `yes`. A file written before the panel existed has no line, which counts as `no`. | No panel |
+| `CLOUDFLARE_ZONE` | The domain name of the Cloudflare zone the deployment's addresses are in, such as `example.com` | The domain's name in Cloudflare's list of domains. Not the 32-character Zone ID shown beside it. | The script stops before it does anything, and says the panel needs it |
+| `CLOUDFLARE_ACCOUNT_ID` | The 32-character Account ID | The zone's **Overview** page in Cloudflare, right-hand column, under **API** | The script stops before it does anything, and says the panel needs it |
+| `CONTROL_HOST` | The panel's own address, such as `control.example.com` | Your choice, one level under the zone | The script picks the address, as the next table shows |
+| `CONTROL_ADMIN_EMAILS` | The emails of the people who may open the panel, separated by commas | Your choice | Only `OPERATOR_EMAIL` may open it |
+
+A deployment whose DNS records the script writes has `CLOUDFLARE_ZONE` filled in already, and one whose Turnstile widget it makes has `CLOUDFLARE_ACCOUNT_ID`: the panel uses the same two lines.
+
+**The address the script picks** when `CONTROL_HOST` is empty depends on `ENVIRONMENT` and `APP_BASE_URL`, with `CLOUDFLARE_ZONE=example.com`:
+
+| The settings file says | The panel's address |
+| --- | --- |
+| `ENVIRONMENT=production` | `control.example.com` |
+| `ENVIRONMENT=test` and `APP_BASE_URL=test1.example.com` | `control-test1.example.com` |
+| `ENVIRONMENT=test` and `APP_BASE_URL=app.test1.example.com` | `control-app-test1.example.com`: the dots before the zone become dashes |
+| `ENVIRONMENT=test`, with `APP_BASE_URL` empty or the zone itself, and `NAME=acme-test` | `control-acme-test.example.com` |
+
+So production's panel is at `control.<zone>`, and a test deployment's sits beside its dashboard, with `control-` in front of the dashboard's address, so test deployments in the same zone each get their own. The address always stays one level under the zone because Cloudflare's free certificate covers `*.example.com` but not `*.test1.example.com`: browsers would refuse `control.test1.example.com` unless the zone had a certificate for it, which takes Cloudflare's paid Advanced Certificate Manager. An address of your own in `CONTROL_HOST` must be under `CLOUDFLARE_ZONE` and differ from the dashboard's, and the script warns when it's more than one level down.
+
+**Who may open it.** With `CONTROL_ADMIN_EMAILS` empty, only `OPERATOR_EMAIL` may: the operator's email, which the settings file has already. To let more people in, list everyone, the operator too if they should keep access, such as `CONTROL_ADMIN_EMAILS=ops@example.com, finance@example.com`. Capital letters don't matter. Each person signs in with a one-time code that Cloudflare emails to their address, so each address must be an inbox that person reads; nobody needs a Cloudflare account. Cloudflare Access lets only these emails through, and the panel checks the email against the same list again, so anyone else can't get past Cloudflare's sign-in page.
+
+**An example,** for a test deployment whose dashboard is at `test1.example.com`:
+
+```sh
+ENVIRONMENT=test
+APP_BASE_URL=test1.example.com
+OPERATOR_EMAIL=ops@example.com
+CLOUDFLARE_ZONE=example.com
+CLOUDFLARE_ACCOUNT_ID=0123456789abcdef0123456789abcdef
+CONTROL=yes
+CONTROL_HOST=
+CONTROL_ADMIN_EMAILS=
+```
+
+`up` then sets the panel up at `https://control-test1.example.com`, and only `ops@example.com` can open it. `node devops/bootstrap.mjs status .env.bootstrap-<name>` shows the address before `up` makes anything.
+
+**Changing them later:** a new `CONTROL_ADMIN_EMAILS` takes effect at the next `up`, which updates both Cloudflare Access and the panel's own list. The address is fixed once `up` has made the tunnel: to move the panel, set `CONTROL_HOST`, then run `node devops/bootstrap.mjs redo .env.bootstrap-<name> control.tunnel` and `up`, and delete the old address's DNS record in Cloudflare yourself ([devops/bootstrap.md](../../devops/bootstrap.md#the-control-panel)).
 
 ## Set it up by hand
 

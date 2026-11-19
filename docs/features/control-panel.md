@@ -69,16 +69,17 @@ A deployment whose DNS records the script writes has `CLOUDFLARE_ZONE` filled in
 | `ENVIRONMENT=test` and `APP_BASE_URL=app.test1.example.com` | `control-app-test1.example.com`: the dots before the zone become dashes |
 | `ENVIRONMENT=test`, with `APP_BASE_URL` empty or the zone itself, and `NAME=acme-test` | `control-acme-test.example.com` |
 
-So production's panel is at `control.<zone>`, and a test deployment's sits beside its dashboard, with `control-` in front of the dashboard's address, so test deployments in the same zone each get their own. The address always stays one level under the zone because Cloudflare's free certificate covers `*.example.com` but not `*.test1.example.com`: browsers would refuse `control.test1.example.com` unless the zone had a certificate for it, which takes Cloudflare's paid Advanced Certificate Manager. An address of your own in `CONTROL_HOST` must be under `CLOUDFLARE_ZONE` and differ from the dashboard's, and the script warns when it's more than one level down.
+So production's panel is at `control.<zone>`, and a test deployment's sits beside its dashboard, with `control-` in front of the dashboard's address, so test deployments in the same zone each get their own. The address the script picks always stays one level under the zone because Cloudflare's free certificate covers `*.example.com` but not `*.dev2.example.com`: browsers would refuse `control.dev2.example.com` unless the zone had a certificate for it ([an address two levels down](#an-address-two-levels-down)). An address of your own in `CONTROL_HOST` must be under `CLOUDFLARE_ZONE` and differ from the dashboard's, and the script warns when it's more than one level down.
 
 **Who may open it.** With `CONTROL_ADMIN_EMAILS` empty, only `OPERATOR_EMAIL` may: the operator's email, which the settings file has already. To let more people in, list everyone, the operator too if they should keep access, such as `CONTROL_ADMIN_EMAILS=ops@example.com, finance@example.com`. Capital letters don't matter. Each person signs in with a one-time code that Cloudflare emails to their address, so each address must be an inbox that person reads; nobody needs a Cloudflare account. Cloudflare Access lets only these emails through, and the panel checks the email against the same list again, so anyone else can't get past Cloudflare's sign-in page.
 
-**An example,** for a test deployment whose dashboard is at `test1.example.com`:
+**An example,** for a test deployment whose dashboard is at `dev2.example.com`, with its settings in `.env.bootstrap-dev2`:
 
 ```sh
+NAME=dev2-example-com
 ENVIRONMENT=test
-APP_BASE_URL=test1.example.com
-OPERATOR_EMAIL=ops@example.com
+APP_BASE_URL=dev2.example.com
+OPERATOR_EMAIL=support@example.com
 CLOUDFLARE_ZONE=example.com
 CLOUDFLARE_ACCOUNT_ID=0123456789abcdef0123456789abcdef
 CONTROL=yes
@@ -86,9 +87,19 @@ CONTROL_HOST=
 CONTROL_ADMIN_EMAILS=
 ```
 
-`up` then sets the panel up at `https://control-test1.example.com`, and only `ops@example.com` can open it. `node devops/bootstrap.mjs status .env.bootstrap-<name>` shows the address before `up` makes anything.
+`up` then sets the panel up at `https://control-dev2.example.com`, and only `support@example.com` can open it. To open it yourself from another inbox, list both: `CONTROL_ADMIN_EMAILS=support@example.com, you@example.com`. `node devops/bootstrap.mjs status .env.bootstrap-dev2` shows the address before `up` makes anything.
 
 **Changing them later:** a new `CONTROL_ADMIN_EMAILS` takes effect at the next `up`, which updates both Cloudflare Access and the panel's own list. The address is fixed once `up` has made the tunnel: to move the panel, set `CONTROL_HOST`, then run `node devops/bootstrap.mjs redo .env.bootstrap-<name> control.tunnel` and `up`, and delete the old address's DNS record in Cloudflare yourself ([devops/bootstrap.md](../../devops/bootstrap.md#the-control-panel)).
+
+#### An address two levels down
+
+An address such as `control.dev2.example.com` works too, but not with Cloudflare's free certificate. It takes Advanced Certificate Manager, a paid add-on for the zone that the Free plan can buy too, at $10 a month per zone on Cloudflare's plans page on 2026-11-19:
+
+1. Buy Advanced Certificate Manager for the zone, `example.com`.
+2. In the zone's **SSL/TLS > Edge Certificates**, either turn on **Total TLS**, which gives every proxied address in the zone a certificate by itself, or order an advanced certificate for `control.dev2.example.com` and `example.com`, since every advanced certificate must include the zone itself.
+3. Put `CONTROL_HOST=control.dev2.example.com` in the settings file and run `up`. The script warns that the address is more than one level down, and goes on. The panel opens once Cloudflare shows the certificate as **Active**.
+
+Set `CONTROL_HOST` before the first `up` with `CONTROL=yes`, so the tunnel, the DNS record and the Access application are made for that address from the start; moving a panel that's already set up takes `redo`, as **Changing them later** above says.
 
 ## Set it up by hand
 

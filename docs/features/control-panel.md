@@ -85,11 +85,11 @@ OPERATOR_EMAIL=support@realinfobot.com
 CLOUDFLARE_ZONE=realinfobot.com
 CLOUDFLARE_ACCOUNT_ID=<the zone's 32-character Account ID>
 CONTROL=yes
-CONTROL_HOST=
+CONTROL_HOST=control-dev2.realinfobot.com
 CONTROL_ADMIN_EMAILS=
 ```
 
-With them, `node devops/bootstrap.mjs up .env.bootstrap-realinfobot-dev2` sets the panel up at `https://control-dev2.realinfobot.com`: with `ENVIRONMENT=test`, the script takes the dashboard's address without the zone, `dev2`, puts `control-` in front of it, and adds the zone, `realinfobot.com`. Only `support@realinfobot.com` can open it. To open it from your own inbox as well, list both: `CONTROL_ADMIN_EMAILS=support@realinfobot.com, you@example.com`. `node devops/bootstrap.mjs status .env.bootstrap-realinfobot-dev2` shows the address before `up` makes anything.
+With them, `node devops/bootstrap.mjs up .env.bootstrap-realinfobot-dev2` sets the panel up at `https://control-dev2.realinfobot.com`, the address `CONTROL_HOST` names. Left empty, `CONTROL_HOST` would give the same address: with `ENVIRONMENT=test`, the script takes the dashboard's address without the zone, `dev2`, puts `control-` in front of it, and adds the zone, `realinfobot.com`. With `CONTROL_ADMIN_EMAILS` empty, only `support@realinfobot.com`, the `OPERATOR_EMAIL`, can open the panel. To open it from your own inbox as well, list both: `CONTROL_ADMIN_EMAILS=support@realinfobot.com, you@example.com`. `node devops/bootstrap.mjs status .env.bootstrap-realinfobot-dev2` shows the address before `up` makes anything.
 
 **Changing them later:** a new `CONTROL_ADMIN_EMAILS` takes effect at the next `up`, which updates both Cloudflare Access and the panel's own list. The address is fixed once `up` has made the tunnel: to move the panel, set `CONTROL_HOST`, then run `node devops/bootstrap.mjs redo .env.bootstrap-<name> control.tunnel` and `up`, and delete the old address's DNS record in Cloudflare yourself ([devops/bootstrap.md](../../devops/bootstrap.md#the-control-panel)).
 

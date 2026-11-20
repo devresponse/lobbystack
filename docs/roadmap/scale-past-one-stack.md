@@ -33,7 +33,7 @@ A study on 2026-11-15 looked at how to see each copy of the admin and the worker
 | Step | Work | Status |
 | --- | --- | --- |
 | 1 | No code: Railway's project webhook and its monitors, an uptime check on the ready check, PostHog's error and log alerts, and PostHog's metrics turned on | Not done on any deployment ([open items](../project/open-items.md#do-these-on-the-demo-after-deploys)) |
-| 2 | A name for each copy on every metric, log record and error, a heartbeat from each copy, one status address for all of them, gauges for calls, queues, database connections and how busy a copy's thread is, and the scale script's view of each copy | Built in fork PR #185 on `develop/r2` ([watch every copy](../features/observability.md#watch-every-copy)); since fork PR #186 a copy that died stays listed for 24 hours with its last report; tried on a computer, not yet on Railway |
+| 2 | A name for each copy on every metric, log record and error, a heartbeat from each copy, one status address for all of them, gauges for calls, queues, database connections and how busy a copy's thread is, and the scale script's view of each copy | Built in fork PR #185 on `develop/r2` ([watch every copy](../features/observability.md#watch-every-copy)); since fork PR #186 a copy that died stays listed for 24 hours with its last report; tried on a computer, and on Railway on 2026-11-20, on a test environment with two copies of each |
 | 3 | A PostHog dashboard and alerts on those metrics | Not started |
 | Later | A limit of calls for each worker, with a new call sent to the least busy copy; a watchdog that restarts a copy whose thread is stuck; a load test with two copies of each | Not started |
 

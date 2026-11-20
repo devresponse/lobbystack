@@ -569,7 +569,7 @@ describe("devops/scale.mjs", { timeout: 30_000 }, () => {
     expect(result.code, result.out).toBe(0);
     expect(result.out).toContain("Connections: 2 admins at 24 connections and 2 workers at 12 hold up to 144 while a release replaces them, so the database's max_connections must be 147 or more.");
     expect(result.out).toContain("What does `show max_connections;` say in the database, signed in as postgres (guide Part 7)?");
-    expect(result.out).toContain("Change admin from 1 to 2 copies and worker from 1 to 2 copies in acme-test (production)? Railway starts each new copy from the release that's running, without a deploy.");
+    expect(result.out).toContain("Change admin from 1 to 2 copies and worker from 1 to 2 copies in acme-test (production)? Railway starts the copies from the release that's running and replaces the running ones, as a deploy does: they get the service's draining time to finish.");
     expect(world.patches).toHaveLength(1);
   });
 

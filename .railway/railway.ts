@@ -215,6 +215,8 @@ export default defineRailway((ctx) => {
     },
   });
   const Postgres = service("Postgres", {
+    // Both environments' databases were made by PostgreSQL 16, which 18 can't start on, so the image stays
+    // pg16 until each database is copied to 18 (docs/deployment/guide/part-7-operations.md, 7.22).
     source: image("pgvector/pgvector:pg16"),
     replicas: { "us-east4-eqdc4a": 1 },
     networking: { privateNetworkEndpoint: "postgres" },

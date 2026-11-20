@@ -69,7 +69,7 @@ Most settings can change later. These can't, or only with a lot of work, so deci
 
 **6. The two secrets that can't change.** `ENCRYPTION_KEY` and `OTP_HASH_SECRET` ([1.2](#12-your-worksheet-and-keeping-secrets-safe)). A backup of the database is useful only with the secrets that were in use when it was made, and with the files from the same moment: the database names each file, and the secrets unlock what it stores ([7.8](part-7-operations.md#78-restore-from-a-backup-and-practice-it)).
 
-**7. Which PostgreSQL.** Keep the `pgvector/pgvector:pg16` image that this guide uses. To use Railway's own PostgreSQL instead, decide before production holds any data ([5.1](part-5-production.md#51-what-changes-from-the-test-environment)).
+**7. Which PostgreSQL.** Keep the `pgvector/pgvector:pg18-trixie` image that this guide uses, PostgreSQL 18 with pgvector. An instance set up before fork PR #223 runs `pgvector/pgvector:pg16` and keeps it until its database is copied to 18 ([7.22](part-7-operations.md#722-upgrade-pinned-versions)). To use Railway's own PostgreSQL instead, decide before production holds any data ([5.1](part-5-production.md#51-what-changes-from-the-test-environment)).
 
 These can change later, with the steps in the sections named:
 
@@ -96,8 +96,8 @@ Railway deploys each push only when a GitHub account linked to the Railway proje
 
 4. Open the fork's **Actions** tab. GitHub runs no checks in a new fork until its owner allows them, so click **I understand my workflows, go ahead and enable them** *(not tried)*. In `devresponse/lobbystack` itself, they're already on.
    - The checks then run on every push to `main`, and take about 10 minutes. Until they pass, a commit shows no green check mark, and [5.2](part-5-production.md#52-production-on-railway) and [7.1](part-7-operations.md#71-release-a-new-version) release only a commit that shows one.
-   - They need no secrets of yours: the jobs that use secrets run only in the original repository, or when someone starts them by hand (`.github/workflows/ci.yml:215`, `.github/workflows/replacement-platform.yml:145`).
-   - The original's automatic production release job (`migrate-production`) runs only in `lobbystack/lobbystack`, so in the fork nothing releases production for you (`.github/workflows/ci.yml:212-215`).
+   - They need no secrets of yours: the jobs that use secrets run only in the original repository, or when someone starts them by hand (`.github/workflows/ci.yml:226`, `.github/workflows/replacement-platform.yml:145`).
+   - The original's automatic production release job (`migrate-production`) runs only in `lobbystack/lobbystack`, so in the fork nothing releases production for you (`.github/workflows/ci.yml:223-226`).
 
 **Choose the version**
 

@@ -36,7 +36,7 @@ jobs:
         if: matrix.service == 'migrator'
         run: |
           docker network create migrator-test
-          docker run --detach --name migrator-postgres --network migrator-test --env POSTGRES_PASSWORD=test --env POSTGRES_DB=lobbystack_test --health-cmd='pg_isready -U postgres -d lobbystack_test' --health-interval=2s --health-retries=30 pgvector/pgvector:pg16
+          docker run --detach --name migrator-postgres --network migrator-test --env POSTGRES_PASSWORD=test --env POSTGRES_DB=lobbystack_test --health-cmd='pg_isready -U postgres -d lobbystack_test' --health-interval=2s --health-retries=30 pgvector/pgvector:pg18-trixie
           for attempt in {1..60}; do
             if [[ "$(docker inspect --format '{{.State.Health.Status}}' migrator-postgres)" == healthy ]]; then break; fi
             sleep 2

@@ -308,7 +308,7 @@ On Railway, never use **Wipe Volume** on production's `Postgres` or `Redis`: it 
 On Railway:
 
 1. Open production's `Postgres` > **Backups**: the newest backup should be from the last day.
-2. Open the backup service's **Cron Runs** tab and the newest run's log. It should start with `pg_dump (PostgreSQL) 16.` and end with `Database backup complete, exiting...`, with no `Potential warnings detected`.
+2. Open the backup service's **Cron Runs** tab and the newest run's log. It should start with `pg_dump (PostgreSQL) 18.` (`16.` on an instance still on PostgreSQL 16) and end with `Database backup complete, exiting...`, with no `Potential warnings detected`.
 3. In Cloudflare, open the backup bucket. Last night's file should be there, about the size of the one before. A much smaller file is a copy that stopped partway.
 
 On a server:
@@ -372,7 +372,7 @@ Restoring the bucket isn't possible this way: Railway keeps no backups of it ([7
 
 Not tried. It needs a terminal and Railway's command-line tool, so it's a job for someone technical. Practice it on the test environment first (below).
 
-1. Rebuild what's missing, with [Part 4](part-4-test-environment.md) and [5.2](part-5-production.md#52-production-on-railway). Use production's existing passwords and secrets from the password manager, not new ones.
+1. Rebuild what's missing, with [Part 4](part-4-test-environment.md) and [5.2](part-5-production.md#52-production-on-railway). Use production's existing passwords and secrets from the password manager, not new ones. Part 4 makes `Postgres` on PostgreSQL 18, which reads a copy that 16 made too: give the new nightly copy `PG_VERSION=18` ([5.2](part-5-production.md#52-production-on-railway), step 20).
 2. Let migrate deploy once on the new, empty database: it creates the seven database roles that the copy needs. Then stop the admin and the worker: on each, open the newest deployment's three-dot menu and choose **Remove**.
 3. In Cloudflare, open the backup bucket, then the newest copy's three-dot menu, and click **Download**.
 4. Copy the file into the Postgres service, then replace the empty database with the copy. Railway's SSH access needs its command-line tool and an SSH key registered with Railway. With `Postgres` open in production, the command palette (Ctrl+K) offers **Copy Service Instance ID**:
@@ -403,7 +403,7 @@ Not tried. It needs a terminal and Railway's command-line tool, so it's a job fo
 **On a new server, when the old one is gone**
 
 1. Do [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), steps 1 to 12, pointing the domain at the new server's address in step 5.
-2. Instead of step 13, put back the `.env` saved in your password manager ([5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), step 25): `nano .env`, paste it, and save. Recreate your two files from [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), steps 16 and 17.
+2. Instead of step 13, put back the `.env` saved in your password manager ([5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), step 25): `nano .env`, paste it, and save. Keep its `POSTGRES_IMAGE` line as it was, or its lack of one, so the new server runs the PostgreSQL that made the backup: an older one can't read it. Recreate your two files from [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), steps 16 and 17.
 3. Do [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), steps 18 to 21. Starting the stack once makes the database roles that the backup needs.
 4. Copy the newest backup up from your computer: `scp -r <the backup folder> root@<the server's IP address>:/root/lobbystack/.replacement-backups/`.
 5. Restore it as above, then set up the nightly backups again ([5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), step 27).
@@ -421,7 +421,7 @@ LobbyStack deletes some content by itself after a set time, and keeps the rest u
 
 **What LobbyStack keeps, and for how long**
 
-Retention is on by default (`CONTENT_RETENTION_ENABLED`, `.env.example:143-148`). On an instance that doesn't sell plans, and on the paid plans of one that does (`packages/shared/src/billing.ts:446-458`, `packages/domain/src/server/privacy.ts:9-98`):
+Retention is on by default (`CONTENT_RETENTION_ENABLED`, `.env.example:147-152`). On an instance that doesn't sell plans, and on the paid plans of one that does (`packages/shared/src/billing.ts:446-458`, `packages/domain/src/server/privacy.ts:9-98`):
 
 | What | Kept |
 | --- | --- |
@@ -1323,7 +1323,7 @@ LobbyStack runs on versions fixed in the repository and in your services' settin
 | Node.js, which runs the admin, the worker and migrate | 26.12.1, by its image's digest | The three Dockerfiles, in six `FROM` lines | April 2029. Long-term support starts in October 2026 |
 | pnpm, which installs the code's libraries | 12.15.0 | `package.json` and nine other places in the repository | |
 | The code's libraries | Exact versions | `pnpm-lock.yaml` | |
-| PostgreSQL, with pgvector | 16, with pgvector 0.8.7 | `pgvector/pgvector:pg16`: on Railway in `Postgres`'s settings ([4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket)), on a server in `docker-compose.yml` | November 9, 2028 |
+| PostgreSQL, with pgvector | 18, with pgvector 0.8.7. 16 on an instance set up before fork PR #223 | `pgvector/pgvector:pg18-trixie`, or `pgvector/pgvector:pg16`: on Railway in `Postgres`'s settings ([4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket)), on a server as `POSTGRES_IMAGE` in `.env`, which `docker-compose.yml` reads, taking `pg16` without it | 18: November 14, 2030. 16: November 9, 2028 |
 | Redis | [7.4](#74-deploy-without-cutting-off-calls) | `redis:7-alpine` on Railway ([4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket)), `redis:7.4-alpine` in `docker-compose.yml` | December 1, 2029 |
 | Caddy, on a server | [2.10](part-2-local-development.md#210-if-something-fails-locally) | `docker-compose.yml` | *Not researched* |
 | Polar's API, only if the instance sells plans | `2026-10` | `POLAR_API_VERSION` in `packages/shared/src/billing.ts`, and the webhook's version, which `pnpm billing apply` sets | Until Polar retires it, which its changelog announces |
@@ -1360,7 +1360,7 @@ On 4 GB, build one image at a time, as in [5.3](part-5-production.md#53-alternat
 
 **PostgreSQL and Redis within a version**
 
-The tags `pg16`, `7-alpine` and `7.4-alpine` get each new minor version, such as 16.15 to 16.16, with its fixes. A running service keeps the copy it started with.
+The tags `pg18-trixie`, `pg16`, `7-alpine` and `7.4-alpine` get each new minor version, such as 18.7 to 18.8, with its fixes. A running service keeps the copy it started with.
 
 - **On Railway:** when a newer image is out, an update button appears in the service's settings *(its label not confirmed)*. Make a backup by hand first ([7.7](#77-back-up-the-database-and-files)), then apply it at a quiet hour: the database or Redis goes away for up to about 2 minutes. Keep Railway's automatic image updates off ([4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket)), so this never happens by itself at a busy hour.
 - **On a server:** at a quiet hour, after the night's backup:
@@ -1373,14 +1373,58 @@ The tags `pg16`, `7-alpine` and `7.4-alpine` get each new minor version, such as
 
   The first line fetches the newest PostgreSQL, Redis and Caddy for their tags. The second restarts the ones that changed, for a few seconds each.
 - **Then pgvector:** a newer pgvector in the image doesn't update the database by itself. As `postgres` (the start of Part 7), run `ALTER EXTENSION vector UPDATE;`, then `SELECT extversion FROM pg_extension WHERE extname = 'vector';` shows the version.
-- **Before you take a new PostgreSQL image,** check on Docker Hub (`hub.docker.com/r/pgvector/pgvector`) that `pg16` is still built on Debian bookworm. A newer Debian, such as trixie, sorts text differently, and the database's indexes would then need rebuilding: a job for someone technical.
+- **Before you take a new PostgreSQL image,** know which Debian it's built on. A newer Debian sorts text differently, and the database's indexes would then need rebuilding: a job for someone technical. `pg18-trixie` names its Debian, trixie, so its updates stay on it. `pg16` is built on bookworm: check on Docker Hub (`hub.docker.com/r/pgvector/pgvector`) that it still is. A move from 16 to 18 copies the data, which builds every index again, so trixie's sorting is no problem there.
 
 **A new major version**
 
-PostgreSQL 16 is supported until November 2028 and Redis 7.4 until December 2029, so plan a move a few months before.
+PostgreSQL 18 is supported until November 2030 and Redis 7.4 until December 2029, so plan a move a few months before. An instance set up before fork PR #223 runs PostgreSQL 16, supported until November 9, 2028: move it to 18 before then, as below.
 
-- Changing the tag on a database in use doesn't work: PostgreSQL 17 won't start on a database that 16 wrote. The move is a copy, a new empty database of the new version, and a restore, as in [7.8](#78-restore-from-a-backup-and-practice-it). It's a job for someone technical, tried on the test environment first, and it starts in the repository, in `docker-compose.yml` and this guide's [4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket).
+- Changing the tag on a database in use doesn't work: PostgreSQL 18 won't start on a database that 16 wrote, and says `database files are incompatible with server`. It changes nothing in 16's files, so putting the old tag back brings the database back as it was ([8.2](part-8-troubleshooting.md#82-builds-and-start-up)).
+- The move is a copy: a new, empty database on the new version, the data copied into it, and the services pointed at it. A copy made by 16 restores into 18; one made by 18 can't go back into 16. It's a job for someone technical, tried on the test environment first, with a backup made by hand and locked first ([7.7](#77-back-up-the-database-and-files)). A test environment whose data can go can start over on 18 instead ([4.10](part-4-test-environment.md#410-keep-the-test-environment-up-to-date)).
 - Railway's own Redis is version 8, which the original LobbyStack chose not to adopt (`.railway/README.md:35`). Keep `redis:7-alpine`.
+
+**Move a server from PostgreSQL 16 to 18**
+
+At a quiet hour: the dashboard stops and calls end for a few minutes. The old database stays in a volume of its own until the new one has run for a week. Tried on 2026-11-20 in Docker on a computer, with the database alone and the scripts' own dump and restore commands: a seeded database moved from 16 to 18 with the same rows in every table, and back. The two scripts themselves didn't run.
+
+1. Stop the admin and the worker, then back up, and note the folder the backup names at its end:
+
+   ```sh
+   cd /root/lobbystack
+   docker compose stop admin worker
+   REPLACEMENT_COMPOSE_PROJECT=lobbystack bash scripts/replacement-backup.sh
+   ```
+
+2. Stop the rest, copy the database's volume to a new one, which takes as much disk again as the database, and remove the old one:
+
+   ```sh
+   docker compose stop
+   docker volume create lobbystack_postgres16_data
+   docker run --rm -v lobbystack_postgres_data:/from:ro -v lobbystack_postgres16_data:/to --entrypoint cp pgvector/pgvector:pg16 -a /from/. /to/
+   docker compose rm -f postgres
+   docker volume rm lobbystack_postgres_data
+   ```
+
+3. Add `POSTGRES_IMAGE=pgvector/pgvector:pg18-trixie` to `.env` (`nano .env`).
+4. Start the new database and set it up, as a new server does: `docker compose up -d postgres redis`, then `docker compose run --rm migrator`. On a server that keeps its files in MinIO, add `minio` to the first command.
+5. Restore the backup into it ([7.8](#78-restore-from-a-backup-and-practice-it)), run migrate once more, and start everything:
+
+   ```sh
+   REPLACEMENT_COMPOSE_PROJECT=lobbystack CONFIRM_REPLACEMENT_RESTORE=1 bash scripts/replacement-restore.sh .replacement-backups/<the folder>
+   docker compose run --rm migrator
+   docker compose up -d
+   ```
+
+6. `docker compose exec postgres psql -U postgres -tAc 'show server_version'` should start with `18.`. Then do the checks in [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), steps 20 to 22.
+7. To go back, before anything you can't lose is written: `docker compose stop`, `docker compose rm -f postgres` and `docker volume rm lobbystack_postgres_data`. Take the `POSTGRES_IMAGE` line out of `.env`, and run `docker compose create postgres`, which makes an empty volume without starting the database. Then run the `docker run` line from step 2 with the two volume names swapped, and `docker compose up -d`.
+8. A week later, delete the copy: `docker volume rm lobbystack_postgres16_data`.
+
+**Move Railway from PostgreSQL 16 to 18**
+
+Not tried on Railway. Make the new database a service of its own beside `Postgres`, from `pgvector/pgvector:pg18-trixie` with the same variables as [4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket), step 5, so the old one stays as it is until the move is done and going back means pointing the services at it again. With the admin and the worker stopped, copy the roles with `pg_dumpall --roles-only`, leaving out its lines for `postgres`, and the data with `pg_dump --format custom` and `pg_restore --no-owner --single-transaction`, over the private network. Then point every `${{Postgres.…}}` in migrate's, the admin's, the worker's and the control panel's variables at the new service, and the nightly copy's `BACKUP_DATABASE_URL` too, with `PG_VERSION=18`, and turn on the new service's backups ([5.2](part-5-production.md#52-production-on-railway), step 16).
+
+- The bootstrap script knows the database only by the name `Postgres`. On a deployment whose database has moved to another service, don't run its `variables` step, as `redo … variables` does and `up` sometimes does by itself, or `devops/railway-vars.mjs` with the `.vars` file: they would point the services back at the old database.
+- Keep the old `Postgres` for a week. Deleting it deletes its Railway backups too, so download a copy first ([7.7](#77-back-up-the-database-and-files)).
 
 ### 7.23 Change the domain or the brand
 
@@ -1580,7 +1624,7 @@ The server's updates, at a quiet hour:
 
 - Check that the domain renews by itself, at Cloudflare or wherever it was bought.
 - Look at the retention periods ([7.9](#79-data-retention-and-deletion-requests)) and at each provider's plan.
-- Look at the versions' end dates ([7.22](#722-upgrade-pinned-versions)): PostgreSQL 16 on November 9, 2028, Node.js 26 in April 2029, Redis 7.4 on December 1, 2029.
+- Look at the versions' end dates ([7.22](#722-upgrade-pinned-versions)): PostgreSQL 18 on November 14, 2030, or 16 on November 9, 2028 on an instance set up before fork PR #223, Node.js 26 in April 2029, Redis 7.4 on December 1, 2029.
 
 **Dates to note once**
 
@@ -1644,7 +1688,7 @@ What stays afterwards: the events of past bookings in the businesses' Google Cal
 - Whether a restart of the server gives calls in progress their goodbye, and whether Ubuntu's automatic restarts of services include Docker.
 - How each provider closes an account, and whether a deleted Railway project is billed during its 48 hours.
 
-**[7.22](#722-upgrade-pinned-versions) to [7.26](#726-shut-down-an-instance) were checked against:** `Dockerfile.admin`, `Dockerfile.worker`, `Dockerfile.migrator`, `docker-compose.yml`, `.railway/template.ts`, `.railway/README.md`, `.github/dependabot.yml`, `package.json`, `pnpm-workspace.yaml`, `packages/db/migrations/0000_roles.sql`, `packages/shared/src/brands/resolve.ts`, `packages/domain/src/server/branding.ts`, `apps/admin/instrumentation.ts`, `apps/admin/src/lib/widget-policy.ts`, `apps/admin/src/lib/web-voice-policy.ts`, `apps/admin/app/api/webhooks/twilio/sms/route.ts`, `apps/admin/src/lib/mcp/oauth-config.ts`, `packages/db/src/client.ts`, `packages/domain/src/server/productEvents.ts`, `apps/worker/src/handlers.ts`, `apps/worker/src/scheduler.ts`, `apps/worker/src/calendarJobs.ts`, `packages/providers/src/twilio/twilioProvider.ts`, `packages/embed/src/index.ts`, `scripts/production-smoke.ts`, and Railway's, Docker's, Ubuntu's, PostgreSQL's, Redis's, Node.js's, Hetzner's and DigitalOcean's pages as read on 2026-10-19. [7.22](#722-upgrade-pinned-versions)'s Polar API version and [7.25](#725-routine-maintenance-calendar)'s monthly look at Polar's changelog were added at `35af54b`, checked against `packages/shared/src/billing.ts`, `packages/providers/src/polar/polarBilling.ts` and `polarCatalog.ts`, `packages/domain/src/server/billingPolar.ts` and `docs/providers/polar.md` (fork PR #73). [7.25](#725-routine-maintenance-calendar)'s two Polar token end dates were added at `7d20322` (fork PR #74), and [7.22](#722-upgrade-pinned-versions)'s line numbers in `docs/providers/polar.md` are from `24e211d`. [7.24](#724-scale-up)'s lines on how busy the copies are were checked against `devops/scale.mjs` and `scripts/scale.test.ts` (fork PR #185), whose stand-in for Railway answers the metrics and domains queries as Railway's API schema describes them; neither has run against Railway.
+**[7.22](#722-upgrade-pinned-versions) to [7.26](#726-shut-down-an-instance) were checked against:** `Dockerfile.admin`, `Dockerfile.worker`, `Dockerfile.migrator`, `docker-compose.yml`, `.railway/template.ts`, `.railway/README.md`, `.github/dependabot.yml`, `package.json`, `pnpm-workspace.yaml`, `packages/db/migrations/0000_roles.sql`, `packages/shared/src/brands/resolve.ts`, `packages/domain/src/server/branding.ts`, `apps/admin/instrumentation.ts`, `apps/admin/src/lib/widget-policy.ts`, `apps/admin/src/lib/web-voice-policy.ts`, `apps/admin/app/api/webhooks/twilio/sms/route.ts`, `apps/admin/src/lib/mcp/oauth-config.ts`, `packages/db/src/client.ts`, `packages/domain/src/server/productEvents.ts`, `apps/worker/src/handlers.ts`, `apps/worker/src/scheduler.ts`, `apps/worker/src/calendarJobs.ts`, `packages/providers/src/twilio/twilioProvider.ts`, `packages/embed/src/index.ts`, `scripts/production-smoke.ts`, and Railway's, Docker's, Ubuntu's, PostgreSQL's, Redis's, Node.js's, Hetzner's and DigitalOcean's pages as read on 2026-10-19. [7.22](#722-upgrade-pinned-versions)'s Polar API version and [7.25](#725-routine-maintenance-calendar)'s monthly look at Polar's changelog were added at `35af54b`, checked against `packages/shared/src/billing.ts`, `packages/providers/src/polar/polarBilling.ts` and `polarCatalog.ts`, `packages/domain/src/server/billingPolar.ts` and `docs/providers/polar.md` (fork PR #73). [7.25](#725-routine-maintenance-calendar)'s two Polar token end dates were added at `7d20322` (fork PR #74), and [7.22](#722-upgrade-pinned-versions)'s line numbers in `docs/providers/polar.md` are from `24e211d`. [7.24](#724-scale-up)'s lines on how busy the copies are were checked against `devops/scale.mjs` and `scripts/scale.test.ts` (fork PR #185), whose stand-in for Railway answers the metrics and domains queries as Railway's API schema describes them; neither has run against Railway. [7.22](#722-upgrade-pinned-versions)'s PostgreSQL 18 lines were checked against `docker-compose.yml`, `.env.example`, `devops/bootstrap.mjs`, `scripts/replacement-backup.sh`, `scripts/replacement-restore.sh`, the `docker-entrypoint.sh` of the PostgreSQL 18 image, and runs of `pgvector/pgvector:pg18-trixie` and `pgvector/pgvector:pg16` in Docker on a computer on 2026-11-20, PostgreSQL 18.7 and 16.16 (fork PR #223).
 
 ### 7.27 Reactivate a canceled business
 
@@ -1746,6 +1790,6 @@ The cancellation's link stays used. The owner can cancel again from **Settings**
 
 Each says `Nothing was deleted.` The script exits with 0 when it finished or a dry run ended, 1 when it stopped, and 2 for a mistake in its options.
 
-**Not yet confirmed:** a run against Railway's Postgres and Redis. The script has run only against a local PostgreSQL 16 and Redis 7, and in CI. Whether Railway's public address needs `?sslmode=no-verify`.
+**Not yet confirmed:** a run against Railway's Postgres and Redis. The script has run only against a local PostgreSQL 16 and 18 and Redis 7, and in CI. Whether Railway's public address needs `?sslmode=no-verify`.
 
 **[7.28](#728-reset-a-test-environment) was checked against:** `devops/reset-database.mjs`, `scripts/reset-database.integration.test.ts`, `packages/db/src/cli.ts`, `packages/db/src/migrations/raw-migrations.ts`, `packages/db/migrations/0098_deployment_branding.sql`, `packages/db/migrations/0108_billing_catalog.sql`, `apps/admin/src/lib/auth.ts`, `apps/admin/src/lib/redis.ts` and `packages/jobs/src/index.ts` (fork PR #110). Stripe's parts were added on 2026-11-08 for step 17 of [Stripe billing](../../billing/stripe-history.md), on `releases/r2`, checked against `devops/reset-database.mjs` and its test.

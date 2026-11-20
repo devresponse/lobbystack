@@ -38,6 +38,18 @@ describe("generateEnv", () => {
     }
   });
 
+  it("gives a new install PostgreSQL 18, which docker-compose.yml runs only when .env names it", () => {
+    const { output } = generateEnv(readFileSync(new URL("../.env.example", import.meta.url), "utf8"), () => "generated");
+    const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8");
+
+    expect(output).toMatch(/^POSTGRES_IMAGE=pgvector\/pgvector:pg18-trixie$/m);
+    // An .env made before has no POSTGRES_IMAGE, and its database keeps the PostgreSQL 16 that wrote it.
+    expect(compose).toContain("image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}");
+    // Either version finds its data in the volume's top folder: 18 would otherwise look in /var/lib/postgresql/18/docker.
+    expect(compose).toMatch(/^ {6}PGDATA: \/var\/lib\/postgresql\/data$/m);
+    expect(compose).toContain("postgres_data:/var/lib/postgresql/data");
+  });
+
   it("generates production-length secrets by default", () => {
     const { output } = generateEnv("BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters");
 

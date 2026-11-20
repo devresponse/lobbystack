@@ -219,10 +219,20 @@ type World = {
   /** The control panel's services that the project has, the image of one made from an image, and each service's settings. */
   made: Set<Service>;
   images: Partial<Record<Service, string>>;
+  /** The deployment's own services (Postgres to worker) that the project doesn't have yet, which up then makes. */
+  absent: Set<Service>;
+  /** The private template RAILWAY_TEMPLATE names, if any, and the layout each deploy of it sent. */
+  template: { id: string; code: string; name: string; serializedConfig: TemplateConfig } | null;
+  templateDeploys: TemplateConfig[];
   settings: Record<Service, Record<string, unknown>>;
   /** The control service's own addresses on Railway, which it shouldn't have. */
   controlDomains: Array<{ id: string; domain: string; targetPort: number }>;
   cloudflare: CloudflareWorld;
+};
+
+/** A private template's layout, as Railway's serializedConfig holds it: only what bootstrap.mjs reads. */
+type TemplateConfig = {
+  services: Record<string, { name: string; source?: { image?: string; repo?: string }; variables?: Record<string, { value?: string; defaultValue?: string; isOptional?: boolean }> }>;
 };
 
 const allServiceIds: Record<Service, string> = { ...serviceIds, ...controlServiceIds };
@@ -246,6 +256,9 @@ function freshWorld(): World {
     posthog: { limit: 6, membershipLevel: 15, projects: [], calls: [] },
     made: new Set(),
     images: {},
+    absent: new Set(),
+    template: null,
+    templateDeploys: [],
     settings: each(() => ({})),
     controlDomains: [],
     cloudflare: { records: [], tunnels: [], organization: { name: "Acme", auth_domain: teamDomain }, policies: [], apps: [],
@@ -262,7 +275,10 @@ function deploy(service: Service) {
 
 type GraphQL = {
   query?: string;
-  variables?: { id?: string; serviceId?: string; input?: { serviceId?: string; variables?: Vars; skipDeploys?: boolean; name?: string; source?: { image?: string } } & Record<string, unknown> };
+  variables?: {
+    id?: string; serviceId?: string; code?: string;
+    input?: { serviceId?: string; variables?: Vars; skipDeploys?: boolean; name?: string; source?: { image?: string }; serializedConfig?: TemplateConfig } & Record<string, unknown>;
+  };
 };
 
 function railwayAnswer(body: GraphQL | null): unknown {
@@ -270,7 +286,7 @@ function railwayAnswer(body: GraphQL | null): unknown {
   const variables = body?.variables ?? {};
   if (operation === "project") {
     return { data: { project: { id: "proj-1", name: "acme-test", deletedAt: null,
-      services: { edges: services.filter((name) => !isControlService(name) || world.made.has(name)).map((name) => ({ node: { id: allServiceIds[name], name } })) },
+      services: { edges: services.filter((name) => (isControlService(name) ? world.made.has(name) : !world.absent.has(name))).map((name) => ({ node: { id: allServiceIds[name], name } })) },
       environments: { edges: [{ node: { id: "env-1", name: "test" } }] },
       volumes: { edges: [] },
       buckets: { edges: [{ node: { id: "bucket-1", name: "Bucket" } }] } } } };
@@ -282,14 +298,31 @@ function railwayAnswer(body: GraphQL | null): unknown {
   if (operation === "workspace") return { data: { workspace: { name: "Acme's workspace" } } };
   if (operation === "serviceCreate") {
     const name = variables.input?.name as Service | undefined;
-    if (!name || !isControlService(name) || world.made.has(name)) return { errors: [{ message: `the stand-in doesn't make a service named ${name ?? "?"}` }] };
-    world.made.add(name);
+    const missing = name !== undefined && (isControlService(name) ? !world.made.has(name) : world.absent.has(name));
+    if (!name || !missing) return { errors: [{ message: `the stand-in doesn't make a service named ${name ?? "?"}` }] };
+    if (isControlService(name)) world.made.add(name);
+    else world.absent.delete(name);
     if (variables.input?.source?.image) world.images[name] = variables.input.source.image;
     return { data: { serviceCreate: { id: allServiceIds[name], name } } };
   }
+  // A private template: deploying it makes the services it lists, each image service from its image.
+  if (operation === "template") return { data: { template: world.template?.code === variables.code ? world.template : null } };
+  if (operation === "templateDeployV2") {
+    const config = variables.input?.serializedConfig;
+    if (!config) return { errors: [{ message: "a template deploy needs its layout" }] };
+    world.templateDeploys.push(structuredClone(config));
+    for (const service of Object.values(config.services)) {
+      const name = service.name as Service;
+      if (!world.absent.delete(name)) continue;
+      if (service.source?.image) world.images[name] = service.source.image;
+    }
+    return { data: { templateDeployV2: { projectId: "proj-1", workflowId: "workflow-1" } } };
+  }
+  if (operation === "workflowStatus") return { data: { workflowStatus: { status: "Complete", error: null } } };
   const service = serviceOf(variables.serviceId ?? variables.input?.serviceId ?? variables.id);
   if (!service) return { errors: [{ message: `the stand-in has no ${operation ?? "such call"} for that service` }] };
   if (operation === "variables") return { data: { variables: { ...world.variables[service] } } };
+  if (operation === "serviceInstance") return { data: { serviceInstance: { id: `${service}-instance` } } };
   if (operation === "serviceConnect") {
     deploy(service);
     return { data: { serviceConnect: { id: allServiceIds[service] } } };
@@ -1380,6 +1413,60 @@ describe.skipIf(process.platform === "win32")("devops/bootstrap.mjs", { timeout:
     // With the smaller pools one admin and one worker fit Postgres's 97 even while a release replaces them both and the
     // old admin takes its minute, so the deployment needn't wait for the higher limit.
     expect(2 * (connectionBudget("admin", world.variables.admin) + connectionBudget("worker", world.variables.worker))).toBeLessThanOrEqual(100 - 3);
+  });
+
+  // PostgreSQL 18 for a new database (guide 7.22): a database that 16 wrote won't start on 18, so only a new Postgres gets it.
+  const postgres18 = "pgvector/pgvector:pg18-trixie";
+
+  it("makes a new deployment's Postgres from PostgreSQL 18's image, and leaves an existing deployment's image alone", async () => {
+    writeSettings();
+    // A project with every service but Postgres, as a run that stopped before making it leaves it.
+    world.absent = new Set(["Postgres"]);
+    const state = stateAfterUp();
+    delete state.done["railway.services"];
+    writeState(state);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(world.images).toEqual({ Postgres: postgres18 });
+    expect(world.absent.size).toBe(0);
+    // A deployment made before, on 16: running the services step again makes nothing and changes no service's source.
+    world = freshWorld();
+    railwayAfterUp();
+    writeState(stateAfterUp());
+    const redo = await bootstrap(["redo", settings(), "railway.services"]);
+    expect(redo.code, redo.out).toBe(0);
+    const again = await bootstrap(["up", settings(), "--yes"]);
+    expect(again.code, again.out).toBe(0);
+    expect(again.out).toContain("= Postgres");
+    expect(world.images).toEqual({});
+    for (const service of services) expect(world.settings[service], service).not.toHaveProperty("source");
+  });
+
+  it("deploys a template's Postgres from PostgreSQL 18's image, even from a template made with 16", async () => {
+    writeSettings({ RAILWAY_TEMPLATE: "tmpl01" });
+    const repo = { repo: "https://github.com/acme/lobbystack" };
+    world.template = { id: "template-1", code: "tmpl01", name: "acme-template", serializedConfig: { services: {
+      "svc-a": { name: "Postgres", source: { image: "pgvector/pgvector:pg16" }, variables: { PGDATA: {} } },
+      "svc-b": { name: "Redis", source: { image: "redis:7-alpine" }, variables: {} },
+      "svc-c": { name: "migrate", source: repo, variables: {} },
+      "svc-d": { name: "admin", source: repo, variables: {} },
+      "svc-e": { name: "worker", source: repo, variables: {} },
+    } } };
+    // A new project: the template makes its services.
+    world.absent = new Set(["Postgres", "Redis", "migrate", "admin", "worker"]);
+    const state = stateAfterUp();
+    delete state.done["railway.services"];
+    writeState(state);
+    const result = await bootstrap(["up", settings(), "--yes"]);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain(`Postgres: ${postgres18}, in place of the template's pgvector/pgvector:pg16`);
+    expect(world.templateDeploys).toHaveLength(1);
+    const deployed = Object.values(world.templateDeploys[0]?.services ?? {});
+    expect(deployed.find((service) => service.name === "Postgres")?.source).toEqual({ image: postgres18 });
+    expect(deployed.find((service) => service.name === "Redis")?.source).toEqual({ image: "redis:7-alpine" });
+    expect(world.images).toEqual({ Postgres: postgres18, Redis: "redis:7-alpine" });
+    // The database's variables went in with it, PGDATA in its own folder of the volume as before.
+    expect(deployed.find((service) => service.name === "Postgres")?.variables?.PGDATA?.value).toBe("/var/lib/postgresql/data/pgdata");
   });
 
   // The fleet status address (docs/features/observability.md, "Watch every copy"): the admin's FLEET_STATUS_TOKEN, which

@@ -154,7 +154,9 @@ Three things are a problem, and turn the answer into a 503:
 - **A worker that isn't ready,** unless it started in the last 2 minutes.
 - **Fewer running copies than expected,** such as "1 worker copy is running, and 2 are expected." or "No worker copy is running." A copy that started in the last 2 minutes and isn't ready yet counts as running here, and so does one that said it was shutting down in the last 2 minutes, whether it is still finishing or already gone. So a deploy or a restart that replaces the only copy raises no alarm.
 
-In a check on a computer on 2026-11-15, with two workers and two built admins on one PostgreSQL and one Redis, a worker killed with `kill -9` turned the answer into a 503 after 31 seconds, a restart cleared it within 4 seconds, and a worker or an admin stopped the ordinary way never raised a problem. With one worker only, stopping it the ordinary way and starting the next one 12 seconds later raised nothing either, and stopping it for good gave "No worker copy is running." 2 minutes after it was told to stop. Nothing here has run on Railway yet ([open items](../project/open-items.md#test-these)).
+In a check on a computer on 2026-11-15, with two workers and two built admins on one PostgreSQL and one Redis, a worker killed with `kill -9` turned the answer into a 503 after 31 seconds, a restart cleared it within 4 seconds, and a worker or an admin stopped the ordinary way never raised a problem. With one worker only, stopping it the ordinary way and starting the next one 12 seconds later raised nothing either, and stopping it for good gave "No worker copy is running." 2 minutes after it was told to stop.
+
+On Railway, on 2026-11-20, a test environment with two copies of each service listed every copy as running, each under Railway's replica ID, which is also the ID Railway's own metrics give the copy, and the copy of each service that the change to two had replaced as `left`, with no problem raised. A killed copy, a restart and a copy stopped for good are still to try there ([open items](../project/open-items.md#test-these)).
 
 ### Read a copy that died
 

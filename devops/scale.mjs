@@ -3,8 +3,9 @@
 // the deployment guide asks for before a second copy (docs/deployment/guide/part-7-operations.md,
 // 7.24). Railway calls the copies replicas. Every copy runs the same release with the same
 // variables: Railway spreads the admin's visitors over its copies, and the admin spreads new calls
-// over the worker's. Railway starts a new copy from the release that's running, without a deploy,
-// and gives a copy it takes away the service's draining time to finish. Postgres, Redis and migrate
+// over the worker's. Railway starts the copies from the release that's running, without a build,
+// but it replaces the running copies too, as a deploy does (seen on its first run, on 2026-11-20),
+// and gives each copy it stops the service's draining time to finish. Postgres, Redis and migrate
 // stay at one copy.
 //
 //   node devops/scale.mjs                      how many copies run, how busy each one is, and what more would need
@@ -214,7 +215,7 @@ async function main() {
     const adding = moving.some((item) => item.to > item.from);
     const removing = moving.filter((item) => item.to < item.from);
     const notes = [
-      adding ? "Railway starts each new copy from the release that's running, without a deploy." : "",
+      adding ? "Railway starts the copies from the release that's running and replaces the running ones, as a deploy does: they get the service's draining time to finish." : "",
       removing.length ? `Each copy Railway takes away gets ${listNames(removing.map((item) => `${item.name}'s ${item.draining} s`))} to finish first.` : "",
     ].filter(Boolean).join(" ");
     const answer = await ask(`\nChange ${what} in ${where.project.name} (${where.environment.name})? ${notes} Type yes to continue: `);

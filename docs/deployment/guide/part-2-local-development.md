@@ -97,7 +97,7 @@ pnpm --filter @lobbystack/shared build
 pnpm dev
 ```
 
-1. `docker compose up -d postgres redis` downloads and starts the database (PostgreSQL) and Redis in Docker. It takes about 10 seconds the first time.
+1. `docker compose up -d postgres redis` downloads and starts the database (PostgreSQL) and Redis in Docker. It takes about 10 seconds the first time. The `.env` that `pnpm env:generate` makes names PostgreSQL 18, as `POSTGRES_IMAGE`. One made before fork PR #223 has no such line, so its database stays on PostgreSQL 16, which made it ([7.22](part-7-operations.md#722-upgrade-pinned-versions)).
 2. `pnpm db:migrate` creates the database tables, in about 10 seconds. It ends with `Database migrations applied.`
 3. The two `build` commands prepare two internal packages that the dashboard loads ready-made, in a few seconds. Without them the dashboard won't start, or, on a copy older than `7893d2e`, onboarding stops at the plan step ([2.10](#210-if-something-fails-locally)). Run them again after you download new code.
 4. `pnpm dev` starts the dashboard, the worker and the marketing site, and keeps running. Leave this terminal window open.
@@ -200,6 +200,7 @@ pnpm build
 | `.env already exists` | You already generated it | Keep it, or add `--force` and then run `docker compose down -v` |
 | `required variable BETTER_AUTH_SECRET is missing a value` | There's no `.env` | `pnpm env:generate` |
 | The apps can't sign in to the database: `password authentication failed` or `is not permitted to log in` | The database first started with other passwords, or with Windows line endings in a clone made before fork PR #83 | `git pull` for the line endings, then `docker compose down -v` and start again |
+| PostgreSQL keeps restarting, and `docker compose logs postgres` says `database files are incompatible with server` | `.env` names PostgreSQL 18 (`POSTGRES_IMAGE`), but PostgreSQL 16 made the database | Take the `POSTGRES_IMAGE` line out of `.env` and run `docker compose up -d postgres redis`: the database comes back on 16 with its data. To start over on 18 without the local data, keep the line and run `docker compose down -v` |
 | A container keeps restarting with `must not use a placeholder value in production` (Way B) | `.env` was copied instead of generated | `pnpm env:generate --force`, then `docker compose down -v` |
 | `Ports are not available` | Another program uses the port, or Windows reserved it. On Windows, IIS often holds port 80, which Way B's Caddy uses | Change the port in `.env`, along with the addresses that contain it. For Caddy, add `HTTP_PORT=8080` to `.env.local`; the dashboard stays at `http://localhost:13000` |
 | Way B's build stops with `failed to receive status: rpc error: code = Unavailable desc = error reading from server: EOF` | Docker Desktop restarted during the build. On Windows, event 2004 in Event Viewer's System log means Windows ran low on virtual memory | Close programs you don't need or restart Windows, then build one image at a time with the same `--env-file` options: `build worker`, then `build admin`, then `up -d` |

@@ -54,7 +54,7 @@ If production will go to a client, the client opens these accounts in their own 
 
 **Which PostgreSQL**
 
-Keep the `pgvector/pgvector:pg16` image from [4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket). Railway's own PostgreSQL adds three things on the Pro plan: restoring the database to any minute of about the last four weeks, a high-availability setup with standby copies, and one-click upgrades to a newer PostgreSQL. But it would make production different from the test environment, the project's checks and Docker Compose; its database is named `railway`; a restore to a past minute creates a new service that someone technical has to swap in; and LobbyStack is tested on PostgreSQL 16 only. If you want it anyway, decide before production holds any data, and move the test environment to it first, so every change is tried on it.
+Keep the `pgvector/pgvector:pg18-trixie` image from [4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket), or `pgvector/pgvector:pg16` on an instance set up before fork PR #223 ([7.22](part-7-operations.md#722-upgrade-pinned-versions)). Railway's own PostgreSQL adds three things on the Pro plan: restoring the database to any minute of about the last four weeks, a high-availability setup with standby copies, and one-click upgrades to a newer PostgreSQL. But it would make production different from the test environment, the project's checks and Docker Compose; its database is named `railway`; a restore to a past minute creates a new service that someone technical has to swap in; and LobbyStack is tested on PostgreSQL 18 and 16 only. If you want it anyway, decide before production holds any data, and move the test environment to it first, so every change is tried on it.
 
 ## 5.2 Production on Railway
 
@@ -176,16 +176,16 @@ Railway's backups stay inside the project, so they go with it if the project or 
     AWS_S3_REGION=auto
     AWS_S3_FORCE_PATH_STYLE=false
     SINGLE_SHOT_MODE=true
-    PG_VERSION=16
+    PG_VERSION=18
     NODE_VERSION=22
     ```
 
     - The template points its `AWS_` lines at a new Railway bucket in the same project, which would go with the project. That bucket is called `Bucket`, like LobbyStack's own, so check that no line still says `${{Bucket.`. If the template added a bucket, leave it alone rather than risk deleting LobbyStack's, which holds the recordings: it stays empty.
-    - `PG_VERSION=16` matches production's PostgreSQL. With the template's `17`, the copies couldn't be read back into PostgreSQL 16.
+    - `PG_VERSION=18` matches production's PostgreSQL. The copy's `pg_dump` must be the database's version or newer: an older one refuses the database (`aborting because of server version mismatch`), so the template's own `17` fails on 18. On an instance set up before fork PR #223, which runs PostgreSQL 16, use `PG_VERSION=16` until its database moves to 18 ([7.22](part-7-operations.md#722-upgrade-pinned-versions)): a copy made by a newer `pg_dump` can't be read back into 16.
     - The copy signs in as `postgres` on purpose. With one of LobbyStack's limited roles it would miss most of the data and still report success.
 21. In the same service's **Settings**, set **Cron Schedule** to `0 3 * * *`, which runs it at 03:00 UTC every night, and the restart policy to **Never**. Click **Deploy**.
     - Choose an hour without releases: a migration waits for the copy to finish, and the dashboard's requests queue behind it.
-22. The next day, open the service's **Cron Runs** tab and the run's log *(it may also run once right after the deploy)*. The log should start with `pg_dump (PostgreSQL) 16.` and end with `Database backup complete, exiting...`, and the bucket should hold a file such as `backup-2026-10-20T03-00-12-345Z.tar.gz`.
+22. The next day, open the service's **Cron Runs** tab and the run's log *(it may also run once right after the deploy)*. The log should start with `pg_dump (PostgreSQL) 18.` (`16.` with `PG_VERSION=16`) and end with `Database backup complete, exiting...`, and the bucket should hold a file such as `backup-2026-10-20T03-00-12-345Z.tar.gz`.
     - A log that says `Potential warnings detected` means the copy may be incomplete, even though the run shows success. Find out why before you rely on it.
     - Practice restoring a copy on the test environment ([7.8](part-7-operations.md#78-restore-from-a-backup-and-practice-it)). Only a restore proves a copy is complete.
 
@@ -348,7 +348,7 @@ What's different from Railway:
     docker run --rm -v "$PWD":/app -w /app node:26-bookworm-slim node scripts/generate-env.mjs
     ```
 
-    It prints `Wrote .env with <n> generated secrets.`
+    It prints `Wrote .env with <n> generated secrets.` The new `.env` names PostgreSQL 18, as `POSTGRES_IMAGE`. A server set up before fork PR #223 has no such line in its `.env`, and keeps PostgreSQL 16 ([7.22](part-7-operations.md#722-upgrade-pinned-versions)).
 14. Open the file with `nano .env`. In nano, Ctrl+W searches, Ctrl+O and Enter save, and Ctrl+X closes.
 15. Change these lines, using production's values from [Part 3](part-3-outside-services.md), and leave every other line as it is:
 

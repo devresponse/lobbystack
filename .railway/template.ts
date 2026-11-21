@@ -22,6 +22,8 @@ export default defineRailway((ctx) => {
 
   // Stock image: the migrate service creates the roles (0000_roles.sql) and sets their logins
   // (`bootstrap`). The role passwords live here so every service references one copy.
+  // The image is the published template's, which changes in Railway's dashboard first (README.md).
+  // devops/bootstrap.mjs makes new deployments with PostgreSQL 18 instead.
   const Postgres = service("Postgres", {
     source: { image: "pgvector/pgvector:pg16" },
     replicas: { [region]: 1 },

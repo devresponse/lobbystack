@@ -8,7 +8,7 @@
 #   docker compose -p kinetic-yak-e2e -f docker-compose.e2e.yml up -d --wait
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg18-trixie
     container_name: kinetic-yak-e2e-postgres
     environment:
       POSTGRES_DB: lobbystack
@@ -22,8 +22,10 @@ services:
       LOBBYSTACK_READONLY_PASSWORD: readonly
     ports:
       - "127.0.0.1:${E2E_POSTGRES_PORT:-25433}:5432"
+    # PostgreSQL 18 keeps its data under /var/lib/postgresql/18/docker, and refuses to start with
+    # something mounted at the older /var/lib/postgresql/data.
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql
     volumes:
       - ./docker/postgres/init/roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
     healthcheck:

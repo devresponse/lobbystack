@@ -45,7 +45,7 @@ jobs:
       VERIFY_RLS_BEHAVIOR: "true"
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg18-trixie
         env:
           POSTGRES_PASSWORD: lobbystack
           POSTGRES_DB: lobbystack

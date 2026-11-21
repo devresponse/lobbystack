@@ -58,7 +58,7 @@ On a server, every service reads the one `.env` file, but only the lines that `d
 
 **Built into the admin**
 
-`APP_BASE_URL`, `BRAND_PRESET`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` and `NEXT_PUBLIC_POSTHOG_HOST` are built into the admin, and on Railway also `STORAGE_PROVIDER`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION` and `S3_FORCE_PATH_STYLE` (`Dockerfile.admin:19-42`, `docker-compose.yml:93-100`). Set them before the admin's first build. Every other value takes effect when its service starts again ([7.6](part-7-operations.md#76-change-a-setting-safely)).
+`APP_BASE_URL`, `BRAND_PRESET`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` and `NEXT_PUBLIC_POSTHOG_HOST` are built into the admin, and on Railway also `STORAGE_PROVIDER`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION` and `S3_FORCE_PATH_STYLE` (`Dockerfile.admin:19-42`, `docker-compose.yml:99-106`). Set them before the admin's first build. Every other value takes effect when its service starts again ([7.6](part-7-operations.md#76-change-a-setting-safely)).
 
 **The instance**
 
@@ -94,7 +94,7 @@ In production, the admin and the worker refuse to start when a secret they need 
 
 | Variable | On | What it's for | Value | Changing it later |
 | --- | --- | --- | --- | --- |
-| `PGDATA`, `POSTGRES_DB`, `POSTGRES_USER` | `Postgres`, on Railway | Where PostgreSQL keeps its data, the database's name, and its administrator's name | `/var/lib/postgresql/data/pgdata`, `lobbystack` and `postgres` ([4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket), step 5). On a server, `docker-compose.yml` sets the last two | Never |
+| `PGDATA`, `POSTGRES_DB`, `POSTGRES_USER` | `Postgres`, on Railway | Where PostgreSQL keeps its data, the database's name, and its administrator's name | `/var/lib/postgresql/data/pgdata`, `lobbystack` and `postgres` ([4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket), step 5). PostgreSQL 18 needs `PGDATA` with the volume at `/var/lib/postgresql/data` ([8.2](part-8-troubleshooting.md#82-builds-and-start-up)). On a server, `docker-compose.yml` sets all three, `PGDATA` to the volume's top folder, `/var/lib/postgresql/data` | Never |
 | `POSTGRES_INITDB_ARGS` | `Postgres`, on Railway | Makes the database with room for 200 connections, PostgreSQL's 100 being too few for copies of the admin and the worker | `-c max_connections=200` ([4.4](part-4-test-environment.md#44-add-postgresql-redis-and-the-bucket), step 5). Read only when the database is first made | Changing it does nothing to a database that exists: [7.24](part-7-operations.md#724-scale-up) raises the limit with `alter system` |
 | `POSTGRES_PASSWORD` | `Postgres`; the database addresses of migrate and the backup service refer to it | The administrator's password, which only migrate and the backups use | Make it (value 1) | Inside PostgreSQL first ([7.18](part-7-operations.md#718-rotate-secrets-and-keys)) |
 | `LOBBYSTACK_AUTH_PASSWORD`, `LOBBYSTACK_APP_PASSWORD`, `LOBBYSTACK_WORKER_PASSWORD`, `LOBBYSTACK_DISPATCHER_PASSWORD` | `Postgres`, which holds them; migrate, the admin and the worker refer to them | The passwords of the four roles the services sign in as | Make them (values 2 to 5) | On Railway, at a quiet hour; on a server, inside PostgreSQL first ([7.18](part-7-operations.md#718-rotate-secrets-and-keys)) |
@@ -235,6 +235,7 @@ Without valid `CONTROL_ACCESS_TEAM_DOMAIN`, `CONTROL_ACCESS_AUD` and `CONTROL_AD
 | `HTTP_BIND_ADDRESS` | Docker Compose, for Caddy | Lets visitors reach Caddy from outside the server | `0.0.0.0`, added at the end of `.env` ([5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), step 15) | Leave it |
 | `HTTP_PORT` | Docker Compose, for Caddy | Caddy's port for plain `http://` | Unset, for 80 | Leave it |
 | `ADMIN_PORT`, `WORKER_PORT`, `POSTGRES_PORT`, `REDIS_PORT` | Docker Compose | The ports on the server itself, where the checks in [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), step 20, reach each service | `13000`, `13002`, `15433` and `16380`, as `.env` has them | Leave them: the checks and the scripts use them |
+| `POSTGRES_IMAGE` | Docker Compose | The PostgreSQL image the database runs | `pgvector/pgvector:pg18-trixie` in a new `.env`. Without the line, `docker-compose.yml` takes `pgvector/pgvector:pg16`, which an `.env` made before fork PR #223 keeps | Only with a move to another major version, which copies the data first ([7.22](part-7-operations.md#722-upgrade-pinned-versions)): another version won't start on the old one's files |
 
 **Set for you, by Railway or by the build**
 
@@ -254,7 +255,7 @@ On a server they're in `.env`, from `.env.example`. Keep each line as the genera
 - `RESEND_WEBHOOK_SECRET`: keep it empty ([Appendix E](appendix-e-doc-problems.md), item 77).
 - `POLAR_ACCEPT_LEGACY_BUSINESS_IDS`: keep `false`. It's for businesses moved from the original LobbyStack's earlier platform.
 - `PROSPECT_DEMO_OPERATOR_EMAIL`: keep it empty. It names the one account allowed to make demo businesses for sales prospects (`apps/admin/src/lib/api-helpers.ts:61-67`).
-- `ONBOARDING_FOLLOWUP_FROM` and `ONBOARDING_FOLLOWUP_SENDER_NAME`: a founder's check-in email, sent 24 hours after onboarding to owners who haven't come back (`.env.example:203`). Empty, none is sent.
+- `ONBOARDING_FOLLOWUP_FROM` and `ONBOARDING_FOLLOWUP_SENDER_NAME`: a founder's check-in email, sent 24 hours after onboarding to owners who haven't come back (`.env.example:207`). Empty, none is sent.
 - `UNIT_ECONOMICS_MONTHLY_DATABASE_COST_USD`, `UNIT_ECONOMICS_MONTHLY_HOSTING_COST_USD` and `UNIT_ECONOMICS_MONTHLY_STORAGE_COST_USD`: monthly costs for an internal cost report. Empty counts as 0.
 - `FIRECRAWL_BASE_URL`: keep it empty, for Firecrawl's own service.
 - `WEB_CALL_ALLOWED_ORIGINS` and `WEB_CALL_PUBLIC_BUSINESS_SLUG`: only for the marketing site's voice demo ([Appendix F](appendix-f-sites.md)). Without the slug, the admin refuses the demo's calls, whatever `WEB_CALL_ALLOWED_ORIGINS` says.

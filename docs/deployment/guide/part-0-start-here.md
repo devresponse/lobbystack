@@ -129,7 +129,7 @@ This guide's default is one Railway project with two environments, `test` and `p
 | Reference | On Railway, a value such as `${{admin.ENCRYPTION_KEY}}`, which Railway replaces with another service's variable, so the two always match |
 | Build | Turning the code into the program a service runs. A value that's **built in** is fixed then, so only a new build changes it ([7.6](part-7-operations.md#76-change-a-setting-safely)) |
 | Deploy | Starting a service on a new build, or with new settings |
-| Image, container | A packaged program, such as `pgvector/pgvector:pg16`, and a running copy of it |
+| Image, container | A packaged program, such as `pgvector/pgvector:pg18-trixie`, and a running copy of it |
 | Volume | A disk attached to a service, which keeps its data from one deploy to the next |
 | Bucket | Storage for files, reached over the internet with keys of its own |
 | Migration | A change to the database's tables, which migrate applies ([7.3](part-7-operations.md#73-database-migrations)) |

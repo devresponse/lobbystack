@@ -1,8 +1,14 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    # A new .env names PostgreSQL 18 (POSTGRES_IMAGE in .env.example). An .env made before has no
+    # POSTGRES_IMAGE, so its database keeps PostgreSQL 16, the version that wrote it: 18 won't start
+    # on 16's files. Guide 7.22 moves such a database to 18.
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
     restart: unless-stopped
     environment:
+      # The volume's top folder, where 16 keeps its data. 18 would use /var/lib/postgresql/18/docker
+      # and refuse a volume mounted here, so naming the folder lets either version use this volume.
+      PGDATA: /var/lib/postgresql/data
       POSTGRES_DB: lobbystack
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}

@@ -103,8 +103,19 @@ jobs:
       - run: npm test
 
   database:
+    name: database (PostgreSQL ${{ matrix.postgres }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # New installs run PostgreSQL 18. Deployments made before keep 16 until their
+    # database is copied across (guide 7.22), so every migration must still run there.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: "18"
+            image: pgvector/pgvector:pg18-trixie
+          - postgres: "16"
+            image: pgvector/pgvector:pg16
     env:
       NODE_ENV: test
       LOBBYSTACK_SKIP_ENV_FILES: "true"
@@ -125,7 +136,7 @@ jobs:
       VERIFY_RLS_BEHAVIOR: "true"
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: ${{ matrix.image }}
         env:
           POSTGRES_PASSWORD: lobbystack
           POSTGRES_DB: lobbystack_test

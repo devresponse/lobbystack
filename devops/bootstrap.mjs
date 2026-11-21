@@ -1868,8 +1868,14 @@ async function waitForDeployment(run, service, serviceId, { id, after } = {}) {
   throw Object.assign(new Error(`${service} still wasn't deployed after ${Math.round((300 * pause) / 60000)} minutes. Check it in Railway, then run again`), { deployFailed: true });
 }
 
+// The database's image: PostgreSQL 18 with pgvector, on Debian trixie, which the tag fixes so that a newer minor
+// version never brings another Debian's text sorting. Only a new Postgres service is made from it (railway.services,
+// and the template's deploy below): Railway keeps an existing service's image, and a database that PostgreSQL 16 wrote
+// won't start on 18, so a deployment made before keeps 16 until its database is copied across (guide 7.22).
+const POSTGRES_IMAGE = "pgvector/pgvector:pg18-trixie";
+
 const SERVICES = [
-  { name: "Postgres", image: "pgvector/pgvector:pg16" },
+  { name: "Postgres", image: POSTGRES_IMAGE },
   { name: "Redis", image: "redis:7-alpine" },
   { name: "migrate" },
   { name: "admin" },
@@ -2022,6 +2028,12 @@ async function railwaySteps(run) {
           if (!variable || variable.value !== undefined) continue;
           const value = variable.defaultValue || known[service.name]?.[key];
           if (value) variable.value = value;
+        }
+        // A template made before PostgreSQL 18 names pg16's image. Its deploy makes a new database, so it gets
+        // this version's image, as a project made without a template does.
+        if (service?.name === "Postgres" && service.source?.image && service.source.image !== POSTGRES_IMAGE) {
+          console.log(`  Postgres: ${POSTGRES_IMAGE}, in place of the template's ${service.source.image}`);
+          service.source.image = POSTGRES_IMAGE;
         }
         // The template holds no secrets, so the databases' passwords are added here (see secretsStep above).
         if (service?.name === "Postgres" || service?.name === "Redis") {

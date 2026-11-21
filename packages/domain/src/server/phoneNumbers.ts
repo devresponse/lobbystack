@@ -101,14 +101,17 @@ export function readNumberOffer(token: string, secret: string): NumberOffer {
 
 /**
  * Checks that the business may pick a number for this purpose now, and
- * resolves where to search. The dashboard keeps the onboarding stage order;
- * the API ignores it, so it passes enforceStage false.
+ * resolves where to search. The dashboard keeps the onboarding stage order,
+ * so its search works from the number step on and never from the plan step,
+ * which comes long before it; the API ignores the order, so it passes
+ * enforceStage false. A claim needs an offer a search signed, so a business
+ * that can't search can't claim either.
  */
 export async function numberMarketInTransaction(tx: DatabaseTransaction, input: { businessId: string; purpose: NumberClaimPurpose; selection?: Partial<NumberSelection> | undefined; enforceStage: boolean }): Promise<BusinessNumberMarket> {
   const business = (await tx.select({ stage: businesses.onboardingStage, timezone: businesses.timezone, replacementUsedAt: businesses.phoneNumberReplacementUsedAt }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
   if (!business) throw new Error("Workspace not found.");
   const onboardingStage = normalizeOnboardingStage(business.stage);
-  if (input.enforceStage && input.purpose === "onboarding" && !["plan", "phone_number", "attribution", "complete"].includes(onboardingStage)) throw new NumberSelectionError("Business number selection is not available at this onboarding stage.", "stage");
+  if (input.enforceStage && input.purpose === "onboarding" && !["phone_number", "attribution", "complete"].includes(onboardingStage)) throw new NumberSelectionError("Business number selection is not available at this onboarding stage.", "stage");
   if (input.purpose === "replacement") {
     if (business.replacementUsedAt) throw new NumberSelectionError("This workspace has already used its number replacement.", "replacement_used");
     const active = await tx.select({ id: phoneNumbers.id }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"), isNull(phoneNumbers.reclaimScheduledAt))).limit(1);
@@ -280,5 +283,5 @@ export async function failNumberProvisioning(context: DomainContext, input: { bu
 }
 
 export async function skipOnboardingNumber(context: DomainContext, input: { userId: string; businessId: string }): Promise<void> {
-  await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => { await requireBusinessAdmin(tx, input); const changed = await tx.update(businesses).set({ onboardingStage: "attribution", updatedAt: new Date() }).where(and(eq(businesses.id, input.businessId), or(eq(businesses.onboardingStage, "plan"), eq(businesses.onboardingStage, "phone_number")))).returning({ id: businesses.id }); if (!changed.length) { const [business] = await tx.select({ stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)); if (!["attribution", "complete"].includes(business?.stage ?? "")) throw new Error("Number selection cannot be skipped at this onboarding stage."); } });
+  await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => { await requireBusinessAdmin(tx, input); const changed = await tx.update(businesses).set({ onboardingStage: "attribution", updatedAt: new Date() }).where(and(eq(businesses.id, input.businessId), eq(businesses.onboardingStage, "phone_number"))).returning({ id: businesses.id }); if (!changed.length) { const [business] = await tx.select({ stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)); if (!["attribution", "complete"].includes(business?.stage ?? "")) throw new Error("Number selection cannot be skipped at this onboarding stage."); } });
 }

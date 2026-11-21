@@ -1221,19 +1221,41 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(apiBusinessSchema.safeParse(business).success).toBe(true);
       return [business.onboarding_stage, (await getOnboardingForApi(context, caller)).stage];
     };
+    // A deployment that takes payments has a plan step in its onboarding, and one that takes none has not.
+    const planStep = (on: boolean) => { vi.stubEnv("POLAR_ACCESS_TOKEN", on ? "token" : ""); vi.stubEnv("POLAR_ORGANIZATION_ID", on ? "organization" : ""); };
     try {
-      // A verification step onboarding no longer has resumes at the plan.
+      // A verification step onboarding no longer has resumes at the plan, or at the website step where there is no plan step.
+      planStep(true);
       expect(await stages()).toEqual(["plan", "plan"]);
+      planStep(false);
+      expect(await stages()).toEqual(["website", "website"]);
       // The free plan goes back from the number steps to its plan, and a paid one stays on them.
       await store("phone_number_claiming");
       await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "free_cloud" });
+      planStep(true);
       expect(await stages()).toEqual(["plan", "plan"]);
-      await admin!.db.update(billingAccounts).set({ plan: "pro", subscriptionState: "active", billingInterval: "monthly" }).where(eq(billingAccounts.businessId, businessId));
+      // Without a plan step to go back to, it stays on the number step, which can be skipped.
+      planStep(false);
       expect(await stages()).toEqual(["phone_number_claiming", "phone_number_claiming"]);
+      await admin!.db.update(billingAccounts).set({ plan: "pro", subscriptionState: "active", billingInterval: "monthly" }).where(eq(billingAccounts.businessId, businessId));
+      for (const on of [true, false]) {
+        planStep(on);
+        expect(await stages()).toEqual(["phone_number_claiming", "phone_number_claiming"]);
+      }
+      // A business stored on the plan step shows it only where there is one.
+      await store("plan");
+      planStep(true);
+      expect(await stages()).toEqual(["plan", "plan"]);
+      planStep(false);
+      expect(await stages()).toEqual(["website", "website"]);
       // A value the dashboard doesn't know starts over.
       await store("retired_step");
-      expect(await stages()).toEqual(["create_business", "create_business"]);
+      for (const on of [true, false]) {
+        planStep(on);
+        expect(await stages()).toEqual(["create_business", "create_business"]);
+      }
     } finally {
+      vi.unstubAllEnvs();
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
     }
   });

@@ -32,7 +32,8 @@ export default defineConfig({
   testMatch: "**/*.e2e.ts",
   // access-gate.e2e.ts needs a server started with PROTECTION_TOKEN: playwright.access-gate.config.ts runs it.
   // script-nonce.e2e.ts needs servers started with CSP_SCRIPT_NONCE: playwright.script-nonce.config.ts runs it.
-  testIgnore: ["**/visual-parity.e2e.ts", "**/new-operator-visual.e2e.ts", "**/loading-parity.e2e.ts", "**/invitation-parity.e2e.ts", "**/access-gate.e2e.ts", "**/script-nonce.e2e.ts"],
+  // onboarding-plan-step.e2e.ts needs a server started with a billing provider's settings: playwright.plan-step.config.ts runs it.
+  testIgnore: ["**/visual-parity.e2e.ts", "**/new-operator-visual.e2e.ts", "**/loading-parity.e2e.ts", "**/invitation-parity.e2e.ts", "**/access-gate.e2e.ts", "**/script-nonce.e2e.ts", "**/onboarding-plan-step.e2e.ts"],
   fullyParallel: false,
   // Operator fixtures share persisted active-workspace state across spec files.
   ...(process.env.PARITY_OPERATOR_USER_ID ? { workers: 1 } : {}),

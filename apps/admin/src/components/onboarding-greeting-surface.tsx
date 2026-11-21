@@ -10,6 +10,7 @@ import { LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getSafeOnboardingErrorMessage } from "@/lib/onboarding-errors";
+import { onboardingStagePath } from "@/lib/onboarding-steps";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,9 +29,10 @@ export function OnboardingGreetingSurface() {
   const [hasUserEdited, setHasUserEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { business } = useActiveBusiness();
-  // Warm the next step while the greeting is being written, so continuing
-  // waits only on the save and its progress refresh.
-  useEffect(() => { prefetch("/onboarding/plan"); }, [prefetch]);
+  // Warm the steps that can follow while the greeting is being written, so
+  // continuing waits only on the save and its progress refresh: the number
+  // step for a plan with a number to pick, else the last step.
+  useEffect(() => { prefetch("/onboarding/number"); prefetch("/onboarding/attribution"); }, [prefetch]);
   const agent = useQuery({ queryKey: ["onboarding-agent", business?.businessId], queryFn: () => requestJson<{ profile: Profile | null }>("/api/agent"), enabled: Boolean(business) });
   const documents = useQuery({
     queryKey: ["onboarding-knowledge", business?.businessId],
@@ -46,12 +48,14 @@ export function OnboardingGreetingSurface() {
     mutationFn: async () => {
       // Calls open in the dashboard's language when they can: English, French or Spanish.
       await requestJson("/api/agent", { method: "PATCH", body: JSON.stringify({ greeting: greeting.trim(), locale: normalizeRuntimeLocale(i18n.language) ?? "en" }) });
-      return await requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: "plan" }) });
+      // The plan was chosen before this step. It asks for the number step, and the server answers with the
+      // last step for a plan without a number to pick, such as Free.
+      return await requestJson<{ stage?: string }>(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: "phone_number" }) });
     },
-    onSuccess: async () => {
+    onSuccess: async (moved) => {
       if (business) telemetry.track("web.onboarding.greeting_submitted", { businessId: business.businessId });
       await queryClient.invalidateQueries({ queryKey: ["businesses"] });
-      navigate("/onboarding/plan");
+      navigate(onboardingStagePath(moved.stage) ?? "/onboarding/attribution");
     },
     meta: { inlineError: true },
   });

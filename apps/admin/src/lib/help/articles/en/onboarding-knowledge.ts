@@ -6,7 +6,7 @@ const article: HelpArticle = {
   section: "getting-started",
   summary: "Upload files or paste text about your business so your AI receptionist can answer questions from them, or skip the step and add them later.",
   screenPaths: ["/onboarding/knowledge"],
-  location: ["Sign up", "Onboarding", "Step 4 of 8"],
+  location: ["Sign up", "Onboarding", "Step 5 of 8, or step 4 of 7"],
   access: "Only owners and admins of the business can upload files, add text or go on from this step.",
   purpose: [
     "This step gives your AI receptionist its first information about your business. Upload documents you already have, such as a price list, a menu, answers to frequently asked questions or your policies, or paste the same kind of information as text. The receptionist uses it to answer questions from callers and website visitors.",
@@ -21,7 +21,7 @@ const article: HelpArticle = {
     { name: "File list", description: "Under the upload box, the files already uploaded for the business and the ones uploading now. A spinner means a file is still uploading, a check mark means it's uploaded, and a message in red explains why a file couldn't be uploaded or used. A file that is uploading, or that failed to upload, has an X button that clears it from the list." },
     { name: "Continue", description: "Saves any text on the **Paste text** tab and opens the next step, where you set the greeting. You can select it without adding anything. It says **Saving...** while it works, and while a file uploads. A problem with continuing or skipping shows just above it." },
     { name: "Skip for now", description: "The link under **Continue**. It opens the next step without saving the text on the **Paste text** tab, and says **Skipping...** while it works. Files you've already uploaded stay." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the fourth. From the second dot on, the dot of a step your business has already reached opens that step." },
+    { name: "Progress dots", description: "The dots at the bottom show where you are in setup: the first is sign-up, and this step is the fifth of eight. Where setup has no plan step, it's the fourth of seven. From the second dot on, the dot of a step your business has already reached opens that step." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at the step your business is on." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],

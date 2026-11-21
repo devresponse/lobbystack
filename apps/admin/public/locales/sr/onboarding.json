@@ -418,9 +418,9 @@
     "retry": "Pokušaj ponovo",
     "current": {
       "title": "Ova firma već ima paket {{plan}}.",
-      "description": "Paket je već podešen, pa možete da pređete na broj telefona.",
+      "description": "Paket je već podešen, pa možete da nastavite podešavanje.",
       "prepaidTitle": "Ova firma već ima pripejd paket.",
-      "prepaidDescription": "Paket je spreman, pa možete da pređete na broj telefona."
+      "prepaidDescription": "Paket je spreman, pa možete da nastavite podešavanje."
     },
     "packs": {
       "title": "Pripejd paketi",

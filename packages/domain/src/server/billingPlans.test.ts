@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { billingProfileSchema, builtInBillingPlanLimits, perMonthCents, resolveBillingPlans } from "@lobbystack/shared";
 
-import { billingPlanLimitBook, billingPlanLimits, billingPlanList, brandBillingCatalog, polarCheckoutConfigured, polarProductLinks, type BillingCatalogSnapshot, type CatalogPrice, type CatalogStandardPlan } from "./billingPlans";
+import { billingPlanLimitBook, billingPlanLimits, billingPlanList, billingProviderConfigured, brandBillingCatalog, polarCheckoutConfigured, polarProductLinks, type BillingCatalogSnapshot, type CatalogPrice, type CatalogStandardPlan } from "./billingPlans";
 
 const plan = (code: CatalogStandardPlan["code"], status: CatalogStandardPlan["status"], extra: Partial<CatalogStandardPlan> = {}): CatalogStandardPlan => ({
   code, status, sold: code === "starter" || code === "pro", custom: code === "enterprise", overage: code !== "free_cloud",
@@ -79,6 +79,15 @@ describe("Polar product links", () => {
     expect(polarCheckoutConfigured({ POLAR_ACCESS_TOKEN: "t", POLAR_ORGANIZATION_ID: "o" })).toBe(true);
     expect(polarCheckoutConfigured({ POLAR_ACCESS_TOKEN: "t" })).toBe(false);
     expect(polarCheckoutConfigured({})).toBe(false);
+  });
+
+  it("reads the deployment's own provider to say whether it takes payments", () => {
+    expect(billingProviderConfigured({ POLAR_ACCESS_TOKEN: "t", POLAR_ORGANIZATION_ID: "o" })).toBe(true);
+    expect(billingProviderConfigured({ BILLING_PROVIDER: "stripe", STRIPE_API_KEY: "rk_test_1", STRIPE_ACCOUNT_ID: "acct_1" })).toBe(true);
+    // Each provider's own settings only: Polar's sell nothing on a Stripe deployment, nor Stripe's on a Polar one.
+    expect(billingProviderConfigured({ BILLING_PROVIDER: "stripe", POLAR_ACCESS_TOKEN: "t", POLAR_ORGANIZATION_ID: "o" })).toBe(false);
+    expect(billingProviderConfigured({ STRIPE_API_KEY: "rk_test_1", STRIPE_ACCOUNT_ID: "acct_1" })).toBe(false);
+    expect(billingProviderConfigured({})).toBe(false);
   });
 });
 

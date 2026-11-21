@@ -14,8 +14,11 @@ export async function POST(request: Request) {
     if (!isOnboardingStage(target) || target === "create_business" || target === "complete") {
       return jsonError("A valid next onboarding stage is required.", 400);
     }
-    await advanceOnboardingStage(createDomainContext(), { userId: session.user.id, businessId, to: target });
-    return NextResponse.json({ ok: true, stage: target });
+    // The step to open next: the one asked for, or the one the server puts in its place, as the plan step
+    // after the name where the deployment has one, and the last step in place of the number step on a
+    // plan without a number.
+    const stage = await advanceOnboardingStage(createDomainContext(), { userId: session.user.id, businessId, to: target });
+    return NextResponse.json({ ok: true, stage });
   } catch (error) {
     return asApiResponse(error);
   }

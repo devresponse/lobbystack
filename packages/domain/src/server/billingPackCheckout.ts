@@ -1,11 +1,12 @@
 import { and, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 
 import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, billingPackOffers, billingPackPlans, billingPackPrices, billingPacks, businesses, enqueueOutbox, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingProviderOf, isBillingPackStatus, isUuid, isYearlyBillingInterval, type BillingPackStatus } from "@lobbystack/shared";
+import { isBillingPackStatus, isUuid, isYearlyBillingInterval, type BillingPackStatus } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, BILLING_CHECKOUT_EXPIRES_MS, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment, lockBillingAccount, OPEN_PURCHASE_REFUSAL, openPackCheckout, type BillingCheckoutClaim, type BillingCheckoutLimit } from "./billing";
 import { packCheckoutTerms } from "./billingPacks";
+import { billingProviderConfigured } from "./billingPlans";
 import { readBillingDeployment } from "./billingProvider";
 import type { DomainContext } from "./context";
 import { loadBillingContext } from "./usage";
@@ -58,11 +59,10 @@ export const PACK_CHECKOUT_PAGE_MS = 60 * 60_000;
  * Whether the deployment's provider has what a pack checkout needs: Polar's
  * token and organization, or Stripe's key and account. A pack must also be on
  * sale, which the request checks. Unlike polarCheckoutConfigured, it reads
- * the provider the deployment uses.
+ * the provider the deployment uses (billingProviderConfigured).
  */
 export function packCheckoutConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  if (billingProviderOf(env) === "stripe") return Boolean(env.STRIPE_API_KEY?.trim() && env.STRIPE_ACCOUNT_ID?.trim());
-  return Boolean(env.POLAR_ACCESS_TOKEN && env.POLAR_ORGANIZATION_ID);
+  return billingProviderConfigured(env);
 }
 
 /** The realtime message that tells a checkout's page its row changed. */

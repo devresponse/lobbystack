@@ -418,9 +418,9 @@
     "retry": "Reintentar",
     "current": {
       "title": "Este negocio ya tiene el plan {{plan}}.",
-      "description": "Su plan ya está listo, así que puede pasar a su número de teléfono.",
+      "description": "Su plan ya está listo, así que puede continuar con la configuración.",
       "prepaidTitle": "Este negocio ya tiene un plan prepagado.",
-      "prepaidDescription": "Su plan ya está listo, así que puede pasar a su número de teléfono."
+      "prepaidDescription": "Su plan ya está listo, así que puede continuar con la configuración."
     },
     "packs": {
       "title": "Planes prepagados",

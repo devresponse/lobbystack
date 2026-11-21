@@ -9,6 +9,7 @@ import { accountBusinessCap, brandAccountLimits, currentBrand, defaultAppointmen
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { disconnectCalendarInTransaction } from "./calendar";
 import type { DomainContext } from "./context";
+import { onboardingStageAfterName } from "./onboarding";
 import { loadBillingContext, planInForce, type PlanInForce } from "./usage";
 
 export type BusinessRole = "business_owner" | "business_admin" | "scheduler" | "viewer";
@@ -142,23 +143,30 @@ function requireRuntimeLocale(value: unknown): RuntimeLocale {
   return locale;
 }
 
+/**
+ * Creates a business for the person naming it in the dashboard, as its owner,
+ * and makes it their active one. Its onboarding goes on from the name: to the
+ * plan step where the deployment has one, else to the website step, and the
+ * answer says which (onboardingStageAfterName).
+ */
 export async function createBusiness(
   context: DomainContext,
   input: CreateBusinessInput,
-): Promise<{ businessId: string; membershipId: string }> {
+): Promise<{ businessId: string; membershipId: string; onboardingStage: "plan" | "website" }> {
   const timezone = requireIanaTimeZone(input.timezone);
   // Refuse a bad slug before taking any locks.
   if (input.slug !== undefined) cleanSlug(input.slug);
   const businessId = randomUUID();
+  const onboardingStage = onboardingStageAfterName();
   return await withBusinessTransaction(context.db, {
     userId: input.userId,
     businessId,
     actorType: "system",
   }, async (tx) => {
     await assertBusinessAllowanceInTransaction(tx, { userId: input.userId, deploymentMode: input.deploymentMode, caps: input.businessCaps });
-    const created = await insertBusinessInTransaction(tx, { businessId, userId: input.userId, name: input.name, slug: input.slug, timezone, businessType: input.businessType, deploymentMode: input.deploymentMode });
+    const created = await insertBusinessInTransaction(tx, { businessId, userId: input.userId, name: input.name, slug: input.slug, timezone, businessType: input.businessType, deploymentMode: input.deploymentMode, onboardingStage });
     await tx.update(users).set({ activeBusinessId: businessId, updatedAt: new Date() }).where(eq(users.id, input.userId));
-    return created;
+    return { ...created, onboardingStage };
   });
 }
 
@@ -168,11 +176,14 @@ export async function createBusiness(
  * first snapshot.
  * The transaction must be scoped to businessId, and timezone must already be
  * an IANA name. A generated slug gets a random suffix when taken; a taken slug
- * the caller chose fails with a unique violation.
+ * the caller chose fails with a unique violation. The business starts on the
+ * website step unless onboardingStage says the plan step: the dashboard asks
+ * for the plan first where the deployment has that step, and a business made
+ * through the API, which doesn't follow the steps, starts as it always did.
  */
 export async function insertBusinessInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; userId: string; name: string; slug?: string | undefined; timezone: string; businessType: string; deploymentMode?: string | undefined; defaultLocale?: string | undefined; websiteUrl?: string | undefined },
+  input: { businessId: string; userId: string; name: string; slug?: string | undefined; timezone: string; businessType: string; deploymentMode?: string | undefined; defaultLocale?: string | undefined; websiteUrl?: string | undefined; onboardingStage?: "plan" | "website" | undefined },
 ): Promise<{ businessId: string; membershipId: string }> {
   const { businessId, timezone } = input;
   const name = input.name.trim();
@@ -193,7 +204,7 @@ export async function insertBusinessInTransaction(
       // A self-hosted server's businesses get its unlimited plan, not the cloud's free one. Any other mode, development included, keeps them cloud, as before:
       // every mode but cloud skips billing and the paid-plan check on numbers.
       deploymentMode: newBusinessDeploymentMode(input.deploymentMode),
-      onboardingStage: "website",
+      onboardingStage: input.onboardingStage ?? "website",
       // Settings every receptionist shares. The summary starts as the business
       // name; summarySource marks it as the placeholder.
       summary: name,

@@ -6,18 +6,18 @@ const article: HelpArticle = {
   section: "getting-started",
   summary: "Enter your business's name to create the business and start its setup, after you sign up or when you add another business from the business menu.",
   screenPaths: ["/onboarding/business"],
-  location: ["Sign up", "Onboarding", "Step 2 of 8"],
+  location: ["Sign up", "Onboarding", "Step 2"],
   access: "Anyone with an account can create a business here, up to the number one account may own, and becomes its owner. When the business already exists, only its owners and admins can change its name and go on with its setup.",
   purpose: [
-    "This step starts your business's setup, right after you sign up. The name you enter creates your business, makes you its owner and starts the rest of setup: your website, your first documents, the greeting callers hear, your plan, a phone number if your plan includes one, and how you heard about the app.",
+    "This step starts your business's setup, right after you sign up. The name you enter creates your business, makes you its owner and starts the rest of setup: your plan, where plans can be bought in the app, then your website, your first documents, the greeting callers hear, a phone number if your plan includes one, and how you heard about the app.",
     "Use the name your customers know. Your AI receptionist knows your business by this name, the app shows it in the business menu and on your business's public page, and the greeting suggested for the receptionist on a later step uses it.",
     "You also come here to add another business to your account. **Create Business** in the business menu at the top of the sidebar opens this step with an empty name, and the new business goes through the same setup as your first one.",
   ],
   areas: [
     { name: "Logo and name at the top", description: "The app's own logo and name, as on the sign-in page." },
     { name: "Business name", description: "The one box on this step. For a new business it's empty, with an example name as a hint. When the business already exists, for example when you come back to this step or your business started as a demo, it shows the current name." },
-    { name: "Continue", description: "Creates the business, or saves the new name of the existing one, and opens the website step. It stays off until you type a name, while the page is loading, and when your account can't own another business. It says **Saving...** while it works, and a problem shows just above it." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the second. From the second dot on, the dot of a step your business has already reached opens that step." },
+    { name: "Continue", description: "Creates the business, or saves the new name of the existing one, and opens the next step: the plan step, or the website step where setup has no plan step. It stays off until you type a name, while the page is loading, and when your account can't own another business. It says **Saving...** while it works, and a problem shows just above it." },
+    { name: "Progress dots", description: "The dots at the bottom show where you are in setup: the first is sign-up, and this step is the second. There are eight, or seven where setup has no plan step. From the second dot on, the dot of a step your business has already reached opens that step." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at the step your business is on." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],
@@ -35,7 +35,7 @@ const article: HelpArticle = {
       steps: [
         "Sign up. If the app first asks you to choose its own name and logo, do that or skip it.",
         "Type your business's name in **Business name**.",
-        "Select **Continue**. The business is created with you as its owner, and the website step opens.",
+        "Select **Continue**. The business is created with you as its owner, and the plan step opens, or the website step where setup has no plan step.",
       ],
     },
     {
@@ -52,7 +52,7 @@ const article: HelpArticle = {
       steps: [
         "On a later setup step, select the second progress dot at the bottom.",
         "Change the name in **Business name**.",
-        "Select **Continue**. The new name is saved and the website step opens. The steps you've already finished stay finished.",
+        "Select **Continue**. The new name is saved and the step after this one opens: the plan step, or the website step where setup has no plan step. The steps you've already finished stay finished.",
       ],
     },
     {
@@ -72,6 +72,7 @@ const article: HelpArticle = {
     "While you're adding another business, the progress dots lead to the setup steps of the business you were working in, because the new one doesn't exist until you select **Continue**.",
     "If you opened the app from a referral link, the person who shared it is credited with the business you create here, as long as you create it in the same browser.",
     "If you claimed a demo that was made for your business, this step shows the demo's business name. Keep it or change it, then select **Continue**.",
+    "Setup has a plan step only where plans can be bought in the app. Where they can't, **Continue** opens the website step, and setup has seven dots instead of eight.",
     "Coming back to this step never undoes your progress: the steps you've finished stay finished.",
     "You can't skip ahead. Opening a later setup step before you reach it brings you back to the step your business is on.",
   ],
@@ -101,7 +102,7 @@ const article: HelpArticle = {
       answer: "Nothing is created until you select **Continue**. Use your browser's back button to return to the dashboard, where you're still working in the same business.",
     },
   ],
-  related: ["onboarding-brand", "onboarding-website", "team", "ai-settings", "plan"],
+  related: ["onboarding-brand", "onboarding-plan", "onboarding-website", "team", "ai-settings", "plan"],
   keywords: ["business name", "create business", "new business", "add a business", "second business", "multiple businesses", "business menu", "workspace", "workspace menu", "company name", "business limit", "rename business", "time zone"],
 };
 

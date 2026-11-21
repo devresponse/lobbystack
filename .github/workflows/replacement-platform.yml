@@ -131,6 +131,8 @@ jobs:
       - run: pnpm --filter @lobbystack/admin e2e:access-gate
       # And twice more, with the script nonce reported on and enforced (docs/development/README.md).
       - run: pnpm --filter @lobbystack/admin e2e:script-nonce
+      # And once more, as a deployment that takes payments, whose onboarding has the plan step (docs/features/onboarding.md).
+      - run: pnpm --filter @lobbystack/admin e2e:plan-step
       - run: pnpm replacement:telemetry
       - name: Scan repository for vulnerabilities, misconfigurations, and secrets
         uses: aquasecurity/trivy-action@v0.36.0

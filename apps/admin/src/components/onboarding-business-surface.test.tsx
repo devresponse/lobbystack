@@ -34,12 +34,56 @@ describe("business creation onboarding", () => {
     expect(telemetryRef.current!.events).toEqual([]);
   });
 
-  it("moves an existing workspace to the website step before continuing", async () => {
+  it("opens the plan step after the name where the server says the new business starts there", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [] });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST"
+      ? Response.json({ businessId: "business", onboardingStage: "plan" })
+      : Response.json({ businesses: [{ businessId: "business", name: "Acme", active: true, onboardingStage: "plan" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    // The page expects the website step here, and the server's answer wins.
+    render(<QueryClientProvider client={client}><OnboardingBusinessSurface /></QueryClientProvider>);
+    await userEvent.type(screen.getByLabelText("businessName.label"), "Acme");
+    await userEvent.click(screen.getByRole("button", { name: "businessName.continue" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/plan"));
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("warms the plan step where the deployment has one, and opens the website step when the server says so", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [] });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST"
+      ? Response.json({ businessId: "business", onboardingStage: "website" })
+      : Response.json({ businesses: [{ businessId: "business", name: "Acme", active: true, onboardingStage: "website" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><OnboardingBusinessSurface planStep /></QueryClientProvider>);
+    await waitFor(() => expect(router.prefetch).toHaveBeenCalledWith("/onboarding/plan"));
+    expect(router.prefetch).not.toHaveBeenCalledWith("/onboarding/website");
+    await userEvent.type(screen.getByLabelText("businessName.label"), "Acme");
+    await userEvent.click(screen.getByRole("button", { name: "businessName.continue" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/website"));
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the step the page expects when an older server's answer names none", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [] });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST"
+      ? Response.json({ businessId: "business" })
+      : Response.json({ businesses: [{ businessId: "business", name: "Acme", active: true }] })));
+    render(<QueryClientProvider client={client}><OnboardingBusinessSurface planStep /></QueryClientProvider>);
+    await userEvent.type(screen.getByLabelText("businessName.label"), "Acme");
+    await userEvent.click(screen.getByRole("button", { name: "businessName.continue" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/plan"));
+  });
+
+  it("asks for the plan step for an existing workspace, and opens the step the server answers with", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "demo", name: "Climco", active: true }] });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith("/api/businesses") && !init?.method) return Response.json({ businesses: [{ businessId: "demo", name: "Climco HVAC", active: true }] });
-      return Response.json({ ok: true });
+      // A deployment without a plan step answers with the website step.
+      return Response.json({ ok: true, stage: "website" });
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<QueryClientProvider client={client}><OnboardingBusinessSurface /></QueryClientProvider>);
@@ -52,9 +96,27 @@ describe("business creation onboarding", () => {
     const writes = fetchMock.mock.calls.filter(([, init]) => init?.method).map(([url, init]) => [url, init!.method, init!.body]);
     expect(writes).toEqual([
       ["/api/businesses?businessId=demo", "PATCH", JSON.stringify({ name: "Climco HVAC" })],
-      ["/api/onboarding/stage?businessId=demo", "POST", JSON.stringify({ to: "website" })],
+      ["/api/onboarding/stage?businessId=demo", "POST", JSON.stringify({ to: "plan" })],
     ]);
     expect(telemetryRef.current!.events).toEqual([expect.objectContaining({ name: "web.onboarding.business_name_submitted" })]);
+  });
+
+  it("opens the plan step for an existing workspace, such as a claimed demo, where the deployment has one", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "demo", name: "Climco", active: true, onboardingStage: "create_business" }] });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/businesses") && !init?.method) return Response.json({ businesses: [{ businessId: "demo", name: "Climco", active: true, onboardingStage: "plan" }] });
+      return Response.json({ ok: true, stage: "plan" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><OnboardingBusinessSurface planStep /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByLabelText("businessName.label")).toHaveProperty("value", "Climco"));
+    await userEvent.click(screen.getByRole("button", { name: "businessName.continue" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/plan"));
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([url, init]) => [url, init!.body])).toEqual([
+      ["/api/onboarding/stage?businessId=demo", JSON.stringify({ to: "plan" })],
+    ]);
   });
 });
 

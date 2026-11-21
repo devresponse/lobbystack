@@ -14,6 +14,7 @@ import { readBillingPlanLimitBook, readPolarProductLinks } from "./billingPlans"
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar } from "./billingPolar.testing";
 import { loadPromoEndWork, recordPromoEnd } from "./billingPromoEnd";
+import { advanceOnboardingStage } from "./onboarding";
 import { createCheckoutForApi, endPromoPlanForApi, getBillingForApi, getOnboardingForApi } from "./publicApi/operations";
 import { createBusiness } from "./tenancy";
 import { getUsageStatusInTransaction, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction } from "./usage";
@@ -552,7 +553,7 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       const file = allowanceFile();
       file.plans["salons-plus"].limits.businessNumbers = 0;
       await promoCatalog(tx, file);
-      const { businessId } = await ownedBusiness(tx, "chat-only");
+      const { userId, businessId } = await ownedBusiness(tx, "chat-only");
       await as(tx, "owner");
       await tx.execute(sql`update public.businesses set onboarding_stage = 'phone_number' where id = ${businessId}::uuid`);
       const [subscribed] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType: "subscription.active", businessId, payload: { billingKey: `business:${businessId}`, plan: "starter", planCode: "salons-plus", status: "active", billingInterval: "monthly", subscriptionId: "sub_chat_only" } }).returning({ id: providerEvents.id });
@@ -560,9 +561,22 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       await reconcileBillingProviderEvent(context(tx), { businessId, providerEventId: subscribed!.id });
       // Starter itself includes a number, but this plan's claims would all be refused, so the API asks for none and sends the business back to its plan.
       const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
-      const onboarding = await getOnboardingForApi(context(tx), apiCaller);
-      expect(onboarding.stage).toBe("plan");
-      expect(onboarding.checklist).toContainEqual({ id: "phone_number", status: "missing", required: false });
+      try {
+        // The plan step exists where the deployment takes payments, as one that sold this plan does.
+        vi.stubEnv("POLAR_ACCESS_TOKEN", "token");
+        vi.stubEnv("POLAR_ORGANIZATION_ID", "organization");
+        const onboarding = await getOnboardingForApi(context(tx), apiCaller);
+        expect(onboarding.stage).toBe("plan");
+        expect(onboarding.checklist).toContainEqual({ id: "phone_number", status: "missing", required: false });
+        // And asked for the number step, as the greeting step asks, the business goes past it to the last step.
+        await as(tx, "lobbystack_app");
+        expect(await advanceOnboardingStage(context(tx), { userId, businessId, to: "phone_number" })).toBe("attribution");
+        await as(tx, "owner");
+        const [moved] = await rows(tx, sql`select onboarding_stage from public.businesses where id = ${businessId}::uuid`);
+        expect(moved).toEqual({ onboarding_stage: "attribution" });
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
   });
 

@@ -6,7 +6,7 @@ const article: HelpArticle = {
   section: "getting-started",
   summary: "Choose the name and logo everyone sees across the app, in a one-time step that appears only while the app is new, before anyone has created a business.",
   screenPaths: ["/onboarding/brand"],
-  location: ["Sign up", "Onboarding", "Step 2 of 8, before the business"],
+  location: ["Sign up", "Onboarding", "Step 2, before the business"],
   access: "This step appears only while the app is new: before anyone has created a business or chosen the app's name and logo, and only when the app doesn't already come with a name and logo of its own. The first person to save or skip it makes the choice, and nobody sees the step again.",
   purpose: [
     "This step names the app itself, before you set up your business. The name and logo you choose replace the app's current ones for everyone who uses it: on the sign-in and sign-up pages, at the top of every setup step, in the browser tab, at the foot of each business's public page and wherever the dashboard mentions the app by name. Emails and text messages the app sends use the new name too.",
@@ -20,7 +20,7 @@ const article: HelpArticle = {
     { name: "Preview", description: "Shows the name and logo as they will look at the top of the sign-in and setup pages, and updates as you type or choose a logo. Until you do, it shows the app's current name and logo." },
     { name: "Continue", description: "Saves the name and logo and opens the next step, where you name your business. It stays off until you type a name or choose a logo, and says **Saving...** while it works. A problem with the name, the logo or the saving shows just above it." },
     { name: "Skip and keep", description: "The link under **Continue**, followed by the app's current name. It keeps the current name and logo, ends the choice for good and opens the next step." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step shares the second with the business name step that follows it. None of them opens a step yet, because your business doesn't exist yet." },
+    { name: "Progress dots", description: "The dots at the bottom show where you are in setup: the first is sign-up, and this step shares the second with the business name step that follows it. None of them opens a step yet, because your business doesn't exist yet." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at this step until someone makes the choice." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],

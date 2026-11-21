@@ -76,10 +76,10 @@ describe.skipIf(!testUrl)("onboarding website step against dedicated PostgreSQL 
   it("only changes the address when the owner comes back to the step later", async () => {
     await rollbackTest(async (tx) => {
       const { userId, businessId } = await newBusiness(tx);
-      await tx.update(businesses).set({ onboardingStage: "plan" }).where(eq(businesses.id, businessId));
+      await tx.update(businesses).set({ onboardingStage: "greeting" }).where(eq(businesses.id, businessId));
       const saved = await asApp(tx, () => saveOnboardingWebsite({ db: tx as unknown as Database }, { userId, businessId, websiteUrl: "https://www.example.org/menu/" }));
-      expect(saved).toEqual({ websiteUrl: "https://www.example.org/menu", stage: "plan" });
-      expect(await readBusiness(tx, businessId)).toEqual({ websiteUrl: "https://www.example.org/menu", onboardingStage: "plan" });
+      expect(saved).toEqual({ websiteUrl: "https://www.example.org/menu", stage: "greeting" });
+      expect(await readBusiness(tx, businessId)).toEqual({ websiteUrl: "https://www.example.org/menu", onboardingStage: "greeting" });
       expect(await queuedReads(tx, businessId)).toEqual({ documents: 0, imports: 0, outbox: [] });
     });
   });

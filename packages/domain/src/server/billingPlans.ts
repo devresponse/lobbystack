@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   billingIntervals,
+  billingProviderOf,
   brandBillingPlans,
   brandPlanDisplay,
   builtInBillingPlanLimits,
@@ -371,6 +372,18 @@ export async function readBillingPlanLimitBook(tx: DatabaseTransaction, brandCat
 /** Whether this deployment has Polar's token and organization, which every checkout needs. */
 export function polarCheckoutConfigured(env: Record<string, string | undefined>): boolean {
   return Boolean(env.POLAR_ACCESS_TOKEN && env.POLAR_ORGANIZATION_ID);
+}
+
+/**
+ * Whether the deployment's billing provider has what a checkout needs: Polar's
+ * token and organization, or Stripe's key and account. Unlike
+ * polarCheckoutConfigured, it reads the provider the deployment uses, so it
+ * says whether the deployment takes payments at all: a pack's checkout asks
+ * it, and so does onboarding, which has a plan step only where it does.
+ */
+export function billingProviderConfigured(env: Record<string, string | undefined>): boolean {
+  if (billingProviderOf(env) === "stripe") return Boolean(env.STRIPE_API_KEY?.trim() && env.STRIPE_ACCOUNT_ID?.trim());
+  return polarCheckoutConfigured(env);
 }
 
 /** The catalog and its Polar links, read once in the caller's transaction. */

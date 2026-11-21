@@ -418,9 +418,9 @@
     "retry": "Réessayer",
     "current": {
       "title": "Cette entreprise a déjà le forfait {{plan}}.",
-      "description": "Son forfait est déjà en place, vous pouvez donc passer à son numéro de téléphone.",
+      "description": "Son forfait est déjà en place, vous pouvez donc poursuivre la configuration.",
       "prepaidTitle": "Cette entreprise a déjà un forfait prépayé.",
-      "prepaidDescription": "Son forfait est prêt, vous pouvez donc passer à son numéro de téléphone."
+      "prepaidDescription": "Son forfait est prêt, vous pouvez donc poursuivre la configuration."
     },
     "packs": {
       "title": "Forfaits prépayés",

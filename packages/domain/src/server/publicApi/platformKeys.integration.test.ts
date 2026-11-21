@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { apiKeys, auditLogs, billingAccounts, businessMemberships, businesses, contacts, createDatabaseClient, idempotencyKeys, outboxMessages, platformPartnerBusinesses, receptionistProfiles, staff, users } from "@lobbystack/db";
 import { apiBusinessSummarySchema } from "@lobbystack/shared";
@@ -246,27 +246,43 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
     it("lists each business at the onboarding step the dashboard shows", async () => {
       const partnerId = `stages-${randomUUID().slice(0, 8)}`;
       // Oldest first. The list reads them newest first, so the free plan's number step comes after a paid one's.
+      // shows: on a deployment that takes payments, whose onboarding has a plan step. without: on one that takes none.
       const cases = [
-        // A verification step onboarding no longer has resumes at the plan.
-        { stored: "verify_phone", plan: null, state: null, shows: "plan" },
+        // A verification step onboarding no longer has resumes at the plan, or at the website step where there is no plan step.
+        { stored: "verify_phone", plan: null, state: null, shows: "plan", without: "website" },
+        { stored: "plan", plan: null, state: null, shows: "plan", without: "website" },
         // The free plan goes back from the number steps to its plan, and so does a subscription that ended.
-        { stored: "phone_number", plan: "free_cloud", state: null, shows: "plan" },
-        { stored: "phone_number", plan: "starter", state: "canceled", shows: "plan" },
-        { stored: "phone_number_claiming", plan: "pro", state: "active", shows: "phone_number_claiming" },
-        { stored: "knowledge", plan: "free_cloud", state: null, shows: "knowledge" },
+        // Without a plan step to go back to, both stay on the number step, which can be skipped.
+        { stored: "phone_number", plan: "free_cloud", state: null, shows: "plan", without: "phone_number" },
+        { stored: "phone_number", plan: "starter", state: "canceled", shows: "plan", without: "phone_number" },
+        { stored: "phone_number_claiming", plan: "pro", state: "active", shows: "phone_number_claiming", without: "phone_number_claiming" },
+        { stored: "knowledge", plan: "free_cloud", state: null, shows: "knowledge", without: "knowledge" },
       ] as const;
-      const expected: Record<string, string> = {};
+      const withPlanStep: Record<string, string> = {};
+      const withoutPlanStep: Record<string, string> = {};
       for (const entry of cases) {
         const id = randomUUID();
         createdBusinessIds.push(id);
-        expected[id] = entry.shows;
+        withPlanStep[id] = entry.shows;
+        withoutPlanStep[id] = entry.without;
         await admin!.db.insert(businesses).values({ id, slug: `platform-stage-${id}`, name: `Stage ${entry.stored}`, timezone: "UTC", businessType: "test", onboardingStage: entry.stored });
         await admin!.db.insert(platformPartnerBusinesses).values({ businessId: id, partnerId });
         if (entry.plan) await admin!.db.insert(billingAccounts).values({ businessId: id, billingKey: `business:${id}`, plan: entry.plan, subscriptionState: entry.state });
       }
-      const page = await listBusinessesForApi({ db: worker!.db }, { partnerId, limit: 10 });
-      expect(Object.fromEntries(page.data.map((business) => [business.id, business.onboarding_stage]))).toEqual(expected);
-      for (const business of page.data) expect(apiBusinessSummarySchema.safeParse(business).success).toBe(true);
+      const listed = async () => {
+        const page = await listBusinessesForApi({ db: worker!.db }, { partnerId, limit: 10 });
+        for (const business of page.data) expect(apiBusinessSummarySchema.safeParse(business).success).toBe(true);
+        return Object.fromEntries(page.data.map((business) => [business.id, business.onboarding_stage]));
+      };
+      try {
+        vi.stubEnv("POLAR_ACCESS_TOKEN", "token");
+        vi.stubEnv("POLAR_ORGANIZATION_ID", "organization");
+        expect(await listed()).toEqual(withPlanStep);
+        vi.stubEnv("POLAR_ACCESS_TOKEN", "");
+        expect(await listed()).toEqual(withoutPlanStep);
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it("lets only the worker list a partner's businesses", async () => {

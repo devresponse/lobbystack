@@ -4,9 +4,9 @@ const article: HelpArticle = {
   slug: "onboarding-greeting",
   title: "How should we greet your callers?",
   section: "getting-started",
-  summary: "Write the first words your AI receptionist says when it answers a call, then go on to choose a plan.",
+  summary: "Write the first words your AI receptionist says when it answers a call, then go on to pick a phone number, or to the last step when your plan includes no number.",
   screenPaths: ["/onboarding/greeting"],
-  location: ["Sign up", "Onboarding", "Step 5 of 8"],
+  location: ["Sign up", "Onboarding", "Step 6 of 8, or step 5 of 7"],
   access: "Anyone on the team of a business that hasn't finished setup is brought to its current step and can see the saved greeting here. Only owners and admins can save the greeting and go on from this step.",
   purpose: [
     "This step sets the greeting: the sentence your AI receptionist says as soon as it answers a call. It's the first thing every caller hears.",
@@ -18,8 +18,8 @@ const article: HelpArticle = {
     { name: "Logo and name at the top", description: "The app's own logo and name, as on the sign-in page." },
     { name: "Website reading progress", description: "Shows above the greeting only when a website has already been added to your business's knowledge, and the app is reading it or has read it. While it reads, it shows **Reading** with the site's address, a progress bar and counts of the pages read so far and the pages ready for questions, and it updates by itself. When it's done, it says how many pages are ready for questions. If reading failed, it says so and suggests adding your details by hand or trying the import again from the dashboard. It doesn't appear for an address saved on the website step, because that step doesn't read the site." },
     { name: "Greeting", description: "The box for the words your receptionist opens each call with. It holds the greeting saved for your business, which you can change. When it's empty, it shows an example." },
-    { name: "Continue", description: "Saves the greeting and opens the next step, where you choose a plan. It stays off until the box has some text and the page has finished loading, and says **Saving...** while it works. A problem with saving shows just above it." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the fifth. From the second dot on, the dot of a step your business has already reached opens that step." },
+    { name: "Continue", description: "Saves the greeting and opens the next step: the one where you pick a phone number when your plan includes one, else the last step. It stays off until the box has some text and the page has finished loading, and says **Saving...** while it works. A problem with saving shows just above it." },
+    { name: "Progress dots", description: "The dots at the bottom show where you are in setup: the first is sign-up, and this step is the sixth of eight. Where setup has no plan step, it's the fifth of seven. From the second dot on, the dot of a step your business has already reached opens that step." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at the step your business is on." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],
@@ -36,15 +36,15 @@ const article: HelpArticle = {
       title: "Set your greeting",
       steps: [
         "Read the suggested greeting in **Greeting**, and change it if you like.",
-        "Select **Continue**. The greeting is saved and the step for choosing a plan opens.",
+        "Select **Continue**. The greeting is saved and the next step opens: the phone number step when your plan includes a number, else the last step.",
       ],
     },
     {
       title: "Change the greeting during setup",
       steps: [
-        "On a later setup step, select the fifth progress dot at the bottom.",
+        "On a later setup step, select the sixth progress dot at the bottom, or the fifth where setup has no plan step.",
         "Change the text in **Greeting**.",
-        "Select **Continue**. The new greeting is saved and the plan step opens. The steps you've already finished stay finished.",
+        "Select **Continue**. The new greeting is saved and the step after this one opens. The steps you've already finished stay finished.",
         "To return to the step you were on, select its progress dot.",
       ],
     },
@@ -90,7 +90,7 @@ const article: HelpArticle = {
       answer: "Yes. Turn off **Tell callers about AI and recording** on the **AI settings** screen. Do this only if you tell callers another way, because many places require it.",
     },
   ],
-  related: ["onboarding-knowledge", "onboarding-plan", "ai-settings", "ai-agents", "website-widget"],
+  related: ["onboarding-knowledge", "onboarding-number", "onboarding-attribution", "ai-settings", "ai-agents", "website-widget"],
   keywords: ["greeting", "welcome message", "opening line", "call greeting", "first words", "how calls start", "suggested greeting", "change greeting", "call language", "AI notice", "recording notice"],
 };
 

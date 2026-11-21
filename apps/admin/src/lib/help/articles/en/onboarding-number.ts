@@ -6,7 +6,7 @@ const article: HelpArticle = {
   section: "getting-started",
   summary: "Choose the local phone number callers dial to reach your AI receptionist, or skip the step and pick one after setup.",
   screenPaths: ["/onboarding/number"],
-  location: ["Sign up", "Onboarding", "Step 7 of 8"],
+  location: ["Sign up", "Onboarding", "Step 7 of 8, or step 6 of 7"],
   access: "Only owners and admins of the business can see the numbers on offer, pick one or skip this step. Others on the team see a message that numbers couldn't be loaded in place of the numbers. Setup only comes to this step when the business's plan includes a phone number.",
   purpose: [
     "This step gives your AI receptionist a phone number of its own. Callers dial it to reach your business, and the receptionist answers.",
@@ -22,7 +22,7 @@ const article: HelpArticle = {
     { name: "Messages under the list", description: "Say in red when numbers couldn't be loaded, searched or set up, and what to do. A message about a failure on the app's side ends with an **Error ID** to give to support." },
     { name: "I'll add a number later", description: "The link at the bottom. It goes on to the last step without a number, and says **Skipping...** while it works. It's turned off while a number is being set up." },
     { name: "Selected number", description: "When the business already has its number, for example when you come back to this step later in setup, the title reads **Your AI's phone number** and the step shows the number under **Selected number**, with **Continue** to go on to the last step." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the seventh. From the second dot on, the dot of a step your business has already reached opens that step." },
+    { name: "Progress dots", description: "The dots at the bottom show where you are in setup: the first is sign-up, and this step is the seventh of eight. Where setup has no plan step, it's the sixth of seven. From the second dot on, the dot of a step your business has already reached opens that step." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at the step your business is on." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],
@@ -62,7 +62,7 @@ const article: HelpArticle = {
     {
       title: "Pick a number after skipping, before you finish setup",
       steps: [
-        "On the last setup step, select the seventh progress dot at the bottom.",
+        "On the last setup step, select the progress dot just before the last one at the bottom.",
         "Pick a number as above. When it's ready, the last step opens again.",
       ],
     },
@@ -104,7 +104,7 @@ const article: HelpArticle = {
     },
     {
       question: "The step says a dedicated business number needs a paid plan.",
-      answer: "Your business's plan doesn't include a phone number. Go back to the plan step with the sixth progress dot and choose a plan that includes one, or select **I'll add a number later**.",
+      answer: "Your business's plan doesn't include a phone number. Where setup has a plan step, go back to it with the third progress dot and choose a plan that includes a number. Otherwise, select **I'll add a number later**.",
     },
     {
       question: "The step says another number for this workspace is still being set up.",

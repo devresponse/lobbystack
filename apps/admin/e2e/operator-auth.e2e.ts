@@ -130,14 +130,14 @@ async function completeOnboardingBySkippingOptionalInputs(page: Page): Promise<v
   await expect(page).toHaveURL("/onboarding/greeting");
   await page.getByLabel("Greeting").fill("Thanks for calling. How can we help?");
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page).toHaveURL("/onboarding/plan");
-  await expect(page).toHaveURL("/onboarding/plan");
-  await page.goto("/onboarding/plan?checkout=success");
-  await expect(page.getByRole("heading", { name: "Choose your plan", exact: true })).toBeVisible();
-  await expect(page.getByText("Checkout completed", { exact: true })).toHaveCount(0);
-  await expect(page).toHaveURL("/onboarding/plan?checkout=success");
-  await page.getByRole("button", { name: "Start free" }).click();
+  // This server takes no payments, so its onboarding has no plan step (onboarding-plan-step.e2e.ts covers a server
+  // that has one). The business is on Free, which has no number to pick, so the last step follows the greeting.
   await expect(page).toHaveURL("/onboarding/attribution");
+  await expect(page.getByRole("navigation", { name: "Onboarding progress: step 7 of 7" })).toBeVisible();
+  // The plan page sends everyone on to the step they are on, whatever its address carries.
+  await page.goto("/onboarding/plan?checkout=success");
+  await expect(page).toHaveURL("/onboarding/attribution");
+  await expect(page.getByRole("heading", { name: "Choose your plan", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Skip", exact: true }).click();
   await expect(page).toHaveURL("/");
 }

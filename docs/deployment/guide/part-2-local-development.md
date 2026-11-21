@@ -1,6 +1,6 @@
 # Part 2. Local development and testing
 
-**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)). [2.2](#22-install-the-tools)'s pnpm moved to 12.15.0 on 2026-10-28 for fork PR #91: on Linux, `pnpm install`, the build and the tests ran with it, but not yet on Windows or a Mac. [2.6](#26-sign-in-for-the-first-time-and-create-a-test-business)'s brand line was updated on 2026-11-01 for fork PR #112, and its website step on 2026-11-02 for fork PR #127, which stopped onboarding reading the site, both from the code only.
+**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)). [2.2](#22-install-the-tools)'s pnpm moved to 12.15.0 on 2026-10-28 for fork PR #91: on Linux, `pnpm install`, the build and the tests ran with it, but not yet on Windows or a Mac. [2.6](#26-sign-in-for-the-first-time-and-create-a-test-business)'s brand line was updated on 2026-11-01 for fork PR #112, and its website step on 2026-11-02 for fork PR #127, which stopped onboarding reading the site, both from the code only. Its plan step was taken out on 2026-11-21 for fork PR #224, which leaves the step out where no plans are sold; a browser test walks those steps on such a server.
 
 This part puts a complete LobbyStack on your own computer. It's the safest place to learn how LobbyStack works and to try changes, because nothing you do here reaches real customers. There are two ways to run it:
 
@@ -145,8 +145,9 @@ Two things to know about Way B:
    2. Your website, or **I don't have a website**. Onboarding only saves the address and reads nothing; to have the receptionist read the site, add it later in **Knowledge**, which needs a Firecrawl key.
    3. Knowledge: **Skip for now**.
    4. The greeting callers hear.
-   5. The plan: choose **Start free**. The page lists the plans of AlloPlace's `brands/alloplace/billing.json`, in Canadian dollars, with **Starter** and **Pro** greyed out, since nothing sells them on your computer (fork PR #88). On your own instance a business has unlimited call minutes anyway.
-   6. How you heard about AlloPlace: **Skip**.
+   5. How you heard about AlloPlace: **Skip**.
+
+   No plan step appears: nothing sells plans on your computer, so since fork PR #224 onboarding leaves the step out, and the bar under each step has seven dots. On your own instance a business has unlimited call minutes. Where plans are sold, the plan step comes right after the business's name ([6.3](part-6-first-run.md#63-set-up-the-first-business)).
 5. The dashboard opens with your business.
 6. Add at least one service and your opening hours. The receptionist can't book anything until the business has an active service.
 7. With your OpenAI key in `.env.local`, restart `pnpm dev` and use the dashboard's **Test Call** button to talk to your receptionist from the browser. (Not tested yet: the test machine had no OpenAI key.)

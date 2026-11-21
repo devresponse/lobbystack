@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { onboardingHasPlanStep } from "@lobbystack/domain";
 import { OnboardingBusinessSurface } from "@/components/onboarding-business-surface";
 import { asksInitialBranding } from "@/lib/onboarding-branding";
 import { requireOnboardingStage } from "@/lib/onboarding-route";
@@ -10,5 +11,5 @@ export default async function OnboardingBusinessPage({ searchParams }: { searchP
   const { userId, businessId } = await requireOnboardingStage("/onboarding/business", { allowCreate: createNew });
   // A fresh deployment's first owner names it before naming their business.
   if (businessId === null && await asksInitialBranding(userId)) redirect("/onboarding/brand");
-  return <OnboardingBusinessSurface createNew={createNew} />;
+  return <OnboardingBusinessSurface createNew={createNew} planStep={onboardingHasPlanStep()} />;
 }

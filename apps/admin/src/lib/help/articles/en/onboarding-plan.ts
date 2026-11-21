@@ -6,12 +6,12 @@ const article: HelpArticle = {
   section: "getting-started",
   summary: "Compare the plans on offer and choose the one your business starts on, paying on a secure payment page when the plan has a price, or unlock a plan with a promo code.",
   screenPaths: ["/onboarding/plan"],
-  location: ["Sign up", "Onboarding", "Step 6 of 8"],
+  location: ["Sign up", "Onboarding", "Step 3 of 8"],
   access: "Anyone on the team who is brought to this step can see the plans. Only owners and admins can choose a plan, pay for one, use a promo code or go on from this step.",
   purpose: [
-    "This step sets how your business pays for the app. Each card shows one plan on offer: its price, what it includes, such as voice minutes, receptionists and a phone number, and a button to start it.",
+    "This step sets how your business pays for the app. It comes right after your business's name, before anything else about the business, so you choose the kind of account first. Each card shows one plan on offer: its price, what it includes, such as voice minutes, receptionists and a phone number, and a button to start it.",
     "A plan with a price opens a secure payment page. After you pay, you come back to this step, and setup goes on by itself as soon as the payment is confirmed. Nothing is charged until you pay on that page.",
-    "The plan you choose decides the next step. The free plan, where one is offered, skips the phone number step and opens the last one. A paid or prepaid plan that includes a phone number goes on to the step where you pick one, and one without a number goes on to the last step.",
+    "Whichever plan you choose, the website step comes next, then your documents and the greeting. The plan decides what follows the greeting. A paid or prepaid plan that includes a phone number goes on to the step where you pick one. The free plan, where one is offered, and a plan without a number go straight to the last step.",
     "The plans, their prices and what they include can change over time, and the step always shows the current ones. After setup, you see and change your plan on the **Plan** screen.",
   ],
   areas: [
@@ -24,8 +24,8 @@ const article: HelpArticle = {
     { name: "Billing email", description: "Shows only when your own email can't be used for this business's billing. It asks for another address for the business's receipts." },
     { name: "Messages under the plans", description: "Say in red when a plan couldn't start or setup couldn't go on, and why." },
     { name: "Plan comparison", description: "Where the step has one, a table under the cards, with a heading such as **Compare plans in detail**, that compares the plans feature by feature, in groups, with a column for each plan. A check mark means the plan includes the feature, and a dash means it doesn't. On a small screen, swipe the table sideways to see every plan." },
-    { name: "Already on a plan", description: "Shows in place of the cards when the business already has a paid plan, for example one set up for you, with the words \"This business is already on the\" followed by the plan's name. A business with a prepaid plan sees \"This business already has a prepaid plan.\" Select **Continue** to go on." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the sixth. From the second dot on, the dot of a step your business has already reached opens that step." },
+    { name: "Already on a plan", description: "Shows in place of the cards when the business already has a paid plan, for example one set up for you or one you paid for here earlier, with the words \"This business is already on the\" followed by the plan's name. A business with a prepaid plan sees \"This business already has a prepaid plan.\" Select **Continue** to go on." },
+    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the third. From the second dot on, the dot of a step your business has already reached opens that step." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at the step your business is on." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],
@@ -53,15 +53,14 @@ const article: HelpArticle = {
         "Compare the cards, and the table under them if there is one.",
         "Select the button on the card of the plan you want. A spinner shows while the payment page opens.",
         "Enter your payment details on the secure payment page and pay.",
-        "Wait on this step when you come back. Once the payment is confirmed, the step for picking a phone number opens.",
-        "If the plan includes no phone number, this step says instead that the business is already on its plan. Select **Continue** to go on to the last step.",
+        "Wait on this step when you come back. Once the payment is confirmed, the website step opens.",
       ],
     },
     {
       title: "Start on a free plan",
       steps: [
         "Where a free plan is on offer, select the button on its card.",
-        "No payment is needed. Setup skips the phone number step and opens the last step.",
+        "No payment is needed. The website step opens. Later, setup skips the phone number step and goes from the greeting to the last step.",
       ],
     },
     {
@@ -70,7 +69,7 @@ const article: HelpArticle = {
         "Find the prepaid plan's card. If the prepaid plans have tabs for different lengths, select the length you want.",
         "Select the button on the card, and pay on the secure payment page.",
         "Wait on this step when you come back. It shows **Adding your minutes...** until the payment arrives.",
-        "The step for picking a phone number opens, or the last step if the prepaid plan includes no phone number.",
+        "The website step opens.",
       ],
     },
     {
@@ -94,7 +93,16 @@ const article: HelpArticle = {
       title: "Go on with the plan the business already has",
       steps: [
         "When the step says the business is already on a plan, select **Continue**.",
-        "The step for picking a phone number opens, or the last step if the plan includes no phone number.",
+        "The website step opens. If you came back to this step from a later one, you return to the step your business is on, as the next task describes.",
+      ],
+    },
+    {
+      title: "Change the plan during setup",
+      steps: [
+        "On a later setup step, select the third progress dot at the bottom.",
+        "While the business is on the free plan, choose a plan from the cards and pay for it as above, or select the free plan's button to keep it. Once the business has a paid or prepaid plan, the step says so in place of the cards, with **Continue**.",
+        "While your business is on the website, documents or greeting step, you return to that step, and nothing you finished is repeated.",
+        "Once your business is on the phone number step or the last step, the phone number step opens when the plan you have now includes a number, else the last step.",
       ],
     },
   ],
@@ -106,6 +114,7 @@ const article: HelpArticle = {
     "If you signed up from a link that carries a promo code, the box opens with the code filled in and checked when you reach this step, as long as you use the same browser.",
     "Purchases for a business go one at a time. While the payment page for one purchase is being prepared, another purchase for the same business is refused. Wait a minute and try again.",
     "Only owners and admins can buy a plan or a prepaid plan, or use a promo code. If plans can't be bought here for your account, their buttons are turned off and the promo code link doesn't show.",
+    "Setup has this step only where plans can be bought in the app. Where they can't, setup goes from the business's name straight to the website step, and has seven dots instead of eight.",
     "After setup, see your plan, change it or buy another on the **Plan** screen under **Settings**.",
   ],
   troubleshooting: [
@@ -158,7 +167,7 @@ const article: HelpArticle = {
       answer: "A plan bought for the business took effect before the payment for the prepaid plan arrived, so setup goes on with that plan. The payment for the prepaid plan will be refunded.",
     },
   ],
-  related: ["onboarding-greeting", "onboarding-number", "onboarding-attribution", "plan", "usage", "phone-number"],
+  related: ["onboarding-business", "onboarding-website", "onboarding-number", "plan", "usage", "phone-number"],
   keywords: ["plan", "pricing", "prices", "subscription", "choose a plan", "free plan", "prepaid plan", "prepaid pack", "promo code", "coupon", "discount", "billing", "payment", "monthly", "annual", "checkout", "billing email"],
 };
 

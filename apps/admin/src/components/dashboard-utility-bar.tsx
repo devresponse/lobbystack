@@ -9,16 +9,21 @@ import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { DashboardTestCallWidget } from "./dashboard-test-call-widget";
 import { DashboardFeedbackWidget } from "./dashboard-feedback-widget";
-import { DashboardAbandonIntent } from "./dashboard-abandon-intent";
 import { ScreenHelpButton } from "./screen-help-button";
 
 
+/**
+ * The dashboard's top bar. The "Before you go" survey, which asked a departing
+ * operator two questions (`DashboardAbandonIntent`), is switched off, as the
+ * maintainer asked: it no longer opens when the pointer leaves the window or
+ * the page sits idle. Its code and words are kept, so rendering
+ * `<DashboardAbandonIntent businessId={business.businessId} />` here again
+ * brings it back. The Feedback button stays, for anyone who wants to write.
+ */
 export function DashboardUtilityBar() {
   const { t } = useTranslation("nav");
   const { business } = useActiveBusiness();
   return (
-    <>
-    {business ? <DashboardAbandonIntent businessId={business.businessId} /> : null}
     <div className="pointer-events-none absolute inset-x-0 top-4 z-40 hidden md:block">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-end gap-0.5 px-6">
         {/* The business's tools, then the screen's help, last at the top right.
@@ -51,6 +56,5 @@ export function DashboardUtilityBar() {
         <ScreenHelpButton className="pointer-events-auto -mr-1" />
       </div>
     </div>
-    </>
   );
 }

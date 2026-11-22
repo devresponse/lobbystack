@@ -34,7 +34,7 @@ Do not duplicate ownership between runtimes unless there is a specific analytics
 - `web.activation.first_call_completed`
 - `web.activation.upgrade_prompt_shown`
 - `web.activation.upgrade_prompt_clicked`
-- `web.activation.abandon_intent`
+- `web.activation.abandon_intent`: the dashboard's **Before you go** survey opened. Not sent since fork PR #226 switched the survey off ([decisions](../project/decisions.md#choose-what-to-build)).
 - `web.knowledge.upload_started`
 - `web.knowledge.upload_completed`
 - `web.integration.calendar_connect_started`

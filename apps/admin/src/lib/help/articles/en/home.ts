@@ -131,10 +131,6 @@ const article: HelpArticle = {
       question: "The numbers at the top are missing and the lists are empty. What can I do?",
       answer: "Home couldn't load the business's activity. Check your connection and reload the page. If you belong to several businesses, check which one is chosen at the top of the sidebar.",
     },
-    {
-      question: "A box titled Before you go appeared. What is it?",
-      answer: "It is a short, optional survey that asks whether you ran into an issue or are missing something. It can appear when your pointer leaves the top of the window or when the dashboard sits untouched for a few minutes. Answer either question and select **Send**, or select **Not now** to close it. It shows at most once every 30 days for each business in the same browser.",
-    },
   ],
   related: ["calls", "call-details", "messages", "questions", "appointments", "analytics", "setup-guide", "phone-number", "plan", "usage", "affiliate-program"],
   keywords: ["dashboard", "overview", "start page", "home page", "action required", "callbacks", "follow-ups", "handoffs", "cancellation requests", "approve cancellation", "upcoming appointments", "recent calls", "calls per month", "test call"],

@@ -40,7 +40,6 @@ Three things that only the repository's owner can do finish what fork PRs #169 a
 ## Do these before a date
 
 - **Move each instance still on PostgreSQL 16 to 18 before 2028-11-09,** when 16's support ends ([7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions)). Since fork PR #223 new installs run 18, and CI's database job runs on 18 and 16. Once no instance runs 16, drop the job's `16` leg in `.github/workflows/ci.yml`.
-- **Move the voice eval's callers off `gpt-4o-mini-tts` before 2027-01-06.** OpenAI shuts the model down that day (OpenAI's deprecations page, read on 2026-10-27). Since fork PR #97 the recorded greeting no longer uses it, but `scripts/voice/live-call-eval.ts` still voices its scripted callers with it, so `pnpm voice:eval` stops working that day. A few hours: another speech model, or a GPT-Live session like the recorder's ([testing](../voice/testing.md#run-the-api-eval)).
 - **Make the measured test coverage a floor from 2026-12-16.** Since fork PR #194 on `develop/r2`, CI's `coverage` job publishes each package's figures and blocks nothing, so that a month of runs can show how far they move. Then set each package's floor from them in `vitest.coverage.mts` and add the job to the `validate` gate in `.github/workflows/ci.yml` ([development](../development/README.md#see-how-much-the-tests-cover), AUDIT-021 in [the technical audit](../reviews/technical-audit-2026-11-14.md)).
 
 ## Test these

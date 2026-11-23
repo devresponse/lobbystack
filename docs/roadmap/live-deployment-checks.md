@@ -41,7 +41,7 @@ Five additions behind one token, `LIVE_CHECKS_TOKEN`, off until it's set, like `
 - **On a schedule and by hand:** smoke hourly, deep nightly, and **Run workflow**. GitHub runs these only from the default branch, so the workflow file has to be on `main` (a decision below).
 - **Results:** the job summary, a commit status `live-checks/<deployment>` on the deployed commit, the deployment's own record of the run, and an alert when a deployment turns red and when it recovers.
 - **Nothing rolls back by itself.** A runbook says what to try, including when rolling back past a migration is safe.
-- **Between runs:** an uptime monitor on `/api/health/ready` and the fleet address, which item 6 of [open items](../project/open-items.md#do-these-on-the-demo-after-deploys) still asks for, and Railway's project webhook for failed and crashed deploys.
+- **Between runs:** an uptime monitor on `/api/health/ready` and the fleet address, which the alerts item of [open items](../project/open-items.md#do-these-on-the-deployments) still asks for, and Railway's project webhook for failed and crashed deploys.
 
 ## Keep it safe
 

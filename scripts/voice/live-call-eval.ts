@@ -82,9 +82,18 @@ function phoneLine(pcm: Buffer): Buffer {
   return out;
 }
 
+// The callers speak in a voice other than the receptionist's (LIVE_VOICE).
+const CALLER_VOICE = "alloy";
+
+// GPT-Live says each caller line in a short session of its own, the way the
+// worker records a call's opening, and the line is kept only when GPT-Live's
+// transcript matches it. OpenAI's speech model gpt-4o-mini-tts voiced the
+// callers before and shuts down on 2027-01-06. Both give 16-bit PCM at 24 kHz.
 async function speak(text: string): Promise<Buffer> {
-  const response = await client.audio.speech.create({ model: "gpt-4o-mini-tts", voice: "alloy", input: text, response_format: "pcm" });
-  const pcm = Buffer.from(await response.arrayBuffer());
+  const { audio } = await recordGreeting(client, { greeting: text, voice: CALLER_VOICE, snapshot }).catch((error: unknown) => {
+    throw new Error(`Couldn't voice the caller's line "${text}": ${error instanceof Error ? error.message : String(error)}`);
+  });
+  const pcm = Buffer.from(audio, "base64");
   return values.browser ? pcm : phoneLine(pcm);
 }
 
@@ -256,8 +265,17 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
   }
 }
 
+// Each line takes a GPT-Live session of a few seconds, so they're voiced as many at once as runs go.
+const lines = [...new Set(scenarios.flatMap((scenario) => [scenario.opening ?? OPENING, ...scenario.lines.map((line) => line.text)]))];
+console.log(`Voicing ${lines.length} caller line${lines.length === 1 ? "" : "s"} with GPT-Live.`);
 const audio = new Map<string, Buffer>();
-for (const text of new Set(scenarios.flatMap((scenario) => [scenario.opening ?? OPENING, ...scenario.lines.map((line) => line.text)]))) audio.set(text, await speak(text));
+let nextLine = 0;
+await Promise.all(Array.from({ length: Math.min(Number(values.concurrency), lines.length) }, async () => {
+  while (nextLine < lines.length) {
+    const text = lines[nextLine++]!;
+    audio.set(text, await speak(text));
+  }
+}));
 
 const jobs = Array.from({ length: Number(values.runs) }, () => scenarios).flat();
 const results: RunResult[] = [];

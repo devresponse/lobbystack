@@ -11,7 +11,7 @@ const article: HelpArticle = {
   purpose: [
     "Claiming turns a demo into a business on your account. The business the demo was made for becomes yours, with its name, its website address, the receptionist and its greeting, what the receptionist learned from the website, and the calls made from the demo page with any messages taken on them. You become its owner.",
     "You need an account to claim. **Claim this receptionist** on the demo page opens the sign-up page: create an account there, or sign in to one you have, and the app brings you to this page. If you're already signed in, it comes straight here. You fill in nothing on this page: it claims the receptionist on its own as soon as you're signed in.",
-    "Once it's claimed, the app switches to the business and setup opens at the step that asks for the business's name, with the demo's name filled in. From there, setup goes on as for any new business: the website, training documents, greeting, plan, a phone number if your plan includes one, and how you heard about the app.",
+    "Once it's claimed, the app switches to the business and setup opens at the step that asks for the business's name, with the demo's name filled in. From there, setup goes on as for any new business: your plan, where plans can be bought in the app, then the website, training documents, greeting, a phone number if your plan includes one, and how you heard about the app.",
     "The person who prepared the demo leaves the business's team when you claim it and can no longer open the business. You can invite your own team from the **Team** screen.",
   ],
   areas: [
@@ -70,7 +70,7 @@ const article: HelpArticle = {
     "If you're signed out when the page claims, it opens the log-in page and comes back here once you sign in. **Create one** on that page makes a new account and also comes back here.",
     "Claiming counts toward the number of businesses your account can own, the same as creating one. Only businesses you own count, not ones where you're an admin, scheduler or viewer. The business menu at the top of the sidebar shows how many you own and the most you can own, next to **Create Business**.",
     "When the claim is refused because of that limit, nothing changes: the demo stays open for you to claim once you have room, until it expires or someone else claims it.",
-    "You don't need a plan to claim. You choose one during setup, as for any new business.",
+    "You don't need a plan to claim. You choose one during setup, right after the business's name, as for any new business.",
     "Once you claim it, the demo's link says the demo has already been claimed, and nobody else can claim it. The person who prepared it sees it as claimed on their **Prospect demos** screen.",
     "Calls made from the demo page stay with the business and can show on the **Calls** screen. They don't add to **Questions**, and they don't count toward your plan's usage.",
     "Messages the receptionist took on demo calls stay with the business too and can show on the **Messages** screen. People trying a demo often give sample names and numbers, so check the details before you call anyone back.",

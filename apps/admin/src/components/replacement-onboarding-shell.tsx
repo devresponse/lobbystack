@@ -13,30 +13,13 @@ type OnboardingShellProps = {
   eyebrow?: string;
   title: string;
   description?: React.ReactNode;
-  progress?: { current: number; navigableUntil?: number; total: number } | null;
+  /** The dots: the step shown, the last one the business can open, and the page behind each dot in order (onboardingStepPaths). */
+  progress?: { current: number; navigableUntil?: number; paths: ReadonlyArray<string | undefined> } | null;
   width?: "sm" | "md" | "lg" | "xl" | "wide";
   children: React.ReactNode;
   legalFooter?: React.ReactNode;
   onSignOut?: () => void;
 };
-
-/**
- * Onboarding routes after sign-up (step 1), keyed by path. The brand step
- * comes before the business only for a deployment's first owner, so it shares
- * step 2 and the progress dots keep linking that step to the business.
- */
-export const onboardingRoutes = {
-  "/onboarding/brand": { key: "brand", step: 2, width: "md" },
-  "/onboarding/business": { key: "businessName", step: 2, width: "md" },
-  "/onboarding/website": { key: "website", step: 3, width: "md" },
-  "/onboarding/knowledge": { key: "knowledge", step: 4, width: "lg" },
-  "/onboarding/greeting": { key: "greeting", step: 5, width: "md" },
-  "/onboarding/plan": { key: "plan", step: 6, width: "wide" },
-  "/onboarding/number": { key: "number", step: 7, width: "lg" },
-  "/onboarding/attribution": { key: "attribution", step: 8, width: "xl" },
-} as const;
-
-const progressRoutes: Record<number, string> = Object.fromEntries(Object.entries(onboardingRoutes).map(([path, route]) => [route.step, path]));
 
 const widths = { sm: "max-w-sm", md: "max-w-md", lg: "max-w-lg", xl: "max-w-xl", wide: "max-w-7xl" } as const;
 
@@ -69,14 +52,15 @@ export function ReplacementOnboardingShell({ eyebrow, title, description, progre
       </main>
       <footer className="flex flex-col items-center gap-4 px-6 pb-12 pt-16">
         {progress ? (
-          <nav aria-label={`Onboarding progress: step ${progress.current} of ${progress.total}`}>
+          <nav aria-label={`Onboarding progress: step ${progress.current} of ${progress.paths.length}`}>
             <ol className="flex items-center justify-center gap-1.5">
-              {Array.from({ length: progress.total }, (_, index) => index + 1)
-                .map((step) => {
+              {progress.paths
+                .map((path, index) => {
+                  const step = index + 1;
                   const active = step === progress.current;
                   const completed = step < progress.current;
                   const canNavigate = step <= (progress.navigableUntil ?? progress.current);
-                  const href = !active && canNavigate ? progressRoutes[step] : undefined;
+                  const href = !active && canNavigate ? path : undefined;
                   const className = cn(
                     "h-1.5 rounded-full transition-all",
                     active ? "w-6 bg-foreground" : "w-1.5",

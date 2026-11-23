@@ -22,6 +22,7 @@ import { useTelemetry } from "@/components/product-analytics";
 import { paidPackToastKey, usePackCheckout, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
 import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import { intlLocale } from "@/lib/locale";
+import { onboardingStagePath, onboardingStagePaths } from "@/lib/onboarding-steps";
 import { cardBullets, cardText, displayText, hasPackCards, openingInterval, packCardBullets, packLengthKey, packLengthName, packLengths, packName, packPrice, packPriceSuffix, packSectionText, packTextValues, pageTextValues, planCardColumns, planCards, planTextValues, pricedIntervals, screenCards, shownInterval, type PlanCardView, type PlanDisplayTranslate } from "@/lib/plan-display";
 import type { BillingPackOfferViewModel, PackCheckoutViewModel } from "@/lib/page-view-models";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,7 @@ type BillingInterval = "monthly" | "annual";
 type Plan = "free_cloud" | "starter" | "pro" | "enterprise";
 type Checkout = { id: string; status: string; checkoutUrl: string | null; error: string | null; refusal: PlanChangeRefusal | null };
 type CheckoutInput = { target: "starter" | "pro"; billingEmail?: string };
-type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList; planDisplay?: BillingDisplay | null; packOffers?: BillingPackOfferViewModel[]; packCheckout?: PackCheckoutViewModel | null; limits?: { includedBusinessNumbers: number | null } };
+type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList; planDisplay?: BillingDisplay | null; packOffers?: BillingPackOfferViewModel[]; packCheckout?: PackCheckoutViewModel | null };
 
 // The built-in bullets, which a card shows when billing.json's display section gives it none.
 const builtInFeatures: Record<Plan, string[]> = {
@@ -43,6 +44,30 @@ const builtInFeatures: Record<Plan, string[]> = {
 const REPORTED_CHECKOUT_KEY = "lobbystack.onboarding.checkoutReported";
 
 const billingUrl = (businessId: string) => `/api/billing?businessId=${encodeURIComponent(businessId)}`;
+
+// The stages after the greeting: the number step and the ones that follow it.
+const stagesPastGreeting: ReadonlySet<string | undefined> = new Set(["phone_number", "phone_number_claiming", "attribution", "complete"]);
+
+/**
+ * Leaves the plan step once the business has its plan, and answers with the
+ * page to open, by the stage the business is stored on:
+ * - On the plan step, the business moves on to the website step. A list that
+ *   doesn't say the stage is read as this one: the server opens the website
+ *   step for a business already past it, and moves nothing.
+ * - Back here from the website, documents or greeting step, it returns to
+ *   that step and nothing moves, so changing the plan repeats no step.
+ * - Back here from the number step or a later one, as a business whose plan
+ *   includes no number is sent, it goes to the number step when the plan it
+ *   has now includes a number to pick, else to the last step. The server
+ *   says which; Free (free) always goes to the last step.
+ */
+async function leavePlanStep(business: { businessId: string; onboardingStage?: string }, free: boolean): Promise<string> {
+  const stage = business.onboardingStage;
+  if (stage === "website" || stage === "knowledge" || stage === "greeting") return onboardingStagePaths[stage];
+  const to = !stagesPastGreeting.has(stage) ? "website" : free ? "attribution" : "phone_number";
+  const moved = await requestJson<{ stage?: string }>(`/api/onboarding/stage?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", body: JSON.stringify({ to }) });
+  return onboardingStagePath(moved.stage) ?? onboardingStagePaths[to];
+}
 
 /**
  * The funnel should count checkouts, not visits to the return URL. A ref only
@@ -81,8 +106,8 @@ export function OnboardingPlanSurface() {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   // A checkout Polar couldn't make this business's customer for starts again with a billing email.
   const [emailPrompt, setEmailPrompt] = useState<{ refusal: BillingEmailRefusal; email: string | null; target: "starter" | "pro" } | null>(null);
-  const returnAttempt = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
-  const packReturnAttempt = useRef<{ key: string; promise: Promise<"attribution" | "phone_number"> } | null>(null);
+  const returnAttempt = useRef<{ key: string; promise: Promise<string> } | null>(null);
+  const packReturnAttempt = useRef<{ key: string; promise: Promise<string> } | null>(null);
   // The length of the prepaid plans the person picked, as the plans' interval, while the packs show under a heading of their own.
   const [chosenLength, setChosenLength] = useState<string | null>(null);
   // The pack whose purchase, which ends the business's Starter or Pro plan, waits for the person to confirm.
@@ -106,17 +131,15 @@ export function OnboardingPlanSurface() {
     enabled: Boolean(checkoutRequestId),
     refetchInterval: (query) => query.state.data?.status === "ready" || query.state.data?.status === "error" ? false : 1_500,
   });
+  // Free, and Continue for a business that already has a paid plan or a pack: both leave the step (leavePlanStep).
   const selectFree = useMutation({
-    mutationFn: () => requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: "attribution" }) }),
-    onSuccess: () => navigate("/onboarding/attribution"),
+    mutationFn: () => leavePlanStep(business!, true),
+    onSuccess: (path) => navigate(path),
     meta: { inlineError: true },
   });
-  // A plan in force without a number, such as a promo plan or a pack the operator gave none, has no number step: the
-  // server sends that step back here, so Continue goes on past it.
-  const keepPlanSkipsNumber = billing.data?.limits?.includedBusinessNumbers === 0;
   const keepPlan = useMutation({
-    mutationFn: () => requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: keepPlanSkipsNumber ? "attribution" : "phone_number" }) }),
-    onSuccess: () => navigate(keepPlanSkipsNumber ? "/onboarding/attribution" : "/onboarding/number"),
+    mutationFn: () => leavePlanStep(business!, false),
+    onSuccess: (path) => navigate(path),
     meta: { inlineError: true },
   });
   const startCheckout = useMutation({
@@ -140,17 +163,16 @@ export function OnboardingPlanSurface() {
         markCheckoutReported(key);
         telemetry.track("web.onboarding.plan_checkout_completed", { businessId: business.businessId, plan: returnedCheckout.data.target ?? "unknown" });
       }
-      returnAttempt.current = { key, promise: requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", body: JSON.stringify({ to: "phone_number" }) }) };
+      returnAttempt.current = { key, promise: leavePlanStep(business, false) };
     }
     let cancelled = false;
-    void returnAttempt.current.promise.then(() => {
-      if (!cancelled) router.replace("/onboarding/number");
+    void returnAttempt.current.promise.then((path) => {
+      if (!cancelled) router.replace(path);
     }).catch(() => { if (!cancelled) returnAttempt.current = null; });
     return () => { cancelled = true; };
   }, [business, returnRequestId, returnedCheckout.data?.synced, returnedCheckout.data?.target, router, telemetry]);
   // A prepaid pack bought here: its checkout, then the return from its payment page, which waits for the
-  // payment, counts the checkout once, and moves on to the number step as a paid plan does, or past it for
-  // a plan in force without a number, as Continue does.
+  // payment, counts the checkout once, and leaves the step as a paid plan does.
   const packCheckout = usePackCheckout(business?.businessId);
   const packReturnId = searchParams.get("pack") === "success" ? searchParams.get("packCheckoutId") : null;
   const packReturn = usePackCheckoutReturn(business?.businessId, packReturnId);
@@ -164,23 +186,15 @@ export function OnboardingPlanSurface() {
         markCheckoutReported(key);
         telemetry.track("web.onboarding.plan_checkout_completed", { businessId: business.businessId, plan: "prepaid" });
       }
-      const businessId = business.businessId;
-      const billingKey = ["billing", businessId];
-      // The next step depends on whether the plan in force now, the pack or the plan it gave way to, includes a
-      // number. Billing is read again for it, since the answer from before the payment shows the plan the business
-      // had then: a read still in flight, which may have begun before the payment, is cancelled rather than joined.
-      // If the new read fails, the number step is the guess, as before.
-      const next = queryClient.cancelQueries({ queryKey: billingKey, exact: true })
-        .then(() => queryClient.fetchQuery({ queryKey: billingKey, queryFn: () => requestJson<BillingStatus>(billingUrl(businessId)), staleTime: 0 }))
-        .then((latest) => latest.limits?.includedBusinessNumbers === 0 ? "attribution" as const : "phone_number" as const, () => "phone_number" as const);
-      packReturnAttempt.current = { key, promise: next.then(async (to) => {
-        await requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ to }) });
-        return to;
-      }) };
+      // Billing as this page read it shows the plan the business had before the payment, so the next screen that
+      // asks reads it again. Whether a number step follows is the server's to say, from the plan in force now:
+      // the pack, or the plan it gave way to.
+      void queryClient.invalidateQueries({ queryKey: ["billing", business.businessId], exact: true });
+      packReturnAttempt.current = { key, promise: leavePlanStep(business, false) };
     }
     let cancelled = false;
-    void packReturnAttempt.current.promise.then((to) => {
-      if (!cancelled) router.replace(to === "attribution" ? "/onboarding/attribution" : "/onboarding/number");
+    void packReturnAttempt.current.promise.then((path) => {
+      if (!cancelled) router.replace(path);
     }).catch(() => { if (!cancelled) packReturnAttempt.current = null; });
     return () => { cancelled = true; };
   }, [billingT, business, packReturnId, packReturn.outcome, queryClient, router, telemetry]);

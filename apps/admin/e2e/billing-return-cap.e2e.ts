@@ -26,7 +26,8 @@ test("checkout return waits for billing confirmation and localized spending caps
     const statusUrl = `${baseURL}/api/billing/checkout?businessId=${businessId}&requestId=${requestId}`;
     expect((await (await context.request.get(statusUrl)).json()).synced).toBe(false);
     expect((await context.request.get(`${baseURL}/api/billing/checkout?businessId=${randomUUID()}&requestId=${requestId}`)).status()).toBe(403);
-    await context.route("**/api/onboarding/phone-numbers/suggestion?*", route => route.fulfill({ json: { numbers: [], market: { countryCode: "CA", areaCode: "416" } } }));
+    // The business is on the plan step, right after its name, so the server must take payments: one that
+    // takes none has no plan step, and its plan page sends everyone on.
     const page = await context.newPage();
     const firstPoll = page.waitForResponse(response => response.url().includes("/api/billing/checkout?"));
     await page.goto(`${baseURL}/onboarding/plan?checkout=success&requestId=${requestId}`);
@@ -34,9 +35,10 @@ test("checkout return waits for billing confirmation and localized spending caps
     expect(new URL(page.url()).pathname).toBe("/onboarding/plan");
     // Simulate a validated webhook's durable billing result; never open a paid checkout.
     await transaction(tx => tx.update(billingAccounts).set({ plan: "pro", billingInterval: "monthly", subscriptionState: "active" }).where(eq(billingAccounts.businessId, businessId)));
-    await expect(page).toHaveURL(`${baseURL}/onboarding/number`);
+    // The plan is chosen before the rest of the setup, so the website step follows the payment.
+    await expect(page).toHaveURL(`${baseURL}/onboarding/website`);
     await transaction(async tx => {
-      expect((await tx.select().from(businesses).where(eq(businesses.id, businessId)))[0]?.onboardingStage).toBe("phone_number");
+      expect((await tx.select().from(businesses).where(eq(businesses.id, businessId)))[0]?.onboardingStage).toBe("website");
       await tx.update(businesses).set({ onboardingStage: "complete" }).where(eq(businesses.id, businessId));
     });
     await page.goto(`${baseURL}/settings/plan`);

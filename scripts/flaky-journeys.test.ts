@@ -83,7 +83,7 @@ describe("the runs' reports", () => {
     const copies = configs.filter(({ name, source }) => name === "playwright.config.ts" || source.includes('from "./playwright.config"'));
     const runs = copies.map(({ name, source }) => ({ name, run: runOf(source) }));
 
-    expect(runs.map(({ name }) => name).sort()).toEqual(["playwright.access-gate.config.ts", "playwright.config.ts", "playwright.script-nonce.config.ts"]);
+    expect(runs.map(({ name }) => name).sort()).toEqual(["playwright.access-gate.config.ts", "playwright.config.ts", "playwright.plan-step.config.ts", "playwright.script-nonce.config.ts"]);
     // A copy without one inherits the journeys' report and writes over it.
     expect(runs.filter(({ run }) => !run)).toEqual([]);
     expect(new Set(runs.map(({ run }) => run)).size).toBe(runs.length);

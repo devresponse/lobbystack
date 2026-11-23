@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
 import { billingAccounts, businessMemberships, businesses, createDatabaseClient, onboardingPhoneVerifications, onboardingNumberClaimEvents, phoneNumbers, users, withBusinessTransaction } from "@lobbystack/db";
-import { claimNumberProvisioning, completeNumberProvisioning, reserveOnboardingNumberClaim, reserveReplacementNumberClaim, searchAvailableBusinessNumbers, searchBusinessNumberInventory, skipOnboardingNumber, type NumberSelection } from "@lobbystack/domain";
+import { advanceOnboardingStage, claimNumberProvisioning, completeNumberProvisioning, reserveOnboardingNumberClaim, reserveReplacementNumberClaim, searchAvailableBusinessNumbers, searchBusinessNumberInventory, skipOnboardingNumber, type NumberSelection } from "@lobbystack/domain";
 import { handleJob } from "../apps/worker/src/handlers";
 
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
@@ -24,6 +24,17 @@ async function main(): Promise<void> {
     assert(drained.verification?.status === "canceled" && drained.business?.onboardingStage === "plan", "A retired verification send did not drain without regressing onboarding.");
 
     const secret = "phone-certification-secret-at-least-32-characters";
+
+    // The number step comes after the greeting, so a business still on the plan
+    // step, right after its name, can't search yet. Its plan is a paid one with a
+    // number, so the steps in between lead to the number step.
+    let earlySearchDenied = false;
+    try { await searchBusinessNumberInventory({ db: app.db }, { userId, businessId, claimTokenSecret: secret }, { listAvailablePhoneNumbers: async () => [] }); } catch { earlySearchDenied = true; }
+    assert(earlySearchDenied, "Number search was offered before the number step.");
+    let nextStep = "";
+    for (const to of ["website", "knowledge", "greeting", "phone_number"] as const) nextStep = await advanceOnboardingStage({ db: app.db }, { userId, businessId, to });
+    const reached = await withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, async (tx) => (await tx.select({ stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)))[0]?.stage);
+    assert(nextStep === "phone_number" && reached === "phone_number", "A paid plan did not reach the number step after the greeting.");
 
     // Number search no longer requires a personal verified phone. The workspace
     // timezone seeds the market, and an explicit selection overrides it.
@@ -91,7 +102,7 @@ async function main(): Promise<void> {
     await claimNumberProvisioning({ db: worker.db }, { businessId: foreignBusinessId, claimId: revisitClaimId });
     await completeNumberProvisioning({ db: worker.db }, { businessId: foreignBusinessId, claimId: revisitClaimId, e164: "+14165550201", providerPhoneId: "PN_revisit", voiceUrl: "https://app.test/voice", smsUrl: "https://app.test/sms" });
     assert(await getRevisitStage() === "complete", "Late phone provisioning regressed completed onboarding.");
-    console.log(JSON.stringify({ noPersonalPhoneRequired: true, businessLocationMarket: true, explicitSelectionMarket: true, unsupportedCountryDenied: true, retiredVerificationDrained: true, signedOfferIssued: true, claimIdempotent: true, numberProvisioned: true, replacementIdempotent: true, replacementActivatedBeforeRetirement: true, replacementEntitlementConsumed: true, retirementWindowScheduled: true, providerSidSafeReclaim: true, completedOnboardingRevisit: true, revisitPurchaseQuotaPreserved: true, concurrentClaimDenied: true, completedProgressPreserved: true }));
+    console.log(JSON.stringify({ noPersonalPhoneRequired: true, numberStepFollowsGreeting: true, businessLocationMarket: true, explicitSelectionMarket: true, unsupportedCountryDenied: true, retiredVerificationDrained: true, signedOfferIssued: true, claimIdempotent: true, numberProvisioned: true, replacementIdempotent: true, replacementActivatedBeforeRetirement: true, replacementEntitlementConsumed: true, retirementWindowScheduled: true, providerSidSafeReclaim: true, completedOnboardingRevisit: true, revisitPurchaseQuotaPreserved: true, concurrentClaimDenied: true, completedProgressPreserved: true }));
   } finally {
     for (const id of [businessId, foreignBusinessId]) await withBusinessTransaction(worker.db, { businessId: id, actorType: "worker" }, async (tx) => await tx.delete(businesses).where(eq(businesses.id, id))).catch(() => undefined);
     await auth.db.delete(users).where(eq(users.id, userId)).catch(() => undefined); await Promise.all([auth.pool.end(), app.pool.end(), worker.pool.end()]);

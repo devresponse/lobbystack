@@ -6,7 +6,7 @@ const article: HelpArticle = {
   section: "getting-started",
   summary: "Save the address of your business's website during setup, or go on without one if your business has no website.",
   screenPaths: ["/onboarding/website"],
-  location: ["Sign up", "Onboarding", "Step 3 of 8"],
+  location: ["Sign up", "Onboarding", "Step 4 of 8, or step 3 of 7"],
   access: "Only owners and admins of the business can save the website or skip this step.",
   purpose: [
     "This step records the address of your business's website. The app keeps it as your business's website and shows it as a link on your business's public page.",
@@ -18,7 +18,7 @@ const article: HelpArticle = {
     { name: "Website", description: "The box for your website's address. Until you type, it shows `yourcompany.com` as an example. When the business already has an address saved, for example when you come back to this step or your business started as a demo, the box shows it." },
     { name: "Continue", description: "Saves the address and opens the next step, where you add documents. It stays off until you type an address, and says **Saving...** while it works. Any problem, with the address, the saving or the skipping, shows just above it." },
     { name: "I don't have a website", description: "The link under **Continue**. It goes on to the next step without saving an address, and says **Skipping...** while it works. An address saved earlier stays as it is." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the third. From the second dot on, the dot of a step your business has already reached opens that step." },
+    { name: "Progress dots", description: "The dots at the bottom show where you are in setup: the first is sign-up, and this step is the fourth of eight. Where setup has no plan step, it's the third of seven. From the second dot on, the dot of a step your business has already reached opens that step." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at the step your business is on." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],
@@ -48,7 +48,7 @@ const article: HelpArticle = {
     {
       title: "Change the address during setup",
       steps: [
-        "On a later setup step, select the third progress dot at the bottom.",
+        "On a later setup step, select the fourth progress dot at the bottom, or the third where setup has no plan step.",
         "Change the address in **Website** and select **Continue**. Only the address changes, and the steps you've already finished stay finished.",
       ],
     },
@@ -90,7 +90,7 @@ const article: HelpArticle = {
       answer: "Once setup is finished, the dashboard has no screen for changing it. To have the receptionist learn from a new site, add the site on the **Knowledge** screen. If the link on your public page has to change, contact support.",
     },
   ],
-  related: ["onboarding-business", "onboarding-knowledge", "knowledge", "public-profile"],
+  related: ["onboarding-business", "onboarding-plan", "onboarding-knowledge", "knowledge", "public-profile"],
   keywords: ["website", "web address", "URL", "domain", "site", "no website", "skip website", "change website address", "import website"],
 };
 

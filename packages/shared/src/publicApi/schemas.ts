@@ -83,7 +83,8 @@ export const apiMeSchema = z.object({
 }).describe("The API key making the request and the business it acts on.");
 
 const businessHoursSources = ["none", "generated", "operator"] as const;
-const onboardingStages = ["create_business", "website", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
+// In the order the dashboard takes them: the plan right after the name, on a deployment that takes payments.
+const onboardingStages = ["create_business", "plan", "website", "knowledge", "greeting", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
 
 const callTranscriptRecipients = z.enum(callTranscriptRecipientChoices);
 const callTranscriptContent = z.enum(callTranscriptContentChoices);

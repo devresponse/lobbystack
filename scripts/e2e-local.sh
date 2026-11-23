@@ -17,6 +17,8 @@
 # set, on the port after the admin's, and runs the access gate's journey
 # (e2e/access-gate.e2e.ts) against it. Then twice more, on the next two ports,
 # with the script nonce reported on and enforced, for e2e/script-nonce.e2e.ts.
+# And once more, on the port after those, as a deployment that takes payments,
+# whose onboarding has the plan step, for e2e/onboarding-plan-step.e2e.ts.
 # Custom targets skip those runs.
 #
 # Environment overrides: E2E_POSTGRES_PORT, E2E_REDIS_PORT, E2E_ADMIN_PORT,
@@ -125,4 +127,6 @@ if [[ "$OWN_SERVER_JOURNEYS" -eq 1 ]]; then
   CI=1 pnpm --filter @lobbystack/admin e2e:access-gate
   echo "==> Running the script nonce's journey against servers that report on it and enforce it"
   CI=1 pnpm --filter @lobbystack/admin e2e:script-nonce
+  echo "==> Running the plan step's journey against a server started with a billing provider's settings"
+  CI=1 pnpm --filter @lobbystack/admin e2e:plan-step
 fi

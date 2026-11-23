@@ -6,7 +6,7 @@ const article: HelpArticle = {
   section: "getting-started",
   summary: "The last setup step: say how you first heard about the app, or skip the question, to finish setup and open the dashboard.",
   screenPaths: ["/onboarding/attribution"],
-  location: ["Sign up", "Onboarding", "Step 8 of 8"],
+  location: ["Sign up", "Onboarding", "Step 8 of 8, or step 7 of 7"],
   access: "Anyone on the team of a business that hasn't finished setup can be brought to this step, but only owners and admins of the business can finish setup here.",
   purpose: [
     "This is the last step of setup. It asks how you first heard about the app. Your answer helps the people who run the app learn how businesses find it, and it doesn't change any of your settings.",
@@ -18,7 +18,7 @@ const article: HelpArticle = {
     { name: "Answers", description: "Fifteen answers, each with an icon: **Google**, one for AI assistants, **YouTube**, **Newsletter or blog**, **From work**, **Podcast**, **Instagram**, **In the news**, **LinkedIn**, **X**, **Reddit**, **Facebook**, **Friends or school**, **TikTok** and **Other**. Select one to choose it, and it's highlighted. Selecting another answer changes your choice." },
     { name: "Finish", description: "Saves your answer, completes setup and opens the dashboard. It stays off until you choose an answer, and says **Finishing...** while it works. A problem with finishing shows just above it." },
     { name: "Skip", description: "The link under **Finish**. It completes setup without an answer and opens the dashboard. An answer you selected isn't saved." },
-    { name: "Progress dots", description: "Eight dots at the bottom show where you are in setup: the first is sign-up, and this step is the eighth and last. From the second dot on, the dot of an earlier step opens that step." },
+    { name: "Progress dots", description: "The dots at the bottom show where you are in setup: the first is sign-up, and this step is the last: the eighth, or the seventh where setup has no plan step. From the second dot on, the dot of an earlier step opens that step." },
     { name: "Sign out", description: "At the top right, signs you out. When you sign in again, setup opens at this step until you finish it." },
     { name: "Terms and Privacy", description: "At the bottom, open the terms of service and the privacy policy in a new tab." },
   ],
@@ -40,9 +40,9 @@ const article: HelpArticle = {
     {
       title: "Change an earlier step before you finish",
       steps: [
-        "Select the progress dot of the step you want to change, such as the fifth for the greeting.",
+        "Select the progress dot of the step you want to change, such as the second for your business's name.",
         "Make the change and save it on that step, usually with its **Continue** button. The steps you've already finished stay finished.",
-        "Select the eighth progress dot to come back here, then select **Finish** or **Skip**.",
+        "Select the last progress dot to come back here, then select **Finish** or **Skip**.",
       ],
     },
   ],
@@ -75,7 +75,7 @@ const article: HelpArticle = {
       answer: "Before you finish, select the right answer instead. Your answer doesn't affect anything in the app, so there's nothing to fix after you finish.",
     },
   ],
-  related: ["onboarding-number", "onboarding-plan", "home", "setup-guide", "affiliate-program"],
+  related: ["onboarding-number", "onboarding-greeting", "home", "setup-guide", "affiliate-program"],
   keywords: ["how did you hear about us", "referral source", "survey", "finish setup", "complete setup", "last step", "skip", "source", "referral link"],
 };
 

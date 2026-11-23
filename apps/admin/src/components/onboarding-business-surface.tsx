@@ -15,9 +15,14 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input";
 import { useTelemetry } from "@/components/product-analytics";
 import { recordPendingOnboardingBusiness } from "@/lib/onboarding-analytics";
+import { onboardingStagePath } from "@/lib/onboarding-steps";
 
-
-export function OnboardingBusinessSurface({ createNew = false }: { createNew?: boolean }) {
+/**
+ * The name step. The plan step follows it where the deployment has one
+ * (planStep), else the website step: the server's answer says which, and
+ * planStep is only what to expect while it's awaited.
+ */
+export function OnboardingBusinessSurface({ createNew = false, planStep = false }: { createNew?: boolean; planStep?: boolean }) {
   const { t } = useTranslation("onboarding");
   const { navigate, navigating, prefetch } = useStepNavigation();
   const telemetry = useTelemetry();
@@ -29,8 +34,9 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
   const limit = businesses.data?.businessLimit;
   // A new business at the account's limit would be refused, so say so before anyone types a name.
   const atLimit = createNew && limit !== undefined && limit.owned >= limit.max;
+  const nextStep = planStep ? "/onboarding/plan" : "/onboarding/website";
   const create = useMutation({
-    mutationFn: () => requestJson<{ businessId: string }>("/api/businesses", {
+    mutationFn: () => requestJson<{ businessId: string; onboardingStage?: string }>("/api/businesses", {
       method: "POST",
       body: JSON.stringify({
         name: name.trim(),
@@ -39,16 +45,16 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
         referralCode: getStoredAffiliateReferralCode(),
       }),
     }),
-    onSuccess: async (created: { businessId: string }) => {
+    onSuccess: async (created: { businessId: string; onboardingStage?: string }) => {
       recordPendingOnboardingBusiness(created.businessId);
       // The next step looks this workspace up before it can save, so it has to
       // be in the cache before we move.
       await queryClient.invalidateQueries({ queryKey: ["businesses"] });
-      navigate("/onboarding/website");
+      navigate(onboardingStagePath(created.onboardingStage) ?? nextStep);
     },
     meta: { inlineError: true },
   });
-  useEffect(() => { prefetch("/onboarding/website"); }, [prefetch]);
+  useEffect(() => { prefetch(nextStep); }, [nextStep, prefetch]);
   useEffect(() => {
     if (existing && !createNew) setName(existing.name);
   }, [createNew, existing]);
@@ -60,17 +66,19 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
         body: JSON.stringify({ name: name.trim() }),
       });
       // A claimed prospect demo starts on this step, unlike a new signup. The
-      // website step redirects back here until the stage moves on, and the
+      // next step redirects back here until the stage moves on, and the
       // server ignores this for a business that is already further along.
-      await requestJson(`/api/onboarding/stage?businessId=${businessId}`, {
+      // It asks for the plan step, and the server answers with the website
+      // step where the deployment has no plan step.
+      return await requestJson<{ stage?: string }>(`/api/onboarding/stage?businessId=${businessId}`, {
         method: "POST",
-        body: JSON.stringify({ to: "website" }),
+        body: JSON.stringify({ to: "plan" }),
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (moved) => {
       if (existing) telemetry.track("web.onboarding.business_name_submitted", { businessId: existing.businessId });
       await queryClient.invalidateQueries({ queryKey: ["businesses"] });
-      navigate("/onboarding/website");
+      navigate(onboardingStagePath(moved.stage) ?? nextStep);
     },
     meta: { inlineError: true },
   });

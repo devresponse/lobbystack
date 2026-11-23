@@ -399,9 +399,9 @@
     "retry": "Try again",
     "current": {
       "title": "This business is already on the {{plan}} plan.",
-      "description": "Its plan is already set up, so you can go on to its phone number.",
+      "description": "Its plan is already set up, so you can go on with setup.",
       "prepaidTitle": "This business already has a prepaid plan.",
-      "prepaidDescription": "Its plan is ready, so you can go on to its phone number."
+      "prepaidDescription": "Its plan is ready, so you can go on with setup."
     },
     "packs": {
       "title": "Prepaid plans",

@@ -1,17 +1,17 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { canVisitOnboardingStage, getActiveOnboardingState, resolveOnboardingRoute, type OnboardingStage } from "@lobbystack/domain";
+import { canVisitOnboardingStage, getActiveOnboardingState, onboardingHasPlanStep, resolveOnboardingRoute, type OnboardingStage } from "@lobbystack/domain";
 
 import { getAppDatabase } from "./api-helpers";
 import { getSession } from "./auth";
 
 const routeStages: Record<string, OnboardingStage> = {
   "/onboarding/business": "create_business",
+  "/onboarding/plan": "plan",
   "/onboarding/website": "website",
   "/onboarding/knowledge": "knowledge",
   "/onboarding/greeting": "greeting",
-  "/onboarding/plan": "plan",
   "/onboarding/number": "phone_number",
   "/onboarding/attribution": "attribution",
 };
@@ -26,6 +26,8 @@ export async function requireOnboardingStage(pathname: string, options: { allowC
   const expected = routeStages[pathname];
   if (!expected) redirect(resolveOnboardingRoute(state.stage));
   if (options.allowCreate && expected === "create_business" && state.businessId === null) return visit;
+  // A deployment that takes no payments has no plan step, so its plan page sends everyone on to the step they are on.
+  if (expected === "plan" && !onboardingHasPlanStep()) redirect(resolveOnboardingRoute(state.stage));
   if (!canVisitOnboardingStage(state.stage, expected)) redirect(resolveOnboardingRoute(state.stage));
   return visit;
 }

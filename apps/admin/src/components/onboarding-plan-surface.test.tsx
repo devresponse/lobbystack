@@ -17,8 +17,18 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 vi.mock("./onboarding-plan-comparison", () => ({ OnboardingPlanComparison: () => null }));
 const clients: QueryClient[] = [];
 let store: Record<string, string> = {};
+// The stage the business is stored on, which the businesses list says: the plan step, unless a test names another.
+let storedStage: string | undefined = "plan";
+// The step the server answers a move with: the one asked for, unless a test names another, as the server
+// does for the number step on a plan without a number to pick.
+let serverStep: string | null = null;
+const business = () => ({ businessId: "business", active: true, ...(storedStage ? { onboardingStage: storedStage } : {}) });
+const moved = (init?: RequestInit) => Response.json({ ok: true, stage: serverStep ?? (JSON.parse(String(init?.body)) as { to: string }).to });
+const stageMoves = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/onboarding/stage?")).map(([, init]) => (init as RequestInit | undefined)?.body);
 beforeEach(() => {
   route.search = new URLSearchParams();
+  storedStage = "plan";
+  serverStep = null;
   telemetryRef.current = createRecordedBrowserTelemetry();
   store = {};
   vi.stubGlobal("localStorage", {
@@ -30,10 +40,10 @@ beforeEach(() => {
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
 function setup(synced: boolean | "error" = false, monthlyOnly = false, effectivePlan = "free_cloud", plans: BillingPlanList = builtInBillingPlanList(), extra: Record<string, unknown> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
-  client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+  client.setQueryData(["businesses"], { businesses: [business()] });
   client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: monthlyOnly ? ["monthly"] : ["monthly", "annual"] }, plans, ...extra });
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
+    if (url.includes("/api/onboarding/stage?")) return moved(init);
     if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "new-checkout" });
     if (url.includes("requestId=new-checkout")) return Response.json({ status: "error", checkoutUrl: null, error: "Checkout failed" });
     if (url.includes("requestId=returned-checkout")) return synced === "error" ? Response.json({ error: "Not synchronized" }, { status: 503 }) : Response.json({ synced, target: "pro" });
@@ -44,29 +54,31 @@ function setup(synced: boolean | "error" = false, monthlyOnly = false, effective
   return fetchMock;
 }
 describe("original onboarding plan behavior with asynchronous checkout", () => {
-  it("reconciles a paid return once under StrictMode before advancing onboarding", async () => {
+  it("reconciles a paid return once under StrictMode before advancing onboarding to the website step", async () => {
     route.search = new URLSearchParams("checkout=success&requestId=returned-checkout");
     const fetchMock = setup(true);
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
-    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/api/onboarding/stage?"))).toHaveLength(1);
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
+    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
   });
   it("records plan_checkout_completed once when a paid return synchronizes", async () => {
     route.search = new URLSearchParams("checkout=success&requestId=returned-checkout");
     setup(true);
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
     telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "pro" });
     expect(telemetryRef.current!.events.filter(event => event.name === "web.onboarding.plan_checkout_completed")).toHaveLength(1);
   });
   it("does not report the same checkout again when the return page is reopened", async () => {
     route.search = new URLSearchParams("checkout=success&requestId=returned-checkout");
     setup(true);
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
     cleanup();
     // A reload of the return URL: the endpoint still answers synced, and a
-    // fresh mount has a fresh ref.
+    // fresh mount has a fresh ref. The business is on the website step by now.
     route.router.replace.mockClear();
+    storedStage = "website";
     setup(true);
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
     expect(telemetryRef.current!.events.filter(event => event.name === "web.onboarding.plan_checkout_completed")).toHaveLength(1);
   });
   it.each([false, "error"] as const)("keeps return parameters and stays put while synchronization is %s", async synced => {
@@ -125,17 +137,20 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     expect(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }).hasAttribute("disabled")).toBe(false);
     expect(assign).toHaveBeenCalledTimes(1);
   });
-  it("records plan_selected when the free plan is chosen", async () => {
-    setup();
+  it("records plan_selected when the free plan is chosen, and goes on to the website step", async () => {
+    const fetchMock = setup();
     await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
     telemetryRef.current!.expectEvent("web.onboarding.plan_selected", { businessId: "business", plan: "free_cloud" });
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
+    expect(route.router.push).not.toHaveBeenCalledWith("/onboarding/attribution");
   });
-  it("lets a business that already has a plan, such as a managed one, go on to its number", async () => {
+  it("lets a business that already has a plan, such as a managed one, go on to the website step", async () => {
     const fetchMock = setup(false, false, "enterprise");
     expect(screen.queryByRole("button", { name: "plan.tiers.free_cloud.cta" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
-    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/number"));
-    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "phone_number" }) }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/billing/checkout")).toBe(false);
   });
   it.each(["free_cloud", "self_host"])("shows the plans to a business whose plan is %s", async effectivePlan => {
@@ -188,11 +203,11 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
   });
   it("waits for the plans, and offers a retry and Free when they don't load", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
-    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    client.setQueryData(["businesses"], { businesses: [business()] });
     let fail = true;
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith("/api/billing?")) return fail ? Response.json({ error: "Billing is unavailable" }, { status: 500 }) : Response.json({ checkoutAvailable: true, effectivePlan: "free_cloud", availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly"] }, plans: builtInBillingPlanList() });
-      if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
+      if (url.includes("/api/onboarding/stage?")) return moved(init);
       throw new Error(`Unexpected request ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -200,7 +215,7 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     expect(screen.queryByRole("button", { name: "plan.tiers.pro.cta.annual" })).toBeNull();
     expect(await screen.findByText("plan.loadFailed")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "attribution" }) })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "website" }) })));
     fail = false;
     await userEvent.click(screen.getByRole("button", { name: "plan.retry" }));
     expect(await screen.findByRole("button", { name: "plan.tiers.pro.cta.monthly" })).toBeTruthy();
@@ -217,9 +232,9 @@ describe("prepaid packs during onboarding", () => {
   const offer = (code: string, minutes: number, days: number | null, checkoutAvailable = true) => ({ code, names: { en: code }, minutes, voiceSeconds: minutes * 60, days, amountCents: 9_900, currency: "cad", smsSegments: 50, outboundCalls: 20, chatUnits: 50, knowledgeStorageBytes: 20_971_520, numbers: 1, receptionists: 1, checkoutAvailable });
   const onSale = { packOffers: [offer("pack-500-180", 500, 180), offer("pack-500-365", 500, 365)], packCheckout: { refusal: null, endsSubscription: null } };
   /** The pack checkout's answers: the POST's checkout, then what its GET reads, and billing as it reads after the payment. */
-  function servePacks(status: Record<string, unknown>, billingNow: Record<string, unknown> = { effectivePlan: "prepaid", limits: { includedBusinessNumbers: 1 } }) {
+  function servePacks(status: Record<string, unknown>, billingNow: Record<string, unknown> = { effectivePlan: "prepaid" }) {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
+      if (url.includes("/api/onboarding/stage?")) return moved(init);
       if (url === "/api/billing/packs/checkout" && init?.method === "POST") return Response.json({ checkoutId: "pc-1" }, { status: 202 });
       if (url.startsWith("/api/billing/packs/checkout?")) return Response.json({ checkoutUrl: null, error: null, synced: status.status === "paid", refusal: null, providerName: "Stripe", ...status });
       if (url.startsWith("/api/billing?")) return Response.json({ checkoutAvailable: true, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly", "annual"] }, plans: builtInBillingPlanList(), ...billingNow });
@@ -232,13 +247,12 @@ describe("prepaid packs during onboarding", () => {
   function renderReturn(status: Record<string, unknown>, effectivePlan = "free_cloud", billingNow?: Record<string, unknown>) {
     route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
-    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    client.setQueryData(["businesses"], { businesses: [business()] });
     client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly", "annual"] }, plans: builtInBillingPlanList() });
     const fetchMock = servePacks(status, billingNow);
     render(<StrictMode><QueryClientProvider client={client}><OnboardingPlanSurface /></QueryClientProvider></StrictMode>);
     return fetchMock;
   }
-  const stageMoves = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/onboarding/stage?")).map(([, init]) => (init as RequestInit | undefined)?.body);
 
   it("offers no pack when none is on sale, as before packs", () => {
     setup();
@@ -356,91 +370,50 @@ describe("prepaid packs during onboarding", () => {
     });
   });
 
-  it("waits for a pack's payment after the provider sends them back, records the checkout once, and goes on to the number step", async () => {
+  it("waits for a pack's payment after the provider sends them back, records the checkout once, and goes on to the website step", async () => {
     // The pack is in force once paid, which must not stop the return on the current-plan screen.
     const fetchMock = renderReturn({ status: "paid" }, "prepaid");
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
     expect(fetchMock).toHaveBeenCalledWith("/api/billing/packs/checkout?checkoutId=pc-1&businessId=business", expect.anything());
-    expect(fetchMock.mock.calls.filter(([url]) => url.includes("/api/onboarding/stage?")).map(([, init]) => init?.body)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
     telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "prepaid" });
     expect(telemetryRef.current!.events.filter((event) => event.name === "web.onboarding.plan_checkout_completed")).toHaveLength(1);
     expect(screen.queryByText("plan.current.prepaidTitle")).toBeNull();
   });
 
   it("says a pack's payment failed and shows the plans again", async () => {
-    renderReturn({ status: "failed", error: "The payment failed." });
+    const fetchMock = renderReturn({ status: "failed", error: "The payment failed." });
     expect(await screen.findByText("plan.packs.failed")).toBeTruthy();
     expect(route.router.replace).toHaveBeenCalledWith("/onboarding/plan");
-    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/website");
+    expect(stageMoves(fetchMock)).toEqual([]);
   });
 
-  it("goes on to the number step without the pack when a plan bought meanwhile came first, and says the pack wasn't added", async () => {
-    const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "starter", { effectivePlan: "starter", limits: { includedBusinessNumbers: 1 } });
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+  it("goes on without the pack when a plan bought meanwhile came first, and says the pack wasn't added", async () => {
+    const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "starter", { effectivePlan: "starter" });
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
     expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
-    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
     // The plan's own checkout reported its purchase; the pack's never arrived as one.
     expect(telemetryRef.current!.events.filter((event) => event.name === "web.onboarding.plan_checkout_completed")).toHaveLength(0);
   });
 
-  it("goes past the number step after paying for a pack that includes no number, reading the plan in force after the payment", async () => {
-    // Billing read before the payment still says Free, which has a number step: the step follows the pack's limits instead.
-    const fetchMock = renderReturn({ status: "paid" }, "free_cloud", { effectivePlan: "prepaid", limits: { includedBusinessNumbers: 0 } });
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/attribution"));
-    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "attribution" })]);
-    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+  it("reads billing again after the payment, which this page read before it, and moves on without waiting for it", async () => {
+    const fetchMock = renderReturn({ status: "paid" }, "free_cloud");
+    const served = fetchMock.getMockImplementation()!;
+    // The new read never answers, and the step is left all the same.
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url.startsWith("/api/billing?") ? new Promise<Response>(() => undefined) : served(url, init));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
     expect(fetchMock).toHaveBeenCalledWith("/api/billing?businessId=business", expect.anything());
-    telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "prepaid" });
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
   });
 
-  it("goes past the number step when a pack gave way to a promo plan that includes no number", async () => {
-    const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "free_cloud", { effectivePlan: "starter", limits: { includedBusinessNumbers: 0 } });
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/attribution"));
-    expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
-    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "attribution" })]);
-  });
-
-  it("reads billing again after the payment rather than joining a read that began before it", async () => {
-    route.search = new URLSearchParams("pack=success&packCheckoutId=pc-1");
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
-    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-    // Billing isn't loaded yet, so the page's first read goes out beside the checkout's. It read the plan before the
-    // payment, Free without a number, and answers only after the checkout says paid.
-    const billing = (body: Record<string, unknown>) => Response.json({ checkoutAvailable: true, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly", "annual"] }, plans: builtInBillingPlanList(), ...body });
-    let answerFirst: () => void = () => undefined;
-    let billingReads = 0;
-    let checkoutReads = 0;
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
-      if (url.startsWith("/api/billing/packs/checkout?")) {
-        checkoutReads += 1;
-        return Response.json({ status: "paid", checkoutUrl: null, error: null, synced: true, refusal: null, providerName: "Stripe" });
-      }
-      if (url.startsWith("/api/billing?")) {
-        billingReads += 1;
-        if (billingReads > 1) return billing({ effectivePlan: "prepaid", limits: { includedBusinessNumbers: 1 } });
-        await new Promise<void>((resolve) => { answerFirst = resolve; });
-        return billing({ effectivePlan: "free_cloud", limits: { includedBusinessNumbers: 0 } });
-      }
-      throw new Error(`Unexpected request ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    render(<StrictMode><QueryClientProvider client={client}><OnboardingPlanSurface /></QueryClientProvider></StrictMode>);
-    await waitFor(() => expect(checkoutReads).toBeGreaterThan(0));
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
-    answerFirst();
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalled());
-    expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number");
-    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
-    expect(billingReads).toBe(2);
-  });
-
-  it("goes on to the number step when billing can't be read again after the payment", async () => {
+  it("moves on when billing can't be read again after the payment", async () => {
     const fetchMock = renderReturn({ status: "paid" }, "free_cloud");
     const served = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url.startsWith("/api/billing?") ? Response.json({ error: "Unavailable" }, { status: 503 }) : served(url, init));
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
-    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
   });
 
   it("says a pack's payment was refunded before it arrived and shows the plans again", async () => {
@@ -448,7 +421,7 @@ describe("prepaid packs during onboarding", () => {
     expect(await screen.findByText("plan.packs.refunded")).toBeTruthy();
     expect(screen.queryByText("plan.packs.failed")).toBeNull();
     expect(route.router.replace).toHaveBeenCalledWith("/onboarding/plan");
-    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/website");
   });
 
   it("says a payment that hasn't arrived is processing, and checks again when asked", async () => {
@@ -458,24 +431,139 @@ describe("prepaid packs during onboarding", () => {
     const before = reads();
     servePacks({ status: "paid" });
     await userEvent.click(screen.getByRole("button", { name: "plan.packs.checkAgain" }));
-    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
     expect(before).toBeGreaterThan(0);
   });
 
-  it("lets a business already on a pack go on to its number", async () => {
+  it("lets a business already on a pack go on to the website step", async () => {
     const fetchMock = setup(false, false, "prepaid");
     expect(screen.getByText("plan.current.prepaidTitle")).toBeTruthy();
     expect(screen.getByText("plan.current.prepaidDescription")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
-    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/number"));
-    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "phone_number" }) }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
   });
 
-  it("goes past the number step from Continue when the plan in force includes no number, as the server would send that step back", async () => {
-    const fetchMock = setup(false, false, "prepaid", builtInBillingPlanList(), { limits: { includedBusinessNumbers: 0 } });
+  describe("back on the plan step from the number step, as a business whose plan includes no number is sent", () => {
+    beforeEach(() => { storedStage = "phone_number"; });
+
+    it("goes on to the number step after paying for a pack with a number to pick, as the server answers", async () => {
+      const fetchMock = renderReturn({ status: "paid" }, "free_cloud");
+      await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+      expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
+      telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "prepaid" });
+    });
+
+    it("goes past the number step after paying for a pack that includes no number, as the server answers from the plan in force", async () => {
+      // Billing as this page read it before the payment says Free: the step that follows is the server's to say.
+      serverStep = "attribution";
+      const fetchMock = renderReturn({ status: "paid" }, "free_cloud");
+      await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/attribution"));
+      expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
+      expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+      telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "prepaid" });
+    });
+
+    it("goes past the number step when a pack gave way to a promo plan that includes no number", async () => {
+      serverStep = "attribution";
+      const fetchMock = renderReturn({ status: "paid", packStatus: "replaced", synced: false }, "free_cloud", { effectivePlan: "starter" });
+      await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/attribution"));
+      expect(translate).toHaveBeenCalledWith("billing.packs.toast.gaveWay");
+      expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    });
+
+    it("goes past the number step from Continue when the plan in force includes no number", async () => {
+      serverStep = "attribution";
+      const fetchMock = setup(false, false, "prepaid");
+      await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
+      await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/attribution"));
+      expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "phone_number" })]);
+      expect(route.router.push).not.toHaveBeenCalledWith("/onboarding/number");
+    });
+  });
+});
+
+describe("leaving the plan step, by the stage the business is stored on", () => {
+  const paidReturn = () => { route.search = new URLSearchParams("checkout=success&requestId=returned-checkout"); return setup(true); };
+
+  it("moves a business on the plan step on to the website step, whichever way it leaves", async () => {
+    const free = setup();
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(free)).toEqual([JSON.stringify({ to: "website" })]);
+    cleanup();
+    const paid = paidReturn();
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(paid)).toEqual([JSON.stringify({ to: "website" })]);
+  });
+
+  it.each([["website", "/onboarding/website"], ["knowledge", "/onboarding/knowledge"], ["greeting", "/onboarding/greeting"]])("returns a business back here from the %s step to that step, and moves nothing", async (stage, path) => {
+    storedStage = stage;
+    const free = setup();
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith(path));
+    expect(route.router.push).toHaveBeenCalledTimes(1);
+    expect(stageMoves(free)).toEqual([]);
+    cleanup();
+    // The same after a payment: back from the payment page to the step it left.
+    const paid = paidReturn();
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith(path));
+    expect(stageMoves(paid)).toEqual([]);
+    telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_completed", { businessId: "business", plan: "pro" });
+    cleanup();
+    route.search = new URLSearchParams();
+    route.router.push.mockClear();
+    // And for a business that already has its plan.
+    const kept = setup(false, false, "pro");
     await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith(path));
+    expect(stageMoves(kept)).toEqual([]);
+  });
+
+  it.each(["phone_number", "phone_number_claiming", "attribution", "complete"])("sends a business back here from the %s stage to the last step on Free", async (stage) => {
+    storedStage = stage;
+    const fetchMock = setup();
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
     await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/attribution"));
-    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "attribution" }) }));
-    expect(route.router.push).not.toHaveBeenCalledWith("/onboarding/number");
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "attribution" })]);
+  });
+
+  it.each(["phone_number", "phone_number_claiming", "attribution", "complete"])("asks for the number step after a payment from the %s stage, and opens the step the server answers with", async (stage) => {
+    storedStage = stage;
+    const withNumber = paidReturn();
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/number"));
+    expect(stageMoves(withNumber)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    cleanup();
+    route.router.replace.mockClear();
+    // A promo plan without a number to pick: the server answers with the last step.
+    serverStep = "attribution";
+    const withoutNumber = paidReturn();
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/onboarding/attribution"));
+    expect(stageMoves(withoutNumber)).toEqual([JSON.stringify({ to: "phone_number" })]);
+    expect(route.router.replace).not.toHaveBeenCalledWith("/onboarding/number");
+  });
+
+  it("asks for the website step when the list doesn't say the stage, and opens the step the server answers with", async () => {
+    storedStage = undefined;
+    const fetchMock = setup();
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/website"));
+    expect(stageMoves(fetchMock)).toEqual([JSON.stringify({ to: "website" })]);
+  });
+
+  it("opens the page of the step it asked for when the answer names none", async () => {
+    const fetchMock = setup();
+    fetchMock.mockImplementation(async () => Response.json({ ok: true }));
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/website"));
+  });
+
+  it("says so and stays on the plans when the server refuses the move", async () => {
+    const fetchMock = setup();
+    fetchMock.mockImplementation(async () => Response.json({ error: "Invalid onboarding transition." }, { status: 409 }));
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
+    expect(await screen.findByText("Invalid onboarding transition.")).toBeTruthy();
+    expect(route.router.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }).hasAttribute("disabled")).toBe(false));
   });
 });

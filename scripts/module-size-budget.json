@@ -34,7 +34,7 @@
     "apps/admin/src/components/live-qr-code-settings-surface.tsx#QrCodeStudio": 250,
     "apps/admin/src/components/live-receptionists-surface.tsx#LiveReceptionistsSurface": 350,
     "apps/admin/src/components/live-upgrade-plan-provider.tsx#LiveUpgradePlanProvider": 175,
-    "apps/admin/src/components/onboarding-plan-surface.tsx#OnboardingPlanSurface": 325,
+    "apps/admin/src/components/onboarding-plan-surface.tsx#OnboardingPlanSurface": 300,
     "apps/admin/src/components/phone-number-chooser.tsx#PhoneNumberChooser": 300,
     "apps/admin/src/components/public-profile/profile-page.tsx#ProfilePage": 250,
     "apps/admin/src/components/qr-code/qr-links.tsx#QrLinksCard": 275,

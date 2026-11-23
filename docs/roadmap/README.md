@@ -47,6 +47,7 @@ Each feature has a status:
 | [Protect the widget and the deployment](protect-the-deployment.md) | Floods and scripts stopped before they reach the app, and no business able to use up what all share | Four settings, then about nine code changes, not estimated | Ready when needed | [2026-10-15](../reviews/widget-scalability-2026-10-15.md) |
 | [Grow past one stack](scale-past-one-stack.md) | More people at once, then surviving a failed machine, then cells | Phase 1 first; not estimated in days | Started: two admins and two workers possible since fork PR #168, set with `devops/scale.mjs` since fork PR #182, and watched copy by copy since fork PR #185; first run on Railway on 2026-11-20, on a test environment | [2026-10-18](../reviews/scalability-2026-10-18.md), [2026-11-13](../reviews/replicas-2026-11-13.md) |
 | [Remove a Railway deployment's last manual steps](railway-bootstrap.md) | No sign-up before onboarding, numbers bought ahead, one admin image for every deployment, and a sign-up allowlist, on top of the bootstrap script | Not estimated | The script is built; the rest waits on a decision | [2026-10-14](../research/railway-automation.md) |
+| [Check every live deployment after each deploy](live-deployment-checks.md) | Test businesses on each deployment, and 46 checks that run when Railway reports a deploy, hourly and nightly, without anyone signing in to the database | About 15 to 21 days in 7 pull requests; the first, about 3 days, changes nothing on the server | Waiting on 6 decisions | None; the maintainer's request of 2026-11-23 |
 
 **Integrations and a new product**
 
@@ -67,7 +68,7 @@ These are tracked only in [open items](../project/open-items.md), since each is 
 - **More call languages:** Serbian calls, a starter greeting in the business's language, texts in all 13 call languages, saving the language a caller spoke, and GPT-Live 1.1 once OpenAI's API offers it ([calls](../features/calls.md#know-which-language-a-call-uses)).
 - **The rest of the widget review:** stop the history poll while live updates are up, measure time to the first word in chats, cache the loader, and a panel-only layout about 150 KB lighter. A standalone panel built like the loader would take one to two weeks, worth it only if load time on phones becomes the main complaint ([widget review](../reviews/widget-2026-10-15.md#follow-the-code-improvements)).
 - **A middle plan** between Pro and Enterprise, where rivals sell one at $129 to $299 ([voice agent market](../research/voice-agent-market.md#estimate-the-profit)). Plans live in `brands/<brand>/billing.json`, but extra public plans don't show in the plan screens and checkout yet ([billing](../billing/README.md#know-the-known-problems)).
-- **Smaller gaps:** appointment emails, changing a public page's address and custom domains, the API's remaining gaps, a check after each deploy, and the rest of the list in [open items](../project/open-items.md#build-these-when-theyre-needed).
+- **Smaller gaps:** appointment emails, changing a public page's address and custom domains, the API's remaining gaps, and the rest of the list in [open items](../project/open-items.md#build-these-when-theyre-needed).
 
 ## Know what was studied and not planned
 

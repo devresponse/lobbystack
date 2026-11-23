@@ -1,11 +1,12 @@
 # Find the future features
 
-This folder holds the features that research or a review proposed and nobody has built yet, one page each: what the feature would do, how to build it, the effort, and what it waits on. The studies behind them keep their findings as of their dates in [research](../research/README.md) and [reviews](../reviews/README.md); these pages are kept current instead. Nothing here is started unless its page says so. Efforts are the studies' rough estimates for one developer, so check them against the code before planning on them. Checked against `main` at `c074ae4` (2026-10-26).
+This folder holds the features that research or a review proposed and nobody has built yet, one page each: what the feature would do, how to build it, the effort, and what it waits on. The studies behind them keep their findings as of their dates in [research](../research/README.md) and [reviews](../reviews/README.md); these pages are kept current instead. Nothing here is started unless its page says so. Efforts are the studies' rough estimates for one developer, so check them against the code before planning on them. Checked against `develop/r2` at `88830a3` (2026-11-23).
 
 Each feature has a status:
 
 - **Waiting on a decision:** the research is done, and the maintainer's answers decide what gets built. They are listed on its page and in [open items](../project/open-items.md#decide-these).
 - **Ready when needed:** recommended work with no open question, to build when traffic, a customer or a deadline calls for it.
+- **Started:** partly built; its page says what is built and what is left.
 - **On hold:** designed, but later evidence points elsewhere.
 
 ## Know the features
@@ -28,7 +29,7 @@ Each feature has a status:
 
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
-| [Take several receptionists further](receptionists-next.md) | A chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and team members limited to some receptionists | 2 to 5 days each; 5 or more for limited members | Ready when needed; more numbers waits on a decision about plans | The design of 2026-11-02, built in fork PR #129 ([receptionists](../features/receptionists.md)) |
+| [Take several receptionists further](receptionists-next.md) | A chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and team members limited to some receptionists | 2 to 5 days each; 5 or more for limited members | Ready when needed; more numbers waits on a decision about plans | The design of 2026-11-02, built on `releases/r2` ([receptionists](../features/receptionists.md)) |
 
 **Calls and conversations**
 
@@ -44,7 +45,7 @@ Each feature has a status:
 
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
-| [Protect the widget and the deployment](protect-the-deployment.md) | Floods and scripts stopped before they reach the app, and no business able to use up what all share | Four settings, then about nine code changes, not estimated | Ready when needed | [2026-10-15](../reviews/widget-scalability-2026-10-15.md) |
+| [Protect the widget and the deployment](protect-the-deployment.md) | Floods and scripts stopped before they reach the app, and no business able to use up what all share | Four settings, then about nine code changes, not estimated | Started: fork PR #174 checks website chats with Turnstile and limits each business's chats a day, and fork PR #176 closes a test deployment to strangers; the rest is ready when needed | [2026-10-15](../reviews/widget-scalability-2026-10-15.md) |
 | [Grow past one stack](scale-past-one-stack.md) | More people at once, then surviving a failed machine, then cells | Phase 1 first; not estimated in days | Started: two admins and two workers possible since fork PR #168, set with `devops/scale.mjs` since fork PR #182, and watched copy by copy since fork PR #185; first run on Railway on 2026-11-20, on a test environment | [2026-10-18](../reviews/scalability-2026-10-18.md), [2026-11-13](../reviews/replicas-2026-11-13.md) |
 | [Remove a Railway deployment's last manual steps](railway-bootstrap.md) | No sign-up before onboarding, numbers bought ahead, one admin image for every deployment, and a sign-up allowlist, on top of the bootstrap script | Not estimated | The script is built; the rest waits on a decision | [2026-10-14](../research/railway-automation.md) |
 
@@ -53,12 +54,7 @@ Each feature has a status:
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
 | [Publish the n8n and Zapier integrations](n8n-and-zapier.md) | A dedicated n8n node, and the brands' private Zapier integration (fork PR #94) listed in Zapier's directory. The Make app (fork PR #95) is shared by invite link | 3 to 5 days for the node; 1.5 to 2.5 days for the listing | Ready when needed | 2026-10-13, in [integrations](../features/api-cli-integrations.md#connect-n8n) |
-| [Offer a QR place guide](qr-place-guide.md) | A no-login guide at a place, paid for by the place's owner | A pilot with no code; a minimum product in 16 to 23 days at the time | Waiting on a decision | [2026-10-10](../research/qr-place-guide-market.md) |
-
-**Billing**
-
-| Feature | What it gives | Effort | Status | Study |
-| --- | --- | --- | --- | --- |
+| [Offer a QR place guide](qr-place-guide.md) | A no-login guide at a place, paid for by the place's owner | A pilot with no code; a minimum product in 16 to 23 days at the time | Waiting on 2 decisions | [2026-10-10](../research/qr-place-guide-market.md) |
 
 ## Know the smaller items
 

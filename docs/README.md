@@ -7,7 +7,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 - [Understand the project](project/overview.md): what the fork is, where it runs, its branches, how a change reaches `main`, and where things are in the code.
 - [Deploy it from GitHub](deployment/guide/README.md): the step-by-step guide, from accounts to the first business.
 - [Develop and test](development/README.md): set up a checkout and run the checks a pull request needs.
-- [Track the open items](project/open-items.md): steps to take after deploys, things to test, decisions to make, work not started.
+- [Track the open items](project/open-items.md): what only the maintainer can do, try or decide, the code to build, and what each triage closed.
 - [Find the future features](roadmap/README.md): what research proposed and nobody has built yet, one page each, with the plan, the effort and the decisions it waits on.
 
 ## Know the project
@@ -97,7 +97,8 @@ The `*.json` files in `validation/` are inputs to the parity scripts and browser
 ## Keep this folder true
 
 - **Update the docs in the pull request that changes the code:** the feature page it changes, a row in the [changelog](project/changelog.md), [open items](project/open-items.md) for anything left to do after the deploy, the [deployment guide](deployment/guide/README.md) for a new variable or step, the [route catalog](reference/routes.md) for a new page or route, and [decisions](project/decisions.md) for a new decision.
-- **Say what you checked.** A page that describes code names the commit of `main` it was checked against; update it when you check the page again.
+- **Say what you checked.** A page that describes code names the branch and the commit it was checked against, such as `develop/r2` at `88830a3`; update it when you check the page again.
+- **Triage the open items when they stop being easy to act from.** Check each item against the code and the deployments, move what is done or obsolete to a dated group under [done or obsolete](project/open-items.md#done-or-obsolete) with the reason, and update the page's first line.
 - **Give each proposed feature a roadmap page.** Research or a review that proposes a feature adds a page to the [roadmap](roadmap/README.md); the pull request that builds it describes the feature on its features page and removes the roadmap page.
 - **Keep dated records as they were.** Reviews, research and the original project's records keep what they found on their date, with a note on what has happened since. Fix a wrong fact, but don't rewrite history.
 - **Keep it public.** The repository is public: no secrets, keys, personal names, emails or phone numbers, no customer or demo business data, and no links to private documents ([what stays out](project/overview.md#keep-public-things-public)).

@@ -32,6 +32,13 @@ describe("the billing provider contract: a pack's checkout", () => {
       expect(polar.requests[0]?.body).toEqual({ products: ["product-pack-500-90"], customer_email: "owner@example.com", external_customer_id: "business:b1", success_url: base.successUrl, return_url: base.cancelUrl, allow_discount_codes: false, metadata: tagged });
     });
 
+    it("lets the page take a discount code made in Polar's dashboard when the brand's file says so, with no discount of its own", async () => {
+      const polar = polarHarness();
+      polar.answer("POST", "/v1/checkouts/", { id: "checkout-3", url: "https://polar.test/checkout/3" }, 201);
+      await polar.billing.createPackCheckout({ ...base, customer: { id: "cus-1", billingKey: "business:b1" }, price: { ref: "product-pack-500-90" }, discountCodes: true });
+      expect(polar.requests[0]?.body).toEqual({ products: ["product-pack-500-90"], customer_id: "cus-1", success_url: base.successUrl, return_url: base.cancelUrl, allow_discount_codes: true, metadata: tagged });
+    });
+
     it("has no call to close a page, so a page left open stays payable until its own expiry", () => {
       expect(polarHarness().billing.closePackCheckout).toBeUndefined();
     });
@@ -112,6 +119,13 @@ describe("the billing provider contract: a pack's checkout", () => {
       // Stripe refuses each mode's parameters in the other, and so does the fake.
       await expect(stripe.checkout.sessions.create({ mode: "payment", line_items: [{ price: "price_pack_500_90", quantity: 1 }], subscription_data: { metadata: {} } })).rejects.toThrow("subscription_data");
       await expect(stripe.checkout.sessions.create({ mode: "subscription", line_items: [{ price: "price_pack_500_90", quantity: 1 }], payment_intent_data: { metadata: {} } })).rejects.toThrow("payment_intent_data");
+    });
+
+    it("takes no promotion code on its page, even when asked for Polar's discount codes", async () => {
+      const { billing, stripe } = withPack();
+      await billing.createPackCheckout({ ...base, customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_pack_500_90" }, discountCodes: true });
+      const params = stripe.requests.at(-1)!.params as Record<string, unknown>;
+      for (const key of ["allow_promotion_codes", "discounts"]) expect(params).not.toHaveProperty(key);
     });
   });
 });

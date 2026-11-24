@@ -1,7 +1,7 @@
 // The pack checkout job: a one-time payment page for a prepaid pack, as the plan checkout job (checkout.ts) makes a plan's.
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { billingProviderNames, planChangeRefusalSentence } from "@lobbystack/shared";
-import { claimPackCheckout, loadPackCheckoutRequest, loadStripeSelling, markPackCheckoutFailed, markPackCheckoutReady, PACK_NOT_ON_SALE, releasePackCheckout } from "@lobbystack/domain";
+import { claimPackCheckout, loadPackCheckoutRequest, loadPolarPackDiscountCodes, loadStripeSelling, markPackCheckoutFailed, markPackCheckoutReady, PACK_NOT_ON_SALE, releasePackCheckout } from "@lobbystack/domain";
 import { reportError } from "@lobbystack/telemetry/node";
 import type { JobExecution, JobResult, WorkerDependencies } from "../handlers";
 import { businessIdOrThrow } from "../jobInput";
@@ -21,8 +21,10 @@ async function failPackCheckoutTry(dependencies: WorkerDependencies, input: { bu
 /**
  * billing.createPackCheckout: asks the deployment's provider for the page
  * where the business pays for a pack, on its own customer, and records it.
- * There is no promo code and no plan change: a pack is a one-time payment, and
- * billing.reconcile adds it once the payment arrives.
+ * The deployment's own promo codes don't apply and nothing changes a plan: a
+ * pack is a one-time payment, and billing.reconcile adds it once the payment
+ * arrives, for whatever the page took. On Polar, the brand's file may let the
+ * page take a discount code made in Polar's dashboard (packDiscountCodes).
  */
 export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerDependencies, execution: JobExecution = {}): Promise<JobResult> {
   const businessId = businessIdOrThrow(job);
@@ -56,8 +58,9 @@ export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerD
     const email = request.billingEmail ?? request.customerEmail;
     const customer = await billing.findOrCreateCustomer({ customer: { id: request.customerId, billingKey: request.externalCustomerId }, businessId, email, name: request.businessName, locale: null, requestId: checkoutId });
     const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;
-    // On Stripe, the brand's file says whether Stripe is the merchant of record.
+    // On Stripe, the brand's file says whether Stripe is the merchant of record; on Polar, whether the page takes discount codes.
     const selling = billing.id === "stripe" ? await loadStripeSelling(dependencies.domain) : null;
+    const discountCodes = billing.id === "polar" && await loadPolarPackDiscountCodes(dependencies.domain);
     const checkout = await billing.createPackCheckout({
       customer: { id: customer?.id ?? null, billingKey: request.externalCustomerId },
       email,
@@ -72,6 +75,7 @@ export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerD
       cancelUrl: planUrl,
       locale: null,
       ...(selling?.managedPayments ? { merchantOfRecord: true } : {}),
+      ...(discountCodes ? { discountCodes: true } : {}),
     });
     await markPackCheckoutReady(dependencies.domain, { businessId, checkoutId, providerCheckoutId: checkout.id, checkoutUrl: checkout.url, expiresAt: checkout.expiresAt });
     return { status: "completed", entityId: checkoutId };

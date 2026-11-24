@@ -8,7 +8,7 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfi
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { getBillingUsageStatus, getWebVoiceBillingAllowance } from "./billing";
-import { applyBillingCatalogForApi, billingDeploymentPolar, billingDeploymentStripe, desiredBillingPacks, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, loadStripeSelling, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
+import { applyBillingCatalogForApi, billingDeploymentPolar, billingDeploymentStripe, desiredBillingPacks, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, loadPolarPackDiscountCodes, loadStripeSelling, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
 import { billingPlanList, brandBillingCatalog, hasLinkedPackPrice, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
@@ -146,8 +146,9 @@ const hashOf = (value: Record<string, any>) => createHash("sha256").update(canon
 describe.skipIf(!testUrl)("billing catalog apply", () => {
   it("seeds an empty deployment, records unchanged for the same file, and applied with no changes for a polar-only edit", async () => {
     await rollbackTest(async (tx) => {
-      // Before any apply, a plan change charges as the shipped files say.
+      // Before any apply, a plan change charges as the shipped files say, and a pack's Polar page takes no discount code.
       expect(await loadPlanChangeProration(context(tx))).toEqual({ upgrade: "invoice", downgrade: "next_period" });
+      expect(await loadPolarPackDiscountCodes(context(tx))).toBe(false);
       const first = await apply(tx, file());
       expect(first).toMatchObject({ status: 201, replayed: false, run: { kind: "catalog", status: "applied", brand: "alloplace", ver: 1, prev_hash: null, code_hash: deployedHash, hash: deployedHash, key_id: caller.platformKeyId, partner: "lobbystack" } });
       // The plans' changes as before packs, then the brand file's packs and their prices.
@@ -181,6 +182,13 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: false, overage: "separate", currency: "cad", usageGraceHours: 1 });
       await apply(tx, file((value) => { value.stripe = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 6, overage: "checkout", managedPayments: true }; }));
       expect(await loadStripeSelling(context(tx))).toEqual({ managedPayments: true, overage: "checkout", currency: "cad", usageGraceHours: 6 });
+      // A pack's Polar page takes discount codes typed into it once the latest file's polar block says so, and an edit of that block alone is applied with no changes.
+      expect(await loadPolarPackDiscountCodes(context(tx))).toBe(false);
+      const codesOn = await apply(tx, file((value) => { value.polar.packDiscountCodes = true; }));
+      expect(codesOn.run).toMatchObject({ status: "applied", changes: [] });
+      expect(await loadPolarPackDiscountCodes(context(tx))).toBe(true);
+      await apply(tx, file((value) => { value.polar.packDiscountCodes = false; }));
+      expect(await loadPolarPackDiscountCodes(context(tx))).toBe(false);
     });
   });
 

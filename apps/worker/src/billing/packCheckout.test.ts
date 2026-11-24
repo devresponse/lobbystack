@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { claimPackCheckout, loadPackCheckoutRequest, loadStripeSelling, markPackCheckoutFailed, markPackCheckoutReady, releasePackCheckout, type PackCheckoutWork } from "@lobbystack/domain";
+import { claimPackCheckout, loadPackCheckoutRequest, loadPolarPackDiscountCodes, loadStripeSelling, markPackCheckoutFailed, markPackCheckoutReady, releasePackCheckout, type PackCheckoutWork } from "@lobbystack/domain";
 import { PolarRequestError } from "@lobbystack/providers/polar/polarBilling";
 import type { PolarBillingClient } from "@lobbystack/providers/polar/adapter";
 import type { StripeCatalogPrice } from "@lobbystack/providers/stripe/catalog";
@@ -65,6 +65,8 @@ describe("billing jobs: a pack's checkout", () => {
     expect(stripe.requests.at(-1)?.params).toMatchObject({ line_items: [{ price: "price_pack_500_90", quantity: 1 }], payment_intent_data: { metadata: tagged }, automatic_tax: { enabled: true }, invoice_creation: { enabled: true, invoice_data: { metadata: tagged } }, success_url: `https://app.example/settings/plan?pack=success&packCheckoutId=${checkoutId}`, cancel_url: "https://app.example/settings/plan" });
     expect(markPackCheckoutReady).toHaveBeenCalledExactlyOnceWith(domain, { businessId, checkoutId, providerCheckoutId: session!.id, checkoutUrl: session!.url, expiresAt: new Date(session!.expires_at * 1000) });
     expect(loadStripeSelling).toHaveBeenCalledWith(domain);
+    // Polar's discount code switch is no Stripe setting.
+    expect(loadPolarPackDiscountCodes).not.toHaveBeenCalled();
     expect(markPackCheckoutFailed).not.toHaveBeenCalled();
   });
 
@@ -105,6 +107,31 @@ describe("billing jobs: a pack's checkout", () => {
     // Polar names no expiry, so the checkout gets the hour its page lasts.
     expect(markPackCheckoutReady).toHaveBeenCalledExactlyOnceWith(domain, { businessId, checkoutId, providerCheckoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1", expiresAt: null });
     expect(loadStripeSelling).not.toHaveBeenCalled();
+    // The applied file was asked, and leaves Polar's discount code box off.
+    expect(loadPolarPackDiscountCodes).toHaveBeenCalledWith(domain);
+  });
+
+  it("lets Polar's page take a discount code made in Polar's dashboard when the brand's polar block turns packDiscountCodes on", async () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.example");
+    const checkoutId = randomUUID();
+    const job = packJob(checkoutId);
+    const businessId = job.businessId!;
+    vi.mocked(claimPackCheckout).mockResolvedValue({ claimed: true });
+    vi.mocked(loadPackCheckoutRequest).mockResolvedValue(work(job, { priceRef: "product-pack-500-90", customerId: "customer-1" }));
+    vi.mocked(loadPolarPackDiscountCodes).mockResolvedValueOnce(true);
+    const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-2", checkoutUrl: "https://polar.example/checkout-2" });
+
+    expect(await handleJob(job, { domain, billing: polarFake({ findCustomerByExternalId: vi.fn().mockResolvedValue({ id: "customer-1", externalId: `business:${businessId}` }), createCustomer: vi.fn(), createCheckout }) })).toEqual({ status: "completed", entityId: checkoutId });
+    // The box only: the page brings no discount of its own, so whoever pays types the code.
+    expect(createCheckout).toHaveBeenCalledExactlyOnceWith({
+      productId: "product-pack-500-90",
+      customer: { id: "customer-1" },
+      metadata: { lobbystack_business: businessId, lobbystack_pack: "minutes_500_90", lobbystack_pack_price: "price-row-1", lobbystack_pack_checkout: checkoutId, lobbystack_role: "pack" },
+      allowDiscountCodes: true,
+      successUrl: `https://app.example/settings/plan?pack=success&packCheckoutId=${checkoutId}`,
+      returnUrl: "https://app.example/settings/plan",
+    });
+    expect(markPackCheckoutReady).toHaveBeenCalledExactlyOnceWith(domain, { businessId, checkoutId, providerCheckoutId: "checkout-2", checkoutUrl: "https://polar.example/checkout-2", expiresAt: null });
   });
 
   it("fails a checkout without a provider, and one whose pack stopped selling, without asking a provider", async () => {

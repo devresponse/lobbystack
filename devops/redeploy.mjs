@@ -1419,8 +1419,9 @@ async function backupDatabase(ctx) {
   if (!backup) {
     console.log(`  making the backup "${name}" of the old database's volume; production keeps running`);
     const made = (await gql(Q.backupCreate, { volumeInstanceId, name })).volumeInstanceBackupCreate;
-    await waitForWorkflow(made?.workflowId, "the backup", 60);
-    backup = await waitUntil(5, "Railway to list the backup", async () => (await list()).filter((item) => item.name === name).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]);
+    // Without the workflow to follow, the backup is looked for as long as the workflow would have been waited for.
+    const followed = await waitForWorkflow(made?.workflowId, "the backup", 60);
+    backup = await waitUntil(followed ? 5 : 60, "Railway to list the backup", async () => (await list()).filter((item) => item.name === name).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]);
   }
   run.state.values.backup = { id: backup.id, name: backup.name, createdAt: backup.createdAt, volumeInstanceId };
   if (backup.expiresAt) {
@@ -2895,14 +2896,29 @@ async function waitUntil(minutes, what, check) {
   }
 }
 
-/** Railway's changes that answer with a workflow: waits while it runs, and stops when it fails. An unknown one isn't waited for. */
+/**
+ * Railway's changes that answer with a workflow: waits while it runs, and stops when it fails. Returns whether it could
+ * follow the workflow. An unknown one isn't waited for, and neither is one whose progress Railway won't show the token:
+ * on 2026-11-24 it refused a production run's token WorkflowStatus (Not Authorized), though the backup went through. The
+ * callers then wait for the change's result instead, as devops/scale.mjs does.
+ */
 async function waitForWorkflow(workflowId, what, minutes) {
-  if (typeof workflowId !== "string" || !workflowId) return;
+  if (typeof workflowId !== "string" || !workflowId) return false;
+  let followed = true;
   await waitUntil(minutes, `Railway to finish ${what}`, async () => {
-    const result = (await gql(Q.workflow, { workflowId })).workflowStatus;
+    let result;
+    try {
+      result = (await gql(Q.workflow, { workflowId })).workflowStatus;
+    } catch (error) {
+      if (!/^Railway refused WorkflowStatus\b/.test(String(error?.message))) throw error;
+      console.log(`  Railway won't show this token the progress of ${what}, so the script waits for its result instead`);
+      followed = false;
+      return true;
+    }
     if (result?.status === "Error") throw new Stop(`Railway couldn't finish ${what}: ${result.error || "it gave no reason"}`);
     return result?.status !== "Running";
   });
+  return followed;
 }
 
 function duration(seconds) {

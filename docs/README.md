@@ -31,6 +31,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Brand a deployment](branding.md) | The name, logo, colour and outside links each deployment shows |
 | [Polar](providers/polar.md), [Stripe](providers/stripe.md) and [email](providers/resend.md) | Setting up payments and email |
 | [Alerts](operations/alerts.md), [backup and restore](operations/backup-restore.md), [error tracking alerts](telemetry/provider-failure-error-tracking.md) | Runbooks for a running deployment |
+| [Move a Railway deployment to PostgreSQL 18](../devops/redeploy.md) | A new Railway project beside the old one, the data copied from a computer at a quiet hour, and the address moved, step by step, with `devops/redeploy.mjs status` showing where a move stands, its `prepare`, `trial`, `cutover`, `check`, `finish` and `retire` doing the steps, and `back` going back; on `develop/r2` |
 | [Railway infrastructure as code](deployment/railway.md) | The original project's `.railway/railway.ts`; the fork deploys by the guide instead |
 
 ## Understand the features
@@ -98,7 +99,7 @@ The `*.json` files in `validation/` are inputs to the parity scripts and browser
 
 - **Update the docs in the pull request that changes the code:** the feature page it changes, a row in the [changelog](project/changelog.md), [open items](project/open-items.md) for anything left to do after the deploy, the [deployment guide](deployment/guide/README.md) for a new variable or step, the [route catalog](reference/routes.md) for a new page or route, and [decisions](project/decisions.md) for a new decision.
 - **Say what you checked.** A page that describes code names the branch and the commit it was checked against, such as `develop/r2` at `88830a3`; update it when you check the page again.
-- **Triage the open items when they stop being easy to act from.** Check each item against the code and the deployments, move what is done or obsolete to a dated group under [done or obsolete](project/open-items.md#done-or-obsolete) with the reason, and update the page's first line.
+- **Triage the open items when they stop being easy to act from.** Check each item against the code and the deployments, move what is done or obsolete to a dated group under [done or obsolete](project/open-items.md#done-or-obsolete) with the reason, and update the page's first line. Between triages, a pull request that finishes an item moves it to the group for the day it merges.
 - **Give each proposed feature a roadmap page.** Research or a review that proposes a feature adds a page to the [roadmap](roadmap/README.md); the pull request that builds it describes the feature on its features page and removes the roadmap page.
 - **Keep dated records as they were.** Reviews, research and the original project's records keep what they found on their date, with a note on what has happened since. Fix a wrong fact, but don't rewrite history.
 - **Keep it public.** The repository is public: no secrets, keys, personal names, emails or phone numbers, no customer or demo business data, and no links to private documents ([what stays out](project/overview.md#keep-public-things-public)).

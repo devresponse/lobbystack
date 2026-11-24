@@ -12,14 +12,14 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "next": "16.4.2",
+    "next": "16.4.6",
     "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@next/eslint-plugin-next": "16.4.2",
+    "@next/eslint-plugin-next": "16.4.6",
     "@types/node": "^26.0.0",
     "@types/pg": "^8.23.1",
     "@types/react": "19.3.0",

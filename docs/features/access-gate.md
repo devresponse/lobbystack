@@ -106,7 +106,7 @@ A wrong token is usually someone with an access link from before the token chang
 - **Open routes stay reachable by anyone,** as on an open deployment: the health checks name the service, its version and the brand, and the widget works for anyone with a widget key, behind its allowed websites, Turnstile and daily limit.
 - **A cookie lasts its 30 days.** There's no list of browsers that were let in and no way to end one cookie; changing the token ends all of them.
 - **It doesn't replace sign-in, sign-up limits or Turnstile,** and it doesn't hide that a server answers at the address. An address with a closing slash or a doubled one first gets Next.js's redirect to the tidy address, whatever the address, and that one answers the 404.
-- **The gate relies on Next.js running the proxy for every request.** A 2025 flaw let a crafted header skip it (CVE-2025-29927, fixed in Next.js 15.2.3); the admin runs 16.4.2, and Dependabot keeps it current.
+- **The gate relies on Next.js running the proxy for every request.** A 2025 flaw let a crafted header skip it (CVE-2025-29927, fixed in Next.js 15.2.3); the admin runs 16.4.6 since fork PR #233. Newer versions arrive only when someone takes them, or from Dependabot once the owner switches it on ([guide 7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions)).
 - **Not yet seen on Railway.** It was tried on a server on a computer with the variable set, including the website widget on a page of another site in a browser without the cookie. The first protected deployment on Railway will settle the rest ([open items](../project/open-items.md)).
 
 ## Know how it's built

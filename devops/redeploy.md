@@ -2,9 +2,9 @@
 
 A deployment set up before fork PR #223 runs PostgreSQL 16, which is supported until November 9, 2028. PostgreSQL 18 won't start on the files 16 wrote, so the move is a copy ([guide 7.22](../docs/deployment/guide/part-7-operations.md#722-upgrade-pinned-versions)). For a deployment that `devops/bootstrap.mjs` set up, the copy goes into a new Railway project: bootstrap builds it beside the old one from a copy of the deployment's settings files, the database and the bucket's files are copied into it at a quiet hour, and the address moves to it. The old project stays for a week, stopped and frozen, so going back means moving the address back.
 
-`redeploy.mjs` follows that move step by step, under the same numbers: 0 to 40, then G1 to G9 for going back and R1 and R2 for a run that stopped. `status` reads both projects and changes nothing. Four commands do the steps before and after the cutover: `prepare` (steps 1 to 17), `trial` (18 to 20), `finish` (35 to 39) and `retire` (40). Picking the hour (step 21), the cutover and its checks (22 to 34) and going back are still done by hand, as [the steps](#the-steps) describe.
+`redeploy.mjs` follows that move step by step, under the same numbers: 0 to 40, then G1 to G9 for going back and R1 and R2 for a run that stopped. `status` reads both projects and changes nothing. Six commands do the steps in order: `prepare` (steps 1 to 17), `trial` (18 to 20), `cutover` (22 to 33), `check` (34), `finish` (35 to 39) and `retire` (40). `back` goes back (G1 to G9) from wherever the cutover got to, and `recover` puts back the new project's settings files if they're lost (R1). Only picking the hour (step 21) and the checks only a person can make are left to you, as [the steps](#the-steps) describe.
 
-**Status:** written on 24 November 2026 for fork PRs #234 and #235, on `develop/r2` at `b44bef3`. `scripts/redeploy.test.ts` runs every command against stand-ins for Railway's and Cloudflare's APIs, bootstrap, the scale script, Docker and the AWS CLI, and every query and change the script sends to Railway was checked that day against Railway's live API schema. None has run against a real project yet ([what isn't confirmed](#what-isnt-confirmed)). The move itself has run once, on dev2 on 22 and 23 November 2026, with every step done by hand.
+**Status:** written on 24 November 2026 for fork PRs #234, #235 and #236, on `develop/r2` at `0649c9f`. `scripts/redeploy.test.ts` runs every command against stand-ins for Railway's and Cloudflare's APIs, bootstrap, the scale script, Docker and the AWS CLI, and every query and change the script sends to Railway was checked that day against Railway's live API schema. None has run against a real project yet ([what isn't confirmed](#what-isnt-confirmed)). The move itself has run once, on dev2 on 22 and 23 November 2026, with every step done by hand.
 
 ## The whole move
 
@@ -13,9 +13,9 @@ A deployment set up before fork PR #223 runs PostgreSQL 16, which is supported u
 | Before the day | 0 to 7 | Runs on the old project | The tools, backups of the files, the database and the bucket, and the notes that going back needs | `prepare` |
 | Build the new project | 8 to 17 | Runs | A copy of the settings files with a temporary address, the old project renamed, the new one built by `up` on PostgreSQL 18, and the variables the files don't know copied across | `prepare` |
 | Before the cutover | 18 to 21 | Runs | The bucket copied into the new one, the address move rehearsed with a throwaway name, a trial copy of the database a day ahead, and the hour picked | `trial`, then the hour by hand |
-| The cutover | 22 to 34 | Offline from step 24 to step 33, about 30 to 60 minutes | Both databases opened to your computer, the services stopped, the database frozen, copied and compared, the bucket's newest files copied, the address moved, `connect` run, then the checks | By hand |
+| The cutover | 22 to 34 | Offline from step 24 to step 33, about 30 to 60 minutes | Both databases opened to your computer, the services stopped, the database frozen, copied and compared, the bucket's newest files copied, the address moved, `connect` run, then the checks | `cutover`, then `check` |
 | After the checks | 35 to 40 | Runs on the new project | The copies set again, the old services disconnected, backups turned on, the temporary address and the TCP proxies removed, and a week later the old project deleted | `finish`, and a week later `retire` |
-| Going back | G1 to G9 | Back on the old project | Before step 30, in a few minutes (G1 to G3); after it, with the address moved back (G4 to G9) | By hand |
+| Going back | G1 to G9 | Back on the old project | Before step 30, in a few minutes (G1 to G3); after it, with the address moved back (G4 to G9) | `back` |
 
 Run `status` before each stage and after it ([see where the move stands](#see-where-the-move-stands)), and the commands as [run the steps](#run-the-steps) describes.
 
@@ -27,7 +27,7 @@ What carries over: the OpenAI project and its webhook, Twilio's subaccount, numb
 - **The checkout:** `develop/r2`, or `releases/r2` with fork PR #223, whose `devops/bootstrap.mjs` makes `Postgres` from `pgvector/pgvector:pg18-trixie`. The new database's version is decided by the script on your computer alone: the services keep building from the branch they follow.
 - **The files:** the deployment's settings file, its `.secrets` file and its `.state.json`, in the checkout's folder, as `up` left them.
 - **A Railway token that reaches both projects:** an account token, or a token of their workspace, from `railway.com/account/tokens`. A project token reaches one project only. The script reads `RAILWAY_API_TOKEN` from the environment, then from the settings file's `.secrets` file, then from the copy's, and otherwise asks, with typing hidden. It never saves or prints it.
-- **Cloudflare's token, if you have it:** `CLOUDFLARE_API_TOKEN`, read the same way but never asked for. With it, and the zone in the settings file's `CLOUDFLARE_ZONE`, `status` reads the address's DNS records from Cloudflare, `trial` writes and then deletes the records of the throwaway name it rehearses the address move with (step 19), and `finish` deletes the temporary address's records (step 38). Bootstrap's token will do: it has **Zone > DNS > Edit**. Without it, rehearse by hand and run `trial --no-rehearsal`, and `finish` says which records to delete.
+- **Cloudflare's token, if you have it:** `CLOUDFLARE_API_TOKEN`, read the same way but never asked for. With it, and the zone in the settings file's `CLOUDFLARE_ZONE`, `status` reads the address's DNS records from Cloudflare, `trial` writes and then deletes the records of the throwaway name it rehearses the address move with (step 19), `back` points the address's records at the old project again (G5), and `finish` deletes the temporary address's records (step 38). Bootstrap's token will do: it has **Zone > DNS > Edit**, and bootstrap's `up` uses it at the cutover's address move (step 30). Without it, rehearse by hand and run `trial --no-rehearsal`, and `back` and `finish` say which records to change.
 - **On Windows,** run it in PowerShell or Windows Terminal, as bootstrap, so that a token you type stays hidden.
 
 ## See where the move stands
@@ -76,8 +76,17 @@ The last line compares `OPENAI_WEBHOOK_SECRET` in the copy's `.secrets` file, if
 ```sh
 node devops/redeploy.mjs prepare .env.bootstrap-<name>
 node devops/redeploy.mjs trial .env.bootstrap-<name>
+node devops/redeploy.mjs cutover .env.bootstrap-<name>
+node devops/redeploy.mjs check .env.bootstrap-<name>
 node devops/redeploy.mjs finish .env.bootstrap-<name>
 node devops/redeploy.mjs retire .env.bootstrap-<name>
+```
+
+And when something goes wrong:
+
+```sh
+node devops/redeploy.mjs back .env.bootstrap-<name>
+node devops/redeploy.mjs recover .env.bootstrap-<name>
 ```
 
 Each takes the settings file or the address, and `--backup <folder>`, as `status` does. Once `prepare` has made the backup folder (step 4), the notes file remembers it, so later runs find it without `--backup`.
@@ -88,11 +97,11 @@ Each run:
 2. Checks Railway's API, as `status` does, and stops before it changes anything if a call it makes is gone.
 3. Reads both projects, and stops if the command doesn't fit where the move stands, saying what comes first.
 4. Lists its steps, marking those done already, and says what it will change.
-5. Asks before it changes anything: type `yes`. `finish` asks it as whether all of step 34's checks have passed, and `retire` wants the old project's name typed in full instead.
+5. Asks before it changes anything: type `yes`. `cutover` asks it as whether it's the hour you picked, `back` says what going back leaves behind, `finish` asks whether all of step 34's checks have passed, and `retire` wants the old project's name typed in full instead. `check` changes nothing, so it asks only its own questions.
 6. Runs the steps in order, and records each in the notes file when it finishes, with the time and how long it took. A step whose work it finds done already says so with `=`, and is recorded like the others. At the first check that fails, it stops and says what to do; then run the same command again, and it carries on from the step that stopped.
 7. Says what comes next.
 
-With `--dry-run`, it does 2 to 4, says what it would change, and changes nothing, without taking the lock. Everything a run prints, secrets hidden, also goes into `.env.bootstrap-<name>.redeploy.log`, with each command it ran and its exit code; what bootstrap and the scale script print stays in the terminal.
+With `--dry-run`, it does 2 to 4, says what it would change, and changes nothing, without taking the lock. `recover` reads only files, so it does none of 2 to 4. Everything a run prints, secrets hidden, also goes into `.env.bootstrap-<name>.redeploy.log`, with each command it ran and its exit code; what bootstrap and the scale script print stays in the terminal.
 
 ### `prepare`: steps 1 to 17
 
@@ -124,6 +133,37 @@ A day or so before the cutover, while production runs. It waits for `prepare` to
 
 The database's password is `POSTGRES_PASSWORD` from both state files, which must agree, and reaches Docker through its environment only. PostgreSQL 18's tools run in Docker as `postgres`, in the backup folder.
 
+### `cutover`: steps 22 to 33
+
+At the hour picked (step 21), with the customers who need notice told. It waits for `trial` to finish, and asks whether it's the hour you picked: production is offline from step 24 to step 33, about as long as the trial's dump and restore took, which it says, plus the address move and `connect`. If a run stops, run `cutover` again: it carries on from the step that stopped, and asks only whether to go on. To give up instead, run `back`. `--same-version`, as with `prepare` and `trial`, allows an old database on 18.
+
+- **Step 22:** A TCP proxy on each `Postgres`, as at step 20, and the same checks: two different servers, the new one on PostgreSQL 18 and the old one not. It notes each server's identity, and every later step that touches a database first checks that its proxy still reaches the same server.
+- **Step 23:** The new admin, worker and control panel stopped: their deployments removed.
+- **Step 24:** It waits, up to 20 minutes, until no call is in progress. The old workers say how many calls they hold through the old admin's fleet status address, where the old admin has a `FLEET_STATUS_TOKEN`; otherwise it counts the calls in the old database that started in the last half hour and haven't ended. If calls remain after 20 minutes, it asks whether to cut them off. Then it notes the release the old admin runs, and stops the old admin, which takes production offline; two minutes later the old worker, which has finished the jobs already handed to the old Redis by then; then the old `cloudflared`.
+- **Step 25:** `freeze.sql` on the old database, which says how many sessions it ended and the database's own settings, where it notes the reset-protection mark; `count.sql`, kept in `count-old.txt` in the backup folder; then `pg_dump -Fc` into `<the address's first part>.dump` in the backup folder, written as a `.part` file and renamed once it's whole.
+- **Step 26:** The new admin, worker and control panel stopped again, if a sync of the branch started them. Then, on the new server only, `lobbystack` dropped with its sessions ended and made again, the dump restored with `pg_restore -O -1 -e`, and `vacuumdb --analyze-only`, since a restore brings no statistics. If the dump isn't there, it records step 25 as not done and stops, so the next run dumps again.
+- **Step 27:** `count.sql` on the new database, against the old one's count: `SAME`, or `DIFFERENT` with the lines of `tables.sql` that differ, after which it records step 26 as not done and stops, so the next run restores again. If the old database had the reset-protection mark, it sets it on the new one.
+- **Step 28:** The bucket's newest files, as at step 18.
+- **Step 29:** The new migrate deployed again, as Railway's **Redeploy** does, so its pre-deploy runs on the copied data: the migrations, the roles' passwords and the row-level security check. It waits up to 20 minutes for it to succeed.
+- **Step 30:** The address taken off the old admin, and `APP_BASE_URL` put back in the copy, without `CUSTOM_HOST`. Once Railway lets the new project have the address, `bootstrap.mjs redo <copy> railway.domain railway.custom turnstile variables "post.*"`, once, then `up` on the copy, which puts the address on the new admin, asks before it points the address's CNAME at the new project, and sets the address's variables, so Railway deploys the new admin and worker again. Any new service still stopped then, such as the control panel and `cloudflared`, starts again on the image it ran. If `up` stops, do what it says and run `cutover` again: it runs `up` again, not `redo`.
+- **Step 31:** The three `-pg18` files copied to `after-cutover` in the backup folder.
+- **Step 32:** The copy's `OPENAI_WEBHOOK_SECRET`, if it has one, made the old admin's again if they differ; `redo <copy> connect.webhook connect.platformKey`, once, then `connect`, which prints what `pnpm billing plan` would make in Polar and asks: it should make nothing, so read it before you type yes.
+- **Step 33:** It waits up to 15 minutes for `https://<address>/api/health/ready` to answer `"ok":true` while Railway gives the address its certificate, then names the release the new project runs, says if it isn't the one the old project ran, and how long production was offline.
+
+The TCP proxies stay open, for going back; `finish` deletes them (step 39).
+
+### `check`: step 34
+
+Right after the cutover. It changes nothing, so it doesn't ask first. It reads:
+
+- `https://<address>/api/health/ready`;
+- the copies, as `devops/scale.mjs --bootstrap <copy>` lists them;
+- the new worker's log since it started, with its newest errors;
+- with the control panel, its address, which must answer through the new `cloudflared`;
+- whether `pnpm billing verify` passed at the end of `connect`.
+
+Then it asks about what only a person can check, each answered yes or no: a sign-in with the emailed code, a knowledge document or a call recording opened and a small file uploaded, a call to a business's number, a text to it, where the deployment takes payments Polar's one webhook to the address answering 200 and a billing portal opening, the worker's log, and the control panel. If any answer is no, it stops and names them: fix it if it's quick and run `check` again, or go back within the first hour, before real traffic builds up on the new database. Once `cutover` has run, `finish` waits for `check` to pass.
+
 ### `finish`: steps 35 to 39
 
 Once all of step 34's checks have passed, which it asks you to confirm. It stops unless the new admin has the address and the old one doesn't.
@@ -137,6 +177,24 @@ Once all of step 34's checks have passed, which it asks you to confirm. It stops
 ### `retire`: step 40
 
 A week after the cutover. It waits for `finish`, and for the new admin to have the address, says if `finish` ran less than a week ago, and asks you to type the old project's name. Railway then deletes the old project and its backups after 48 hours, during which the old project's **Settings** can cancel that. The original settings file, its `.secrets`, `.state.json`, `.vars` and `.log`, and the script's notes and log go into `old-project-files` in the backup folder. From then on, bootstrap and the scale script run with the `-pg18` files.
+
+### `back`: G1 to G9
+
+Production back on the old project, from wherever the cutover got to: G1 to G3 while the old admin still has the address and step 30 hasn't begun, G4 to G9 after. It says which and what that leaves behind, and asks first. If it stops, run it again: it finishes the same way, and `cutover` and `finish` wait until it has.
+
+- **G1 and G6:** `grant connect on database lobbystack to public` on the old database, through its TCP proxy, which it opens again if it's gone.
+- **G2 and G7:** The old admin, worker and `cloudflared` started again: the deployments step 24 removed, deployed again on the image they ran, or where Railway won't, new ones from their source. It waits for each to succeed and, once the old admin has the address, for `https://<address>/api/health/ready` to answer `"ok":true`.
+- **G3:** The new admin, worker and control panel stopped, if a sync started them; `lobbystack` on the new server dropped and made again, on PostgreSQL 18 only; and the new migrate deployed again.
+- **G4:** The address taken off the new admin, and the new admin, worker, control panel and `cloudflared` stopped.
+- **G5:** The address given back to the old admin, once Railway lets it have it, and the records Railway asks for written in Cloudflare, DNS only. It asks before it points the CNAME back at the old project, and says where Railway's records differ from the notes of step 7. Without Cloudflare's token or `CLOUDFLARE_ZONE`, it prints them for you to set, and asks whether they're set.
+- **G8:** The new admin, worker and control panel stopped, if a sync started them; the new `lobbystack` renamed `lobbystack_after_switch`, or that name with the time after it if it's taken, once its sessions have ended, which keeps what customers wrote after the switch; an empty `lobbystack` made; and the new migrate deployed again.
+- **G9:** Polar's webhook for the temporary address, which only a `connect` run on the copy before step 30 would have made, to delete by hand.
+
+Once every step is done, it closes the TCP proxies the script opened, records when it went back and which way, and clears the cutover's steps, so the next try runs `cutover` from step 22 at another quiet hour. The new project stays as it is for that try, and `status` shows each time the move went back.
+
+### `recover`: R1
+
+If the `-pg18` files are lost or broken, it puts back the newest copies the backup folder has: `after-cutover` if step 31 made it, else `after-stage-1` (step 14), after moving the ones there now into `replaced-<time>` in the backup folder. What the copy's state file learned after that backup runs again: from `after-cutover`, steps 32 and 33; from `after-stage-1`, steps 30 to 33, bootstrap's `redo` included. It asks first, and reads and writes files only; `--dry-run` says what it would do. Then run `status`, and the command whose step is next.
 
 ## The steps
 
@@ -187,21 +245,21 @@ Production is offline from step 24 to step 33. From step 23 until the checks, do
 
 | Step | What | How | What `status` shows |
 | --- | --- | --- | --- |
-| 22 | Add a TCP proxy to each `Postgres`, and open both databases to your computer, checking that the old one isn't on 18 and the new one is | By hand | Both proxies |
-| 23 | Stop the new admin, worker and control panel: remove each one's deployment | By hand | Them stopped |
-| 24 | When no call is in progress, stop the old admin; two minutes later the old worker, so it finishes the jobs already handed to the old Redis; then the old `cloudflared`. Production is offline from here | By hand | Them stopped |
-| 25 | Freeze the old database, count it, and dump it with PostgreSQL 18's `pg_dump -Fc` into the backup folder ([the SQL](#the-sql-the-copy-runs)) | By hand | |
-| 26 | Restore into the new database: only on PostgreSQL 18, drop and make `lobbystack` again, `pg_restore -O -1 -e`, then `vacuumdb --analyze-only` | By hand | |
-| 27 | Count the new database and compare: `SAME` or `DIFFERENT`. If the old database had the reset-protection mark, set it again ([guide 7.28](../docs/deployment/guide/part-7-operations.md#728-reset-a-test-environment)) | By hand | |
-| 28 | Copy the bucket's newest files | By hand, as step 18 | Both buckets' files and size |
-| 29 | Redeploy the new migrate, and wait for it to succeed | By hand | migrate's state |
-| 30 | Move the address: remove it from the old admin, put `APP_BASE_URL` back in the copy, `redo … railway.domain railway.custom turnstile variables "post.*"`, then `up`, which asks before pointing the CNAME at the new project. Redeploy any new service still stopped | By hand | Which admin has the address |
-| 31 | Copy the three `-pg18` files to `after-cutover` in the backup folder | By hand | |
-| 32 | Once the new admin is active, `redo … connect.webhook connect.platformKey`, then `connect`. Read what `pnpm billing plan` prints before you type yes: it should make nothing | By hand | |
-| 33 | `/api/health/ready` answers `"ok":true`, and `/api/health/live` names the commit the old project ran | By hand | The new services' release |
-| 34 | Check: a sign-in and its emailed code, a file opened and one uploaded, a phone call, a text, Polar's one webhook answering 200 and a billing portal, the worker's log, the control panel, and the copies (`node devops/scale.mjs --bootstrap .env.bootstrap-<name>-pg18`) | By hand | |
+| 22 | Add a TCP proxy to each `Postgres`, and open both databases to your computer, checking that the old one isn't on 18 and the new one is | `cutover` | Both proxies |
+| 23 | Stop the new admin, worker and control panel: remove each one's deployment | `cutover` (by hand: each one's **Deployments** tab, the newest deployment's menu, **Remove**) | Them stopped |
+| 24 | When no call is in progress, stop the old admin; two minutes later the old worker, so it finishes the jobs already handed to the old Redis; then the old `cloudflared`. Production is offline from here | `cutover` | Them stopped |
+| 25 | Freeze the old database, count it, and dump it with PostgreSQL 18's `pg_dump -Fc` into the backup folder ([the SQL](#the-sql-the-copy-runs)) | `cutover` | |
+| 26 | Restore into the new database: only on PostgreSQL 18, drop and make `lobbystack` again, `pg_restore -O -1 -e`, then `vacuumdb --analyze-only` | `cutover` | |
+| 27 | Count the new database and compare: `SAME` or `DIFFERENT`. If the old database had the reset-protection mark, set it again ([guide 7.28](../docs/deployment/guide/part-7-operations.md#728-reset-a-test-environment)) | `cutover` | |
+| 28 | Copy the bucket's newest files | `cutover`, as step 18 | Both buckets' files and size |
+| 29 | Redeploy the new migrate, and wait for it to succeed | `cutover` | migrate's state |
+| 30 | Move the address: remove it from the old admin, put `APP_BASE_URL` back in the copy, `redo … railway.domain railway.custom turnstile variables "post.*"`, then `up`, which asks before pointing the CNAME at the new project. Redeploy any new service still stopped | `cutover`, which runs bootstrap's `redo` and `up` | Which admin has the address |
+| 31 | Copy the three `-pg18` files to `after-cutover` in the backup folder | `cutover` | |
+| 32 | Once the new admin is active, `redo … connect.webhook connect.platformKey`, then `connect`. Read what `pnpm billing plan` prints before you type yes: it should make nothing | `cutover`, which runs bootstrap's `redo` and `connect` | |
+| 33 | `/api/health/ready` answers `"ok":true`, and `/api/health/live` names the commit the old project ran | `cutover` | The new services' release |
+| 34 | Check: a sign-in and its emailed code, a file opened and one uploaded, a phone call, a text, Polar's one webhook answering 200 and a billing portal, the worker's log, the control panel, and the copies (`node devops/scale.mjs --bootstrap .env.bootstrap-<name>-pg18`) | `check` reads what it can, then asks you about the rest | |
 
-If a check fails within the first hour and can't be fixed quickly, go back before real traffic builds up on the new database.
+If a check fails within the first hour and can't be fixed quickly, go back before real traffic builds up on the new database: `back`.
 
 ### After the checks (steps 35 to 40)
 
@@ -215,6 +273,8 @@ If a check fails within the first hour and can't be fixed quickly, go back befor
 | 40 | A week later, if nothing needed going back, delete the old project, which deletes its backups too, and move the old three files into the backup folder. From then on, bootstrap and the scale script run with the `-pg18` files | `retire` | |
 
 ### Going back
+
+`back` does these steps, and finds which way to go ([back](#back-g1-to-g9)).
 
 **Before step 30,** while the old admin still has the address, nothing outside Railway has changed:
 
@@ -232,9 +292,9 @@ If a check fails within the first hour and can't be fixed quickly, go back befor
 
 ### If a run stops
 
-Every step can run again. Bootstrap marks a step done only when it finishes, and finds what it made by ID or name rather than making it twice. `prepare`, `trial`, `finish` and `retire` record a step the same way, and carry on from the first one not recorded. If you have to stop for the day anywhere from step 24 to step 29, go back rather than leave production offline: the next attempt runs from step 22 again.
+Every step can run again. Bootstrap marks a step done only when it finishes, and finds what it made by ID or name rather than making it twice. `redeploy.mjs`'s commands record a step the same way, and carry on from the first one not recorded. If you have to stop for the day anywhere from step 24 to step 29, go back rather than leave production offline: `back` does G1 to G3, and the next attempt runs `cutover` from step 22 again.
 
-- **R1.** If the `-pg18` files are lost or broken, put the newest backed-up copies back: `after-cutover` if step 31 made it, else `after-stage-1`, from which step 30 runs again in full.
+- **R1.** If the `-pg18` files are lost or broken, put the newest backed-up copies back: `after-cutover` if step 31 made it, else `after-stage-1`, from which step 30 runs again in full. `recover` does this ([recover](#recover-r1)).
 - **R2.** A lock left behind by a closed window is taken over by the next run, as bootstrap does, and so is one of `redeploy.mjs`'s. If bootstrap or `redeploy.mjs` says another run is using a file and none is, delete the `.lock` file it names.
 
 ## The SQL the copy runs
@@ -302,17 +362,17 @@ The dump runs as `postgres`, through the old database's TCP proxy, with the pass
 | File | What | Who writes it |
 | --- | --- | --- |
 | `.env.bootstrap-<name>`, `.secrets`, `.state.json` | The deployment's settings, keys and state, which keep describing the old project until step 40 | Bootstrap. `redeploy.mjs` only reads them, and `retire` moves them into the backup folder |
-| `.env.bootstrap-<name>-pg18`, and its `.secrets` and `.state.json` | The new project's, made by copying the three (step 8) | `prepare` or you, then bootstrap. `prepare` also sets the copy's address (step 9) and, if production's differs, its `OPENAI_WEBHOOK_SECRET` (step 16) |
-| `.env.bootstrap-<name>.redeploy.json` | The notes: the address's DNS records, the copies of the admin and the worker, the old project's ID and when they were noted; the backup folder; and each step the commands finished, when, and how long it took, with what later steps need, such as the Railway backup's ID, the temporary address, the rehearsal's and the trial's times, and the TCP proxies the script opened. No key | `status` and the commands, readable only by your account where the system allows |
-| `.env.bootstrap-<name>.redeploy.json.lock` | Held while the notes are written, and by `prepare`, `trial`, `finish` and `retire` for their whole run; taken over from a run that's gone | `redeploy.mjs` |
+| `.env.bootstrap-<name>-pg18`, and its `.secrets` and `.state.json` | The new project's, made by copying the three (step 8) | `prepare` or you, then bootstrap. `prepare` also sets the copy's address (step 9) and, if production's differs, its `OPENAI_WEBHOOK_SECRET` (step 16, and `cutover` again before step 32); `cutover` puts the address back (step 30), and `recover` the backed-up copies (R1) |
+| `.env.bootstrap-<name>.redeploy.json` | The notes: the address's DNS records, the copies of the admin and the worker, the old project's ID and when they were noted; the backup folder; and each step the commands finished, when, and how long it took, with what later steps need, such as the Railway backup's ID, the temporary address, the rehearsal's and the trial's times, the TCP proxies the script opened, and the cutover's: the two servers' identities, the deployments it removed, when production went offline and the release it ran, the dump, and the checks' answers; and each time the move went back. No key | `status` and the commands, readable only by your account where the system allows |
+| `.env.bootstrap-<name>.redeploy.json.lock` | Held while the notes are written, and by every command but `status` and `schema` for its whole run; taken over from a run that's gone | `redeploy.mjs` |
 | `.env.bootstrap-<name>.redeploy.log` | What each run of the commands printed, secrets hidden, and the commands it ran with their exit codes | The commands, readable only by your account where the system allows |
-| The backup folder | The three files; the SQL files; `<the address's first part>-files`, the bucket's files; `after-stage-1`, and from step 31 `after-cutover`; the dump from step 25; and after step 40, `old-project-files`. `trial`'s dump is deleted when it's done. It holds every key and production's data, so keep it to your account and out of the checkout | `prepare`, `trial`, `retire` and you |
+| The backup folder | The three files; the SQL files; `<the address's first part>-files`, the bucket's files; `after-stage-1`, and from step 31 `after-cutover`; the cutover's dump, `<the address's first part>.dump`, and `count-old.txt` (step 25); after `recover`, `replaced-<time>`, the copy's files it replaced; and after step 40, `old-project-files`. `trial`'s dump is deleted when it's done. It holds every key and production's data, so keep it to your account and out of the checkout | `prepare`, `trial`, `cutover`, `recover`, `retire` and you |
 
-`status` and `prepare` read the variables of migrate, the admin, the worker and the control panel, which hold keys, to compare them, and print none of them: they hide any value of a variable whose name ends like a key's, such as `_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, `DATABASE_URL` and `REDIS_URL`, and any text shaped like a key, as bootstrap does. `prepare` copies a value from an old service to a new one through Railway's API (step 16), and writes one key into a file: production's `OPENAI_WEBHOOK_SECRET`, into the copy's `.secrets` file. The Railway token reaches bootstrap and the scale script, the bucket's keys the AWS CLI, and the database's password Docker, each through its environment only, and none of them is saved.
+`status` and `prepare` read the variables of migrate, the admin, the worker and the control panel, which hold keys, to compare them, and print none of them: they hide any value of a variable whose name ends like a key's, such as `_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, `DATABASE_URL` and `REDIS_URL`, and any text shaped like a key, as bootstrap does. `prepare` copies a value from an old service to a new one through Railway's API (step 16), and writes one key into a file: production's `OPENAI_WEBHOOK_SECRET`, into the copy's `.secrets` file. `cutover` reads the old admin's `FLEET_STATUS_TOKEN` to ask the old workers about calls in progress (step 24), and sends it only to the old admin's address. The Railway token reaches bootstrap and the scale script, the bucket's keys the AWS CLI, and the database's password Docker, each through its environment only, and none of them is saved.
 
 ## Railway's API
 
-The script calls Railway's public API, `backboard.railway.com/graphql/v2`, as bootstrap and the scale script do. Each run first checks every query and change it sends against Railway's schema, which Railway gives without a token: each field, argument and input it uses must still be there, and each argument Railway requires must be given. `status` names a change it finds and carries on, since it only reads; `prepare`, `trial`, `finish` and `retire` stop before they change anything, unless run with `--dry-run`.
+The script calls Railway's public API, `backboard.railway.com/graphql/v2`, as bootstrap and the scale script do. Each run first checks every query and change it sends against Railway's schema, which Railway gives without a token: each field, argument and input it uses must still be there, and each argument Railway requires must be given. `status` names a change it finds and carries on, since it only reads; the commands that change something stop before they do, unless run with `--dry-run`.
 
 ```sh
 node devops/redeploy.mjs schema
@@ -323,7 +383,7 @@ The first runs only that check, and exits with 1 if something changed. The secon
 
 ## What isn't confirmed
 
-None of this has met Railway or Cloudflare yet; the stand-ins answer as Railway's schema and Cloudflare's API describe. Before production, run the whole move on a deployment set up for the purpose. One that bootstrap builds today runs PostgreSQL 18 already, so run `prepare` and `trial` on it with `--same-version`. Check, with `status` and in Railway's dashboard:
+None of this has met Railway or Cloudflare yet; the stand-ins answer as Railway's schema and Cloudflare's API describe. Before production, run the whole move on a deployment set up for the purpose. One that bootstrap builds today runs PostgreSQL 18 already, so run `prepare`, `trial` and `cutover` on it with `--same-version`, then `check`, and `back` once, `cutover` again and `finish`. Check, with `status` and in Railway's dashboard:
 
 - **That an account or workspace token reads both projects,** their variables and their buckets.
 - **The copies,** read as `devops/scale.mjs` reads them, from the latest deployment's settings, which hasn't met Railway either.
@@ -335,6 +395,11 @@ None of this has met Railway or Cloudflare yet; the stand-ins answer as Railway'
 - **A deployment removed (step 17):** the new `cloudflared` stops, and stays stopped.
 - **The rehearsal (step 19):** an address added to an admin and removed, the records Railway asks for, how soon it verifies them, and how soon a name taken off one project is free for another.
 - **The TCP proxies (steps 20 and 39):** opened and closed through the environment's settings without a deploy, and whether `Postgres` restarts when one opens. If one never opens, add it by hand: **Postgres** > **Settings** > **Networking** > **TCP Proxy**, port 5432.
+- **Stopping and starting services (steps 23, 24, 30, G2, G4 and G7):** a deployment removed, and deployed again on the image it ran (`deploymentRedeploy` with `usePreviousImageTag`), or where Railway won't, a new one from the service's source (`serviceInstanceDeployV2`). Also whether the variables `up` sets at step 30 deploy the stopped new admin and worker by themselves: the script starts whichever is still stopped afterwards.
+- **Railway's Redeploy (steps 29, G3 and G8),** through `serviceInstanceRedeploy`, and that it runs migrate's pre-deploy again.
+- **The calls in progress (step 24):** the old workers' count through the fleet status address, which needs the old admin's `FLEET_STATUS_TOKEN` (fork PR #185), else the old database's count of calls not ended.
+- **The address move (step 30) and going back (G5):** how soon Railway lets one project have an address the other just gave up, which step 19 times, and the check record Railway asks for when the address returns to the old admin.
+- **The worker's log (step 34):** each line's severity, as Railway gives it.
 - **The disconnect (step 36)** and **the backup schedule (step 37).**
 - **The project's deletion (step 40),** with Railway's 48 hours' grace.
 - **The sealed variables,** taken from the environment's list of variables, which gives each one's name and whether it's sealed.

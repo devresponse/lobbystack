@@ -159,7 +159,15 @@ const additionalPlan = z.strictObject({
 // A deployment sells through the block of its billing provider (ADR 0010):
 // a file holds the block of each provider its brand's deployments use, and
 // an apply refuses a file without its deployment's (provider_block_missing).
-const polarBlock = z.strictObject({ allowMultipleSubscriptions: z.boolean(), portalPlanChanges: z.boolean(), upgradeProration: proration, downgradeProration: proration });
+const polarBlock = z.strictObject({
+  allowMultipleSubscriptions: z.boolean(),
+  portalPlanChanges: z.boolean(),
+  upgradeProration: proration,
+  downgradeProration: proration,
+  // Whether a pack's checkout page takes a discount code made in Polar's dashboard. Plan checkouts never do:
+  // a discount there comes only with a promo plan. Left out, it's off, and the profile hash stays as it was.
+  packDiscountCodes: z.boolean().optional(),
+});
 
 /** A Stripe product tax code, such as txcd_10103001 (software as a service for business use). */
 export const STRIPE_TAX_CODE_PATTERN = /^txcd_\d{8}$/;

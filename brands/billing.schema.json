@@ -39,6 +39,9 @@
             "next_period",
             "reset"
           ]
+        },
+        "packDiscountCodes": {
+          "type": "boolean"
         }
       },
       "required": [

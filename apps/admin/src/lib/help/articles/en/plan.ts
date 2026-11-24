@@ -143,6 +143,7 @@ const article: HelpArticle = {
     "When you cancel, usage over what's included is still billed until the end date.",
     "A promo plan can last a set number of months. A line under **Your plan** says until when, and whether it then moves to the regular plan it's based on or ends, and the owners get an email a week before. A promo plan set to end this way can't be resumed here.",
     "A promo code can be used once by each business.",
+    "A discount code for a prepaid pack goes on the secure payment page, where that page has a field for one. **Have a promo code?** takes only codes for plans, so it says a pack's code isn't valid.",
     "A prepaid pack is paid once, never renews and has no pay-as-you-go usage. Each use draws on the pack that ends first, and what a pack still holds when it ends is lost.",
     "While a pack is the plan, the owners get an email when a fifth of the minutes is left, when none is left, and 30 and 7 days before a pack ends.",
     "When the last pack ends, the business goes back to the free plan, and receptionists beyond what it includes are paused. If that plan includes no phone number, the number stops answering calls and texts right away and is released 30 days after the last pack ended, unless you buy another pack or start a plan that includes a number before then, which brings it back. The **Phone Number** screen shows the date.",

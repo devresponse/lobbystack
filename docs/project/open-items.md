@@ -37,6 +37,7 @@ Steps that no deploy takes by itself. The first six are on the demo, `demo.allop
 9. **Redo dev1's variables before it runs two copies:** `node devops/bootstrap.mjs redo .env.bootstrap-<name> variables`, then `up` ([watch every copy](../../devops/bootstrap.md#watch-every-copy)), and `alter system set max_connections = 200;` on its database with a restart of `Postgres` ([guide 7.24](../deployment/guide/part-7-operations.md#724-scale-up)). On 2026-11-23 its fleet status address answered 404: it has no `FLEET_STATUS_TOKEN`, so its variables predate fork PR #185, and most likely fork PR #168's smaller pools too. RealInfoBot's production answered the same, and its move to PostgreSQL 18 sets all of this.
 10. **Before live payments on Stripe,** make the checks by hand and the legal pages' review in [Stripe's list](../providers/stripe.md#know-whats-left), and set AlloPlace's pack prices ([decide these](#decide-these)).
 11. **Move PostHog funnels built on the old onboarding order:** since fork PR #224 the plan's events come before the website's ([onboarding](../features/onboarding.md#choose-the-plan-right-after-the-name)).
+12. **Let RealInfoBot's packs take a discount code, such as 95% off,** on each RealInfoBot deployment once it runs the `polar.packDiscountCodes` switch (2026-11-24): `pnpm billing apply --brand realinfobot --polar live` on production, `--polar sandbox` on the test ones, since the switch changed the file's hash; then, in that deployment's Polar organization, make the code under **Products > Discounts**: a percentage, **Once**, the three listing pack products, a redemption limit and an end date. Buyers type it on Polar's payment page, not under **Have a promo code?** ([prepaid packs](../features/prepaid-packs.md#take-money-off-a-pack-with-a-discount-code)).
 
 ### Test these
 
@@ -161,6 +162,8 @@ Ranked by the review of 2026-11-23 for what each buys for its effort. The first 
 **Take receptionists further** ([roadmap](../roadmap/receptionists-next.md)): when businesses ask, a chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and members limited to some receptionists.
 
 **Help in more languages** ([help pages](../features/help-pages.md#read-a-help-page)): the help pages are in English only, and the help addresses in French, Spanish and Serbian send readers to the English page. A language needs its articles in `apps/admin/src/lib/help/articles/<language>/`, its words in `registry.ts`, and its code in `HELP_LOCALES` in `locales.ts`.
+
+**Codes for packs in the app itself,** the option passed over on 2026-11-24 ([decisions](decisions.md#choose-what-to-build)): `lobbystack billing code-create` for a pack, **Have a promo code?** taking its codes and showing the lower price on the pack's card, uses counted in LobbyStack, and the same on Stripe, whose pack pages take no code today. Until then Polar's own codes cover RealInfoBot's promotions ([prepaid packs](../features/prepaid-packs.md#take-money-off-a-pack-with-a-discount-code)).
 
 **Close smaller gaps:**
 

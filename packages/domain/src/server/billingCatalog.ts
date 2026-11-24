@@ -1313,6 +1313,16 @@ export async function loadStripeSelling(context: DomainContext): Promise<{ manag
   };
 }
 
+/**
+ * Whether the last applied billing.json lets a pack's Polar checkout take a
+ * discount code made in Polar's dashboard (its polar block's packDiscountCodes):
+ * off before the first apply and wherever the file leaves it out.
+ */
+export async function loadPolarPackDiscountCodes(context: DomainContext): Promise<boolean> {
+  const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
+  return (latest?.profile as { polar?: { packDiscountCodes?: unknown } } | null | undefined)?.polar?.packDiscountCodes === true;
+}
+
 const runKinds = ["catalog", "polar", "link", "verify"] as const;
 
 /** Every run, newest first, with the rows it changed: section 7.5's Q8, one row comparison per page. */

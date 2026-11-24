@@ -64,6 +64,8 @@ type World = {
   deploys: string[];
   /** Whether Railway refuses to deploy a removed deployment again. */
   refuseRedeploy: boolean;
+  /** Whether Railway refuses the token a change's progress, as it did a production run's on 2026-11-24. */
+  refuseWorkflowStatus: boolean;
   /** The calls in progress the old workers report through the fleet status address, one answer at a time; the last stays. */
   liveCalls: number[];
   /** What the admin's /api/health/live says it runs. */
@@ -202,6 +204,7 @@ function freshWorld(): World {
     disconnected: [],
     deploys: [],
     refuseRedeploy: false,
+    refuseWorkflowStatus: false,
     liveCalls: [0],
     version: "d533e698a1b2c3d4e5f60718293a4b5c6d7e8f90",
     upFails: 0,
@@ -349,7 +352,7 @@ function railwayAnswer(body: { query: string; variables: Record<string, unknown>
       return { data: { volumeInstanceBackupCreate: { workflowId: `wf-${world.counter}` } } };
     }
     case "WorkflowStatus":
-      return { data: { workflowStatus: { status: "Complete", error: null } } };
+      return world.refuseWorkflowStatus ? refuse("Not Authorized") : { data: { workflowStatus: { status: "Complete", error: null } } };
     case "BackupLock": {
       const backup = projectOfVolume(vars.volumeInstanceId)?.backups[String(vars.volumeInstanceId)]?.find((item) => item.id === vars.volumeInstanceBackupId);
       if (!backup) return refuse("Backup not found");
@@ -1218,6 +1221,18 @@ describe.skipIf(process.platform === "win32")("devops/redeploy.mjs", { timeout: 
     expect(linesOf("bootstrap-calls.txt")).toHaveLength(4);
   });
 
+  it("prepare makes and locks the backup when Railway won't show the token its progress", async () => {
+    oldFiles();
+    world.refuseWorkflowStatus = true;
+    const result = await redeploy(["prepare", settingsName, "--backup", backupDir()], { input: "yes\nyes\n", env: changeEnv() });
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("Railway won't show this token the progress of the backup, so the script waits for its result instead");
+    expect(result.out).toMatch(/the backup "before-pg18-\d{4}-\d{2}-\d{2}", .* UTC, locked: the schedule never deletes it/);
+    const made = world.projects[0]?.backups["vol-old-postgres"]?.filter((item) => item.name?.startsWith("before-pg18-"));
+    expect(made?.map((item) => item.expiresAt)).toEqual([null]);
+    expect(mutations()).toEqual(["BackupCreate", "BackupLock", "ProjectRename", "VariablesUpsert"]);
+  });
+
   it("prepare stops before bootstrap runs while another project has the new one's name, then carries on", async () => {
     oldFiles();
     const stray = { ...oldProject(), id: "prj-stray", name: host, environment: { id: "env-stray", name: "production" }, services: [], volumes: [], buckets: [], domains: {} };
@@ -1374,6 +1389,25 @@ describe.skipIf(process.platform === "win32")("devops/redeploy.mjs", { timeout: 
     expect(result.out).toContain("the old database's TCP proxy is there already: old.proxy.rlwy.net:21001");
     expect(old.proxies["svc-old-postgres"]?.map((item) => item.id)).toEqual(["tcp-by-hand"]);
     expect(world.patches.map((item) => item.environmentId)).toEqual(["env-new", "env-new"]);
+  });
+
+  it("trial goes on by the results when Railway won't show the token a change's progress", async () => {
+    world.refuseWorkflowStatus = true;
+    prepared(range(1, 19));
+    const result = await redeploy(["trial", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(result.code, result.out).toBe(0);
+    for (const which of ["old", "new"]) {
+      expect(result.out).toContain(`Railway won't show this token the progress of the ${which} database's TCP proxy, so the script waits for its result instead`);
+      expect(result.out).toContain(`opened the ${which} database to the internet: ${which}.proxy.rlwy.net:`);
+      expect(result.out).toContain(`Railway won't show this token the progress of closing the ${which} database's TCP proxy, so the script waits for its result instead`);
+      expect(result.out).toContain(`closed the ${which} database's TCP proxy`);
+    }
+    expect(result.out).toContain("RESTORE OK");
+    expect(world.operations.filter((operation) => operation === "WorkflowStatus")).toHaveLength(4);
+    expect(world.patches.map((item) => item.environmentId)).toEqual(["env-old", "env-new", "env-old", "env-new"]);
+    expect(world.projects.every((project) => Object.values(project.proxies).every((list) => !list.length))).toBe(true);
+    expect((stateOf().values as { proxies?: string[] }).proxies).toEqual([]);
+    expect(stateOf().done["20"]).toBeTruthy();
   });
 
   it("trial waits for prepare to finish", async () => {

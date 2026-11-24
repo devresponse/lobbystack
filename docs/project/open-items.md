@@ -7,7 +7,7 @@ Take an item off in the pull request that settles it, and add it to the closed l
 ## Do these before a date
 
 - **2026-12-16: make the measured test coverage a floor, once it measures everything.** Since fork PR #194, CI's `coverage` job publishes each package's figures and blocks nothing. It measures only the admin, the worker, `db` and `domain`, and runs without PostgreSQL, so the database tests of `db` and `domain` skip and their figures read low. Floors taken from it would lock both gaps in, so first give the job a database and the other suites ([build these next](#build-these-next), item 2). Then set each package's floor in `vitest.coverage.mts` from a few runs, and add the job to the `validate` gate in `.github/workflows/ci.yml` ([development](../development/README.md#see-how-much-the-tests-cover), AUDIT-021 in [the technical audit](../reviews/technical-audit-2026-11-14.md)).
-- **2028-11-09: move each instance off PostgreSQL 16,** when its support ends ([7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions)). Since fork PR #223 new installs run 18, and an instance set up before keeps 16 until its data is copied to 18. dev2's data was copied on 2026-11-23, from a computer through temporary TCP proxies, since Railway's Postgres offers no SFTP, a way the guide doesn't describe yet ([write these in the docs](#write-these-in-the-docs)). RealInfoBot's production is planned the same way. Once no instance runs 16, drop the `16` leg of CI's database job in `.github/workflows/ci.yml`.
+- **2028-11-09: move each instance off PostgreSQL 16,** when its support ends ([7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions)). Since fork PR #223 new installs run 18, and an instance set up before keeps 16 until its data is copied to 18. dev2's data was copied on 2026-11-23 into a new Railway project, from a computer through temporary TCP proxies, since Railway's Postgres offers no SFTP: the way [7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions) and [`devops/redeploy.md`](../../devops/redeploy.md) describe since fork PR #234. RealInfoBot's production is planned the same way. Once no instance runs 16, drop the `16` leg of CI's database job in `.github/workflows/ci.yml`.
 
 ## Yours to do
 
@@ -73,6 +73,7 @@ Built and tested in code, or tried only in part. Each item says what should happ
 - **The script nonce** (fork PR #203) on dev2: `CSP_SCRIPT_NONCE=true` on the admin, then the dashboard, a public page and the widget with the browser's console open, where no "violates the following Content Security Policy directive" line should show; then `CSP_SCRIPT_NONCE_ENFORCED=true` and the same again, a call and a chat included ([development](../development/README.md#give-an-inline-script-the-nonce)).
 - **Reading a document in a process of its own** (fork PR #190): a PDF with text, a scan and a large photo should each reach "Ready" with no `Document extraction reached its` line in the worker's log, while Railway shows the worker's memory ([knowledge](../knowledge/architecture.md#read-uploaded-pdfs)).
 - **The control panel on dev2,** where it has run since 2026-11-19: an email off the list shouldn't get in, and **System health**, once `up` gives the panel `CONTROL_ADMIN_URL` and `FLEET_STATUS_TOKEN`, should list every copy as running, with the Overview's tile giving the same verdict ([read the System health page](../features/control-panel.md#read-the-system-health-page)).
+- **`devops/redeploy.mjs status` against real projects** (fork PR #234), which has met only stand-ins for Railway and Cloudflare: on dev2, its old project against its new one, whose variables, buckets and DNS records should match what its move by hand found on 2026-11-22 and 23, while the old project is still there; then on RealInfoBot's production before its move ([what isn't confirmed](../../devops/redeploy.md#what-isnt-confirmed)).
 - **A nightly copy of a database on PostgreSQL 18:** with `PG_VERSION=18` on the backup service, its log should start with `pg_dump (PostgreSQL) 18.` ([5.2](../deployment/guide/part-5-production.md#52-production-on-railway), step 22).
 
 **On calls, mailboxes and the outside services:**
@@ -181,7 +182,6 @@ Ranked by the review of 2026-11-23 for what each buys for its effort. The first 
 
 ### Write these in the docs
 
-- **The move of a Railway database to PostgreSQL 18,** in guide 7.22 from dev2's of 2026-11-23: a new Railway project on 18 beside the old one, and the data copied from a computer with Docker's `postgres:18` through temporary TCP proxies, since Railway's Postgres offers no SFTP. The guide's Railway steps still say they weren't tried ([7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions)).
 - **Every deployment in [know where it runs](overview.md#know-where-it-runs),** which names only the demo: RealInfoBot's test deployment, dev1, dev2 and production, with the branch each builds from and how it takes payments.
 - **The studies kept only outside the repository,** each as a research page as of its date and, for a feature not built, a roadmap page with its questions under [decide these](#decide-these): the logging review and calls through ElevenLabs, set aside for now (2026-10-30); the design for reading PDF tables (2026-11-03); a phone number per receptionist and a chat handed to another receptionist (2026-11-04); hosting on AWS (2026-11-17); a full chat app (2026-11-18); and the marketing costs study (2026-11-19).
 
@@ -199,6 +199,12 @@ The docs no longer link to the original project's sites, but some code and confi
 ## Done or obsolete
 
 What each triage closed, and each pull request that finished an item, grouped by date, newest first, with the reason. Add a later date's group above this one.
+
+### Closed on 2026-11-24
+
+| Item | Why it's closed |
+| --- | --- |
+| Write the move of a Railway database to PostgreSQL 18 in guide 7.22, from dev2's of 2026-11-23 | Since fork PR #234, [7.22](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions) describes the move into a new project, and [`devops/redeploy.md`](../../devops/redeploy.md) has its steps and SQL. Running its `status` against real projects stays under [test these](#test-these) |
 
 ### Closed on 2026-11-23
 

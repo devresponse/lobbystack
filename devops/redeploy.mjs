@@ -617,23 +617,22 @@ function printTools() {
   }
   const aws = runTool("aws", ["--version"]);
   if (aws.status === 0) ok(`AWS CLI ${aws.stdout.match(/aws-cli\/([\w.]+)/)?.[1] ?? firstLine(aws)}`);
-  else fix(missingTool(aws) ? "no AWS CLI: the bucket's files are copied with it (guide 7.7)" : `aws --version failed: ${firstLine(aws)}`);
+  else fix(missingTool(aws) ? "no AWS CLI, version 2: the bucket's files are copied with it (guide 7.7)" : `aws --version failed: ${firstLine(aws)}`);
 }
 
 /**
- * Runs a command-line tool and returns spawnSync's result. On Windows, a tool installed as a .cmd file only starts
- * through the shell, so the line goes to the shell whole, each argument quoted (as in devops/bootstrap.mjs).
+ * Runs a command-line tool and returns spawnSync's result. It never goes through a shell, so no argument, such as a
+ * folder's name or an address Railway gives, can become part of a command. The tools it runs, docker, aws, git and
+ * icacls, are programs of their own on Windows too; the AWS CLI's version 2 is (aws.exe), its version 1 from pip is
+ * a .cmd file, which only a shell starts.
  */
 function runTool(command, args, settings = {}) {
-  if (process.platform !== "win32") return spawnSync(command, args, { encoding: "utf8", windowsHide: true, ...settings });
-  const line = [command, ...args].map((arg) => (/^[\w@+=:,./\\-]+$/.test(String(arg)) ? String(arg) : `"${String(arg).replace(/"/g, '""')}"`)).join(" ");
-  return spawnSync(line, { encoding: "utf8", windowsHide: true, ...settings, shell: true });
+  return spawnSync(command, args, { encoding: "utf8", windowsHide: true, ...settings, shell: false });
 }
 
-/** Whether a runTool result means the tool isn't installed. On Windows the shell always starts, and says so instead. */
+/** Whether a runTool result means the tool isn't installed, or on Windows is only a .cmd file. */
 function missingTool(result) {
-  if (result.error) return true;
-  return process.platform === "win32" && result.status !== 0 && /is not recognized as an internal or external command|cannot find the path specified/i.test(`${result.stderr ?? ""}${result.stdout ?? ""}`);
+  return Boolean(result.error);
 }
 
 function firstLine(result) {
@@ -1330,7 +1329,7 @@ async function checkTools(ctx) {
   if (ctx.old.buckets.length) {
     const aws = runTool("aws", ["--version"]);
     if (aws.status === 0) console.log(`  ok  AWS CLI ${aws.stdout.match(/aws-cli\/([\w.]+)/)?.[1] ?? firstLine(aws)}`);
-    else problems.push(missingTool(aws) ? "no AWS CLI: it copies the bucket's files (guide 7.7)" : `aws --version failed: ${firstLine(aws)}`);
+    else problems.push(missingTool(aws) ? "no AWS CLI, version 2: it copies the bucket's files (guide 7.7)" : `aws --version failed: ${firstLine(aws)}`);
   }
   console.log(`  ok  Node.js ${process.version}, and the token reads the old project, "${ctx.old.project.name}"`);
   if (problems.length) throw new Stop(`${problems.join("; ")}. Then run ${options.command} again`);

@@ -4,7 +4,7 @@ A deployment set up before fork PR #223 runs PostgreSQL 16, which is supported u
 
 `redeploy.mjs` follows that move step by step, under the same numbers: 0 to 40, then G1 to G9 for going back and R1 and R2 for a run that stopped. `status` reads both projects and changes nothing. Six commands do the steps in order: `prepare` (steps 1 to 17), `trial` (18 to 20), `cutover` (22 to 33), `check` (34), `finish` (35 to 39) and `retire` (40). `back` goes back (G1 to G9) from wherever the cutover got to, and `recover` puts back the new project's settings files if they're lost (R1). Only picking the hour (step 21) and the checks only a person can make are left to you, as [the steps](#the-steps) describe.
 
-**Status:** written on 24 November 2026 for fork PRs #234, #235 and #236, on `develop/r2` at `0649c9f`. `scripts/redeploy.test.ts` runs every command against stand-ins for Railway's and Cloudflare's APIs, bootstrap, the scale script, Docker and the AWS CLI, and every query and change the script sends to Railway was checked that day against Railway's live API schema. None has run against a real project yet ([what isn't confirmed](#what-isnt-confirmed)). The move itself has run once, on dev2 on 22 and 23 November 2026, with every step done by hand.
+**Status:** written on 24 November 2026 for fork PRs #234 to #236 and #238, on `develop/r2` at `bb7c7be`. `scripts/redeploy.test.ts` runs every command against stand-ins for Railway's and Cloudflare's APIs, bootstrap, the scale script, Docker and the AWS CLI, and every query and change the script sends to Railway was checked that day against Railway's live API schema. None has run against a real project yet ([what isn't confirmed](#what-isnt-confirmed)). The move itself has run once, on dev2 on 22 and 23 November 2026, with every step done by hand.
 
 ## The whole move
 
@@ -23,7 +23,7 @@ What carries over: the OpenAI project and its webhook, Twilio's subaccount, numb
 
 ## Before you start
 
-- **The tools:** Node.js 18 or later; Docker, running, with PostgreSQL 18's image (`docker pull postgres:18`, which `prepare` does), whose `psql`, `pg_dump` and `pg_restore` copy the database from your computer (Docker Desktop on Windows and Mac); and the AWS CLI, which copies the bucket ([guide 7.7](../docs/deployment/guide/part-7-operations.md#77-back-up-the-database-and-files)). Also what bootstrap needs: `pnpm install` done, and optionally the Railway CLI, which makes the bucket ([bootstrap's "Before you start"](bootstrap.md#before-you-start)).
+- **The tools:** Node.js 18 or later; Docker, running, with PostgreSQL 18's image (`docker pull postgres:18`, which `prepare` does), whose `psql`, `pg_dump` and `pg_restore` copy the database from your computer (Docker Desktop on Windows and Mac); and the AWS CLI's version 2, from AWS's install page, which copies the bucket ([guide 7.7](../docs/deployment/guide/part-7-operations.md#77-back-up-the-database-and-files)). The script starts each tool without a shell, so on Windows version 1's `aws.cmd`, from pip, doesn't start. Also what bootstrap needs: `pnpm install` done, and optionally the Railway CLI, which makes the bucket ([bootstrap's "Before you start"](bootstrap.md#before-you-start)).
 - **The checkout:** `develop/r2`, or `releases/r2` with fork PR #223, whose `devops/bootstrap.mjs` makes `Postgres` from `pgvector/pgvector:pg18-trixie`. The new database's version is decided by the script on your computer alone: the services keep building from the branch they follow.
 - **The files:** the deployment's settings file, its `.secrets` file and its `.state.json`, in the checkout's folder, as `up` left them.
 - **A Railway token that reaches both projects:** an account token, or a token of their workspace, from `railway.com/account/tokens`. A project token reaches one project only. The script reads `RAILWAY_API_TOKEN` from the environment, then from the settings file's `.secrets` file, then from the copy's, and otherwise asks, with typing hidden. It never saves or prints it.
@@ -405,4 +405,4 @@ None of this has met Railway or Cloudflare yet; the stand-ins answer as Railway'
 - **The sealed variables,** taken from the environment's list of variables, which gives each one's name and whether it's sealed.
 - **The release,** from the latest deployment's commit and branch.
 - **Cloudflare's records,** read and written with bootstrap's token.
-- **On Windows:** `icacls` on the backup folder, and Docker given the folder's Windows path.
+- **On Windows:** `icacls` on the backup folder, Docker given the folder's Windows path, and each tool started without a shell.

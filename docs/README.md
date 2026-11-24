@@ -31,7 +31,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Brand a deployment](branding.md) | The name, logo, colour and outside links each deployment shows |
 | [Polar](providers/polar.md), [Stripe](providers/stripe.md) and [email](providers/resend.md) | Setting up payments and email |
 | [Alerts](operations/alerts.md), [backup and restore](operations/backup-restore.md), [error tracking alerts](telemetry/provider-failure-error-tracking.md) | Runbooks for a running deployment |
-| [Move a Railway deployment to PostgreSQL 18](../devops/redeploy.md) | A new Railway project beside the old one, the data copied from a computer at a quiet hour, and the address moved, step by step, with `devops/redeploy.mjs status` showing where a move stands; on `develop/r2` |
+| [Move a Railway deployment to PostgreSQL 18](../devops/redeploy.md) | A new Railway project beside the old one, the data copied from a computer at a quiet hour, and the address moved, step by step, with `devops/redeploy.mjs status` showing where a move stands, and its `prepare`, `trial`, `finish` and `retire` doing the steps before and after the cutover; on `develop/r2` |
 | [Railway infrastructure as code](deployment/railway.md) | The original project's `.railway/railway.ts`; the fork deploys by the guide instead |
 
 ## Understand the features

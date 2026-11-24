@@ -4,8 +4,13 @@
 // settings files, its data and its bucket's files are copied at a quiet hour, the address moves to it, and the old
 // project stays a week for going back.
 //
-//   node devops/redeploy.mjs status <settings file or address>   where the move stands; changes nothing
-//   node devops/redeploy.mjs schema                              whether Railway's API still has every call it makes
+//   node devops/redeploy.mjs status <settings file or address>    where the move stands; changes nothing
+//   node devops/redeploy.mjs prepare <settings file or address>   steps 1 to 17: backups, notes, the new project
+//   node devops/redeploy.mjs trial <settings file or address>     steps 18 to 20: the bucket, the address rehearsal,
+//                                                                 and a trial copy of the database, a day ahead
+//   node devops/redeploy.mjs finish <settings file or address>    steps 35 to 39, after the cutover and its checks
+//   node devops/redeploy.mjs retire <settings file or address>    step 40, a week later: deletes the old project
+//   node devops/redeploy.mjs schema                               whether Railway's API still has every call it makes
 //
 // The settings file is the deployment's own, such as .env.bootstrap-acme-prod, which bootstrap's up ran with. Given
 // an address instead, such as app.example.com, the script finds the .env.bootstrap-<name> file in this folder whose
@@ -23,16 +28,28 @@
 // copies in <settings file>.redeploy.json, for going back and for setting the copies again (step 7). It never reads
 // the database's or Redis's variables, never signs in to a database, and changes nothing in Railway or Cloudflare.
 //
+// prepare, trial, finish and retire each run their steps in order, record each one in <settings file>.redeploy.json
+// as it finishes, and skip what's recorded, so a command that stopped is finished by running it again. Each asks
+// before it changes the old project, and stops at the first check that fails. They run bootstrap.mjs and scale.mjs
+// for what those already do, PostgreSQL 18's tools in Docker for the database, and the AWS CLI for the buckets. Each
+// run is written to <settings file>.redeploy.log, secrets hidden.
+//
 // Options:
-//   --backup <folder>   the backup folder, when it isn't lobbystack-backups/<the address's first part>-before-pg18
-//                       beside this checkout
-//   --save <file>       with schema: write the part of Railway's API the script uses into <file>, for its tests
+//   --backup <folder>     the backup folder, when it isn't lobbystack-backups/<the address's first part>-before-pg18
+//                         beside this checkout
+//   --dry-run             say what the command would do, and change nothing
+//   --temporary <host>    with prepare: the new project's address until the switch, instead of <first part>-new.<rest>
+//   --rehearse <host>     with trial: the throwaway address for the rehearsal, instead of move-test.<zone>
+//   --no-rehearsal        with trial: leave the address rehearsal (step 19) out
+//   --same-version        with prepare and trial: allow an old database that's already on 18, to rehearse the move
+//   --save <file>         with schema: write the part of Railway's API the script uses into <file>, for its tests
 //
 // It needs a Railway account or workspace token (railway.com/account/tokens), which it reads as bootstrap.mjs does:
 // RAILWAY_API_TOKEN from the environment, else from the settings file's .secrets file, else it asks. Cloudflare's
-// token comes from CLOUDFLARE_API_TOKEN, the same way, and isn't asked for. Neither is saved or printed. Every run
-// first checks each call the script makes against Railway's API schema, which Railway gives without a token.
-// Node 18 or later, nothing to install.
+// token comes from CLOUDFLARE_API_TOKEN, the same way, and isn't asked for. Neither is saved or printed. The database's
+// password comes from both state files, which must agree, and goes to Docker only. Every run first checks each call
+// the script makes against Railway's API schema, which Railway gives without a token, and a command that changes
+// something stops before it does if one is gone. Node 18 or later, nothing to install.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -100,7 +117,7 @@ const Q = {
   }
 }`,
   tcpProxies: `query TcpProxies($environmentId: String!, $serviceId: String!) {
-  tcpProxies(environmentId: $environmentId, serviceId: $serviceId) { id domain proxyPort applicationPort syncStatus }
+  tcpProxies(environmentId: $environmentId, serviceId: $serviceId) { id domain proxyPort applicationPort syncStatus deletedAt }
 }`,
   backups: `query BackupList($volumeInstanceId: String!) {
   volumeInstanceBackupList(volumeInstanceId: $volumeInstanceId) { id name createdAt expiresAt usedMB }
@@ -111,7 +128,126 @@ const Q = {
   bucket: `query BucketDetails($bucketId: String!, $environmentId: String!) {
   bucketInstanceDetails(bucketId: $bucketId, environmentId: $environmentId) { objectCount sizeBytes }
 }`,
+  // Step 5: Railway makes a backup in a workflow, so the script waits for it, finds the backup by its name and locks
+  // it, which takes its end date away so the schedule never deletes it.
+  backupCreate: `mutation BackupCreate($volumeInstanceId: String!, $name: String) {
+  volumeInstanceBackupCreate(volumeInstanceId: $volumeInstanceId, name: $name) { workflowId }
+}`,
+  workflow: `query WorkflowStatus($workflowId: String!) {
+  workflowStatus(workflowId: $workflowId) { status error }
+}`,
+  backupLock: `mutation BackupLock($volumeInstanceBackupId: String!, $volumeInstanceId: String!) {
+  volumeInstanceBackupLock(volumeInstanceBackupId: $volumeInstanceBackupId, volumeInstanceId: $volumeInstanceId)
+}`,
+  // Step 37: the new database's backups, as guide 5.2's step 16 sets them.
+  backupSchedule: `mutation BackupScheduleUpdate($volumeInstanceId: String!, $kinds: [VolumeInstanceBackupScheduleKind!]!) {
+  volumeInstanceBackupScheduleUpdate(volumeInstanceId: $volumeInstanceId, kinds: $kinds)
+}`,
+  // Steps 6 and 18: a bucket's keys, which go to the AWS CLI's sync only, through its environment.
+  bucketKeys: `query BucketCredentials($bucketId: String!, $environmentId: String!, $projectId: String!) {
+  bucketS3Credentials(bucketId: $bucketId, environmentId: $environmentId, projectId: $projectId) { accessKeyId secretAccessKey endpoint bucketName region urlStyle }
+}`,
+  // Step 10.
+  rename: `mutation ProjectRename($id: String!, $name: String!) {
+  projectUpdate(id: $id, input: { name: $name }) { id name }
+}`,
+  // Step 15: the new database's own words about its version.
+  logs: `query Logs($deploymentId: String!, $filter: String, $limit: Int) {
+  deploymentLogs(deploymentId: $deploymentId, filter: $filter, limit: $limit) { timestamp message }
+}`,
+  // Step 16: the variables the files don't know, onto the new services.
+  upsert: `mutation VariablesUpsert($input: VariableCollectionUpsertInput!) {
+  variableCollectionUpsert(input: $input)
+}`,
+  // Step 17: removing a deployment stops the service, and every copy of it.
+  removeDeployment: `mutation DeploymentRemove($id: String!) {
+  deploymentRemove(id: $id)
+}`,
+  // Steps 19 and 38: an address on an admin.
+  domainCreate: `mutation DomainCreate($input: CustomDomainCreateInput!) {
+  customDomainCreate(input: $input) { id domain }
+}`,
+  domainDelete: `mutation DomainDelete($id: String!) {
+  customDomainDelete(id: $id)
+}`,
+  domainAvailable: `query DomainAvailable($domain: String!) {
+  customDomainAvailable(domain: $domain) { available message }
+}`,
+  // Steps 20 and 39: a TCP proxy, set in the environment's settings, the way Railway's CLI sets the copies, and sent
+  // without a deploy, so the database doesn't restart. TcpProxyDelete is for one that the settings didn't take away.
+  patch: `mutation EnvironmentPatch($environmentId: String!, $patch: EnvironmentConfig, $commitMessage: String, $skipDeploys: Boolean) {
+  environmentPatchCommit(environmentId: $environmentId, patch: $patch, commitMessage: $commitMessage, skipDeploys: $skipDeploys)
+}`,
+  proxyDelete: `mutation TcpProxyDelete($id: String!) {
+  tcpProxyDelete(id: $id)
+}`,
+  // Step 36: the old services no longer build from the repository, so a sync of the branch can't start them.
+  disconnect: `mutation ServiceDisconnect($id: String!) {
+  serviceDisconnect(id: $id) { id }
+}`,
+  // Step 40: Railway deletes the project after a grace period of 48 hours.
+  scheduleDelete: `mutation ProjectScheduleDelete($id: String!) {
+  projectScheduleDelete(id: $id)
+}`,
 };
+
+// The SQL the copy runs, written into the backup folder (step 4), where psql reads it with -f: pasted into psql's
+// prompt, a block can arrive as one line, and a leading command then swallows the rest (dev2's run, 2026-11-23).
+const SQL = {
+  // One line: the tables, the rows in all, and a fingerprint of every table's name and row count.
+  "count.sql": `with t as (
+  select table_schema || '.' || table_name as tbl,
+    (xpath('/row/c/text()', query_to_xml(format(
+      'select count(*) as c from %I.%I', table_schema, table_name),
+      false, true, '')))[1]::text::bigint as n
+  from information_schema.tables
+  where table_type = 'BASE TABLE'
+    and table_schema not in ('pg_catalog', 'information_schema')
+)
+select format('tables %s, rows %s, fingerprint %s',
+  count(*), sum(n),
+  md5(string_agg(tbl || '=' || n, ',' order by tbl collate "C")))
+from t;
+`,
+  // Stops the app's roles from connecting, ends the sessions still open, and shows the database's own settings.
+  "freeze.sql": `revoke connect on database lobbystack from public;
+select count(pg_terminate_backend(pid)) as sessions_ended
+from pg_stat_activity
+where datname = 'lobbystack' and pid <> pg_backend_pid();
+select coalesce(string_agg(s, ', '), 'none') as database_settings
+from pg_db_role_setting, unnest(setconfig) as s
+where setrole = 0 and setdatabase =
+  (select oid from pg_database where datname = 'lobbystack');
+`,
+  // Every table with its rows, to find where two counts differ.
+  "tables.sql": `select table_schema || '.' || table_name || ' ' ||
+  (xpath('/row/c/text()', query_to_xml(format(
+    'select count(*) as c from %I.%I', table_schema, table_name),
+    false, true, '')))[1]::text
+from information_schema.tables
+where table_type = 'BASE TABLE'
+  and table_schema not in ('pg_catalog', 'information_schema')
+order by (table_schema || '.' || table_name) collate "C";
+`,
+  // Calls in each hour of the day over four weeks, in this computer's time zone, to pick the hour (step 21).
+  "hours.sql": `select to_char(started_at at time zone :'tz', 'HH24') || ' ' || count(*)
+from calls
+where started_at > now() - interval '28 days'
+group by 1
+order by 1;
+`,
+};
+
+// How often a wait asks again, and so how long it waits: a wait of n minutes asks n * 12 times. Tests shorten it.
+const POLL_MS = Number(process.env.REDEPLOY_POLL_MS ?? 5000);
+const polls = (minutes) => Math.ceil((minutes * 60_000) / 5000);
+// The new admin's address, reached for its health checks. Tests point it at a stand-in ({host} is the address).
+const SITE_URL = process.env.REDEPLOY_SITE_URL ?? "https://{host}";
+// What a change command runs: bootstrap.mjs and scale.mjs beside this script. Tests give stand-ins.
+const BOOTSTRAP = process.env.REDEPLOY_BOOTSTRAP ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "bootstrap.mjs");
+const SCALE = process.env.REDEPLOY_SCALE ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "scale.mjs");
+// The services that make up a deployment, in the order step 15 waits for them.
+const RUNNING = ["Postgres", "Redis", "migrate", "admin", "worker", "control", "cloudflared"];
 
 // What a run asks Railway's schema, without descriptions: every type with its fields, arguments and input fields.
 const SCHEMA_QUERY = `query RailwaySchema {
@@ -129,13 +265,30 @@ const SCHEMA_QUERY = `query RailwaySchema {
 fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }`;
 
 // The fields of each input object the script builds itself and passes as a variable, which its documents don't name.
-const INPUT_FIELDS = {};
+const INPUT_FIELDS = {
+  VariableCollectionUpsertInput: ["projectId", "environmentId", "serviceId", "variables"],
+  CustomDomainCreateInput: ["domain", "environmentId", "projectId", "serviceId", "targetPort"],
+};
 
 class Stop extends Error {}
 
 const hidden = new Set();
 const consoleOriginal = { log: console.log.bind(console), error: console.error.bind(console) };
-for (const level of ["log", "error"]) console[level] = (...args) => consoleOriginal[level](redact(args.join(" ")));
+// Everything printed goes to the change commands' log too, secrets hidden the same way.
+let logFile = null;
+for (const level of ["log", "error"]) {
+  console[level] = (...args) => {
+    const text = redact(args.join(" "));
+    consoleOriginal[level](text);
+    if (logFile) {
+      try {
+        fs.appendFileSync(logFile, `${text}\n`, { mode: 0o600 });
+      } catch {
+        // A log that can't be written doesn't stop the run.
+      }
+    }
+  };
+}
 
 let prompter = null;
 let options;
@@ -144,7 +297,8 @@ async function main() {
   if (typeof fetch !== "function") throw new Error("this script needs Node 18 or later");
   if (options.command === "schema") return schemaCommand();
   const run = loadRun(options.target);
-  return status(run);
+  if (options.command === "status") return status(run);
+  return changeCommand(run);
 }
 
 // ---------------------------------------------------------------- the files
@@ -196,10 +350,16 @@ function findSettingsFile(target) {
 
 /** The values bootstrap.mjs keeps in <settings file>.state.json, or null when it has none. */
 function readBootstrapValues(file) {
+  return fs.existsSync(`${file}.state.json`) ? readBootstrapState(file).values : null;
+}
+
+/** bootstrap.mjs's state file: the steps it has done, and the values it keeps. Empty when there's none. */
+function readBootstrapState(file) {
   const stateFile = `${file}.state.json`;
-  if (!fs.existsSync(stateFile)) return null;
+  if (!fs.existsSync(stateFile)) return { done: {}, values: {} };
   try {
-    return JSON.parse(fs.readFileSync(stateFile, "utf8"))?.values ?? {};
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    return { done: state?.done ?? {}, values: state?.values ?? {} };
   } catch (error) {
     throw new Stop(`${stateFile} isn't valid JSON (${error.message})`);
   }
@@ -345,10 +505,7 @@ async function status(run) {
   console.log("\nThis computer");
   printTools();
 
-  const token = secretOf(run, "RAILWAY_API_TOKEN") || hide(await ask("Railway account or workspace token (typing is hidden): ", { hidden: true }));
-  if (!token) throw new Stop("no Railway token given");
-  railwayAuth = { Authorization: `Bearer ${token}` };
-
+  await signIn(run);
   const old = await readProject(run.old, "old");
   await printProject("The old project", old, run);
   const newId = run.copy?.values?.RAILWAY_PROJECT_ID;
@@ -378,7 +535,8 @@ function printFiles(run) {
   console.log(`  backup folder: ${run.backup}${fs.existsSync(run.backup) ? "" : " (not made yet: step 4)"}`);
   const holder = lockHolder(run);
   if (holder) console.log(`  another run (${holder.command ?? "a command"}, process ${holder.pid}, since ${holder.started ?? "?"}) is using ${run.stateFile}`);
-  else if (fs.existsSync(`${run.stateFile}.lock`)) console.log(`  a lock left by a run that's gone: ${run.stateFile}.lock, which the next run takes over (R2)`);
+  // A change command holds the lock itself.
+  else if (!run.locked && fs.existsSync(`${run.stateFile}.lock`)) console.log(`  a lock left by a run that's gone: ${run.stateFile}.lock, which the next run takes over (R2)`);
   const noted = run.state.values.noted;
   console.log(`  notes: ${noted ? `${run.stateFile}, since ${shortTime(noted.at)}` : `${run.stateFile} (none kept yet)`}`);
 }
@@ -606,22 +764,30 @@ function printBuckets(old, fresh) {
 
 /** Step 16: each compared service's variables, old against new, by name. Values are compared, and never printed. */
 async function printVariables(run, old, fresh) {
-  console.log("\nVariables, old against new (names only; no value is shown)");
+  printComparison(run, await compareVariables(run, old, fresh));
+}
+
+/**
+ * The variables of migrate, the admin, the worker and the control panel, old against new, in the groups step 16 acts
+ * on. Each role's old values are kept for copying, and hidden from what's printed.
+ */
+async function compareVariables(run, old, fresh) {
   const sealedOld = await sealedNames(old);
   const sealedNew = await sealedNames(fresh);
+  const roles = [];
   let oldAdmin = null;
   for (const role of COMPARED) {
     const a = old.service(role);
     const b = fresh.service(role);
     if (!a && !b) continue;
     if (!a || !b) {
-      console.log(`  ${role}: only in the ${a ? "old" : "new"} project`);
+      roles.push({ role, only: a ? "old" : "new" });
       continue;
     }
     const left = await variablesOf(old, a);
     const right = await variablesOf(fresh, b);
     if (left.error || right.error) {
-      console.log(`  ${role}: couldn't read its variables (${left.error ?? right.error})`);
+      roles.push({ role, error: left.error ?? right.error });
       continue;
     }
     if (role === "admin") oldAdmin = left.values;
@@ -630,30 +796,59 @@ async function printVariables(run, old, fresh) {
     const oldNames = compared(left.values);
     const newNames = new Set(compared(right.values));
     const onlyOld = oldNames.filter((name) => !newNames.has(name)).sort();
-    const onlyNew = [...newNames].filter((name) => !(name in left.values)).sort();
     const differ = oldNames.filter((name) => newNames.has(name) && String(left.values[name]) !== String(right.values[name])).sort();
-    const lines = [];
     const connect = onlyOld.filter((name) => role === "admin" && CONNECT_VARIABLES.has(name));
-    const byHand = onlyOld.filter((name) => !connect.includes(name));
-    if (connect.length) lines.push(`only in the old project, set by connect: ${connect.join(", ")}. connect runs after the switch (step 32): copy them to the new admin now, so it answers calls and Polar from the first minute (step 16)`);
-    if (byHand.length) lines.push(`only in the old project, so added in Railway by hand: ${byHand.join(", ")}. Copy them to the new ${role} (step 16)`);
     const address = differ.filter((name) => ADDRESS_VARIABLES.has(name));
     const keys = differ.filter((name) => !ADDRESS_VARIABLES.has(name) && KEY_NAME.test(name));
-    const other = differ.filter((name) => !address.includes(name) && !keys.includes(name));
-    if (address.length) lines.push(`different: ${address.join(", ")}, the address, which the cutover sets back (step 30)`);
-    if (keys.length) lines.push(`different: ${keys.join(", ")}, ${keys.length === 1 ? "a key" : "keys"} changed in Railway since the files were written. Bring the copy's files up to date first, since every variables run puts the files' value back: the key in ${run.copy.file}.secrets, then redo its step and up (step 16)`);
-    if (other.length) lines.push(`different: ${other.join(", ")}. The new ${other.length === 1 ? "value is" : "values are"} the script's own; keep ${other.length === 1 ? "it" : "them"}, unless production's was set by hand on purpose (step 16)`);
-    if (onlyNew.length) lines.push(`only in the new project: ${onlyNew.join(", ")}`);
-    const sealedHere = [...sealed].sort();
-    if (sealedHere.length) lines.push(`sealed, so Railway shows no value to compare: ${sealedHere.join(", ")}. Check ${sealedHere.length === 1 ? "it" : "them"} by hand`);
-    console.log(`  ${role}:${lines.length ? "" : " the same in both"}`);
-    for (const line of lines) console.log(`    ${line}`);
+    roles.push({
+      role,
+      oldService: a,
+      newService: b,
+      oldValues: left.values,
+      newValues: right.values,
+      connect,
+      byHand: onlyOld.filter((name) => !connect.includes(name)),
+      address,
+      keys,
+      other: differ.filter((name) => !address.includes(name) && !keys.includes(name)),
+      onlyNew: [...newNames].filter((name) => !(name in left.values)).sort(),
+      sealed: [...sealed].sort(),
+    });
   }
+  let webhook = null;
   const secret = run.copy && secretFromFile(`${run.copy.file}.secrets`, "OPENAI_WEBHOOK_SECRET");
   if (secret) {
     hide(secret);
-    const same = oldAdmin && oldAdmin.OPENAI_WEBHOOK_SECRET === secret;
-    console.log(`  OPENAI_WEBHOOK_SECRET in ${run.copy.file}.secrets, which connect puts on the admin: ${!oldAdmin ? "not compared, since the old admin's variables couldn't be read" : same ? "the same as the old admin's" : "differs from the old admin's. Put the old admin's there before connect runs (step 16)"}`);
+    webhook = !oldAdmin ? "unread" : oldAdmin.OPENAI_WEBHOOK_SECRET === secret ? "same" : "differs";
+  }
+  return { roles, webhook };
+}
+
+function printComparison(run, { roles, webhook }) {
+  console.log("\nVariables, old against new (names only; no value is shown)");
+  for (const item of roles) {
+    if (item.only) {
+      console.log(`  ${item.role}: only in the ${item.only} project`);
+      continue;
+    }
+    if (item.error) {
+      console.log(`  ${item.role}: couldn't read its variables (${item.error})`);
+      continue;
+    }
+    const lines = [];
+    if (item.connect.length) lines.push(`only in the old project, set by connect: ${item.connect.join(", ")}. connect runs after the switch (step 32): copy them to the new admin now, so it answers calls and Polar from the first minute (step 16)`);
+    if (item.byHand.length) lines.push(`only in the old project, so added in Railway by hand: ${item.byHand.join(", ")}. Copy them to the new ${item.role} (step 16)`);
+    if (item.address.length) lines.push(`different: ${item.address.join(", ")}, the address, which the cutover sets back (step 30)`);
+    if (item.keys.length) lines.push(`different: ${item.keys.join(", ")}, ${item.keys.length === 1 ? "a key" : "keys"} changed in Railway since the files were written. Bring the copy's files up to date first, since every variables run puts the files' value back: the key in ${run.copy.file}.secrets, then redo its step and up (step 16)`);
+    if (item.other.length) lines.push(`different: ${item.other.join(", ")}. The new ${item.other.length === 1 ? "value is" : "values are"} the script's own; keep ${item.other.length === 1 ? "it" : "them"}, unless production's was set by hand on purpose (step 16)`);
+    if (item.onlyNew.length) lines.push(`only in the new project: ${item.onlyNew.join(", ")}`);
+    if (item.sealed.length) lines.push(`sealed, so Railway shows no value to compare: ${item.sealed.join(", ")}. Check ${item.sealed.length === 1 ? "it" : "them"} by hand`);
+    console.log(`  ${item.role}:${lines.length ? "" : " the same in both"}`);
+    for (const line of lines) console.log(`    ${line}`);
+  }
+  if (webhook) {
+    const said = { unread: "not compared, since the old admin's variables couldn't be read", same: "the same as the old admin's", differs: "differs from the old admin's. Put the old admin's there before connect runs (step 16)" };
+    console.log(`  OPENAI_WEBHOOK_SECRET in ${run.copy.file}.secrets, which connect puts on the admin: ${said[webhook]}`);
   }
 }
 
@@ -708,7 +903,8 @@ async function notes(run, old, fresh) {
     console.log(`  Kept in ${run.stateFile} since ${shortTime(kept.at)}.`);
     return;
   }
-  const release = tryLock(run);
+  // A change command holds the lock already.
+  const release = run.locked ? () => undefined : tryLock(run);
   if (!release) {
     console.log(`  Not kept: another run is using ${run.stateFile}.`);
     return;
@@ -748,6 +944,1192 @@ async function dnsRecords(run, host, admin) {
   } catch (error) {
     return { list: fromRailway(), from: "what Railway asks for", problem: `Cloudflare couldn't be read: ${error.message}` };
   }
+}
+
+// ---------------------------------------------------------------- the change commands
+
+// Each step carries its number in devops/redeploy.md. A step whose work is found done already says so, and is recorded
+// like the others.
+const PREPARE = [
+  { n: "1", what: "Check the tools: Docker running, and the AWS CLI for the bucket", run: checkTools },
+  { n: "2", what: `Get PostgreSQL ${TARGET_MAJOR}'s tools: docker pull postgres:${TARGET_MAJOR}`, run: pullImage },
+  { n: "3", what: `Check the checkout: its bootstrap.mjs makes the database on PostgreSQL ${TARGET_MAJOR}`, run: checkCheckout },
+  { n: "4", what: "The backup folder, with the three files and the SQL the copy runs", run: makeBackupFolder },
+  { n: "5", what: "A Railway backup of the old database, locked so the schedule keeps it", run: backupDatabase },
+  { n: "6", what: "The old bucket's files, copied into the backup folder", run: (ctx) => copyBucket(ctx, false) },
+  { n: "7", what: "The notes for going back: the address's DNS records, and the copies", run: keepNotes },
+  { n: "8", what: `The copy of the three files, ${COPY_SUFFIX}, made where none exists yet`, run: copySettings },
+  { n: "9", what: "The copy's temporary address", run: temporaryAddress },
+  { n: "10", what: "The old Railway project renamed, so up can't find it by its name", run: renameOld },
+  { n: "11", what: "The copy forgets the old project: bootstrap's redo railway.project, once", run: forgetOld },
+  { n: "12", what: "bootstrap's doctor and up --dry-run on the copy", run: checkCopy },
+  { n: "13", what: `The new project, built by bootstrap's up from the copy, on PostgreSQL ${TARGET_MAJOR}`, run: buildNew },
+  { n: "14", what: "The copy's files, backed up to after-stage-1 in the backup folder", run: (ctx) => backupCopy(ctx, "after-stage-1") },
+  { n: "15", what: `The new services running, migrate done, the database on ${TARGET_MAJOR}, the admin answering`, run: checkNew },
+  { n: "16", what: "What the files don't know, copied from the old services' variables to the new ones", run: copyVariables },
+  { n: "17", what: "The new cloudflared stopped, so the control panel answers only from the old project", run: stopNewTunnel },
+];
+
+const TRIAL = [
+  { n: "18", what: "The bucket's files, copied into the new bucket too", run: (ctx) => copyBucket(ctx, true) },
+  { n: "19", what: "The address move, rehearsed with a throwaway name", run: rehearseAddress },
+  { n: "20", what: "A trial copy of the database into lobbystack_trial on the new server, timed, then cleaned up", run: trialCopy },
+];
+
+const FINISH = [
+  { n: "35", what: "The copies of the admin and the worker, set again as step 7 noted them", run: setCopies },
+  { n: "36", what: "The old services disconnected from the repository, so a sync can't start them", run: disconnectOld },
+  { n: "37", what: "The new database's Railway backups, on the old one's schedule", run: scheduleBackups },
+  { n: "38", what: "The temporary address, removed from the new admin and from Cloudflare", run: removeTemporary },
+  { n: "39", what: "Both databases' TCP proxies deleted", run: closeProxies },
+];
+
+const RETIRE = [
+  { n: "40", what: "The old project deleted, with 48 hours' grace, and its files moved into the backup folder", run: retireOld },
+];
+
+const COMMANDS = {
+  prepare: {
+    title: "prepare: steps 1 to 17, while production runs",
+    steps: PREPARE,
+    check: checkPrepare,
+    changes: prepareChanges,
+    next: () => "Next, a day or so before the cutover: node devops/redeploy.mjs trial, steps 18 to 20.",
+  },
+  trial: {
+    title: "trial: steps 18 to 20, a day or so before the cutover, while production runs",
+    steps: TRIAL,
+    check: checkTrial,
+    changes: trialChanges,
+    next: () => "Next: pick the hour (step 21), then the cutover, steps 22 to 34, by hand as devops/redeploy.md describes.",
+  },
+  finish: {
+    title: "finish: steps 35 to 39, once the cutover's checks have passed",
+    steps: FINISH,
+    check: checkFinish,
+    changes: finishChanges,
+    question: () => "Have all of step 34's checks passed on the new project?",
+    next: () => "Next, in a week, if nothing needed going back: node devops/redeploy.mjs retire, step 40.",
+  },
+  retire: {
+    title: "retire: step 40, a week after the cutover",
+    steps: RETIRE,
+    check: checkRetire,
+    changes: retireChanges,
+    question: (ctx) => `Railway deletes the old project, "${ctx.old.project.name}", and its backups 48 hours from now, and going back is then impossible.`,
+    answer: (ctx) => ctx.old.project.name,
+    after: moveOldFiles,
+    next: () => `The move is over. From now on, bootstrap and the scale script run with the ${COPY_SUFFIX} files.`,
+  },
+};
+
+/**
+ * prepare, trial, finish and retire: each checks Railway's API and both projects first, says what it will change and
+ * asks, then runs its steps in order, holding the state file's lock throughout. A step is recorded in the state file
+ * as soon as it finishes, and a recorded step is skipped, so a command that stopped is finished by running it again.
+ */
+async function changeCommand(run) {
+  const release = options.dryRun ? () => undefined : tryLock(run);
+  if (!release) {
+    const holder = lockHolder(run);
+    throw new Stop(`another run${holder ? ` (${holder.command ?? "a command"}, process ${holder.pid})` : ""} is using ${run.stateFile}. Let it finish; if none is running, delete ${run.stateFile}.lock (R2)`);
+  }
+  run.locked = !options.dryRun;
+  try {
+    if (!options.dryRun) {
+      logFile = `${run.file}.redeploy.log`;
+      logOnly(`\n==== ${options.command} ${path.basename(run.file)} | ${new Date().toISOString()} | node ${process.version} on ${process.platform}`);
+    }
+    const command = COMMANDS[options.command];
+    printFiles(run);
+    console.log("");
+    await checkSchema({ stopOnProblem: !options.dryRun });
+    await signIn(run);
+    const ctx = await readBoth(run);
+    await command.check(ctx);
+    console.log(`\n${command.title}`);
+    for (const step of command.steps) console.log(`  ${run.state.done[step.n] ? "done" : "    "} ${step.n.padStart(2)}. ${step.what}`);
+    const left = command.steps.filter((step) => !run.state.done[step.n]);
+    if (!left.length) {
+      console.log(`\nEvery step of ${options.command} is done. ${command.next(ctx)}`);
+      return;
+    }
+    console.log(`\n${options.command} ${options.dryRun ? "would" : "will"}:`);
+    for (const line of command.changes(ctx, new Set(left.map((step) => step.n)))) console.log(`  - ${line}`);
+    if (options.dryRun) {
+      console.log("\nA dry run: nothing was changed.");
+      return;
+    }
+    await confirm(command.question?.(ctx) ?? "", command.answer?.(ctx));
+    await runSteps(ctx, command.steps);
+    if (command.after) await command.after(ctx);
+    console.log(`\n${command.next(ctx)}`);
+  } finally {
+    release();
+    run.locked = false;
+  }
+}
+
+async function runSteps(ctx, steps) {
+  const { run } = ctx;
+  for (const step of steps) {
+    if (run.state.done[step.n]) continue;
+    console.log(`\n${step.n}. ${step.what}`);
+    const started = Date.now();
+    try {
+      await step.run(ctx);
+    } catch (error) {
+      try {
+        keepState(run);
+      } catch {
+        // The step's own error says more.
+      }
+      const message = `step ${step.n}: ${error.message}`;
+      throw error instanceof Stop ? new Stop(message) : new Error(message);
+    }
+    run.state.done[step.n] = new Date().toISOString();
+    (run.state.values.seconds ??= {})[step.n] = Math.round((Date.now() - started) / 1000);
+    keepState(run);
+  }
+}
+
+function keepState(run) {
+  if (!save(run)) throw new Stop(`another program changed ${run.stateFile} while this run held its lock, so this run's record wasn't saved. Look at the file, then run again`);
+}
+
+/** Goes on only when the answer is the one asked for: yes, or for retire the old project's name. */
+async function confirm(question, expected = "yes") {
+  const answer = await ask(`${question ? `${question} ` : ""}Type ${expected === "yes" ? "yes" : `"${expected}"`} to go on: `);
+  if (expected === "yes" ? answer.toLowerCase() !== "yes" : answer !== expected) throw new Stop("stopped at your answer. Nothing more was changed");
+}
+
+/** A line for the log only, such as the command a child ran; the child's own output went to the terminal. */
+function logOnly(text) {
+  if (!logFile) return;
+  try {
+    fs.appendFileSync(logFile, `${redact(text)}\n`, { mode: 0o600 });
+  } catch {
+    // A log that can't be written doesn't stop the run.
+  }
+}
+
+let railwayToken = "";
+
+async function signIn(run) {
+  railwayToken = secretOf(run, "RAILWAY_API_TOKEN") || hide(await ask("Railway account or workspace token (typing is hidden): ", { hidden: true }));
+  if (!railwayToken) throw new Stop("no Railway token given");
+  railwayAuth = { Authorization: `Bearer ${railwayToken}` };
+}
+
+/** Both projects as Railway has them now: the old one from the original's state file, the new one from the copy's once it names one. */
+async function readBoth(run) {
+  reloadCopy(run);
+  const old = await readProject(run.old, "old");
+  await loadDomains(old);
+  const id = run.copy?.values?.RAILWAY_PROJECT_ID;
+  const fresh = id && id !== run.old.RAILWAY_PROJECT_ID ? await readProject(run.copy.values, "new") : null;
+  if (fresh) await loadDomains(fresh);
+  return { run, old, fresh };
+}
+
+function reloadCopy(run) {
+  const file = `${run.file}${COPY_SUFFIX}`;
+  if (!fs.existsSync(file)) {
+    run.copy = null;
+    return;
+  }
+  const state = readBootstrapState(file);
+  run.copy = { file, settings: readSettings(file), values: state.values, done: state.done };
+}
+
+/** The admin's addresses, which the steps that move or check an address need. */
+async function loadDomains(where) {
+  const admin = where.service("admin");
+  if (admin) admin.domains = (await gql(Q.domains, { projectId: where.project.id, environmentId: where.environment.id, serviceId: admin.id })).domains;
+}
+
+const hasAddress = (where, host) => Boolean(where?.service("admin")?.domains?.customDomains?.some((item) => item.domain === host));
+
+/** The new project, checked against both state files before the script changes anything in it. */
+function assertNew(ctx) {
+  const { run, fresh } = ctx;
+  if (!fresh) throw new Stop("the new project isn't built yet: run prepare first");
+  if (fresh.project.id === run.old.RAILWAY_PROJECT_ID || fresh.project.id !== run.copy?.values?.RAILWAY_PROJECT_ID) throw new Stop("the new project doesn't check out against the two state files, so nothing was changed in it");
+  return fresh;
+}
+
+/** The name bootstrap's up gives the new project, and finds a project by: the name the state files recorded. */
+const projectName = (run) => run.copy?.values?.RAILWAY_PROJECT_NAME || run.old.RAILWAY_PROJECT_NAME || run.host;
+
+/** The address the new project has until the switch (step 9). */
+function temporaryHost(run) {
+  const given = hostOf(options.temporary);
+  if (given) return given;
+  if (run.state.values.temporary) return run.state.values.temporary;
+  const copyHost = run.copy && settingsHost(run.copy.settings);
+  if (copyHost && copyHost !== run.host) return copyHost;
+  const [first, ...rest] = run.host.split(".");
+  return [`${first}-new`, ...rest].join(".");
+}
+
+// ---------------------------------------------------------------- prepare (steps 1 to 17)
+
+function checkPrepare(ctx) {
+  const { run, old, fresh } = ctx;
+  if (!run.host) throw new Stop("the settings name no address (APP_BASE_URL). The move takes the deployment's address to the new project at step 30, so it needs one");
+  const postgres = old.service("Postgres");
+  if (!postgres) throw new Stop("the old project has no Postgres service");
+  const image = postgres.instance?.source?.image;
+  if (pgMajor(image) === TARGET_MAJOR && !options.sameVersion) throw new Stop(`the old database runs PostgreSQL ${TARGET_MAJOR} already (${image}), so there's nothing to move. To rehearse the move on it anyway, add --same-version`);
+  if (hasAddress(fresh, run.host)) throw new Stop(`the new project has ${run.host} already: the cutover has run, so prepare has nothing left to do`);
+  if (options.temporary && run.state.done["9"] && hostOf(options.temporary) !== run.state.values.temporary) throw new Stop(`step 9 gave the copy ${run.state.values.temporary} already. Leave --temporary out`);
+}
+
+function prepareChanges(ctx, todo) {
+  const { run, old } = ctx;
+  const lines = [];
+  if (todo.has("5")) lines.push("make a Railway backup of the old database and lock it (step 5)");
+  if (todo.has("6") && old.buckets.length) lines.push(`copy the old bucket's files into ${run.backup} (step 6)`);
+  if (todo.has("10") && old.project.name === projectName(run)) lines.push(`rename the old Railway project to "${oldName(ctx)}" (step 10)`);
+  if (todo.has("13")) lines.push(`build a new Railway project named "${projectName(run)}" at ${temporaryHost(run)} with bootstrap's up, which asks its own questions; Railway charges for it from then on (steps 11 to 13)`);
+  if (todo.has("16")) lines.push("copy the variables the old services have and the files don't to the new services (step 16)");
+  if (todo.has("17") && old.service("cloudflared")) lines.push("stop the new cloudflared (step 17)");
+  lines.push("Production keeps running throughout, and nothing changes at OpenAI, Twilio, Resend or Polar.");
+  return lines;
+}
+
+const oldName = (ctx) => `${projectName(ctx.run)} (old, PostgreSQL ${pgMajor(ctx.old.service("Postgres")?.instance?.source?.image) ?? 16})`;
+
+async function checkTools(ctx) {
+  const problems = [];
+  const docker = runTool("docker", ["info", "--format", "{{.ServerVersion}}"]);
+  if (docker.status === 0) console.log("  ok  Docker is running");
+  else problems.push(missingTool(docker) ? `no Docker: PostgreSQL ${TARGET_MAJOR}'s tools run in it (Docker Desktop on Windows and Mac)` : "Docker isn't running: start Docker Desktop");
+  if (ctx.old.buckets.length) {
+    const aws = runTool("aws", ["--version"]);
+    if (aws.status === 0) console.log(`  ok  AWS CLI ${aws.stdout.match(/aws-cli\/([\w.]+)/)?.[1] ?? firstLine(aws)}`);
+    else problems.push(missingTool(aws) ? "no AWS CLI: it copies the bucket's files (guide 7.7)" : `aws --version failed: ${firstLine(aws)}`);
+  }
+  console.log(`  ok  Node.js ${process.version}, and the token reads the old project, "${ctx.old.project.name}"`);
+  if (problems.length) throw new Stop(`${problems.join("; ")}. Then run ${options.command} again`);
+}
+
+async function pullImage() {
+  const image = `postgres:${TARGET_MAJOR}`;
+  if (runTool("docker", ["image", "inspect", image, "--format", "{{.Id}}"]).status !== 0) {
+    console.log(`  docker pull ${image}: a few hundred MB, once`);
+    handOver();
+    const pulled = runTool("docker", ["pull", image], { stdio: "inherit" });
+    if (pulled.status !== 0) throw new Stop(`docker pull ${image} failed${pulled.error ? `: ${pulled.error.message}` : " (above)"}`);
+  }
+  const version = runTool("docker", ["run", "--rm", image, "pg_dump", "--version"]);
+  if (Number(version.stdout?.match(/\(PostgreSQL\)\s+(\d+)/)?.[1]) !== TARGET_MAJOR) throw new Stop(`${image}'s pg_dump says "${firstLine(version)}", not PostgreSQL ${TARGET_MAJOR}`);
+  console.log(`  ok  ${version.stdout.trim()}`);
+}
+
+async function checkCheckout() {
+  let text;
+  try {
+    text = fs.readFileSync(BOOTSTRAP, "utf8");
+  } catch (error) {
+    throw new Stop(`couldn't read ${BOOTSTRAP} (${error.code ?? error.message})`);
+  }
+  const image = text.match(/const POSTGRES_IMAGE = "([^"]+)"/)?.[1];
+  if (pgMajor(image) !== TARGET_MAJOR) throw new Stop(`this checkout's devops/bootstrap.mjs makes the database from ${image ?? "an image it doesn't name"}, not PostgreSQL ${TARGET_MAJOR}. Update the checkout to develop/r2, or releases/r2 with fork PR #223 (git pull --ff-only, then pnpm install), then run prepare again`);
+  console.log(`  ok  devops/bootstrap.mjs makes Postgres from ${image}`);
+  const git = runTool("git", ["-C", REPO_ROOT, "log", "-1", "--format=%h %cs%d"]);
+  if (git.status === 0) console.log(`  the checkout: ${git.stdout.trim()}`);
+  if (!fs.existsSync(path.join(REPO_ROOT, "node_modules"))) console.log("  note: pnpm install hasn't run in this checkout, and connect needs it at step 32");
+}
+
+async function makeBackupFolder(ctx) {
+  const { run } = ctx;
+  const folder = run.backup;
+  const inside = path.relative(REPO_ROOT, folder);
+  if (inside === "" || (!inside.startsWith("..") && !path.isAbsolute(inside))) throw new Stop(`the backup folder ${folder} is inside the checkout, where Git doesn't ignore it: name another with --backup`);
+  fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+  restrict(folder, true);
+  for (const end of ["", ".secrets", ".state.json"]) {
+    const from = `${run.file}${end}`;
+    if (fs.existsSync(from)) console.log(`  ${keepCopy(from, path.join(folder, path.basename(from)))}`);
+  }
+  for (const [name, text] of Object.entries(SQL)) fs.writeFileSync(path.join(folder, name), text, { mode: 0o600 });
+  console.log(`  wrote ${Object.keys(SQL).join(", ")} in ${folder}`);
+  run.state.backup = folder;
+}
+
+/** Keeps a file and its folder to this computer's account: chmod, or on Windows icacls, as the step-by-step guides do. */
+function restrict(target, folder = false) {
+  if (process.platform !== "win32") {
+    fs.chmodSync(target, folder ? 0o700 : 0o600);
+    return;
+  }
+  const user = process.env.USERNAME;
+  const result = user ? runTool("icacls", [target, "/inheritance:r", "/grant:r", `${user}:${folder ? "(OI)(CI)F" : "F"}`]) : null;
+  if (result?.status !== 0) console.log(`  note: couldn't keep ${target} to your account${result ? ` (${firstLine(result)})` : ""}. Do it in its Properties > Security`);
+}
+
+/** Copies a file into the backup folder, never over another: one already there stays, and a different copy gets the time in its name. */
+function keepCopy(from, to) {
+  if (fs.existsSync(to)) {
+    if (fs.readFileSync(to).equals(fs.readFileSync(from))) return `= ${to} is there already`;
+    const stamped = `${to}.${new Date().toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-")}`;
+    copyPrivate(from, stamped);
+    return `${to} is there and differs, so this copy is ${stamped}`;
+  }
+  copyPrivate(from, to);
+  return `copied ${from} to ${to}`;
+}
+
+function copyPrivate(from, to) {
+  fs.copyFileSync(from, to);
+  restrict(to);
+}
+
+async function backupDatabase(ctx) {
+  const { run, old } = ctx;
+  const volume = old.service("Postgres")?.volume;
+  if (!volume) throw new Stop("the old Postgres has no volume to back up");
+  const volumeInstanceId = volume.id;
+  const list = async () => (await gql(Q.backups, { volumeInstanceId })).volumeInstanceBackupList ?? [];
+  const name = `before-pg${TARGET_MAJOR}-${new Date().toISOString().slice(0, 10)}`;
+  const kept = run.state.values.backup;
+  let backup = (await list()).find((item) => (kept?.id ? item.id === kept.id : item.name === name));
+  if (!backup) {
+    console.log(`  making the backup "${name}" of the old database's volume; production keeps running`);
+    const made = (await gql(Q.backupCreate, { volumeInstanceId, name })).volumeInstanceBackupCreate;
+    await waitForWorkflow(made?.workflowId, "the backup", 60);
+    backup = await waitUntil(5, "Railway to list the backup", async () => (await list()).filter((item) => item.name === name).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]);
+  }
+  run.state.values.backup = { id: backup.id, name: backup.name, createdAt: backup.createdAt, volumeInstanceId };
+  if (backup.expiresAt) {
+    await gql(Q.backupLock, { volumeInstanceBackupId: backup.id, volumeInstanceId });
+    backup = (await list()).find((item) => item.id === backup.id) ?? backup;
+  }
+  if (backup.expiresAt) console.log(`  the backup "${backup.name}" is made, but Railway still gives it an end date, ${shortTime(backup.expiresAt)}: lock it by hand, in the old Postgres's Backups`);
+  else console.log(`  the backup "${backup.name}", ${shortTime(backup.createdAt)}, locked: the schedule never deletes it`);
+}
+
+/** Steps 6 and 18: the old bucket into the backup folder, and for 18 the folder into the new bucket. Nothing is deleted on either side. */
+async function copyBucket(ctx, intoNew) {
+  const { run, old } = ctx;
+  const [from] = old.buckets;
+  if (!from) {
+    console.log("  the old project has no bucket: nothing to copy");
+    return;
+  }
+  const folder = path.join(run.backup, `${run.label}-files`);
+  fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+  const oldKeys = await bucketKeys(old, from);
+  console.log(`  the old ${from.name} into ${folder}, which can take a while`);
+  awsSync(`s3://${oldKeys.bucketName}`, folder, oldKeys);
+  const files = folderFiles(folder);
+  console.log(`  the folder has ${count(files.count, "file")}, ${bytes(files.bytes)}`);
+  if (!intoNew) return bucketSays(old, from);
+  const fresh = assertNew(ctx);
+  const [to] = fresh.buckets;
+  if (!to) throw new Stop("the new project has no bucket. bootstrap's up makes it with the Railway CLI, else says to make it by hand: do that, then run again");
+  const newKeys = await bucketKeys(fresh, to);
+  if (to.id === from.id || (newKeys.bucketName === oldKeys.bucketName && newKeys.endpoint === oldKeys.endpoint)) throw new Stop("the new project's bucket is the old one's, so nothing was copied into it");
+  console.log(`  ${folder} into the new ${to.name}`);
+  awsSync(folder, `s3://${newKeys.bucketName}`, newKeys);
+  await bucketSays(fresh, to);
+}
+
+async function bucketKeys(where, bucket) {
+  const list = (await gql(Q.bucketKeys, { bucketId: bucket.id, environmentId: where.environment.id, projectId: where.project.id })).bucketS3Credentials ?? [];
+  const keys = list.find((item) => item?.accessKeyId && item.secretAccessKey && item.bucketName && item.endpoint);
+  if (!keys) throw new Stop(`Railway gave no keys for the ${where.which} bucket, ${bucket.name}`);
+  hide(keys.accessKeyId);
+  hide(keys.secretAccessKey);
+  return keys;
+}
+
+/** aws s3 sync with one bucket's keys, given to it through its environment only, as guide 7.7 sets the AWS CLI up for Railway. */
+function awsSync(from, to, keys) {
+  const env = {
+    ...process.env,
+    AWS_ACCESS_KEY_ID: keys.accessKeyId,
+    AWS_SECRET_ACCESS_KEY: keys.secretAccessKey,
+    AWS_DEFAULT_REGION: keys.region || "auto",
+    AWS_REQUEST_CHECKSUM_CALCULATION: "WHEN_REQUIRED",
+    AWS_RESPONSE_CHECKSUM_VALIDATION: "WHEN_REQUIRED",
+  };
+  // A profile or session token of this computer's would be sent with the bucket's keys.
+  for (const name of ["AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_DEFAULT_PROFILE"]) delete env[name];
+  const result = runTool("aws", ["s3", "sync", from, to, "--endpoint-url", keys.endpoint, "--only-show-errors", "--no-progress"], { env, maxBuffer: 64 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(`aws s3 sync stopped: ${firstLine(result)}`);
+}
+
+function folderFiles(folder) {
+  let found = 0;
+  let size = 0;
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) {
+        found += 1;
+        size += fs.statSync(full).size;
+      }
+    }
+  };
+  walk(folder);
+  return { count: found, bytes: size };
+}
+
+async function bucketSays(where, bucket) {
+  const details = await attempt(() => gql(Q.bucket, { bucketId: bucket.id, environmentId: where.environment.id }));
+  const said = details?.bucketInstanceDetails;
+  if (said) console.log(`  Railway says the ${where.which} ${bucket.name} has ${count(Number(said.objectCount), "file")}, ${bytes(said.sizeBytes)}; its count can lag a few minutes`);
+}
+
+async function keepNotes(ctx) {
+  const { run, old, fresh } = ctx;
+  await notes(run, old, fresh);
+  if (run.state.values.noted?.project !== old.project.id) throw new Stop("the notes for going back weren't kept (above)");
+}
+
+async function copySettings(ctx) {
+  const { run } = ctx;
+  for (const end of ["", ".secrets", ".state.json"]) {
+    const from = `${run.file}${end}`;
+    const to = `${run.file}${COPY_SUFFIX}${end}`;
+    if (fs.existsSync(to)) console.log(`  = kept ${to}, which exists`);
+    else if (fs.existsSync(from)) {
+      copyPrivate(from, to);
+      console.log(`  copied ${from} to ${to}`);
+    }
+  }
+  reloadCopy(run);
+}
+
+async function temporaryAddress(ctx) {
+  const { run } = ctx;
+  const temporary = temporaryHost(run);
+  const zone = String(run.settings.CLOUDFLARE_ZONE ?? "").toLowerCase();
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(temporary)) throw new Stop(`${temporary} isn't an address such as app-new.example.com`);
+  if (temporary === run.host || run.host.endsWith(`.${temporary}`) || temporary === zone) throw new Stop(`the temporary address must be a name of its own, not ${temporary}: give one with --temporary`);
+  if (zone && !temporary.endsWith(`.${zone}`)) throw new Stop(`${temporary} isn't in CLOUDFLARE_ZONE (${zone}), where bootstrap writes its CNAME: give one that is, with --temporary`);
+  if (settingsHost(run.copy.settings) !== temporary || "CUSTOM_HOST" in run.copy.settings) {
+    setAddress(run.copy.file, `https://${temporary}`);
+    reloadCopy(run);
+  }
+  console.log(`  ${run.copy.file}: APP_BASE_URL=https://${temporary}, and no CUSTOM_HOST`);
+  run.state.values.temporary = temporary;
+}
+
+/** Sets APP_BASE_URL in a settings file and takes out CUSTOM_HOST, its older name, leaving every other line as it is. */
+function setAddress(file, url) {
+  const text = fs.readFileSync(file, "utf8");
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const out = [];
+  let set = false;
+  for (const line of text.split(/\r?\n/)) {
+    const key = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line.trim())?.[1];
+    if (key === "CUSTOM_HOST") continue;
+    if (key === "APP_BASE_URL") {
+      if (!set) out.push(`APP_BASE_URL=${url}`);
+      set = true;
+      continue;
+    }
+    out.push(line);
+  }
+  if (!set) out.splice(out.at(-1) === "" ? out.length - 1 : out.length, 0, `APP_BASE_URL=${url}`);
+  fs.writeFileSync(file, out.join(eol));
+}
+
+async function renameOld(ctx) {
+  const { run, old } = ctx;
+  if (old.project.name !== projectName(run)) console.log(`  = the old project is named "${old.project.name}" already`);
+  else {
+    const name = oldName(ctx);
+    await gql(Q.rename, { id: old.project.id, name });
+    old.project.name = name;
+    console.log(`  the old project is now "${name}"`);
+  }
+  run.state.values.oldName = old.project.name;
+  await checkNameFree(ctx);
+}
+
+/**
+ * Before bootstrap runs on the copy: it finds the project by its name, so the old project mustn't have that name any
+ * more, and no other project but the new one may have it. Otherwise up would build into that project.
+ */
+async function checkNameFree(ctx, { quiet = false } = {}) {
+  const { run } = ctx;
+  const name = projectName(run);
+  const recorded = run.copy?.values?.RAILWAY_PROJECT_ID;
+  const allowed = recorded && recorded !== run.old.RAILWAY_PROJECT_ID ? recorded : null;
+  const { project } = await gql(Q.project, { id: run.old.RAILWAY_PROJECT_ID });
+  if (project?.name === name) throw new Stop(`the old project still has the name "${name}", which up finds the new project by: it would build into production. Rename the old project (step 10), then run again`);
+  const named = new Set();
+  for (const workspaceId of new Set([run.settings.RAILWAY_WORKSPACE_ID || null, project?.workspaceId || null])) {
+    const { projects } = await gql(Q.projects, { workspaceId });
+    for (const { node } of projects.edges) if (node.name === name && !node.deletedAt && node.id !== allowed) named.add(node.id);
+  }
+  if (named.size) throw new Stop(`Railway has ${named.size === 1 ? "a project" : `${named.size} projects`} named "${name}" (${[...named].join(", ")}), which up would build into. Rename ${named.size === 1 ? "it" : "them"}, then run again`);
+  if (!quiet) console.log(allowed ? `  ok  only the new project has the name "${name}"` : `  ok  no project has the name "${name}" now, which up gives the new one`);
+}
+
+// Steps of bootstrap's that act at OpenAI, Twilio, Resend and Polar: the copy's state file must keep them done.
+const PROVIDER_STEP = /^(openai|twilio|resend|polar)\./;
+
+async function forgetOld(ctx) {
+  const { run } = ctx;
+  reloadCopy(run);
+  const id = run.copy.values.RAILWAY_PROJECT_ID;
+  if (!id) return console.log("  = the copy names no project already");
+  if (id !== run.old.RAILWAY_PROJECT_ID) return console.log(`  = the copy names the new project, ${id}: this never runs again`);
+  // Without an address, redo would also take twilio.tollfree off, and up would point production's texts at the new project.
+  if (!settingsHost(run.copy.settings)) throw new Stop(`${run.copy.file} has no APP_BASE_URL (step 9)`);
+  await checkNameFree(ctx, { quiet: true });
+  const result = bootstrap(["redo", run.copy.file, "railway.project"], { capture: true });
+  for (const line of result.output.split(/\r?\n/).filter(Boolean)) console.log(`  | ${line}`);
+  if (result.status !== 0) throw new Stop(`bootstrap's redo stopped (exit code ${result.status})`);
+  reloadCopy(run);
+  if (run.copy.values.RAILWAY_PROJECT_ID) throw new Stop(`${run.copy.file}.state.json still names a project after redo`);
+  providerStepsKept(run);
+}
+
+/** The copy's state file still marks every OpenAI, Twilio, Resend and Polar step the original's has done, so up repeats none. */
+function providerStepsKept(run) {
+  const original = readBootstrapState(run.file).done;
+  const lost = Object.keys(original).filter((key) => PROVIDER_STEP.test(key) && !run.copy.done[key]);
+  if (lost.length) throw new Stop(`${run.copy.file}.state.json no longer marks ${lost.join(", ")} done, so up would do ${lost.length === 1 ? "it" : "them"} again outside Railway. Don't run up on the copy: make the copy again from the original files (delete the three ${COPY_SUFFIX} files, and steps 8 to 11 in ${run.stateFile})`);
+}
+
+async function checkCopy(ctx) {
+  const { run } = ctx;
+  providerStepsKept(run);
+  await checkNameFree(ctx, { quiet: true });
+  if (bootstrap(["doctor", run.copy.file]).status !== 0) throw new Stop(`bootstrap's doctor found something to fix in the copy (above). Fix it in ${run.copy.file} or its .secrets file, then run prepare again`);
+  if (bootstrap(["up", run.copy.file, "--dry-run"]).status !== 0) throw new Stop("bootstrap's up --dry-run stopped (above)");
+  console.log(`\n  The dry run above builds a new project named "${projectName(run)}" at ${temporaryHost(run)}. Every OpenAI, Twilio, Resend and Polar step stays done in the copy's state file, so up does none of them.`);
+}
+
+async function buildNew(ctx) {
+  const { run } = ctx;
+  providerStepsKept(run);
+  await checkNameFree(ctx, { quiet: true });
+  const up = bootstrap(["up", run.copy.file]);
+  reloadCopy(run);
+  if (up.status !== 0) throw new Stop("bootstrap's up stopped (above). Do what it says, then run prepare again: up carries on where it stopped");
+  const id = run.copy.values.RAILWAY_PROJECT_ID;
+  if (!id || id === run.old.RAILWAY_PROJECT_ID) throw new Stop(`up finished, but ${run.copy.file}.state.json names ${id ? "the old project" : "no project"}`);
+  ctx.fresh = await readProject(run.copy.values, "new");
+  await loadDomains(ctx.fresh);
+  console.log(`  the new project: "${ctx.fresh.project.name}" (${id})`);
+}
+
+/** Runs devops/bootstrap.mjs: what it prints goes to the terminal, and the person answers its questions there. */
+function bootstrap(args, { capture = false } = {}) {
+  return child(BOOTSTRAP, args, capture);
+}
+
+function child(script, args, capture = false) {
+  handOver();
+  logOnly(`ran: node ${path.basename(script)} ${args.join(" ")}`);
+  const result = spawnSync(process.execPath, [script, ...args], {
+    env: { ...process.env, RAILWAY_API_TOKEN: railwayToken },
+    stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error) throw new Error(`couldn't run ${script}: ${result.error.message}`);
+  logOnly(`  exit code ${result.status}`);
+  return { status: result.status, output: capture ? redact(`${result.stdout ?? ""}${result.stderr ?? ""}`) : "" };
+}
+
+async function backupCopy(ctx, name) {
+  const { run } = ctx;
+  const folder = path.join(run.backup, name);
+  fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+  for (const end of ["", ".secrets", ".state.json"]) {
+    const from = `${run.copy.file}${end}`;
+    if (fs.existsSync(from)) copyPrivate(from, path.join(folder, path.basename(from)));
+  }
+  console.log(`  copied the three ${COPY_SUFFIX} files to ${folder}`);
+}
+
+async function checkNew(ctx) {
+  const { run, old } = ctx;
+  assertNew(ctx);
+  // The control panel's two services only where the old project has them.
+  const wanted = RUNNING.filter((role) => !["control", "cloudflared"].includes(role) || old.service(role));
+  let fresh;
+  await waitUntil(20, "every new service to be running and migrate to be done", async () => {
+    fresh = await readProject(run.copy.values, "new");
+    const states = wanted.map((role) => [role, fresh.service(role) ? fresh.service(role).instance?.latestDeployment?.status ?? "none" : "missing"]);
+    const failed = states.filter(([, state]) => ["missing", "FAILED", "CRASHED", "REMOVED"].includes(state));
+    if (failed.length) throw new Stop(`the new ${failed.map(([role, state]) => `${role} is ${String(state).toLowerCase()}`).join(", ")}: see its deployment in Railway, fix it, then run prepare again`);
+    return states.every(([, state]) => state === "SUCCESS");
+  });
+  console.log(`  ok  ${wanted.join(", ")}: running, and migrate done`);
+  const postgres = fresh.service("Postgres");
+  const image = postgres.instance?.source?.image;
+  if (pgMajor(image) !== TARGET_MAJOR) throw new Stop(`the new Postgres runs ${image}, not PostgreSQL ${TARGET_MAJOR}`);
+  const logs = await attempt(() => gql(Q.logs, { deploymentId: postgres.instance.latestDeployment.id, filter: "PostgreSQL", limit: 50 }));
+  const said = (logs?.deploymentLogs ?? []).map((item) => String(item.message)).find((message) => /PostgreSQL \d+\.\d+/.test(message));
+  const major = Number(said?.match(/PostgreSQL (\d+)\./)?.[1]);
+  if (said && major !== TARGET_MAJOR) throw new Stop(`the new Postgres's log says PostgreSQL ${major}`);
+  console.log(`  ok  the new Postgres runs ${image}${said ? `, and its log says PostgreSQL ${major}` : ""}`);
+  const temporary = temporaryHost(run);
+  await waitUntil(15, `https://${temporary}/api/health/ready to answer "ok":true (Railway gives the address its certificate a few minutes after up)`, async () => (await health(temporary, "/api/health/ready")).body?.ok === true);
+  console.log(`  ok  https://${temporary}/api/health/ready answers "ok":true. Don't sign up there: the cutover replaces its data`);
+  ctx.fresh = fresh;
+  await loadDomains(fresh);
+}
+
+async function health(host, pathname) {
+  try {
+    const response = await fetch(`${SITE_URL.replace("{host}", host)}${pathname}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+    return { status: response.status, body: parseJson(await response.text()) };
+  } catch (error) {
+    return { error: error.cause?.code ?? error.message };
+  }
+}
+
+async function copyVariables(ctx) {
+  const { run, old } = ctx;
+  const fresh = assertNew(ctx);
+  const comparison = await compareVariables(run, old, fresh);
+  printComparison(run, comparison);
+  const unread = comparison.roles.filter((item) => item.error);
+  if (unread.length) throw new Stop(`the variables of ${unread.map((item) => item.role).join(", ")} couldn't be read`);
+  if (comparison.webhook === "differs") {
+    replaceSecret(`${run.copy.file}.secrets`, "OPENAI_WEBHOOK_SECRET", comparison.roles.find((item) => item.role === "admin").oldValues.OPENAI_WEBHOOK_SECRET);
+    console.log(`  OPENAI_WEBHOOK_SECRET in ${run.copy.file}.secrets is the old admin's now, which connect puts on the new admin (step 32)`);
+  }
+  const keys = comparison.roles.filter((item) => item.keys?.length);
+  if (keys.length) await confirm(`\n  The old project has other values than the copy's files for ${keys.map((item) => `${item.keys.join(", ")} on the ${item.role}`).join("; ")}. Each variables run puts the files' values back, so the new project keeps the files' values unless you bring the files up to date first (devops/redeploy.md, step 16). Keep the files' values?`);
+  for (const item of comparison.roles) {
+    const names = [...(item.connect ?? []), ...(item.byHand ?? [])];
+    if (!names.length) continue;
+    const variables = Object.fromEntries(names.map((name) => [name, String(item.oldValues[name])]));
+    await gql(Q.upsert, { input: { projectId: fresh.project.id, environmentId: fresh.environment.id, serviceId: item.newService.id, variables } });
+    console.log(`  copied to the new ${item.role}: ${names.join(", ")}. Railway deploys it again with them`);
+  }
+  const after = await compareVariables(run, old, fresh);
+  const left = after.roles.filter((item) => item.connect?.length || item.byHand?.length);
+  if (left.length) throw new Stop(`Railway doesn't show ${left.map((item) => `${[...item.connect, ...item.byHand].join(", ")} on the new ${item.role}`).join("; ")} yet. Run prepare again`);
+  const sealed = after.roles.filter((item) => item.sealed?.length);
+  if (sealed.length) console.log(`  Compare by hand, since Railway shows no value of a sealed variable: ${sealed.map((item) => `${item.sealed.join(", ")} on the ${item.role}`).join("; ")}`);
+}
+
+/** Puts a value on a key's one line in a secrets file, leaving the other lines as they are. */
+function replaceSecret(file, key, value) {
+  const text = fs.readFileSync(file, "utf8");
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  let found = 0;
+  const lines = text.split(/\r?\n/).map((line) => {
+    if (/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line.trim())?.[1] !== key) return line;
+    found += 1;
+    return `${key}=${value}`;
+  });
+  if (found !== 1) throw new Stop(`${file} has ${found} ${key} lines: put the old admin's value on one, by hand`);
+  fs.writeFileSync(file, lines.join(eol), { mode: 0o600 });
+}
+
+async function stopNewTunnel(ctx) {
+  const { run } = ctx;
+  const fresh = assertNew(ctx);
+  const tunnel = fresh.service("cloudflared");
+  if (!tunnel) return console.log("  the deployment has no control panel, so no cloudflared: nothing to stop");
+  const deployment = tunnel.instance?.latestDeployment;
+  if (!deployment || ["REMOVED", "REMOVING"].includes(deployment.status)) return console.log("  = the new cloudflared is stopped already");
+  await gql(Q.removeDeployment, { id: deployment.id });
+  await waitUntil(3, "Railway to stop the new cloudflared", async () => {
+    const now = (await readProject(run.copy.values, "new")).service("cloudflared")?.instance?.latestDeployment;
+    return !now || now.status === "REMOVED";
+  });
+  console.log("  the new cloudflared is stopped: the control panel's address answers from the old project until the switch");
+}
+
+// ---------------------------------------------------------------- trial (steps 18 to 20)
+
+function checkTrial(ctx) {
+  const { run, fresh } = ctx;
+  const next = PREPARE.find((step) => !run.state.done[step.n]);
+  if (next) throw new Stop(`prepare hasn't finished: step ${next.n} is next. Run prepare first`);
+  assertNew(ctx);
+  if (hasAddress(fresh, run.host)) throw new Stop(`the new project has ${run.host} already: trial is for before the cutover`);
+  if (!run.state.done["19"] && !options.noRehearsal) rehearsal(run);
+}
+
+function trialChanges(ctx, todo) {
+  const { run } = ctx;
+  const lines = [];
+  if (todo.has("18") && ctx.old.buckets.length) lines.push(`copy the old bucket's files into the new bucket, through ${path.join(run.backup, `${run.label}-files`)} (step 18)`);
+  if (todo.has("19") && !options.noRehearsal) lines.push(`add ${rehearsal(run).name} to the old admin with its records in Cloudflare, move it to the new admin, then remove it and its records; ${run.host} isn't touched (step 19)`);
+  if (todo.has("20")) lines.push("open each database to the internet through a TCP proxy, dump production while it runs, restore the dump into lobbystack_trial on the new server and count both, then drop lobbystack_trial, delete the dump and close the proxies it opened (step 20)");
+  lines.push("Production keeps running throughout.");
+  return lines;
+}
+
+/** Step 19's throwaway name, and what writing its records in Cloudflare needs. */
+function rehearsal(run) {
+  const zone = String(run.settings.CLOUDFLARE_ZONE ?? "").toLowerCase();
+  const name = hostOf(options.rehearse) || (zone ? `move-test.${zone}` : "");
+  if (!name) throw new Stop("step 19 needs a throwaway address in the deployment's zone, and the settings name no CLOUDFLARE_ZONE. Rehearse by hand (devops/redeploy.md, step 19), then run trial with --no-rehearsal");
+  const taken = [run.host, run.state.values.temporary, hostOf(run.settings.CONTROL_HOST), zone].filter(Boolean);
+  if (taken.includes(name) || taken.some((host) => host.endsWith(`.${name}`))) throw new Stop(`${name} is the deployment's own: give a throwaway name with --rehearse`);
+  if (!zone || !name.endsWith(`.${zone}`)) throw new Stop(`${name} isn't in CLOUDFLARE_ZONE (${zone || "none"}), where the script writes its records. Give one that is with --rehearse, or rehearse by hand and use --no-rehearsal`);
+  const token = secretOf(run, "CLOUDFLARE_API_TOKEN");
+  if (!token) throw new Stop("step 19 writes the throwaway name's records in Cloudflare, and there's no CLOUDFLARE_API_TOKEN in the environment or the secrets files. Add it, or rehearse by hand and use --no-rehearsal");
+  return { name, zone, token };
+}
+
+const REHEARSAL_NOTE = "redeploy.mjs step 19, a throwaway name";
+
+/** Step 19: a throwaway name added to the old admin, moved to the new one, timed both times, then removed with its records. */
+async function rehearseAddress(ctx) {
+  const { run, old } = ctx;
+  const fresh = assertNew(ctx);
+  if (options.noRehearsal) return console.log("  left out (--no-rehearsal)");
+  const { name, zone, token } = rehearsal(run);
+  const zoneId = await cloudflareZone(token, zone);
+  const sides = [["old", old], ["new", fresh]];
+  const made = new Set();
+  const seconds = {};
+  try {
+    // A run that stopped halfway may have left the name on an admin.
+    for (const [, where] of sides) await removeName(where, name);
+    const free = async () => (await gql(Q.domainAvailable, { domain: name })).customDomainAvailable ?? {};
+    const available = await free();
+    if (available.available === false) throw new Stop(`Railway says ${name} isn't free (${available.message || "no reason given"}): give another with --rehearse`);
+    for (const [which, where] of sides) {
+      const admin = where.service("admin");
+      if (which === "new") {
+        // How soon a name taken off one project is free for another is part of what the address move takes.
+        const started = Date.now();
+        await waitUntil(5, `${name} to be free in Railway again`, async () => (await free()).available !== false);
+        seconds.free = Math.round((Date.now() - started) / 1000);
+      }
+      await gql(Q.domainCreate, { input: { domain: name, environmentId: where.environment.id, projectId: where.project.id, serviceId: admin.id, targetPort: 3000 } });
+      const records = await waitUntil(2, `Railway's DNS records for ${name}`, async () => {
+        const list = recordsOf(await domainOn(where, name));
+        return list.length ? list : null;
+      });
+      await putRecords(token, zoneId, name, records, made);
+      const started = Date.now();
+      await waitUntil(15, `Railway to verify ${name} on the ${which} admin`, async () => (await domainOn(where, name))?.status?.verified === true);
+      seconds[which] = Math.round((Date.now() - started) / 1000);
+      console.log(`  ${name}: verified on the ${which} admin after ${duration(seconds[which])}`);
+      await removeName(where, name);
+    }
+  } finally {
+    for (const [which, where] of sides) {
+      const left = await attempt(() => removeName(where, name));
+      if (left?.error) console.log(`  couldn't remove ${name} from the ${which} admin (${left.error}): remove it by hand, in its Settings > Networking`);
+    }
+    for (const id of made) {
+      const gone = await attempt(() => cloudflare(token, `/zones/${zoneId}/dns_records/${id}`, { method: "DELETE" }));
+      if (gone?.error) console.log(`  couldn't delete a record of ${name} in Cloudflare (${gone.error}): delete it by hand`);
+    }
+    if (made.size) console.log(`  deleted ${name}'s records in Cloudflare`);
+  }
+  run.state.values.rehearsal = { name, ...seconds };
+  console.log(`  Railway took ${duration(seconds.new)} to verify the name on the new admin: the address move at step 30 takes about as long, while production is offline`);
+}
+
+async function domainOn(where, name) {
+  const admin = where.service("admin");
+  const { domains } = await gql(Q.domains, { projectId: where.project.id, environmentId: where.environment.id, serviceId: admin.id });
+  return domains.customDomains.find((item) => item.domain === name) ?? null;
+}
+
+async function removeName(where, name) {
+  const found = await domainOn(where, name);
+  if (found) await gql(Q.domainDelete, { id: found.id });
+  return found;
+}
+
+/** The records Railway asks for an address, as Cloudflare names them. */
+const recordsOf = (domain) => (domain?.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue)
+  .map((record) => ({ type: String(record.recordType).replace("DNS_RECORD_TYPE_", ""), name: String(record.fqdn).replace(/\.$/, "").toLowerCase(), content: String(record.requiredValue) }));
+
+/** Writes the throwaway name's records, DNS only. A record of that name this script didn't make stops it. */
+async function putRecords(token, zoneId, name, records, made) {
+  for (const record of records) {
+    if (record.name !== name && !record.name.endsWith(`.${name}`)) throw new Stop(`Railway asked for a record of ${record.name}, which isn't ${name}'s, so it wasn't written`);
+    const existing = ((await cloudflare(token, `/zones/${zoneId}/dns_records?type=${record.type}&name=${encodeURIComponent(record.name)}`)) ?? []).filter((item) => item.name === record.name);
+    const theirs = existing.filter((item) => !made.has(item.id) && item.comment !== REHEARSAL_NOTE);
+    if (theirs.length) throw new Stop(`Cloudflare already has ${record.type} ${record.name}, which this script didn't make: give another name with --rehearse`);
+    const body = { type: record.type, name: record.name, content: record.content, ttl: 1, proxied: false, comment: REHEARSAL_NOTE };
+    if (existing[0]) {
+      made.add(existing[0].id);
+      await cloudflare(token, `/zones/${zoneId}/dns_records/${existing[0].id}`, { method: "PATCH", body });
+    } else made.add((await cloudflare(token, `/zones/${zoneId}/dns_records`, { method: "POST", body })).id);
+    console.log(`  Cloudflare: ${record.type} ${record.name}  ${record.content}`);
+  }
+}
+
+async function cloudflareZone(token, zone) {
+  const zones = await cloudflare(token, `/zones?name=${encodeURIComponent(zone)}`);
+  if (!zones?.length) throw new Stop(`the Cloudflare token can't see the zone ${zone}`);
+  return zones[0].id;
+}
+
+/** Step 20: production dumped while it runs, restored into lobbystack_trial on the new server, both counted, then cleaned up. */
+async function trialCopy(ctx) {
+  const { run, old } = ctx;
+  const fresh = assertNew(ctx);
+  const password = databasePassword(run);
+  dockerReady();
+  const opened = [];
+  const dumpFile = path.join(run.backup, "trial.dump");
+  let servers = null;
+  let made = false;
+  try {
+    const onOld = await openProxy(run, old, opened);
+    const onNew = await openProxy(run, fresh, opened);
+    servers = checkServers(run, password, onOld, onNew);
+    const before = tally(run, password, onOld, "lobbystack");
+    console.log(`  old: ${before.line}`);
+    let started = Date.now();
+    console.log("  dumping production into the backup folder, while it runs");
+    pgOrStop(run, password, ["pg_dump", ...at(onOld), "-d", "lobbystack", "-Fc", "-f", "trial.dump.part"], "pg_dump");
+    fs.renameSync(`${dumpFile}.part`, dumpFile);
+    const dumpSeconds = Math.round((Date.now() - started) / 1000);
+    const dumpBytes = fs.statSync(dumpFile).size;
+    console.log(`  the dump: ${bytes(dumpBytes)} in ${duration(dumpSeconds)}`);
+    sameServer(run, password, onNew, servers.new);
+    pgOrStop(run, password, ["dropdb", ...at(onNew), "--if-exists", "lobbystack_trial"], "dropdb");
+    pgOrStop(run, password, ["createdb", ...at(onNew), "lobbystack_trial"], "createdb");
+    made = true;
+    started = Date.now();
+    console.log("  restoring it into lobbystack_trial on the new server");
+    pgOrStop(run, password, ["pg_restore", ...at(onNew), "-d", "lobbystack_trial", "-O", "-1", "-e", "trial.dump"], "pg_restore");
+    const restoreSeconds = Math.round((Date.now() - started) / 1000);
+    const after = tally(run, password, onNew, "lobbystack_trial");
+    console.log(`  RESTORE OK in ${duration(restoreSeconds)}`);
+    console.log(`  trial: ${after.line}`);
+    if (before.tables !== after.tables) {
+      console.log(`  The number of tables differs. Lines only the old database has (<) or only the trial copy has (>):`);
+      const a = tableLines(run, password, onOld, "lobbystack");
+      const b = tableLines(run, password, onNew, "lobbystack_trial");
+      for (const line of a.filter((item) => !b.includes(item))) console.log(`    < ${line}`);
+      for (const line of b.filter((item) => !a.includes(item))) console.log(`    > ${line}`);
+      throw new Stop("the trial copy has other tables than production. Find out why before the cutover");
+    }
+    console.log(before.fingerprint === after.fingerprint ? "  SAME: the trial copy has every table, with the same rows" : `  the same tables; ${count(Math.abs(after.rows - before.rows), "row")} apart, since production kept writing during the dump`);
+    printHours(run, password, onOld);
+    run.state.values.trial = { at: new Date().toISOString(), dumpSeconds, restoreSeconds, dumpBytes, tables: before.tables, rows: before.rows };
+    console.log(`  On the day, the dump and the restore should take about ${duration(dumpSeconds + restoreSeconds)}, while production is offline`);
+  } finally {
+    if (made && servers) {
+      const dropped = await attempt(async () => {
+        const onNew = (await liveProxies(fresh))[0];
+        if (!onNew) throw new Error("its TCP proxy is gone");
+        sameServer(run, password, onNew, servers.new);
+        pgOrStop(run, password, ["dropdb", ...at(onNew), "--if-exists", "lobbystack_trial"], "dropdb");
+      });
+      console.log(dropped?.error ? `  couldn't drop lobbystack_trial (${dropped.error}): drop it on the new server by hand` : "  dropped lobbystack_trial");
+    }
+    for (const file of [dumpFile, `${dumpFile}.part`]) fs.rmSync(file, { force: true });
+    for (const where of opened) {
+      const closed = await attempt(() => closeProxy(run, where));
+      if (closed?.error) console.log(`  couldn't close the ${where.which} database's TCP proxy (${closed.error}): delete it by hand, in Postgres > Settings > Networking`);
+    }
+  }
+}
+
+/** The database password, from both state files, which must hold the same one: the copy's came from the original. */
+function databasePassword(run) {
+  const a = run.old.POSTGRES_PASSWORD;
+  const b = run.copy ? readBootstrapState(run.copy.file).values.POSTGRES_PASSWORD : undefined;
+  if (!a || !b) throw new Stop(`${!a ? `${run.file}.state.json` : `${run.copy?.file}.state.json`} has no POSTGRES_PASSWORD`);
+  if (a !== b) throw new Stop("the two state files hold different database passwords. The copy's must be the original's (step 8)");
+  return hide(a);
+}
+
+function dockerReady() {
+  const docker = runTool("docker", ["image", "inspect", `postgres:${TARGET_MAJOR}`, "--format", "{{.Id}}"]);
+  if (docker.status !== 0) throw new Stop(missingTool(docker) ? "no Docker on this computer (step 1)" : `Docker isn't running, or has no postgres:${TARGET_MAJOR} image: start Docker Desktop (step 2)`);
+}
+
+/** One of PostgreSQL 18's tools in Docker, as postgres, in the backup folder. The password reaches it through the environment only. */
+function pg(run, password, args) {
+  const result = runTool("docker", ["run", "--rm", "-e", "PGPASSWORD", "-e", "PGUSER=postgres", "-e", "PGCONNECT_TIMEOUT=20", "-v", `${run.backup}:/backup`, "-w", "/backup", `postgres:${TARGET_MAJOR}`, ...args], {
+    env: { ...process.env, PGPASSWORD: password },
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error) throw new Error(`docker didn't start: ${result.error.message}`);
+  return result;
+}
+
+function pgOrStop(run, password, args, what) {
+  const result = pg(run, password, args);
+  if (result.status !== 0) throw new Stop(`${what} failed: ${redact(`${result.stderr || result.stdout}`.trim().split(/\r?\n/).slice(0, 5).join(" | ")) || `exit code ${result.status}`}`);
+  return result.stdout;
+}
+
+const at = (proxy) => ["-h", proxy.domain, "-p", String(proxy.proxyPort)];
+
+/** A server's PostgreSQL version and its system identifier, which tells two servers apart. */
+function serverOf(run, password, proxy, which) {
+  const result = pg(run, password, ["psql", "-X", ...at(proxy), "-d", "postgres", "-Atc", "select current_setting('server_version_num') || ' ' || system_identifier from pg_control_system()"]);
+  if (result.status !== 0) throw new Stop(`couldn't sign in to the ${which} database through ${proxy.domain}:${proxy.proxyPort}: ${redact(firstLine(result))}`);
+  const [number, id] = result.stdout.trim().split(/\s+/);
+  return { major: Math.floor(Number(number) / 10_000), id };
+}
+
+function checkServers(run, password, onOld, onNew) {
+  const servers = { old: serverOf(run, password, onOld, "old"), new: serverOf(run, password, onNew, "new") };
+  console.log(`  old: PostgreSQL ${servers.old.major}, new: PostgreSQL ${servers.new.major}`);
+  if (servers.old.id === servers.new.id) throw new Stop("both TCP proxies reach the same server, so nothing was copied");
+  if (servers.new.major !== TARGET_MAJOR) throw new Stop(`the new server runs PostgreSQL ${servers.new.major}, not ${TARGET_MAJOR}, so nothing was copied`);
+  if (servers.old.major === TARGET_MAJOR && !options.sameVersion) throw new Stop(`the old server runs PostgreSQL ${TARGET_MAJOR} already. To rehearse on it anyway, add --same-version`);
+  return servers;
+}
+
+/** Before each change on the new server: still the server checked first, still on PostgreSQL 18. */
+function sameServer(run, password, proxy, expected) {
+  const now = serverOf(run, password, proxy, "new");
+  if (now.id !== expected.id || now.major !== TARGET_MAJOR) throw new Stop("the new database's address no longer reaches the server checked at the start, so nothing was changed there");
+}
+
+function tally(run, password, proxy, database) {
+  const line = pgOrStop(run, password, ["psql", "-X", ...at(proxy), "-d", database, "-At", "-f", "count.sql"], `the count of ${database}`).trim();
+  const match = /tables (\d+), rows (\d+), fingerprint (\w+)/.exec(line);
+  if (!match) throw new Stop(`the count of ${database} printed "${line}"`);
+  return { line, tables: Number(match[1]), rows: Number(match[2]), fingerprint: match[3] };
+}
+
+function tableLines(run, password, proxy, database) {
+  return pgOrStop(run, password, ["psql", "-X", ...at(proxy), "-d", database, "-At", "-f", "tables.sql"], `the tables of ${database}`).trim().split(/\r?\n/).filter(Boolean);
+}
+
+/** For step 21: production's calls in each hour of the day over four weeks, in this computer's time zone. */
+function printHours(run, password, proxy) {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const result = pg(run, password, ["psql", "-X", ...at(proxy), "-d", "lobbystack", "-At", "-v", `tz=${zone}`, "-f", "hours.sql"]);
+  if (result.status !== 0) return console.log(`  calls by hour: unknown (${redact(firstLine(result))})`);
+  const calls = new Map(result.stdout.trim().split(/\r?\n/).filter(Boolean).map((line) => line.split(" ")).map(([hour, n]) => [hour, Number(n)]));
+  const hours = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
+  const fewest = Math.min(...hours.map((hour) => calls.get(hour) ?? 0));
+  console.log(`  For step 21, calls in each hour over the last four weeks (${zone}):`);
+  for (let row = 0; row < 24; row += 8) console.log(`    ${hours.slice(row, row + 8).map((hour) => `${hour}h ${String(calls.get(hour) ?? 0).padStart(5)}`).join("  ")}`);
+  const quiet = hours.filter((hour) => (calls.get(hour) ?? 0) === fewest).map((hour) => `${hour}h`);
+  console.log(`    fewest, ${fewest}: ${quiet.slice(0, 8).join(", ")}${quiet.length > 8 ? `, and ${quiet.length - 8} more` : ""}`);
+}
+
+const liveProxies = async (where) => ((await gql(Q.tcpProxies, { environmentId: where.environment.id, serviceId: where.service("Postgres").id })).tcpProxies ?? []).filter((item) => !item.deletedAt);
+
+// A TCP proxy is set in the environment's settings, without a deploy, so the database doesn't restart.
+const proxyPatch = (serviceId, value) => ({ services: { [serviceId]: { networking: { tcpProxies: { 5432: value } } } } });
+
+/**
+ * A database's TCP proxy: the one it has, else a new one. One this script opened, in this run or in one that was
+ * interrupted, as the state file records, goes into opened, to be closed again; one opened by hand stays.
+ */
+async function openProxy(run, where, opened) {
+  const mine = (run.state.values.proxies ??= []);
+  const ready = async () => (await liveProxies(where)).find((item) => item.domain && item.proxyPort) ?? null;
+  const existing = await ready();
+  if (existing) {
+    if (mine.includes(where.which)) opened.push(where);
+    console.log(`  the ${where.which} database's TCP proxy is there already${mine.includes(where.which) ? ", left open by an earlier run of this script" : ""}: ${existing.domain}:${existing.proxyPort}`);
+    return existing;
+  }
+  const workflow = (await gql(Q.patch, { environmentId: where.environment.id, patch: proxyPatch(where.service("Postgres").id, {}), commitMessage: "redeploy.mjs: a TCP proxy for the database copy", skipDeploys: true })).environmentPatchCommit;
+  opened.push(where);
+  if (!mine.includes(where.which)) mine.push(where.which);
+  keepState(run);
+  await waitForWorkflow(workflow, `the ${where.which} database's TCP proxy`, 5);
+  const proxy = await waitUntil(5, `Railway to open the ${where.which} database's TCP proxy (if it never does, add it by hand: Postgres > Settings > Networking > TCP Proxy, port 5432, then run again)`, ready);
+  console.log(`  opened the ${where.which} database to the internet: ${proxy.domain}:${proxy.proxyPort}`);
+  return proxy;
+}
+
+async function closeProxy(run, where) {
+  const workflow = (await gql(Q.patch, { environmentId: where.environment.id, patch: proxyPatch(where.service("Postgres").id, null), commitMessage: "redeploy.mjs: the TCP proxy closed", skipDeploys: true })).environmentPatchCommit;
+  await waitForWorkflow(workflow, `closing the ${where.which} database's TCP proxy`, 5);
+  for (const proxy of await liveProxies(where)) await gql(Q.proxyDelete, { id: proxy.id });
+  await waitUntil(3, `Railway to close the ${where.which} database's TCP proxy`, async () => !(await liveProxies(where)).length);
+  run.state.values.proxies = (run.state.values.proxies ?? []).filter((which) => which !== where.which);
+  keepState(run);
+  console.log(`  closed the ${where.which} database's TCP proxy`);
+}
+
+// ---------------------------------------------------------------- finish (steps 35 to 39)
+
+function checkFinish(ctx) {
+  const { run, old, fresh } = ctx;
+  assertNew(ctx);
+  if (!hasAddress(fresh, run.host)) throw new Stop(`the new admin doesn't have ${run.host} yet: finish comes after the cutover (steps 22 to 34)`);
+  if (hasAddress(old, run.host)) throw new Stop(`the old admin still has ${run.host}`);
+}
+
+function finishChanges(ctx, todo) {
+  const { run } = ctx;
+  const copies = run.state.values.noted?.copies ?? {};
+  const lines = [];
+  if (todo.has("35") && (copies.admin > 1 || copies.worker > 1)) lines.push(`run ${copies.admin} admin and ${copies.worker} worker copies with devops/scale.mjs, which asks its own yes (step 35)`);
+  const built = ["migrate", "admin", "worker", "control"].filter((role) => ctx.old.service(role)?.instance?.source?.repo).map((role) => (role === "control" ? "control panel" : role));
+  if (todo.has("36") && built.length) lines.push(`disconnect the old ${built.length > 1 ? `${built.slice(0, -1).join(", ")} and ${built.at(-1)}` : built[0]} from the repository (step 36)`);
+  if (todo.has("37")) lines.push("turn on the new database's Railway backups, as the old one had them (step 37)");
+  if (todo.has("38")) lines.push(`remove ${run.state.values.temporary ?? "the temporary address"} from the new admin, and its records from Cloudflare (step 38)`);
+  if (todo.has("39")) lines.push("delete both databases' TCP proxies (step 39)");
+  return lines;
+}
+
+async function setCopies(ctx) {
+  const { run } = ctx;
+  assertNew(ctx);
+  const copies = run.state.values.noted?.copies;
+  if (!copies) throw new Stop(`${run.stateFile} has no notes from step 7: set the copies with devops/scale.mjs by hand (devops/redeploy.md, step 35)`);
+  const admin = Number(copies.admin) || 1;
+  const worker = Number(copies.worker) || 1;
+  if (admin <= 1 && worker <= 1) return console.log("  the old project ran one admin and one worker: nothing to set");
+  const args = [`admin=${admin}`, `worker=${worker}`, "--max-connections", "200", "--bootstrap", run.copy.file];
+  if (child(SCALE, [...args, "--dry-run"]).status !== 0) throw new Stop("scale.mjs --dry-run stopped (above)");
+  if (child(SCALE, args).status !== 0) throw new Stop("scale.mjs stopped (above). Run finish again once that's settled");
+  console.log(`  scale.mjs set ${admin} admin and ${worker} worker copies`);
+}
+
+async function disconnectOld(ctx) {
+  const { old } = ctx;
+  for (const role of ["migrate", "admin", "worker", "control"]) {
+    const item = old.service(role);
+    if (!item) continue;
+    const repo = item.instance?.source?.repo;
+    if (!repo) {
+      console.log(`  = the old ${role} builds from no repository`);
+      continue;
+    }
+    await gql(Q.disconnect, { id: item.id });
+    console.log(`  the old ${role} no longer builds from ${repo}`);
+  }
+}
+
+async function scheduleBackups(ctx) {
+  const { old } = ctx;
+  const fresh = assertNew(ctx);
+  const volume = fresh.service("Postgres")?.volume;
+  if (!volume) throw new Stop("the new Postgres has no volume");
+  const before = old.service("Postgres")?.volume;
+  const kinds = before ? [...new Set(((await gql(Q.schedules, { volumeInstanceId: before.id })).volumeInstanceBackupScheduleList ?? []).map((item) => String(item.kind)))].filter((kind) => ["DAILY", "WEEKLY", "MONTHLY"].includes(kind)) : [];
+  if (!kinds.length) console.log("  the old database had no backup schedule, so none was set. Guide 5.2, step 16, sets one");
+  else {
+    await gql(Q.backupSchedule, { volumeInstanceId: volume.id, kinds });
+    const now = ((await gql(Q.schedules, { volumeInstanceId: volume.id })).volumeInstanceBackupScheduleList ?? []).map((item) => String(item.kind).toLowerCase());
+    console.log(`  the new database's backups: ${now.join(", ") || "none, as Railway shows them"}`);
+  }
+  const others = old.services.filter((item) => !SERVICE_ORDER.includes(item.role));
+  if (others.length) console.log(`  The old project also has ${others.map((item) => item.name).join(", ")}. If one is the nightly copy (guide 5.2, steps 17 to 22), set it up in the new project with PG_VERSION=${TARGET_MAJOR}, and stop the old one`);
+}
+
+async function removeTemporary(ctx) {
+  const { run } = ctx;
+  const fresh = assertNew(ctx);
+  const temporary = run.state.values.temporary;
+  if (!temporary) return console.log("  no temporary address was noted (step 9): nothing to remove");
+  if (temporary === run.host || run.host.endsWith(`.${temporary}`)) throw new Stop(`the noted temporary address, ${temporary}, is the deployment's own`);
+  if (await removeName(fresh, temporary)) console.log(`  removed ${temporary} from the new admin`);
+  else console.log(`  = the new admin doesn't have ${temporary}`);
+  const zone = String(run.settings.CLOUDFLARE_ZONE ?? "").toLowerCase();
+  const token = secretOf(run, "CLOUDFLARE_API_TOKEN");
+  if (!zone || !token) return console.log(`  Delete ${temporary}'s CNAME and _railway-verify.${temporary}'s TXT record at the DNS provider by hand`);
+  const zoneId = await cloudflareZone(token, zone);
+  for (const name of [temporary, `_railway-verify.${temporary}`]) {
+    for (const record of (await cloudflare(token, `/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}&per_page=100`)) ?? []) {
+      if (record.name !== name) continue;
+      await cloudflare(token, `/zones/${zoneId}/dns_records/${record.id}`, { method: "DELETE" });
+      console.log(`  deleted ${record.type} ${record.name} in Cloudflare`);
+    }
+  }
+}
+
+async function closeProxies(ctx) {
+  const fresh = assertNew(ctx);
+  for (const where of [ctx.old, fresh]) {
+    if (!(await liveProxies(where)).length) console.log(`  = the ${where.which} database has no TCP proxy`);
+    else await closeProxy(ctx.run, where);
+  }
+  console.log("  Keep the dump in the backup folder until the old project is gone");
+}
+
+// ---------------------------------------------------------------- retire (step 40)
+
+function checkRetire(ctx) {
+  const { run, fresh } = ctx;
+  const next = FINISH.find((step) => !run.state.done[step.n]);
+  if (next) throw new Stop(`finish hasn't run to the end: step ${next.n} is next. Run finish first`);
+  assertNew(ctx);
+  if (!hasAddress(fresh, run.host)) throw new Stop(`the new admin doesn't have ${run.host}, so the old project may still be needed`);
+}
+
+function retireChanges(ctx) {
+  const { run, old } = ctx;
+  const days = (Date.now() - Date.parse(run.state.done["39"])) / 86_400_000;
+  const lines = [`delete the old Railway project, "${old.project.name}" (${old.project.id}), with its backups: Railway waits 48 hours, during which its Settings can cancel that`];
+  lines.push(`move ${run.file}, its .secrets, .state.json and logs, and this script's notes, into ${path.join(run.backup, "old-project-files")}`);
+  if (days < 7) lines.push(`finish ran ${days < 1 ? "less than a day" : count(Math.floor(days), "day")} ago. The move keeps the old project a week, for going back`);
+  return lines;
+}
+
+async function retireOld(ctx) {
+  const { old } = ctx;
+  assertNew(ctx);
+  if (old.project.deletedAt) return console.log(`  = Railway is deleting "${old.project.name}" already`);
+  await gql(Q.scheduleDelete, { id: old.project.id });
+  console.log(`  Railway deletes "${old.project.name}" in 48 hours; until then, its Settings can cancel that`);
+}
+
+/** After step 40 is recorded: the old project's files, and this script's notes and log, into the backup folder. */
+async function moveOldFiles(ctx) {
+  const { run } = ctx;
+  const folder = path.join(run.backup, "old-project-files");
+  fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+  const moved = [];
+  for (const end of ["", ".secrets", ".state.json", ".vars", ".log", ".redeploy.json", ".redeploy.log"]) {
+    const from = `${run.file}${end}`;
+    if (!fs.existsSync(from)) continue;
+    let to = path.join(folder, path.basename(from));
+    if (fs.existsSync(to)) to = `${to}.${Date.now()}`;
+    if (end === ".redeploy.log") logFile = to;
+    try {
+      fs.renameSync(from, to);
+    } catch {
+      // Another drive: copied, then deleted.
+      fs.copyFileSync(from, to);
+      fs.rmSync(from);
+    }
+    moved.push(path.basename(from));
+  }
+  console.log(`  moved ${moved.join(", ")} into ${folder}`);
+}
+
+// ---------------------------------------------------------------- waiting
+
+/** Asks again every few seconds until check gives something, for at most the minutes given. */
+async function waitUntil(minutes, what, check) {
+  for (let tries = 0; ; tries += 1) {
+    const found = await check();
+    if (found) return found;
+    if (tries >= polls(minutes)) throw new Stop(`waited ${minutes} minutes for ${what}`);
+    if (tries === 0) console.log(`  waiting for ${what}`);
+    await sleep(POLL_MS);
+  }
+}
+
+/** Railway's changes that answer with a workflow: waits while it runs, and stops when it fails. An unknown one isn't waited for. */
+async function waitForWorkflow(workflowId, what, minutes) {
+  if (typeof workflowId !== "string" || !workflowId) return;
+  await waitUntil(minutes, `Railway to finish ${what}`, async () => {
+    const result = (await gql(Q.workflow, { workflowId })).workflowStatus;
+    if (result?.status === "Error") throw new Stop(`Railway couldn't finish ${what}: ${result.error || "it gave no reason"}`);
+    return result?.status !== "Running";
+  });
+}
+
+function duration(seconds) {
+  if (!Number.isFinite(seconds)) return "an unknown time";
+  if (seconds < 90) return count(Math.max(1, Math.round(seconds)), "second");
+  return count(Math.round(seconds / 60), "minute");
 }
 
 // ---------------------------------------------------------------- Railway's schema
@@ -1089,16 +2471,21 @@ async function gql(query, variables = {}, { anonymous = false } = {}) {
 
 const operationName = (query) => query.match(/^\s*(?:query|mutation) (\w+)/)?.[1] ?? "the call";
 
-async function cloudflare(token, pathname) {
+async function cloudflare(token, pathname, { method = "GET", body } = {}) {
   let response;
   try {
-    response = await fetch(`${URLS.cloudflare}${pathname}`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+    response = await fetch(`${URLS.cloudflare}${pathname}`, {
+      method,
+      headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(body ? { "content-type": "application/json" } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(30_000),
+    });
   } catch (error) {
     throw new Error(`couldn't reach Cloudflare (${error.cause?.code ?? error.message})`);
   }
-  const body = parseJson(await response.text());
-  if (!response.ok || body?.success === false) throw new Error(`Cloudflare refused ${pathname.split("?")[0]}: ${body?.errors?.map((item) => item.message).join("; ") || `HTTP ${response.status}`}`);
-  return body?.result;
+  const answer = parseJson(await response.text());
+  if (!response.ok || answer?.success === false) throw new Error(`Cloudflare refused ${method === "GET" ? "" : `${method} `}${pathname.split("?")[0]}: ${answer?.errors?.map((item) => item.message).join("; ") || `HTTP ${response.status}`}`);
+  return answer?.result;
 }
 
 /** A read the run can go on without: its answer, or { error } with the reason. A token Railway refuses still stops the run. */
@@ -1113,29 +2500,45 @@ async function attempt(read) {
 
 // ---------------------------------------------------------------- the command line
 
+const CHANGE_COMMANDS = ["prepare", "trial", "finish", "retire"];
+
 function parseArgs(argv) {
-  const parsed = { command: "", target: "", backup: "", save: "" };
+  const parsed = { command: "", target: "", backup: "", save: "", temporary: "", rehearse: "", dryRun: false, noRehearsal: false, sameVersion: false };
   const positional = [];
+  const flags = { "--dry-run": "dryRun", "--no-rehearsal": "noRehearsal", "--same-version": "sameVersion" };
+  const valued = { "--backup": "backup", "--save": "save", "--temporary": "temporary", "--rehearse": "rehearse" };
+  const given = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     let arg = argv[index];
     let value;
     const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
     if (equals > 0) [arg, value] = [arg.slice(0, equals), arg.slice(equals + 1)];
     if (arg === "--help" || arg === "-h") help();
-    else if (arg === "--backup" || arg === "--save") {
+    else if (flags[arg]) {
+      parsed[flags[arg]] = true;
+      given.add(arg);
+    } else if (valued[arg]) {
       value ??= argv[++index];
       if (!value || value.startsWith("--")) usage(`${arg} needs a value.`);
-      parsed[arg.slice(2)] = value;
+      parsed[valued[arg]] = value;
+      given.add(arg);
     } else if (arg.startsWith("-")) usage(`Unknown option ${arg}.`);
     else positional.push(arg);
   }
   [parsed.command, parsed.target] = positional;
+  const only = (option, commands) => {
+    if (given.has(option) && !commands.includes(parsed.command)) usage(`${option} goes with ${commands.join(" or ")}.`);
+  };
   if (parsed.command === "schema") {
     if (positional.length > 1) usage("schema takes no settings file.");
-  } else if (parsed.command === "status") {
-    if (!parsed.target || positional.length > 2) usage("status takes the settings file, or the deployment's address.");
-    if (parsed.save) usage("--save goes with schema.");
+  } else if (parsed.command === "status" || CHANGE_COMMANDS.includes(parsed.command)) {
+    if (!parsed.target || positional.length > 2) usage(`${parsed.command} takes the settings file, or the deployment's address.`);
   } else usage(parsed.command ? `Unknown command ${parsed.command}.` : "Give a command.");
+  only("--save", ["schema"]);
+  only("--dry-run", CHANGE_COMMANDS);
+  only("--temporary", ["prepare"]);
+  for (const option of ["--rehearse", "--no-rehearsal"]) only(option, ["trial"]);
+  only("--same-version", ["prepare", "trial"]);
   return parsed;
 }
 
@@ -1147,21 +2550,30 @@ function help() {
 }
 
 function usage(problem) {
-  consoleOriginal.error(`${problem}\n\nUsage: node devops/redeploy.mjs status <settings file or address> [--backup <folder>]\n       node devops/redeploy.mjs schema [--save <file>]\nRun it with --help for more, and see devops/redeploy.md.`);
+  consoleOriginal.error(`${problem}\n\nUsage: node devops/redeploy.mjs status <settings file or address> [--backup <folder>]\n       node devops/redeploy.mjs prepare|trial|finish|retire <settings file or address> [--dry-run]\n       node devops/redeploy.mjs schema [--save <file>]\nRun it with --help for more, and see devops/redeploy.md.`);
   process.exit(2);
 }
 
-// One reader for every question, so answers piped in on separate lines all arrive.
+// One reader for every question, so answers piped in on separate lines all arrive. Lines read ahead wait here, across
+// a child that had the terminal meanwhile.
+const waiting = [];
+
 function ask(question, { hidden: hide = false } = {}) {
   prompter ??= createPrompter();
   return prompter.ask(question, hide);
 }
 
+/** Lets a child process have the terminal: the reader lets go of it, and the next question makes a new one. */
+function handOver() {
+  prompter?.close();
+  prompter = null;
+}
+
 function createPrompter() {
   const terminal = process.stdin.isTTY === true;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal });
-  const waiting = [];
-  let closed = false;
+  // Input that ended before this reader was made, as after a child, answers every question with nothing.
+  let closed = process.stdin.readableEnded === true;
   let current = null;
   rl.on("line", (line) => waiting.push(line));
   rl.on("close", () => {
@@ -1209,6 +2621,7 @@ function createPrompter() {
       });
     },
     close() {
+      current = null;
       rl.close();
     },
   };

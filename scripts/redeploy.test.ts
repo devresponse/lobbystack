@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 // devops/redeploy.mjs end to end, run as a person runs it: in a folder with a deployment's settings files, against one
-// local server that stands in for Railway's API, Cloudflare's and the new admin's health address, with stand-ins for
-// Docker and the AWS CLI on the PATH, and for bootstrap.mjs and scale.mjs, which the change commands run.
+// local server that stands in for Railway's API, Cloudflare's and the admins' addresses, with stand-ins for Docker and
+// the AWS CLI on the PATH, and for bootstrap.mjs and scale.mjs, which the change commands run.
 // The stand-in answers Railway's schema query with scripts/fixtures/railway-redeploy-schema.json, the part of Railway's
 // live schema the script uses, which `node devops/redeploy.mjs schema --save` wrote: so the first test is also a check
 // that every call the script makes was in Railway's API on the day the fixture was saved.
@@ -27,8 +27,10 @@ const settingsName = ".env.bootstrap-acme-prod";
 const copyName = `${settingsName}-pg18`;
 
 type Vars = Record<string, string>;
-type StandInService = { id: string; name: string; image: string | null; status: string; copies: number; commit: string | null; variables: Vars; sealed: string[] };
-type StandInDomain = { id?: string; domain: string; verified: boolean; records: Array<{ recordType: string; fqdn: string; requiredValue: string }> };
+/** A service and its latest deployment: deployments counts the ones made since the test began, which changes its ID. */
+type StandInService = { id: string; name: string; image: string | null; status: string; copies: number; commit: string | null; variables: Vars; sealed: string[]; deployments?: number };
+/** Railway gives the check record of a name it hasn't verified apart from the CNAME, named relative to the zone's apex. */
+type StandInDomain = { id?: string; domain: string; verified: boolean; records: Array<{ recordType: string; fqdn: string; requiredValue: string }>; verification?: { host: string; token: string } };
 type StandInProject = {
   id: string;
   name: string;
@@ -58,6 +60,16 @@ type World = {
   domainsMade: Array<{ serviceId: string; domain: string }>;
   domainsDeleted: string[];
   disconnected: string[];
+  /** Each deployment the script started, and how: "redeploy <service> on its image", "service redeploy <service>", "deploy <service>", "up <service>". */
+  deploys: string[];
+  /** Whether Railway refuses to deploy a removed deployment again. */
+  refuseRedeploy: boolean;
+  /** The calls in progress the old workers report through the fleet status address, one answer at a time; the last stays. */
+  liveCalls: number[];
+  /** What the admin's /api/health/live says it runs. */
+  version: string;
+  /** How many of bootstrap's up runs fail before one succeeds. */
+  upFails: number;
   /** Addresses whose health check doesn't answer ok. */
   unhealthy: Set<string>;
   counter: number;
@@ -188,12 +200,19 @@ function freshWorld(): World {
     domainsMade: [],
     domainsDeleted: [],
     disconnected: [],
+    deploys: [],
+    refuseRedeploy: false,
+    liveCalls: [0],
+    version: "d533e698a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    upFails: 0,
     unhealthy: new Set(),
     counter: 0,
   };
 }
 
 const projectById = (id: unknown) => world.projects.find((project) => project.id === id);
+const deploymentOf = (item: StandInService) => `dep-${item.id}${item.deployments ? `-${item.deployments}` : ""}`;
+const allServices = () => world.projects.flatMap((project) => project.services);
 const projectOfVolume = (id: unknown) => world.projects.find((item) => item.volumes.some((volume) => volume.id === id));
 const domainId = (serviceId: string, item: StandInDomain, index: number) => item.id ?? `dom-${serviceId}-${index}`;
 // The keys of each bucket, which only the AWS CLI stand-in may receive.
@@ -232,7 +251,7 @@ function railwayAnswer(body: { query: string; variables: Record<string, unknown>
         numReplicas: null,
         source: { image: item.image, repo: item.commit ? "acme/lobbystack" : null },
         latestDeployment: {
-          id: `dep-${item.id}`,
+          id: deploymentOf(item),
           status: item.status,
           createdAt: "2026-11-23T00:00:00.000Z",
           meta: {
@@ -290,7 +309,12 @@ function railwayAnswer(body: { query: string; variables: Record<string, unknown>
             customDomains: domains.custom.map((item, index) => ({
               id: domainId(found.service.id, item, index),
               domain: item.domain,
-              status: { verified: item.verified, dnsRecords: item.records.map((record) => ({ ...record, currentValue: record.requiredValue, status: "DNS_RECORD_STATUS_PROPAGATED" })) },
+              status: {
+                verified: item.verified,
+                verificationDnsHost: item.verification?.host ?? null,
+                verificationToken: item.verification?.token ?? null,
+                dnsRecords: item.records.map((record) => ({ ...record, currentValue: record.requiredValue, status: "DNS_RECORD_STATUS_PROPAGATED" })),
+              },
             })),
             serviceDomains: domains.railway.map((domain, index) => ({ id: `sd-${index}`, domain })),
           },
@@ -351,9 +375,14 @@ function railwayAnswer(body: { query: string; variables: Record<string, unknown>
       return { data: { projectUpdate: { id: project.id, name: project.name } } };
     }
     case "Logs": {
-      const found = world.projects.flatMap((project) => project.services).find((item) => `dep-${item.id}` === vars.deploymentId);
+      const found = allServices().find((item) => deploymentOf(item) === vars.deploymentId);
       const major = found?.image?.match(/pg(\d+)/)?.[1];
-      return { data: { deploymentLogs: major ? [{ timestamp: "2026-11-24T01:00:00.000Z", message: `LOG:  starting PostgreSQL ${major}.1 (Debian ${major}.1-1.pgdg13+2) on x86_64-pc-linux-gnu` }] : [] } };
+      if (major) return { data: { deploymentLogs: [{ timestamp: "2026-11-24T01:00:00.000Z", message: `LOG:  starting PostgreSQL ${major}.1 (Debian ${major}.1-1.pgdg13+2) on x86_64-pc-linux-gnu`, severity: "info" }] } };
+      const worker = [
+        { timestamp: "2026-11-24T06:01:00.000Z", message: "outbox: 3 jobs done", severity: "info" },
+        { timestamp: "2026-11-24T06:02:00.000Z", message: "Twilio answered 503, trying again", severity: "error" },
+      ];
+      return { data: { deploymentLogs: found?.name === "worker" ? worker : [] } };
     }
     case "VariablesUpsert": {
       const input = vars.input as { projectId: string; environmentId: string; serviceId: string; variables: Vars };
@@ -364,10 +393,28 @@ function railwayAnswer(body: { query: string; variables: Record<string, unknown>
       return { data: { variableCollectionUpsert: true } };
     }
     case "DeploymentRemove": {
-      const found = world.projects.flatMap((project) => project.services).find((item) => `dep-${item.id}` === vars.id);
+      const found = allServices().find((item) => deploymentOf(item) === vars.id);
       if (!found) return refuse("Deployment not found");
       found.status = "REMOVED";
       return { data: { deploymentRemove: true } };
+    }
+    case "DeploymentRedeploy": {
+      const found = allServices().find((item) => deploymentOf(item) === vars.id);
+      if (!found) return refuse("Deployment not found");
+      if (world.refuseRedeploy) return refuse("This deployment can't be redeployed");
+      found.deployments = (found.deployments ?? 0) + 1;
+      found.status = "SUCCESS";
+      world.deploys.push(`redeploy ${found.id}${vars.usePreviousImageTag === true ? " on its image" : ""}`);
+      return { data: { deploymentRedeploy: { id: deploymentOf(found), status: "INITIALIZING" } } };
+    }
+    case "ServiceRedeploy":
+    case "ServiceDeploy": {
+      const found = serviceById(vars.serviceId);
+      if (!found || found.project.environment.id !== vars.environmentId) return refuse("Service not found");
+      found.service.deployments = (found.service.deployments ?? 0) + 1;
+      found.service.status = "SUCCESS";
+      world.deploys.push(`${operation === "ServiceRedeploy" ? "service redeploy" : "deploy"} ${found.service.id}`);
+      return { data: operation === "ServiceRedeploy" ? { serviceInstanceRedeploy: true } : { serviceInstanceDeployV2: deploymentOf(found.service) } };
     }
     case "DomainAvailable": {
       const taken = world.projects.some((project) => Object.values(project.domains).some((item) => item.custom.some((domain) => domain.domain === vars.domain)));
@@ -378,14 +425,13 @@ function railwayAnswer(body: { query: string; variables: Record<string, unknown>
       const found = serviceById(input.serviceId);
       if (!found || found.project.id !== input.projectId || input.targetPort !== 3000) return refuse("Service not found");
       world.counter += 1;
+      const label = input.domain.endsWith(`.${zone}`) ? input.domain.slice(0, -(zone.length + 1)) : input.domain;
       const domain: StandInDomain = {
         id: `dom-made-${world.counter}`,
         domain: input.domain,
         verified: false,
-        records: [
-          { recordType: "DNS_RECORD_TYPE_CNAME", fqdn: input.domain, requiredValue: `${found.service.id}.up.railway.app` },
-          { recordType: "DNS_RECORD_TYPE_TXT", fqdn: `_railway-verify.${input.domain}`, requiredValue: `railway-verify=${found.service.id}` },
-        ],
+        records: [{ recordType: "DNS_RECORD_TYPE_CNAME", fqdn: input.domain, requiredValue: `${found.service.id}.up.railway.app` }],
+        verification: { host: `_railway-verify.${label}`, token: `railway-verify=${found.service.id}` },
       };
       (found.project.domains[found.service.id] ??= { custom: [], railway: [] }).custom.push(domain);
       world.domainsMade.push({ serviceId: found.service.id, domain: input.domain });
@@ -483,13 +529,43 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     const [status, body] = cloudflareAnswer(method, url, authorization, text ? (JSON.parse(text) as Record<string, unknown>) : null);
     return json(status, body);
   }
-  // The new admin's health address, at the address the script was given.
-  const site = /^\/site\/([^/]+)\/api\/health\/ready$/.exec(url.pathname);
-  if (site) return world.unhealthy.has(site[1] ?? "") ? json(503, { ok: false }) : json(200, { ok: true, checks: { database: "ok" } });
-  // bootstrap.mjs's stand-in, at up: Railway now has the new project.
+  // An admin's addresses, and the control panel's, at the address the script was given.
+  const site = /^\/site\/([^/]+)(\/.*)?$/.exec(url.pathname);
+  if (site) {
+    const [, name = "", rest = "/"] = site;
+    if (rest === "/api/health/ready") return world.unhealthy.has(name) ? json(503, { ok: false }) : json(200, { ok: true, checks: { database: "ok" } });
+    if (rest === "/api/health/live") return json(200, { ok: true, service: "admin", version: world.version });
+    if (rest === "/api/internal/fleet") {
+      const token = world.projects[0]?.services.find((item) => item.name === "admin")?.variables.FLEET_STATUS_TOKEN;
+      if (!token || authorization !== `Bearer ${token}`) return json(401, { error: "unauthorized" });
+      const calls = world.liveCalls.length > 1 ? world.liveCalls.shift() : world.liveCalls[0];
+      return json(200, { copies: [{ service: "admin", liveCalls: 0 }, { service: "worker", liveCalls: calls ?? 0 }] });
+    }
+    // The control panel, behind Cloudflare Access.
+    response.writeHead(302, { location: "https://acme.cloudflareaccess.com/" });
+    return response.end();
+  }
+  // bootstrap.mjs's stand-in, at up: Railway has the new project, and the address in the copy's settings is on its
+  // admin, its CNAME pointing there; a stopped admin and worker are deployed again with their new variables (step 30).
   if (url.pathname === "/test/up") {
+    const asked = JSON.parse((await read(request)) || "{}") as { host?: string };
+    if (world.upFails > 0) {
+      world.upFails -= 1;
+      return json(200, { fail: `Railway says ${asked.host} is in use` });
+    }
     const fresh = projectById("prj-new") ?? newProject();
     if (!projectById("prj-new")) world.projects.push(fresh);
+    const admin = (fresh.domains["svc-new-admin"] ??= { custom: [], railway: [] });
+    if (asked.host && !admin.custom.some((item) => item.domain === asked.host)) {
+      admin.custom.push({ domain: asked.host, verified: true, records: [{ recordType: "DNS_RECORD_TYPE_CNAME", fqdn: asked.host, requiredValue: "svc-new-admin.up.railway.app" }] });
+      for (const record of world.cloudflare) if (record.type === "CNAME" && record.name === asked.host) record.content = "svc-new-admin.up.railway.app";
+    }
+    for (const item of fresh.services) {
+      if (!["admin", "worker"].includes(item.name) || item.status !== "REMOVED") continue;
+      item.deployments = (item.deployments ?? 0) + 1;
+      item.status = "SUCCESS";
+      world.deploys.push(`up ${item.id}`);
+    }
     return json(200, { id: fresh.id, environmentId: fresh.environment.id, services: Object.fromEntries(fresh.services.map((item) => [item.name, item.id])) });
   }
   const answer = railwayAnswer(JSON.parse(await read(request)) as { query: string; variables: Record<string, unknown> }, authorization);
@@ -542,10 +618,13 @@ const tool = (body: string) => `#!/bin/sh\nexec "${process.execPath}" -e '${body
 
 /**
  * Stand-ins for Docker and the AWS CLI. `docker` is running and has postgres:18 unless told otherwise; its psql, pg_dump,
- * pg_restore, createdb and dropdb answer as the two servers would, the old one on oldMajor and the new one on newMajor,
- * and each call is written to docker-calls.txt with the password it was given. `aws s3 sync` writes aws-calls.txt.
+ * pg_restore, createdb, dropdb and vacuumdb answer as the two servers would, the old one on oldMajor and the new one on
+ * newMajor, each keeping its list of databases in databases.json, and each call is written to docker-calls.txt with
+ * the password it was given. The new lobbystack counts newTables tables, the trial copy trialTables; the old database
+ * has the reset-protection mark when mark is true, and calls.txt holds the calls in progress it counts, one line each
+ * time it's asked. `aws s3 sync` writes aws-calls.txt.
  */
-function writeTools({ docker = true, dockerRunning = true, image = true, aws = true, oldMajor = 16, newMajor = 18, trialTables = 87 } = {}) {
+function writeTools({ docker = true, dockerRunning = true, image = true, aws = true, oldMajor = 16, newMajor = 18, trialTables = 87, newTables = 87, mark = false } = {}) {
   rmSync(bin, { recursive: true, force: true });
   mkdirSync(bin);
   if (docker) {
@@ -567,19 +646,39 @@ function writeTools({ docker = true, dockerRunning = true, image = true, aws = t
       const server = (rest[rest.indexOf("-h") + 1] || "").split(".")[0];
       const database = rest.includes("-d") ? rest[rest.indexOf("-d") + 1] : "";
       const file = rest.includes("-f") ? rest[rest.indexOf("-f") + 1] : "";
-      if (name === "psql" && rest.includes("-Atc")) {
+      const sql = rest.filter((item, index) => ["-c", "-Atc"].includes(rest[index - 1])).join("; ");
+      const databases = fs.existsSync("databases.json") ? JSON.parse(fs.readFileSync("databases.json", "utf8")) : { old: ["postgres", "lobbystack"], new: ["postgres", "lobbystack"] };
+      const keep = () => fs.writeFileSync("databases.json", JSON.stringify(databases));
+      if (name === "psql" && sql.includes("pg_control_system")) {
         console.log(server === "old" ? "${oldMajor}0004 7300000000000000001" : "${newMajor}0001 7400000000000000002");
         process.exit(0);
       }
+      if (name === "psql" && sql.includes("from calls")) {
+        const counts = fs.existsSync("calls.txt") ? fs.readFileSync("calls.txt", "utf8").trim().split("\\n") : ["0"];
+        console.log(counts[0]);
+        if (counts.length > 1) fs.writeFileSync("calls.txt", counts.slice(1).join("\\n"));
+        process.exit(0);
+      }
+      if (name === "psql" && sql.includes("from pg_database")) { console.log(databases[server].join("\\n")); process.exit(0); }
+      const renamed = /rename to (\\w+)/.exec(sql);
+      if (name === "psql" && renamed) { databases[server] = databases[server].map((item) => (item === "lobbystack" ? renamed[1] : item)); keep(); process.exit(0); }
+      if (name === "psql" && sql) process.exit(0);
+      if (name === "psql" && file === "freeze.sql") { console.log("3\\n" + ${mark ? '"lobbystack.reset_protection=on"' : '"none"'}); process.exit(0); }
       if (name === "psql" && file === "count.sql") {
-        const tables = database === "lobbystack_trial" ? ${trialTables} : 87;
+        const tables = database === "lobbystack_trial" ? ${trialTables} : server === "new" && database === "lobbystack" ? ${newTables} : 87;
         console.log("tables " + tables + ", rows 45678, fingerprint " + (tables === 87 ? "0123abcd" : "4567ef01"));
         process.exit(0);
       }
-      if (name === "psql" && file === "tables.sql") { console.log(database === "lobbystack_trial" ? "public.calls 12" : "public.calls 12\\npublic.extra 3"); process.exit(0); }
+      if (name === "psql" && file === "tables.sql") {
+        const short = database === "lobbystack_trial" || (server === "new" && ${newTables} !== 87);
+        console.log(short ? "public.calls 12" : "public.calls 12\\npublic.extra 3");
+        process.exit(0);
+      }
       if (name === "psql" && file === "hours.sql") { console.log("03 1\\n09 30\\n14 42"); process.exit(0); }
-      if (name === "pg_dump") { fs.writeFileSync(folder + "/" + file, "PGDMP a trial dump"); process.exit(0); }
-      if (["dropdb", "createdb", "pg_restore"].includes(name)) process.exit(0);
+      if (name === "pg_dump") { fs.writeFileSync(folder + "/" + file, "PGDMP a dump"); process.exit(0); }
+      if (name === "createdb") { if (!databases[server].includes(rest.at(-1))) databases[server].push(rest.at(-1)); keep(); process.exit(0); }
+      if (name === "dropdb") { databases[server] = databases[server].filter((item) => item !== rest.at(-1)); keep(); process.exit(0); }
+      if (["pg_restore", "vacuumdb"].includes(name)) process.exit(0);
       process.exit(3);`), { mode: 0o755 });
   }
   if (aws) {
@@ -602,7 +701,8 @@ function writeTools({ docker = true, dockerRunning = true, image = true, aws = t
 /**
  * Stand-ins for bootstrap.mjs and scale.mjs, which the change commands run with node. Each writes its arguments, and
  * whether the Railway token came through its environment, to bootstrap-calls.txt or scale-calls.txt. bootstrap's redo
- * forgets the project as bootstrap does, and its up asks the stand-in server for the new project.
+ * of railway.project forgets the project as bootstrap does, and any other redo forgets the steps it names; its up asks
+ * the stand-in server for the new project with the copy's address on it, and its connect records connect's steps.
  */
 function writeScripts() {
   writeFileSync(join(dir, "bootstrap-stand-in.mjs"), `import fs from "node:fs";
@@ -611,22 +711,34 @@ const [command, file, ...rest] = process.argv.slice(2);
 fs.appendFileSync("bootstrap-calls.txt", [command, file, ...rest].join(" ") + (process.env.RAILWAY_API_TOKEN === "${railwayToken}" ? "" : " (no token)") + "\\n");
 const stateFile = file + ".state.json";
 const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const save = () => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
 if (command === "redo") {
-  for (const key of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_IDS", "RAILWAY_HOST", "APP_HOST", "POST_DNS_HOST"]) delete state.values[key];
+  const project = rest.includes("railway.project");
+  if (project) for (const key of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_IDS", "RAILWAY_HOST", "APP_HOST", "POST_DNS_HOST"]) delete state.values[key];
+  const named = (id) => rest.some((step) => (step.endsWith(".*") ? id.startsWith(step.slice(0, -1)) : id === step));
   for (const id of Object.keys(state.done)) {
-    if (/^(railway\\.|deploy\\.|post\\.)/.test(id) || ["turnstile", "variables"].includes(id)) {
+    if (project ? /^(railway\\.|deploy\\.|post\\.)/.test(id) || ["turnstile", "variables"].includes(id) : named(id)) {
       delete state.done[id];
       console.log("  " + id + ": runs again next time");
     }
   }
-  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  save();
   console.log("Now run up, then connect. " + POSTGRES_IMAGE);
 } else if (command === "up" && !rest.includes("--dry-run")) {
-  const made = await (await fetch(process.env.REDEPLOY_RAILWAY_URL.replace(/\\/railway$/, "/test/up"), { method: "POST" })).json();
+  const address = /^APP_BASE_URL=(.*)$/m.exec(fs.readFileSync(file, "utf8"))?.[1] ?? "";
+  const made = await (await fetch(process.env.REDEPLOY_RAILWAY_URL.replace(/\\/railway$/, "/test/up"), { method: "POST", body: JSON.stringify({ host: new URL(address).host }) })).json();
+  if (made.fail) {
+    console.log("up: stopped: " + made.fail);
+    process.exit(1);
+  }
   Object.assign(state.values, { RAILWAY_PROJECT_ID: made.id, RAILWAY_ENVIRONMENT_ID: made.environmentId, RAILWAY_SERVICE_IDS: made.services });
   for (const id of ["railway.project", "railway.services", "variables", "deploy.admin"]) state.done[id] = new Date().toISOString();
-  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  save();
   console.log("up: the new project is built");
+} else if (command === "connect") {
+  for (const id of ["connect.webhook", "connect.platformKey", "connect.billing.verify"]) state.done[id] = new Date().toISOString();
+  save();
+  console.log("connect: Polar's billing plan makes nothing");
 } else console.log(command + ": nothing to fix");
 `);
   writeFileSync(join(dir, "scale-stand-in.mjs"), `import fs from "node:fs";
@@ -681,6 +793,37 @@ function moveAddress() {
   const cname = world.cloudflare.find((record) => record.id === "rec-cname");
   if (cname) cname.content = "new5678.up.railway.app";
 }
+
+/** The control panel's two services in both projects, as bootstrap's up adds them; step 17 stopped the new cloudflared. */
+function withControl() {
+  for (const project of world.projects) {
+    const which = project.id.replace("prj-", "");
+    project.services.push(service(which, "control"), service(which, "cloudflared", { image: "cloudflare/cloudflared:latest", commit: null, status: which === "new" ? "REMOVED" : "SUCCESS" }));
+  }
+}
+
+/** Both databases' TCP proxies, as step 22 left them open. */
+function proxiesOpen() {
+  for (const project of world.projects) {
+    const which = project.id.replace("prj-", "");
+    project.proxies[`svc-${which}-postgres`] = [{ id: `tcp-${which}`, domain: `${which}.proxy.rlwy.net`, proxyPort: 21_000, applicationPort: 5432, syncStatus: "ACTIVE" }];
+  }
+}
+
+const serviceOf = (project: number, name: string) => {
+  const found = world.projects[project]?.services.find((item) => item.name === name);
+  if (!found) throw new Error(`no ${name}`);
+  return found;
+};
+
+/** A Docker call as "<tool> <server> <database> <file>", leaving out the checks of each server's version. */
+const dockerSteps = () => dockerCalls().filter((call) => call.rest[0] !== "--version" && !call.rest.some((item) => item.includes("pg_control_system"))).map((call) => {
+  const after = (flag: string) => (call.rest.includes(flag) ? call.rest[call.rest.indexOf(flag) + 1] : "");
+  const sql = call.rest.filter((_, index) => ["-c", "-Atc"].includes(call.rest[index - 1] ?? "")).join("; ");
+  return [call.name, (after("-h") ?? "").split(".")[0], after("-d") || call.rest.at(-1), after("-f") || sql].filter(Boolean).join(" ");
+});
+
+const databasesOn = () => JSON.parse(readFileSync(join(dir, "databases.json"), "utf8")) as Record<string, string[]>;
 
 /** Runs redeploy.mjs in the folder with the settings files, its answers piped in, against the stand-ins. */
 function redeploy(args: string[], { input = "", env = {} }: { input?: string; env?: Record<string, string | undefined> } = {}): Promise<Result> {
@@ -988,9 +1131,9 @@ describe.skipIf(process.platform === "win32")("devops/redeploy.mjs", { timeout: 
     const help = await redeploy(["--help"]);
     expect(help.code).toBe(0);
     expect(help.out).toContain("node devops/redeploy.mjs status <settings file or address>");
-    const unknown = await redeploy(["cutover", settingsName]);
+    const unknown = await redeploy(["move", settingsName]);
     expect(unknown.code).toBe(2);
-    expect(unknown.out).toContain("Unknown command cutover.");
+    expect(unknown.out).toContain("Unknown command move.");
     const noTarget = await redeploy(["status"]);
     expect(noTarget.code).toBe(2);
     expect(noTarget.out).toContain("status takes the settings file, or the deployment's address.");
@@ -1239,6 +1382,247 @@ describe.skipIf(process.platform === "win32")("devops/redeploy.mjs", { timeout: 
     expect(result.code).toBe(1);
     expect(result.out).toContain("Stopped: prepare hasn't finished: step 16 is next. Run prepare first");
     expect(world.operations.filter((operation) => operation.startsWith("mutation"))).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------- cutover, check, back and recover
+
+  it("cutover waits for trial, and check for the cutover", async () => {
+    prepared(range(1, 17));
+    const early = await redeploy(["cutover", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(early.code).toBe(1);
+    expect(early.out).toContain("Stopped: trial hasn't finished: step 18 is next. Run it first; trial runs a day or so before the cutover");
+    const check = await redeploy(["check", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(check.code).toBe(1);
+    expect(check.out).toContain("Stopped: the cutover hasn't finished: step 22 is next. Run cutover");
+    expect(mutations()).toEqual([]);
+  });
+
+  it("cutover stops production, copies the database, moves the address and connects, and runs again from a step that stopped", async () => {
+    prepared(range(1, 20), { trial: { at: "2026-11-23T03:00:00.000Z", dumpSeconds: 40, restoreSeconds: 80, dumpBytes: 52_428_800, tables: 87, rows: 45_678 } });
+    withControl();
+    serviceOf(0, "admin").variables.FLEET_STATUS_TOKEN = "fleet-status-token-of-the-old-admin-0012";
+    // One call is still in progress when the cutover starts, and ends a moment later.
+    world.liveCalls = [1, 0];
+    // bootstrap's up stops the first time, as when Railway hasn't let go of the address yet.
+    world.upFails = 1;
+    const stateBefore = readFileSync(join(dir, `${settingsName}.redeploy.json`), "utf8");
+
+    const dry = await redeploy(["cutover", settingsName, "--dry-run"], { env: changeEnv() });
+    expect(dry.code, dry.out).toBe(0);
+    expect(dry.out).toContain("cutover: steps 22 to 33, at the hour picked. Production is offline from step 24 to step 33");
+    expect(dry.out).toContain("the old cloudflared. Production is offline from then until step 33; the trial's dump and restore took 2 minutes (step 24)");
+    expect(dry.out).toContain("A dry run: nothing was changed.");
+    expect(mutations()).toEqual([]);
+    expect(readFileSync(join(dir, `${settingsName}.redeploy.json`), "utf8")).toBe(stateBefore);
+
+    const stopped = await redeploy(["cutover", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(stopped.code).toBe(1);
+    expect(stopped.out).toContain("Production goes offline at step 24, until step 33. Is it the hour you picked, with the customers who need notice told? Type yes to go on:");
+    expect(stopped.out).toContain("old: PostgreSQL 16, new: PostgreSQL 18");
+    expect(stopped.out).toContain("1 call in progress, from the old workers, through the old admin's fleet status address: waiting for it to end");
+    expect(stopped.out).toContain("no call in progress, from the old workers");
+    expect(stopped.out).toContain("Production is offline from now");
+    expect(stopped.out).toContain("froze the old database: the app's roles can't connect any more, and 3 sessions ended. Its own settings: none");
+    expect(stopped.out).toContain("RESTORE OK");
+    expect(stopped.out).toContain("SAME: every table arrived, with every row");
+    expect(stopped.out).toContain(`took ${host} off the old admin: it reaches neither project until up gives it to the new one`);
+    expect(stopped.out).toContain("Stopped: step 30: bootstrap's up stopped (above).");
+    expect(stateOf().done["29"]).toBeTruthy();
+    expect(stateOf().done["30"]).toBeUndefined();
+    // Steps 22 to 29: both databases opened, the new services and then the old ones stopped, the old database frozen,
+    // dumped and restored into the new one, counted, and the new migrate deployed again on it.
+    expect(world.patches.map((item) => [item.environmentId, item.skipDeploys])).toEqual([["env-old", true], ["env-new", true]]);
+    expect(dockerSteps()).toEqual([
+      "psql old lobbystack freeze.sql", "psql old lobbystack count.sql", "pg_dump old lobbystack app.dump.part",
+      "dropdb new lobbystack", "createdb new lobbystack", "pg_restore new lobbystack", "vacuumdb new lobbystack",
+      "psql new lobbystack count.sql",
+    ]);
+    expect(dockerCalls().find((call) => call.name === "pg_restore")?.rest).toEqual(expect.arrayContaining(["-O", "-1", "-e", "app.dump"]));
+    expect(readFileSync(join(backupDir(), "app.dump"), "utf8")).toBe("PGDMP a dump");
+    expect(readFileSync(join(backupDir(), "count-old.txt"), "utf8")).toBe("tables 87, rows 45678, fingerprint 0123abcd\n");
+    expect(awsCalls().map((call) => [call.from, call.to])).toEqual([["s3://bkt-old-name", join(backupDir(), "app-files")], [join(backupDir(), "app-files"), "s3://bkt-new-name"]]);
+    expect(mutations()).toEqual(["EnvironmentPatch", "EnvironmentPatch", "DeploymentRemove", "DeploymentRemove", "DeploymentRemove", "DeploymentRemove", "DeploymentRemove", "DeploymentRemove", "ServiceRedeploy", "DomainDelete"]);
+    for (const name of ["admin", "worker", "cloudflared", "control"]) expect(serviceOf(0, name).status, name).toBe(name === "control" ? "SUCCESS" : "REMOVED");
+
+    const resumed = await redeploy(["cutover", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(resumed.code, resumed.out).toBe(0);
+    expect(resumed.out).toMatch(/Production has been offline since \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \(step 24\)\. Go on with the cutover\? Type yes to go on:/);
+    expect(resumed.out).toContain(`= the old admin doesn't have ${host}`);
+    // Step 30: redo once, up again, and the services up didn't deploy started on the image they ran.
+    expect(linesOf("bootstrap-calls.txt")).toEqual([
+      `redo ${copyName} railway.domain railway.custom turnstile variables post.*`, `up ${copyName}`, `up ${copyName}`,
+      `redo ${copyName} connect.webhook connect.platformKey`, `connect ${copyName}`,
+    ]);
+    expect(readFileSync(join(dir, copyName), "utf8")).toContain(`APP_BASE_URL=https://${host}\n`);
+    expect(world.deploys).toEqual(["service redeploy svc-new-migrate", "up svc-new-admin", "up svc-new-worker", "redeploy svc-new-control on its image", "redeploy svc-new-cloudflared on its image"]);
+    expect(world.projects[1]?.domains["svc-new-admin"]?.custom.map((item) => item.domain)).toEqual(["app-new.example.com", host]);
+    expect(world.cloudflare.find((record) => record.id === "rec-cname")?.content).toBe("svc-new-admin.up.railway.app");
+    // Step 31, and step 33.
+    expect(readdirSync(join(backupDir(), "after-cutover")).sort()).toEqual([copyName, `${copyName}.secrets`, `${copyName}.state.json`]);
+    expect(resumed.out).toContain(`https://${host} answers "ok":true, from the new project, running d533e69`);
+    expect(resumed.out).toMatch(/Production was offline for about \d+ seconds?/);
+    expect(resumed.out).toContain("Next, right away: node devops/redeploy.mjs check, step 34.");
+    const state = stateOf() as { done: Record<string, string>; values: { proxies?: string[]; cutover?: Record<string, unknown> } };
+    expect(range(22, 33).every((step) => state.done[String(step)])).toBe(true);
+    // The databases stay open until finish closes them (step 39).
+    expect(state.values.proxies).toEqual(["old", "new"]);
+    expect(state.values.cutover).toMatchObject({ release: "d533e698a1b2c3d4e5f60718293a4b5c6d7e8f90", mark: false, dump: { file: "app.dump", bytes: 12 } });
+    for (const value of secretValues()) {
+      expect(stopped.out).not.toContain(value);
+      expect(resumed.out).not.toContain(value);
+    }
+  });
+
+  it("cutover counts the calls in the old database, stops when the copy differs, and back puts production back on the old project", async () => {
+    prepared(range(1, 20));
+    writeTools({ newTables: 86, mark: true });
+    writeFileSync(join(dir, "calls.txt"), "2\n0");
+    const stopped = await redeploy(["cutover", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(stopped.code).toBe(1);
+    expect(stopped.out).toContain("2 calls in progress, from the old database: calls started in the last half hour that haven't ended: waiting for them to end");
+    expect(stopped.out).toContain("Its own settings: lobbystack.reset_protection=on");
+    expect(stopped.out).toContain("DIFFERENT. Lines only the old database has (<) or only the new one has (>):");
+    expect(stopped.out).toContain("    < public.extra 3");
+    expect(stopped.out).toContain("Stopped: step 27: the new database isn't the old one's copy. Run cutover again, which restores it again (step 26); if it differs again, go back: node devops/redeploy.mjs back");
+    expect(stateOf().done["25"]).toBeTruthy();
+    expect(stateOf().done["26"]).toBeUndefined();
+    // The mark goes on the new database only once it's the old one's copy.
+    expect(dockerSteps().filter((step) => step.includes("reset_protection"))).toEqual([]);
+
+    const back = await redeploy(["back", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(back.code, back.out).toBe(0);
+    expect(back.out).toContain("back: G1 to G3, going back before the address moved");
+    expect(back.out).toContain(`${host} stayed on the old admin, so nothing outside Railway changes.`);
+    expect(back.out).toContain("Production goes back to the old project, as it was before the cutover. Type yes to go on:");
+    // G1 lets the app in again, G2 starts the old admin and worker from the deployments step 24 removed, and G3 empties
+    // the new database and deploys its migrate again.
+    expect(dockerSteps().slice(-3)).toEqual(["psql old postgres grant connect on database lobbystack to public", "dropdb new lobbystack", "createdb new lobbystack"]);
+    expect(world.deploys).toEqual(["redeploy svc-old-admin on its image", "redeploy svc-old-worker on its image", "service redeploy svc-new-migrate"]);
+    expect(back.out).toContain(`https://${host} answers "ok":true, from the old project`);
+    expect(back.out).toContain("Production runs on the old project again.");
+    // The proxies step 22 opened are closed, and the cutover's record cleared for another try.
+    expect(world.projects.every((project) => Object.values(project.proxies).every((list) => !list.length))).toBe(true);
+    const state = stateOf() as { done: Record<string, string>; values: Record<string, unknown> };
+    expect(Object.keys(state.done).filter((step) => Number(step) >= 22 || step.startsWith("G"))).toEqual([]);
+    expect(state.values.wentBack).toEqual([{ at: expect.any(String), path: "before" }]);
+    expect(state.values.cutover).toBeUndefined();
+
+    const status = await redeploy(["status", settingsName], { env: changeEnv() });
+    expect(status.code, status.out).toBe(0);
+    expect(status.out).toMatch(/trial\s+steps 18 to 20\s+done, /);
+    expect(status.out).toMatch(/cutover\s+steps 22 to 33\s+not started/);
+    expect(status.out).toMatch(/went back \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC, before the address moved/);
+  });
+
+  it("check reads what it can, asks about the rest, and stops at a check that fails", async () => {
+    prepared(range(1, 33));
+    moveAddress();
+    withControl();
+    serviceOf(1, "cloudflared").status = "SUCCESS";
+    writeState(copyName, world.projects[1] ?? null, { CONTROL_HOST: "control.example.com" });
+    // Sign-in, files, a call, a text, the worker's log and the control panel: the call fails the first time.
+    const failed = await redeploy(["check", settingsName], { input: "yes\nyes\nno\nyes\nyes\nyes\n", env: changeEnv() });
+    expect(failed.code).toBe(1);
+    expect(failed.out).not.toContain("Type yes to go on");
+    expect(failed.out).toContain(`ok  https://${host}/api/health/ready answers "ok":true`);
+    expect(failed.out).toContain("the new worker's log: 2 lines since it started, 1 error; the newest:");
+    expect(failed.out).toContain("Twilio answered 503, trying again");
+    expect(failed.out).toContain("ok  https://control.example.com answers (HTTP 302), through the new cloudflared");
+    expect(failed.out).toContain("Call a business's number: did the receptionist answer?");
+    expect(failed.out).toContain("Stopped: step 34: call didn't pass. Fix it if it's quick, then run check again; if not, go back within the first hour, before real traffic builds up on the new database: node devops/redeploy.mjs back");
+    expect(linesOf("scale-calls.txt")).toEqual([`--bootstrap ${copyName}`]);
+    expect(stateOf().done["34"]).toBeUndefined();
+    const finish = await redeploy(["finish", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(finish.code).toBe(1);
+    expect(finish.out).toContain("Stopped: the cutover's checks haven't passed yet: run check (step 34)");
+
+    const passed = await redeploy(["check", settingsName], { input: "yes\n".repeat(6), env: changeEnv() });
+    expect(passed.code, passed.out).toBe(0);
+    expect(passed.out).toContain("Every check passed");
+    expect(passed.out).toContain("Next, once you're happy with the new project: node devops/redeploy.mjs finish, steps 35 to 39.");
+    expect(stateOf().done["34"]).toBeTruthy();
+    expect(mutations()).toEqual([]);
+  });
+
+  it("back after the address moved gives it back to the old admin, sets the new database aside and starts the old services", async () => {
+    const at = new Date(Date.now() - 3_600_000).toISOString();
+    prepared(range(1, 33), {
+      cutover: { release: "d533e698a1b2c3d4e5f60718293a4b5c6d7e8f90", offline: at, addressLeftOld: at, redo: at, connectRedo: at },
+      removed: { old: { admin: { id: "dep-svc-old-admin", at }, worker: { id: "dep-svc-old-worker", at } } },
+      servers: { old: "7300000000000000001", new: "7400000000000000002" },
+      proxies: ["old", "new"],
+    });
+    moveAddress();
+    proxiesOpen();
+    for (const name of ["admin", "worker"]) serviceOf(0, name).status = "REMOVED";
+    // Railway won't deploy the removed deployments again: the old services start from their source instead.
+    world.refuseRedeploy = true;
+    // The answers: the plan, then pointing the address's CNAME back at the old project.
+    const result = await redeploy(["back", settingsName], { input: "yes\nyes\n", env: changeEnv() });
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toContain("back: G4 to G9, going back after the address moved");
+    expect(result.out).toContain(`Production goes back to the old project, and ${host} with it; what customers wrote since the switch stays behind in the new project. Type yes to go on:`);
+    // G4 and G5: the address off the new admin and on the old one, its records in Cloudflare pointed back.
+    expect(world.domainsDeleted).toEqual([host]);
+    expect(world.domainsMade).toEqual([{ serviceId: "svc-old-admin", domain: host }]);
+    expect(result.out).toContain(`Railway asks for CNAME ${host} svc-old-admin.up.railway.app, where step 7 noted old1234.up.railway.app: Railway's is used`);
+    expect(result.out).toContain(`${host} points to new5678.up.railway.app now. Point it to svc-old-admin.up.railway.app, the old project, again? Type yes to go on:`);
+    expect(world.cloudflare.find((record) => record.id === "rec-cname")?.content).toBe("svc-old-admin.up.railway.app");
+    expect(world.cloudflare.find((record) => record.id === "rec-txt")?.content).toBe("railway-verify=svc-old-admin");
+    expect(world.cloudflareCalls.filter((call) => /^(POST|PATCH|DELETE) /.test(call))).toHaveLength(2);
+    // G6 to G8: the old database open again, the old services started, the new database set aside under a name of its own.
+    expect(dockerSteps()).toEqual([
+      "psql old postgres grant connect on database lobbystack to public",
+      "psql new postgres select datname from pg_database",
+      "psql new postgres select count(pg_terminate_backend(pid, 5000)) from pg_stat_activity where datname = 'lobbystack' and pid <> pg_backend_pid(); alter database lobbystack rename to lobbystack_after_switch",
+      "psql new postgres select datname from pg_database",
+      "createdb new lobbystack",
+    ]);
+    expect(databasesOn().new).toEqual(["postgres", "lobbystack_after_switch", "lobbystack"]);
+    expect(result.out).toContain("Railway wouldn't deploy the removed deployment again");
+    expect(world.deploys).toEqual(["deploy svc-old-admin", "deploy svc-old-worker", "service redeploy svc-new-migrate"]);
+    expect(mutations()).toEqual(["DomainDelete", "DeploymentRemove", "DeploymentRemove", "DomainCreate", "DeploymentRedeploy", "ServiceDeploy", "DeploymentRedeploy", "ServiceDeploy", "ServiceRedeploy", "EnvironmentPatch", "EnvironmentPatch"]);
+    expect(result.out).toContain("Nothing changes at Twilio, OpenAI or Polar");
+    const state = stateOf() as { done: Record<string, string>; values: Record<string, unknown> };
+    expect(state.values.wentBack).toEqual([{ at: expect.any(String), path: "after", aside: "lobbystack_after_switch" }]);
+    expect(Object.keys(state.done).filter((step) => Number(step) >= 22 || step.startsWith("G"))).toEqual([]);
+    expect(world.projects.every((project) => Object.values(project.proxies).every((list) => !list.length))).toBe(true);
+    for (const value of secretValues()) expect(result.out).not.toContain(value);
+  });
+
+  it("recover puts the copy's files back from the backup folder, and cutover runs the steps they missed again", async () => {
+    const at = new Date().toISOString();
+    prepared(range(1, 33), { cutover: { redo: at, connectRedo: at } });
+    const saved = join(backupDir(), "after-cutover");
+    mkdirSync(saved, { recursive: true });
+    for (const end of ["", ".secrets", ".state.json"]) writeFileSync(join(saved, `${copyName}${end}`), readFileSync(join(dir, `${copyName}${end}`)));
+    // The copy's state file is broken, and its secrets file is lost.
+    writeFileSync(join(dir, `${copyName}.state.json`), "{ broken");
+    rmSync(join(dir, `${copyName}.secrets`));
+
+    const dry = await redeploy(["recover", settingsName, "--dry-run"], { env: changeEnv() });
+    expect(dry.code, dry.out).toBe(0);
+    expect(dry.out).toContain(`the new project's copy: ${copyName}, which can't be read: ${copyName}.state.json isn't valid JSON`);
+    expect(dry.out).toContain(`recover (R1) would:\n  - move ${copyName}, ${copyName}.state.json into ${join(backupDir(), "replaced-")}`);
+    expect(dry.out).toContain(`  - copy the three -pg18 files back from ${saved}`);
+    expect(dry.out).toContain("  - record steps 32 and 33 as not done, so cutover runs them again");
+    expect(dry.out).toContain("A dry run: nothing was changed.");
+    expect(readFileSync(join(dir, `${copyName}.state.json`), "utf8")).toBe("{ broken");
+
+    const result = await redeploy(["recover", settingsName], { input: "yes\n", env: changeEnv() });
+    expect(result.code, result.out).toBe(0);
+    expect(JSON.parse(readFileSync(join(dir, `${copyName}.state.json`), "utf8")).values.RAILWAY_PROJECT_ID).toBe("prj-new");
+    expect(readFileSync(join(dir, `${copyName}.secrets`), "utf8")).toContain(`RAILWAY_API_TOKEN=${railwayToken}`);
+    const aside = readdirSync(backupDir()).filter((name) => name.startsWith("replaced-"));
+    expect(aside).toHaveLength(1);
+    expect(readdirSync(join(backupDir(), aside[0] ?? "")).sort()).toEqual([copyName, `${copyName}.state.json`]);
+    const state = stateOf() as { done: Record<string, string>; values: { cutover?: Record<string, unknown> } };
+    expect(state.done["31"]).toBeTruthy();
+    expect(state.done["32"]).toBeUndefined();
+    expect(state.done["33"]).toBeUndefined();
+    expect(state.values.cutover).toEqual({ redo: at });
+    // recover reads and writes files only.
+    expect(world.operations).toEqual([]);
   });
 
   // ---------------------------------------------------------------- finish and retire

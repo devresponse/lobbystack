@@ -8,6 +8,11 @@
 //   node devops/redeploy.mjs prepare <settings file or address>   steps 1 to 17: backups, notes, the new project
 //   node devops/redeploy.mjs trial <settings file or address>     steps 18 to 20: the bucket, the address rehearsal,
 //                                                                 and a trial copy of the database, a day ahead
+//   node devops/redeploy.mjs cutover <settings file or address>   steps 22 to 33, at the hour picked: production
+//                                                                 offline, its data copied, the address moved
+//   node devops/redeploy.mjs check <settings file or address>     step 34: the checks, the last ones by you
+//   node devops/redeploy.mjs back <settings file or address>      G1 to G9: production back on the old project
+//   node devops/redeploy.mjs recover <settings file or address>   R1: the -pg18 files back from the backup folder
 //   node devops/redeploy.mjs finish <settings file or address>    steps 35 to 39, after the cutover and its checks
 //   node devops/redeploy.mjs retire <settings file or address>    step 40, a week later: deletes the old project
 //   node devops/redeploy.mjs schema                               whether Railway's API still has every call it makes
@@ -28,11 +33,15 @@
 // copies in <settings file>.redeploy.json, for going back and for setting the copies again (step 7). It never reads
 // the database's or Redis's variables, never signs in to a database, and changes nothing in Railway or Cloudflare.
 //
-// prepare, trial, finish and retire each run their steps in order, record each one in <settings file>.redeploy.json
-// as it finishes, and skip what's recorded, so a command that stopped is finished by running it again. Each asks
-// before it changes the old project, and stops at the first check that fails. They run bootstrap.mjs and scale.mjs
-// for what those already do, PostgreSQL 18's tools in Docker for the database, and the AWS CLI for the buckets. Each
-// run is written to <settings file>.redeploy.log, secrets hidden.
+// prepare, trial, cutover, check, back, finish and retire each run their steps in order, record each one in
+// <settings file>.redeploy.json as it finishes, and skip what's recorded, so a command that stopped is finished by
+// running it again. Each says what it will change and asks first, except check, which changes nothing, and each stops
+// at the first check that fails. They run bootstrap.mjs and scale.mjs for what those already do, PostgreSQL 18's
+// tools in Docker for the databases, and the AWS CLI for the buckets. Outside Railway, cutover's address move (step
+// 30, through bootstrap's up) and back's (G5) change the address's DNS records in Cloudflare, each asking before it
+// points the address's CNAME elsewhere. back finds where the cutover got to and goes back from there; recover puts
+// the copy's files back when they're lost or broken. Each run is written to <settings file>.redeploy.log, secrets
+// hidden.
 //
 // Options:
 //   --backup <folder>     the backup folder, when it isn't lobbystack-backups/<the address's first part>-before-pg18
@@ -41,7 +50,8 @@
 //   --temporary <host>    with prepare: the new project's address until the switch, instead of <first part>-new.<rest>
 //   --rehearse <host>     with trial: the throwaway address for the rehearsal, instead of move-test.<zone>
 //   --no-rehearsal        with trial: leave the address rehearsal (step 19) out
-//   --same-version        with prepare and trial: allow an old database that's already on 18, to rehearse the move
+//   --same-version        with prepare, trial and cutover: allow an old database that's already on 18, to rehearse
+//                         the move
 //   --save <file>         with schema: write the part of Railway's API the script uses into <file>, for its tests
 //
 // It needs a Railway account or workspace token (railway.com/account/tokens), which it reads as bootstrap.mjs does:
@@ -112,7 +122,7 @@ const Q = {
 }`,
   domains: `query Domains($projectId: String!, $environmentId: String!, $serviceId: String!) {
   domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) {
-    customDomains { id domain status { verified dnsRecords { recordType fqdn requiredValue currentValue status } } }
+    customDomains { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue currentValue status } } }
     serviceDomains { id domain }
   }
 }`,
@@ -151,19 +161,31 @@ const Q = {
   rename: `mutation ProjectRename($id: String!, $name: String!) {
   projectUpdate(id: $id, input: { name: $name }) { id name }
 }`,
-  // Step 15: the new database's own words about its version.
+  // Step 15: the new database's own words about its version. Step 34: the new worker's errors.
   logs: `query Logs($deploymentId: String!, $filter: String, $limit: Int) {
-  deploymentLogs(deploymentId: $deploymentId, filter: $filter, limit: $limit) { timestamp message }
+  deploymentLogs(deploymentId: $deploymentId, filter: $filter, limit: $limit) { timestamp message severity }
 }`,
   // Step 16: the variables the files don't know, onto the new services.
   upsert: `mutation VariablesUpsert($input: VariableCollectionUpsertInput!) {
   variableCollectionUpsert(input: $input)
 }`,
-  // Step 17: removing a deployment stops the service, and every copy of it.
+  // Steps 17, 23 and 24: removing a deployment stops the service, and every copy of it.
   removeDeployment: `mutation DeploymentRemove($id: String!) {
   deploymentRemove(id: $id)
 }`,
-  // Steps 19 and 38: an address on an admin.
+  // Steps 30, G2 and G7: a stopped service started again from the deployment that was removed, on the image it ran.
+  redeployDeployment: `mutation DeploymentRedeploy($id: String!, $usePreviousImageTag: Boolean) {
+  deploymentRedeploy(id: $id, usePreviousImageTag: $usePreviousImageTag) { id status }
+}`,
+  // Steps 29, G3 and G8: Railway's Redeploy, which runs migrate's pre-deploy again.
+  redeployService: `mutation ServiceRedeploy($environmentId: String!, $serviceId: String!) {
+  serviceInstanceRedeploy(environmentId: $environmentId, serviceId: $serviceId)
+}`,
+  // A stopped service whose removed deployment Railway won't deploy again: a new deployment from its source.
+  deployService: `mutation ServiceDeploy($environmentId: String!, $serviceId: String!) {
+  serviceInstanceDeployV2(environmentId: $environmentId, serviceId: $serviceId)
+}`,
+  // Steps 19, 30, 38 and G5: an address on an admin.
   domainCreate: `mutation DomainCreate($input: CustomDomainCreateInput!) {
   customDomainCreate(input: $input) { id domain }
 }`,
@@ -173,7 +195,7 @@ const Q = {
   domainAvailable: `query DomainAvailable($domain: String!) {
   customDomainAvailable(domain: $domain) { available message }
 }`,
-  // Steps 20 and 39: a TCP proxy, set in the environment's settings, the way Railway's CLI sets the copies, and sent
+  // Steps 20, 22 and 39: a TCP proxy, set in the environment's settings, the way Railway's CLI sets the copies, and sent
   // without a deploy, so the database doesn't restart. TcpProxyDelete is for one that the settings didn't take away.
   patch: `mutation EnvironmentPatch($environmentId: String!, $patch: EnvironmentConfig, $commitMessage: String, $skipDeploys: Boolean) {
   environmentPatchCommit(environmentId: $environmentId, patch: $patch, commitMessage: $commitMessage, skipDeploys: $skipDeploys)
@@ -298,6 +320,7 @@ async function main() {
   if (options.command === "schema") return schemaCommand();
   const run = loadRun(options.target);
   if (options.command === "status") return status(run);
+  if (options.command === "recover") return recoverCommand(run);
   return changeCommand(run);
 }
 
@@ -373,7 +396,16 @@ function loadRun(target) {
   const host = settingsHost(settings);
   const label = host ? host.split(".")[0] : settings.NAME || path.basename(file).replace(/^\.env\.bootstrap-/, "");
   const copyFile = `${file}${COPY_SUFFIX}`;
-  const copy = fs.existsSync(copyFile) ? { file: copyFile, settings: readSettings(copyFile), values: readBootstrapValues(copyFile) ?? {} } : null;
+  let copy = null;
+  if (fs.existsSync(copyFile)) {
+    try {
+      copy = { file: copyFile, settings: readSettings(copyFile), values: readBootstrapValues(copyFile) ?? {} };
+    } catch (error) {
+      // recover (R1) is for a copy that's lost or broken.
+      if (options.command !== "recover") throw error;
+      copy = { file: copyFile, settings: {}, values: {}, broken: error.message };
+    }
+  }
   const stateFile = `${file}.redeploy.json`;
   const state = readState(stateFile);
   const backup = path.resolve(options.backup || state.backup || path.join(REPO_ROOT, "..", "lobbystack-backups", `${label}-before-pg18`));
@@ -523,13 +555,36 @@ async function status(run) {
     await printVariables(run, old, fresh);
   }
   await notes(run, old, fresh);
+  printProgress(run);
   console.log(`\nThe steps, and what's still done by hand: devops/redeploy.md.`);
+}
+
+/** Each command's steps as the state file records them, and what's next. */
+function printProgress(run) {
+  const { done, values } = run.state;
+  console.log("\nThe steps, as the state file records them:");
+  for (const [name, steps] of [["prepare", PREPARE], ["trial", TRIAL], ["cutover", CUTOVER], ["check", CHECK], ["finish", FINISH], ["retire", RETIRE]]) {
+    const finished = steps.filter((step) => done[step.n]);
+    const next = steps.find((step) => !done[step.n]);
+    const range = steps.length > 1 ? `steps ${steps[0].n} to ${steps.at(-1).n}` : `step ${steps[0].n}`;
+    const state = !finished.length ? "not started" : next ? `${finished.length} of ${steps.length} done, step ${next.n} next` : `done, ${shortTime(done[steps.at(-1).n])}`;
+    console.log(`  ${name.padEnd(8)} ${range.padEnd(17)} ${state}`);
+  }
+  if (values.backPath) {
+    const steps = values.backPath === "before" ? BACK_BEFORE : BACK_AFTER;
+    const next = steps.find((step) => !done[step.n]);
+    console.log(`  back     ${`${steps[0].n} to ${steps.at(-1).n}`.padEnd(17)} stopped halfway${next ? `, ${next.n} next` : ""}: run back again to finish it`);
+  }
+  for (const item of values.wentBack ?? []) {
+    console.log(`  went back ${shortTime(item.at)}, ${item.path === "before" ? "before the address moved" : "after the address moved"}${item.aside ? `; what customers wrote after the switch is in the new server's ${item.aside}` : ""}`);
+  }
 }
 
 function printFiles(run) {
   console.log(`${run.host || run.label}: the move to a new Railway project on PostgreSQL ${TARGET_MAJOR} (devops/redeploy.md)`);
   console.log(`  settings file: ${run.file} (${run.how})`);
   const copyLine = !run.copy ? "not made yet (step 8)"
+    : run.copy.broken ? `${run.copy.file}, which can't be read: ${run.copy.broken}`
     : `${run.copy.file}${settingsHost(run.copy.settings) && settingsHost(run.copy.settings) !== run.host ? `, at the address ${settingsHost(run.copy.settings)}` : ""}`;
   console.log(`  the new project's copy: ${copyLine}`);
   console.log(`  backup folder: ${run.backup}${fs.existsSync(run.backup) ? "" : " (not made yet: step 4)"}`);
@@ -921,11 +976,7 @@ async function notes(run, old, fresh) {
 async function dnsRecords(run, host, admin) {
   const zone = String(run.settings.CLOUDFLARE_ZONE ?? "").toLowerCase();
   const check = `_railway-verify.${host}`;
-  const fromRailway = () => {
-    const domain = admin?.domains?.customDomains?.find((item) => item.domain === host);
-    return (domain?.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue)
-      .map((record) => ({ type: String(record.recordType).replace("DNS_RECORD_TYPE_", ""), name: String(record.fqdn).replace(/\.$/, ""), content: record.requiredValue }));
-  };
+  const fromRailway = () => recordsOf(admin?.domains?.customDomains?.find((item) => item.domain === host), host);
   if (!zone) {
     const list = fromRailway();
     return { list, from: list.length ? "what Railway asks for" : "", problem: `The settings name no CLOUDFLARE_ZONE, so note the records ${host} and ${check} have at the DNS provider.` };
@@ -988,6 +1039,41 @@ const RETIRE = [
   { n: "40", what: "The old project deleted, with 48 hours' grace, and its files moved into the backup folder", run: retireOld },
 ];
 
+const CUTOVER = [
+  { n: "22", what: `Both databases opened to this computer through TCP proxies, the new one on PostgreSQL ${TARGET_MAJOR}`, run: openDatabases },
+  { n: "23", what: "The new admin, worker and control panel stopped", run: stopNew },
+  { n: "24", what: "Once no call is in progress, the old admin stopped, the old worker two minutes later, then the old cloudflared: production is offline from here", run: stopOld },
+  { n: "25", what: "The old database frozen, counted, and dumped into the backup folder", run: dumpOld },
+  { n: "26", what: `The dump restored into the new database, on PostgreSQL ${TARGET_MAJOR} only`, run: restoreNew },
+  { n: "27", what: "The new database counted and compared with the old one, and given the old one's reset-protection mark", run: compareNew },
+  { n: "28", what: "The bucket's newest files, copied into the new bucket", run: (ctx) => copyBucket(ctx, true) },
+  { n: "29", what: "The new migrate deployed again, on the copied data", run: migrateNew },
+  { n: "30", what: "The address moved: off the old admin, then bootstrap's up on the copy, which asks before pointing its CNAME at the new project", run: moveAddress },
+  { n: "31", what: "The copy's files, backed up to after-cutover in the backup folder", run: (ctx) => backupCopy(ctx, "after-cutover") },
+  { n: "32", what: "bootstrap's connect on the copy, whose billing plan you read before you type yes", run: connectNew },
+  { n: "33", what: "Production back: the address answers from the new project", run: productionBack },
+];
+
+const CHECK = [
+  { n: "34", what: "The checks: health, the copies, the worker's log and the control panel, then a sign-in, files, a call, a text and Polar, by you", run: checks },
+];
+
+// Going back before step 30, while the old admin still has the address, and after it.
+const BACK_BEFORE = [
+  { n: "G1", what: "The old database opened to the app's roles again", run: openOld },
+  { n: "G2", what: "The old admin, worker and cloudflared started again", run: startOld },
+  { n: "G3", what: `The new database emptied, on PostgreSQL ${TARGET_MAJOR} only, and the new migrate deployed again`, run: emptyNew },
+];
+
+const BACK_AFTER = [
+  { n: "G4", what: "The new services stopped, and the address taken off the new admin", run: stopNewAll },
+  { n: "G5", what: "The address given back to the old admin, with its DNS records", run: addressBack },
+  { n: "G6", what: "The old database opened to the app's roles again", run: openOld },
+  { n: "G7", what: "The old admin, worker and cloudflared started again", run: startOld },
+  { n: "G8", what: `The new database set aside as lobbystack_after_switch, on PostgreSQL ${TARGET_MAJOR} only, and the new migrate deployed again`, run: asideNew },
+  { n: "G9", what: "Polar: a webhook for the temporary address, if connect ever made one", run: polarNote },
+];
+
 const COMMANDS = {
   prepare: {
     title: "prepare: steps 1 to 17, while production runs",
@@ -1001,7 +1087,7 @@ const COMMANDS = {
     steps: TRIAL,
     check: checkTrial,
     changes: trialChanges,
-    next: () => "Next: pick the hour (step 21), then the cutover, steps 22 to 34, by hand as devops/redeploy.md describes.",
+    next: () => "Next: pick the hour (step 21), from the calls by hour above, then at that hour: node devops/redeploy.mjs cutover, steps 22 to 33.",
   },
   finish: {
     title: "finish: steps 35 to 39, once the cutover's checks have passed",
@@ -1021,12 +1107,45 @@ const COMMANDS = {
     after: moveOldFiles,
     next: () => `The move is over. From now on, bootstrap and the scale script run with the ${COPY_SUFFIX} files.`,
   },
+  cutover: {
+    title: "cutover: steps 22 to 33, at the hour picked. Production is offline from step 24 to step 33",
+    steps: CUTOVER,
+    check: checkCutover,
+    changes: cutoverChanges,
+    question: (ctx) => (ctx.run.state.done["24"]
+      ? `Production has been offline since ${shortTime(ctx.run.state.values.cutover?.offline ?? ctx.run.state.done["24"])} (step 24). Go on with the cutover?`
+      : "Production goes offline at step 24, until step 33. Is it the hour you picked, with the customers who need notice told?"),
+    next: () => "Next, right away: node devops/redeploy.mjs check, step 34. If a check fails and can't be fixed quickly, go back: node devops/redeploy.mjs back.",
+  },
+  check: {
+    title: "check: step 34, right after the cutover",
+    steps: CHECK,
+    check: checkCheck,
+    changes: () => ["change nothing: it reads the new project, has the scale script list the copies, and asks you about the checks only a person can do"],
+    ask: false,
+    next: () => "Next, once you're happy with the new project: node devops/redeploy.mjs finish, steps 35 to 39.",
+  },
+  back: {
+    title: (ctx) => (ctx.path === "before" ? "back: G1 to G3, going back before the address moved" : "back: G4 to G9, going back after the address moved"),
+    steps: (ctx) => (ctx.path === "before" ? BACK_BEFORE : BACK_AFTER),
+    check: checkBack,
+    changes: backChanges,
+    question: backQuestion,
+    begin: (ctx) => {
+      ctx.run.state.values.backPath = ctx.path;
+      keepState(ctx.run);
+    },
+    after: wentBack,
+    afterAlways: true,
+    next: () => "To try again, run cutover from step 22, at another quiet hour.",
+  },
 };
 
 /**
- * prepare, trial, finish and retire: each checks Railway's API and both projects first, says what it will change and
- * asks, then runs its steps in order, holding the state file's lock throughout. A step is recorded in the state file
- * as soon as it finishes, and a recorded step is skipped, so a command that stopped is finished by running it again.
+ * Every command but status, recover and schema: each checks Railway's API and both projects first, says what it will
+ * change and asks, then runs its steps in order, holding the state file's lock throughout. A step is recorded in the
+ * state file as soon as it finishes, and a recorded step is skipped, so a command that stopped is finished by running
+ * it again.
  */
 async function changeCommand(run) {
   const release = options.dryRun ? () => undefined : tryLock(run);
@@ -1047,10 +1166,12 @@ async function changeCommand(run) {
     await signIn(run);
     const ctx = await readBoth(run);
     await command.check(ctx);
-    console.log(`\n${command.title}`);
-    for (const step of command.steps) console.log(`  ${run.state.done[step.n] ? "done" : "    "} ${step.n.padStart(2)}. ${step.what}`);
-    const left = command.steps.filter((step) => !run.state.done[step.n]);
+    const steps = typeof command.steps === "function" ? command.steps(ctx) : command.steps;
+    console.log(`\n${typeof command.title === "function" ? command.title(ctx) : command.title}`);
+    for (const step of steps) console.log(`  ${run.state.done[step.n] ? "done" : "    "} ${step.n.padStart(2)}. ${step.what}`);
+    const left = steps.filter((step) => !run.state.done[step.n]);
     if (!left.length) {
+      if (command.afterAlways && !options.dryRun) await command.after(ctx);
       console.log(`\nEvery step of ${options.command} is done. ${command.next(ctx)}`);
       return;
     }
@@ -1060,8 +1181,9 @@ async function changeCommand(run) {
       console.log("\nA dry run: nothing was changed.");
       return;
     }
-    await confirm(command.question?.(ctx) ?? "", command.answer?.(ctx));
-    await runSteps(ctx, command.steps);
+    if (command.ask !== false) await confirm(command.question?.(ctx) ?? "", command.answer?.(ctx));
+    command.begin?.(ctx);
+    await runSteps(ctx, steps);
     if (command.after) await command.after(ctx);
     console.log(`\n${command.next(ctx)}`);
   } finally {
@@ -1601,6 +1723,8 @@ async function copyVariables(ctx) {
   if (comparison.webhook === "differs") {
     replaceSecret(`${run.copy.file}.secrets`, "OPENAI_WEBHOOK_SECRET", comparison.roles.find((item) => item.role === "admin").oldValues.OPENAI_WEBHOOK_SECRET);
     console.log(`  OPENAI_WEBHOOK_SECRET in ${run.copy.file}.secrets is the old admin's now, which connect puts on the new admin (step 32)`);
+    // R1 puts the files back from after-stage-1 (step 14): they must hold this value too.
+    await backupCopy(ctx, "after-stage-1");
   }
   const keys = comparison.roles.filter((item) => item.keys?.length);
   if (keys.length) await confirm(`\n  The old project has other values than the copy's files for ${keys.map((item) => `${item.keys.join(", ")} on the ${item.role}`).join("; ")}. Each variables run puts the files' values back, so the new project keeps the files' values unless you bring the files up to date first (devops/redeploy.md, step 16). Keep the files' values?`);
@@ -1673,7 +1797,7 @@ function rehearsal(run) {
   const zone = String(run.settings.CLOUDFLARE_ZONE ?? "").toLowerCase();
   const name = hostOf(options.rehearse) || (zone ? `move-test.${zone}` : "");
   if (!name) throw new Stop("step 19 needs a throwaway address in the deployment's zone, and the settings name no CLOUDFLARE_ZONE. Rehearse by hand (devops/redeploy.md, step 19), then run trial with --no-rehearsal");
-  const taken = [run.host, run.state.values.temporary, hostOf(run.settings.CONTROL_HOST), zone].filter(Boolean);
+  const taken = [run.host, run.state.values.temporary, hostOf(run.settings.CONTROL_HOST), hostOf(run.old.CONTROL_HOST), zone].filter(Boolean);
   if (taken.includes(name) || taken.some((host) => host.endsWith(`.${name}`))) throw new Stop(`${name} is the deployment's own: give a throwaway name with --rehearse`);
   if (!zone || !name.endsWith(`.${zone}`)) throw new Stop(`${name} isn't in CLOUDFLARE_ZONE (${zone || "none"}), where the script writes its records. Give one that is with --rehearse, or rehearse by hand and use --no-rehearsal`);
   const token = secretOf(run, "CLOUDFLARE_API_TOKEN");
@@ -1709,7 +1833,7 @@ async function rehearseAddress(ctx) {
       }
       await gql(Q.domainCreate, { input: { domain: name, environmentId: where.environment.id, projectId: where.project.id, serviceId: admin.id, targetPort: 3000 } });
       const records = await waitUntil(2, `Railway's DNS records for ${name}`, async () => {
-        const list = recordsOf(await domainOn(where, name));
+        const list = recordsOf(await domainOn(where, name), name);
         return list.length ? list : null;
       });
       await putRecords(token, zoneId, name, records, made);
@@ -1746,9 +1870,22 @@ async function removeName(where, name) {
   return found;
 }
 
-/** The records Railway asks for an address, as Cloudflare names them. */
-const recordsOf = (domain) => (domain?.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue)
-  .map((record) => ({ type: String(record.recordType).replace("DNS_RECORD_TYPE_", ""), name: String(record.fqdn).replace(/\.$/, "").toLowerCase(), content: String(record.requiredValue) }));
+/**
+ * The records Railway asks for an address, as Cloudflare names them: the CNAME, and until the address is verified, the
+ * TXT record that proves it's ours, which Railway names relative to the zone's apex, as bootstrap.mjs reads it.
+ */
+function recordsOf(domain, host) {
+  const list = (domain?.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue)
+    .map((record) => ({ type: String(record.recordType).replace("DNS_RECORD_TYPE_", ""), name: String(record.fqdn).replace(/\.$/, "").toLowerCase(), content: String(record.requiredValue) }));
+  const { verified, verificationDnsHost, verificationToken } = domain?.status ?? {};
+  const check = String(verificationDnsHost ?? "").toLowerCase().replace(/\.$/, "");
+  const rest = check.replace(/^_railway-verify\.?/, "");
+  const name = check === host || check.endsWith(`.${host}`) ? check : check.startsWith("_railway-verify") && (!rest || host.startsWith(`${rest}.`)) ? `_railway-verify.${host}` : check;
+  if (!verified && name && verificationToken && !list.some((record) => record.type === "TXT" && record.name === name)) {
+    list.push({ type: "TXT", name, content: `railway-verify=${String(verificationToken).replace(/^(railway-verify=)+/, "")}` });
+  }
+  return list;
+}
 
 /** Writes the throwaway name's records, DNS only. A record of that name this script didn't make stops it. */
 async function putRecords(token, zoneId, name, records, made) {
@@ -1923,15 +2060,16 @@ const proxyPatch = (serviceId, value) => ({ services: { [serviceId]: { networkin
 
 /**
  * A database's TCP proxy: the one it has, else a new one. One this script opened, in this run or in one that was
- * interrupted, as the state file records, goes into opened, to be closed again; one opened by hand stays.
+ * interrupted, as the state file records, goes into opened, to be closed again; one opened by hand stays. quiet leaves
+ * out the line about one that's there already, for the cutover's steps after step 22, which opened it.
  */
-async function openProxy(run, where, opened) {
+async function openProxy(run, where, opened, { quiet = false } = {}) {
   const mine = (run.state.values.proxies ??= []);
   const ready = async () => (await liveProxies(where)).find((item) => item.domain && item.proxyPort) ?? null;
   const existing = await ready();
   if (existing) {
     if (mine.includes(where.which)) opened.push(where);
-    console.log(`  the ${where.which} database's TCP proxy is there already${mine.includes(where.which) ? ", left open by an earlier run of this script" : ""}: ${existing.domain}:${existing.proxyPort}`);
+    if (!quiet) console.log(`  the ${where.which} database's TCP proxy is there already${mine.includes(where.which) ? ", left open by an earlier run of this script" : ""}: ${existing.domain}:${existing.proxyPort}`);
     return existing;
   }
   const workflow = (await gql(Q.patch, { environmentId: where.environment.id, patch: proxyPatch(where.service("Postgres").id, {}), commitMessage: "redeploy.mjs: a TCP proxy for the database copy", skipDeploys: true })).environmentPatchCommit;
@@ -1959,6 +2097,10 @@ async function closeProxy(run, where) {
 function checkFinish(ctx) {
   const { run, old, fresh } = ctx;
   assertNew(ctx);
+  if (run.state.values.backPath) throw new Stop("going back stopped halfway: run back again to finish it");
+  // A cutover this script ran must have finished and passed its checks. One done by hand recorded nothing here.
+  const next = [...CUTOVER, ...CHECK].find((step) => !run.state.done[step.n]);
+  if (next && CUTOVER.some((step) => run.state.done[step.n])) throw new Stop(CHECK.includes(next) ? "the cutover's checks haven't passed yet: run check (step 34)" : `the cutover hasn't finished: step ${next.n} is next. Run cutover`);
   if (!hasAddress(fresh, run.host)) throw new Stop(`the new admin doesn't have ${run.host} yet: finish comes after the cutover (steps 22 to 34)`);
   if (hasAddress(old, run.host)) throw new Stop(`the old admin still has ${run.host}`);
 }
@@ -2101,6 +2243,644 @@ async function moveOldFiles(ctx) {
     moved.push(path.basename(from));
   }
   console.log(`  moved ${moved.join(", ")} into ${folder}`);
+}
+
+// ---------------------------------------------------------------- cutover (steps 22 to 33)
+
+function checkCutover(ctx) {
+  const { run, old, fresh } = ctx;
+  const next = [...PREPARE, ...TRIAL].find((step) => !run.state.done[step.n]);
+  if (next) throw new Stop(`${PREPARE.includes(next) ? "prepare" : "trial"} hasn't finished: step ${next.n} is next. Run it first; trial runs a day or so before the cutover`);
+  assertNew(ctx);
+  if (run.state.values.backPath) throw new Stop("going back stopped halfway: run back again to finish it, before another cutover");
+  const moving = run.state.done["30"] || run.state.values.cutover?.addressLeftOld;
+  if (!moving && hasAddress(fresh, run.host)) throw new Stop(`the new admin has ${run.host}, but the cutover didn't move it there. Find out how before going on (devops/redeploy.md, step 30)`);
+  if (!moving && !hasAddress(old, run.host)) throw new Stop(`the old admin doesn't have ${run.host}, and the cutover hasn't moved it. Give it back to the old admin before you start (devops/redeploy.md, G5)`);
+}
+
+function cutoverChanges(ctx, todo) {
+  const { run, old } = ctx;
+  const trial = run.state.values.trial;
+  const lines = [];
+  if (todo.has("22")) lines.push("open each database to the internet through a TCP proxy, for this computer's PostgreSQL 18 tools (step 22)");
+  if (todo.has("23")) lines.push("stop the new admin, worker and control panel (step 23)");
+  if (todo.has("24")) lines.push(`stop the old admin once no call is in progress, the old worker two minutes later, then the old cloudflared. Production is offline from then until step 33${trial ? `; the trial's dump and restore took ${duration(trial.dumpSeconds + trial.restoreSeconds)}` : ""} (step 24)`);
+  if (todo.has("25")) lines.push("freeze the old database, so the app can't write to it again, count it and dump it into the backup folder (step 25)");
+  if (todo.has("26") || todo.has("27")) lines.push("replace the new database with the dump, count it and compare it with the old one (steps 26 and 27)");
+  if (todo.has("28") && old.buckets.length) lines.push("copy the bucket's newest files into the new bucket (step 28)");
+  if (todo.has("29")) lines.push("deploy the new migrate again (step 29)");
+  if (todo.has("30")) lines.push(`take ${run.host} off the old admin, put it back in ${path.basename(run.copy.file)}, and run bootstrap's redo and up on the copy, which asks before pointing ${run.host}'s CNAME at the new project (step 30)`);
+  if (todo.has("32")) lines.push("run bootstrap's connect on the copy, whose billing plan you read before you type yes: it should make nothing in Polar (step 32)");
+  lines.push("Outside Railway, only step 30 changes anything: the address's DNS records, and Turnstile's list of the admin's addresses. If a step fails, run cutover again, or go back: node devops/redeploy.mjs back.");
+  return lines;
+}
+
+/**
+ * Both databases, through their TCP proxies, opened when they're missing. Each server is checked against the one
+ * step 22 recorded, so a proxy that reaches another server never gets a change, and the new one must be on 18.
+ */
+async function databases(ctx, { versions = true } = {}) {
+  const { run, old } = ctx;
+  const fresh = assertNew(ctx);
+  const password = databasePassword(run);
+  dockerReady();
+  const recorded = run.state.values.servers;
+  const quiet = Boolean(recorded);
+  const on = { old: await openProxy(run, old, [], { quiet }), new: await openProxy(run, fresh, [], { quiet }) };
+  const servers = { old: serverOf(run, password, on.old, "old"), new: serverOf(run, password, on.new, "new") };
+  if (servers.old.id === servers.new.id) throw new Stop("both TCP proxies reach the same server, so nothing was changed");
+  for (const which of ["old", "new"]) {
+    if (recorded?.[which] && recorded[which] !== servers[which].id) throw new Stop(`the ${which} database's TCP proxy reaches another server than at step 22, so nothing was changed. Check both projects' Postgres in Railway`);
+  }
+  if (servers.new.major !== TARGET_MAJOR) throw new Stop(`the new server runs PostgreSQL ${servers.new.major}, not ${TARGET_MAJOR}, so nothing was changed`);
+  if (versions && servers.old.major === TARGET_MAJOR && !options.sameVersion) throw new Stop(`the old server runs PostgreSQL ${TARGET_MAJOR} already. To rehearse on it anyway, add --same-version`);
+  if (!recorded) {
+    run.state.values.servers = { old: servers.old.id, new: servers.new.id };
+    keepState(run);
+  }
+  return { password, on, servers };
+}
+
+async function openDatabases(ctx) {
+  const { servers } = await databases(ctx);
+  console.log(`  old: PostgreSQL ${servers.old.major}, new: PostgreSQL ${servers.new.major}`);
+}
+
+const roleName = (role) => (role === "control" ? "control panel" : role);
+const joined = (items) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items[0] ?? "");
+const stoppedNow = (where, role) => ["REMOVED", "REMOVING"].includes(where.service(role)?.instance?.latestDeployment?.status);
+
+/** Removes each service's running deployment, which stops every copy of it, and records which, for going back. */
+async function stopServices(ctx, where, roles, { quiet = false } = {}) {
+  const { run } = ctx;
+  const removed = ((run.state.values.removed ??= {})[where.which] ??= {});
+  const stopping = [];
+  for (const role of roles) {
+    if (!where.service(role)) continue;
+    const deployment = where.service(role).instance?.latestDeployment;
+    if (!deployment || ["REMOVED", "REMOVING"].includes(deployment.status)) {
+      if (!quiet) console.log(`  = the ${where.which} ${roleName(role)} is stopped already`);
+      continue;
+    }
+    await gql(Q.removeDeployment, { id: deployment.id });
+    removed[role] = { id: deployment.id, at: new Date().toISOString() };
+    keepState(run);
+    stopping.push(role);
+  }
+  if (!stopping.length) return;
+  await waitUntil(3, `Railway to stop the ${where.which} ${joined(stopping.map(roleName))}`, async () => {
+    const now = await readProject(where.values, where.which);
+    return stopping.every((role) => [undefined, "REMOVED"].includes(now.service(role)?.instance?.latestDeployment?.status));
+  });
+  console.log(`  stopped the ${where.which} ${joined(stopping.map(roleName))}`);
+}
+
+/** Starts a stopped service again: the deployment that was removed, on the image it ran, else a new one from its source. */
+async function startService(ctx, where, role) {
+  const item = where.service(role);
+  const removedId = ctx.run.state.values.removed?.[where.which]?.[role]?.id ?? item.instance?.latestDeployment?.id;
+  const again = removedId ? await attempt(() => gql(Q.redeployDeployment, { id: removedId, usePreviousImageTag: true })) : null;
+  if (again && !again.error) return console.log(`  started the ${where.which} ${roleName(role)} again, on the image it ran`);
+  const fresh = await attempt(() => gql(Q.deployService, { environmentId: where.environment.id, serviceId: item.id }));
+  if (fresh?.error) throw new Stop(`Railway wouldn't start the ${where.which} ${roleName(role)} again (${again?.error ?? "no deployment to deploy again"}; ${fresh.error}). Start it by hand: in Railway, its Deployments, the newest one's menu, Redeploy. Then run ${options.command} again`);
+  console.log(`  started the ${where.which} ${roleName(role)} again, from its source${again?.error ? ` (Railway wouldn't deploy the removed deployment again: ${again.error})` : ""}`);
+}
+
+/** Deploys a service again from its source, as Railway's Redeploy does, and waits for that deployment to succeed. */
+async function deployAgain(where, role) {
+  const item = where.service(role);
+  if (!item) throw new Stop(`the ${where.which} project has no ${role}`);
+  const before = item.instance?.latestDeployment?.id ?? null;
+  await gql(Q.redeployService, { environmentId: where.environment.id, serviceId: item.id });
+  console.log(`  deploying the ${where.which} ${roleName(role)} again${role === "migrate" ? ": its pre-deploy runs the migrations, sets the roles' passwords and checks row level security" : ""}`);
+  await deployed(where, role, before);
+  console.log(`  the ${where.which} ${roleName(role)}'s deployment succeeded`);
+}
+
+/** Waits for a service's newest deployment after the one given to succeed, and stops when it fails. */
+async function deployed(where, role, before, minutes = 20) {
+  await waitUntil(minutes, `the ${where.which} ${roleName(role)}'s deployment to succeed`, async () => {
+    const latest = (await readProject(where.values, where.which)).service(role)?.instance?.latestDeployment;
+    const mine = latest && latest.id !== before ? latest : null;
+    if (["FAILED", "CRASHED", "REMOVED"].includes(mine?.status)) throw new Stop(`the ${where.which} ${roleName(role)}'s deployment ended ${String(mine.status).toLowerCase()}: its log in Railway says why`);
+    return mine?.status === "SUCCESS";
+  });
+}
+
+async function stopNew(ctx) {
+  await stopServices(ctx, assertNew(ctx), ["admin", "worker", "control"]);
+}
+
+async function stopOld(ctx) {
+  const { run, old } = ctx;
+  const cutover = (run.state.values.cutover ??= {});
+  if (!stoppedNow(old, "admin")) {
+    const meta = metaOf(old.service("admin")?.instance?.latestDeployment);
+    if (typeof meta?.commitHash === "string") cutover.release ??= meta.commitHash;
+    await noCallsInProgress(ctx);
+    await stopServices(ctx, old, ["admin"]);
+    cutover.offline ??= new Date().toISOString();
+    keepState(run);
+    console.log(`  Production is offline from now, ${shortTime(cutover.offline)}`);
+  } else console.log("  = the old admin is stopped already");
+  if (old.service("worker") && !stoppedNow(old, "worker")) {
+    // The old worker finishes the jobs already handed to the old Redis, which doesn't come along. Tests shorten it.
+    const since = Date.parse(run.state.values.removed?.old?.admin?.at ?? "");
+    const left = Number.isFinite(since) ? since + 120_000 - Date.now() : 120_000;
+    if (left > 0) {
+      console.log(`  waiting ${duration(left / 1000)}, so the old worker finishes the jobs it was handed`);
+      await sleep((left * POLL_MS) / 5000);
+    }
+    await stopServices(ctx, old, ["worker"]);
+  }
+  if (old.service("cloudflared")) await stopServices(ctx, old, ["cloudflared"]);
+}
+
+/**
+ * Step 24 starts when no call is in progress: the old workers say how many they hold through the old admin's fleet
+ * status address, when it has a FLEET_STATUS_TOKEN, else the old database counts the calls that haven't ended.
+ */
+async function noCallsInProgress(ctx) {
+  const { run, old } = ctx;
+  const admin = old.service("admin");
+  const variables = (await gql(Q.variables, { projectId: old.project.id, environmentId: old.environment.id, serviceId: admin.id })).variables ?? {};
+  const raw = variables.FLEET_STATUS_TOKEN;
+  const token = typeof raw === "string" && raw.trim().length >= 32 && !raw.includes("${{") ? hide(raw.trim()) : "";
+  const fromFleet = async () => {
+    try {
+      const response = await fetch(`${SITE_URL.replace("{host}", run.host)}/api/internal/fleet`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+      const copies = parseJson(await response.text())?.copies;
+      return Array.isArray(copies) ? copies.filter((copy) => copy?.service === "worker").reduce((sum, copy) => sum + (Number(copy.liveCalls) || 0), 0) : null;
+    } catch {
+      return null;
+    }
+  };
+  let calls = token ? await fromFleet() : null;
+  let from = "the old workers, through the old admin's fleet status address";
+  let read = fromFleet;
+  if (calls === null) {
+    const { password, on } = await databases(ctx);
+    from = "the old database: calls started in the last half hour that haven't ended";
+    read = async () => Number(pgOrStop(run, password, ["psql", "-X", ...at(on.old), "-d", "lobbystack", "-Atc", "select count(*) from calls where ended_at is null and started_at > now() - interval '30 minutes'"], "the count of calls in progress").trim());
+    calls = await read();
+  }
+  let said = null;
+  for (let tries = 0; calls > 0 && tries < polls(20); tries += 1) {
+    if (calls !== said) console.log(`  ${count(calls, "call")} in progress, from ${from}: waiting for ${calls === 1 ? "it" : "them"} to end`);
+    said = calls;
+    await sleep(POLL_MS);
+    calls = (await read()) ?? calls;
+  }
+  if (calls > 0) await confirm(`  ${count(calls, "call")} still in progress after 20 minutes, which stopping the old admin cuts off. Stop it anyway?`);
+  else console.log(`  no call in progress, from ${from}`);
+}
+
+async function dumpOld(ctx) {
+  const { run } = ctx;
+  const { password, on } = await databases(ctx);
+  const cutover = (run.state.values.cutover ??= {});
+  // Quiet and unaligned: the sessions it ended, then the database's own settings, or none. An error stops it, so the
+  // dump never follows a freeze that didn't happen.
+  const [ended = "?", settings = "none"] = pgOrStop(run, password, ["psql", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", ...at(on.old), "-d", "lobbystack", "-f", "freeze.sql"], "the freeze").trim().split(/\r?\n/);
+  cutover.mark = /lobbystack\.reset_protection\s*=\s*on/i.test(settings);
+  keepState(run);
+  console.log(`  froze the old database: the app's roles can't connect any more, and ${count(Number(ended) || 0, "session")} ended. Its own settings: ${settings}`);
+  const before = tally(run, password, on.old, "lobbystack");
+  cutover.count = before.line;
+  keepState(run);
+  fs.writeFileSync(path.join(run.backup, "count-old.txt"), `${before.line}\n`, { mode: 0o600 });
+  console.log(`  old: ${before.line}`);
+  const dump = `${run.label}.dump`;
+  for (const file of [dump, `${dump}.part`]) fs.rmSync(path.join(run.backup, file), { force: true });
+  const started = Date.now();
+  pgOrStop(run, password, ["pg_dump", ...at(on.old), "-d", "lobbystack", "-Fc", "-f", `${dump}.part`], "pg_dump");
+  fs.renameSync(path.join(run.backup, `${dump}.part`), path.join(run.backup, dump));
+  cutover.dump = { file: dump, bytes: fs.statSync(path.join(run.backup, dump)).size, seconds: Math.round((Date.now() - started) / 1000) };
+  console.log(`  the dump: ${path.join(run.backup, dump)}, ${bytes(cutover.dump.bytes)} in ${duration(cutover.dump.seconds)}`);
+}
+
+async function restoreNew(ctx) {
+  const { run } = ctx;
+  const dump = run.state.values.cutover?.dump?.file ?? `${run.label}.dump`;
+  if (!fs.existsSync(path.join(run.backup, dump))) {
+    delete run.state.done["25"];
+    keepState(run);
+    throw new Stop(`${dump} isn't in ${run.backup}, so nothing was restored. Run cutover again, which dumps the old database again (step 25)`);
+  }
+  // A sync of the branch may have started a new service again since step 23: it mustn't run on what's restored.
+  await stopServices(ctx, await readProject(run.copy.values, "new"), ["admin", "worker", "control"], { quiet: true });
+  const { password, on } = await databases(ctx);
+  const started = Date.now();
+  // --force ends the sessions still open on the new, empty database, such as a dashboard's, which the stop above left.
+  pgOrStop(run, password, ["dropdb", ...at(on.new), "--if-exists", "--force", "lobbystack"], "dropdb");
+  pgOrStop(run, password, ["createdb", ...at(on.new), "lobbystack"], "createdb");
+  pgOrStop(run, password, ["pg_restore", ...at(on.new), "-d", "lobbystack", "-O", "-1", "-e", dump], "pg_restore");
+  pgOrStop(run, password, ["vacuumdb", ...at(on.new), "-d", "lobbystack", "--analyze-only"], "vacuumdb");
+  console.log(`  RESTORE OK in ${duration((Date.now() - started) / 1000)}, with the statistics a restore doesn't bring`);
+}
+
+async function compareNew(ctx) {
+  const { run } = ctx;
+  const { password, on } = await databases(ctx);
+  const cutover = (run.state.values.cutover ??= {});
+  const was = cutover.count ?? tally(run, password, on.old, "lobbystack").line;
+  const now = tally(run, password, on.new, "lobbystack");
+  console.log(`  old: ${was}`);
+  console.log(`  new: ${now.line}`);
+  if (now.line !== was) {
+    console.log("  DIFFERENT. Lines only the old database has (<) or only the new one has (>):");
+    const a = tableLines(run, password, on.old, "lobbystack");
+    const b = tableLines(run, password, on.new, "lobbystack");
+    for (const line of a.filter((item) => !b.includes(item))) console.log(`    < ${line}`);
+    for (const line of b.filter((item) => !a.includes(item))) console.log(`    > ${line}`);
+    delete run.state.done["26"];
+    keepState(run);
+    throw new Stop("the new database isn't the old one's copy. Run cutover again, which restores it again (step 26); if it differs again, go back: node devops/redeploy.mjs back");
+  }
+  console.log("  SAME: every table arrived, with every row");
+  if (cutover.mark) {
+    pgOrStop(run, password, ["psql", "-X", ...at(on.new), "-d", "postgres", "-c", "alter database lobbystack set lobbystack.reset_protection = 'on'"], "the reset-protection mark");
+    console.log("  set the reset-protection mark on the new database, as the old one had it (guide 7.28)");
+  }
+}
+
+async function migrateNew(ctx) {
+  await deployAgain(assertNew(ctx), "migrate");
+}
+
+/** Step 30: the address off the old admin, back in the copy's settings, then bootstrap's address steps on the copy. */
+async function moveAddress(ctx) {
+  const { run, old } = ctx;
+  const fresh = assertNew(ctx);
+  const host = run.host;
+  const cutover = (run.state.values.cutover ??= {});
+  if (await removeName(old, host)) console.log(`  took ${host} off the old admin: it reaches neither project until up gives it to the new one`);
+  else console.log(`  = the old admin doesn't have ${host}`);
+  cutover.addressLeftOld ??= new Date().toISOString();
+  keepState(run);
+  reloadCopy(run);
+  if (settingsHost(run.copy.settings) !== host || "CUSTOM_HOST" in run.copy.settings) {
+    setAddress(run.copy.file, `https://${host}`);
+    reloadCopy(run);
+  }
+  console.log(`  ${run.copy.file}: APP_BASE_URL=https://${host} again`);
+  if (!(await domainOn(fresh, host))) {
+    // Railway lets another project have a name a short while after it's taken off (step 19 timed it).
+    await waitUntil(10, `${host} to be free in Railway`, async () => (await gql(Q.domainAvailable, { domain: host })).customDomainAvailable?.available !== false);
+  }
+  if (!cutover.redo) {
+    const result = bootstrap(["redo", run.copy.file, "railway.domain", "railway.custom", "turnstile", "variables", "post.*"], { capture: true });
+    for (const line of result.output.split(/\r?\n/).filter(Boolean)) console.log(`  | ${line}`);
+    if (result.status !== 0) throw new Stop(`bootstrap's redo stopped (exit code ${result.status})`);
+    cutover.redo = new Date().toISOString();
+    keepState(run);
+  }
+  const up = bootstrap(["up", run.copy.file]);
+  reloadCopy(run);
+  if (up.status !== 0) throw new Stop("bootstrap's up stopped (above). Do what it says, then run cutover again, which runs up again; production stays offline until then. To go back instead: node devops/redeploy.mjs back");
+  // up deploys the admin and the worker with their new variables; the control panel and cloudflared start here.
+  const now = await readProject(run.copy.values, "new");
+  for (const role of ["admin", "worker", "control", "cloudflared"]) if (stoppedNow(now, role)) await startService(ctx, now, role);
+  await loadDomains(now);
+  if (!hasAddress(now, host)) throw new Stop(`up finished, but the new admin doesn't have ${host}. Run cutover again`);
+  ctx.fresh = now;
+  console.log(`  the new admin has ${host}`);
+}
+
+/** Before connect: the copy's OPENAI_WEBHOOK_SECRET, if it has one, must be production's, which connect puts on the admin. */
+async function webhookSecretFromOld(ctx) {
+  const { run, old } = ctx;
+  const admin = old.service("admin");
+  const value = (await gql(Q.variables, { projectId: old.project.id, environmentId: old.environment.id, serviceId: admin.id })).variables?.OPENAI_WEBHOOK_SECRET;
+  const file = `${run.copy.file}.secrets`;
+  const mine = secretFromFile(file, "OPENAI_WEBHOOK_SECRET");
+  if (typeof value !== "string" || !value || value.includes("${{")) return;
+  hide(value);
+  if (mine && mine !== value) {
+    replaceSecret(file, "OPENAI_WEBHOOK_SECRET", value);
+    console.log(`  OPENAI_WEBHOOK_SECRET in ${file} is the old admin's now, as step 16 makes it`);
+  }
+}
+
+async function connectNew(ctx) {
+  const { run } = ctx;
+  assertNew(ctx);
+  await webhookSecretFromOld(ctx);
+  const cutover = (run.state.values.cutover ??= {});
+  if (!cutover.connectRedo) {
+    // connect then takes the webhook's secret and the platform keys from the new admin, where step 16 put production's.
+    const result = bootstrap(["redo", run.copy.file, "connect.webhook", "connect.platformKey"], { capture: true });
+    for (const line of result.output.split(/\r?\n/).filter(Boolean)) console.log(`  | ${line}`);
+    if (result.status !== 0) throw new Stop(`bootstrap's redo stopped (exit code ${result.status})`);
+    cutover.connectRedo = new Date().toISOString();
+    keepState(run);
+  }
+  console.log("  bootstrap's connect: read what pnpm billing plan prints before you type yes. It should make nothing in Polar; if it lists something to make, answer no");
+  if (bootstrap(["connect", run.copy.file]).status !== 0) throw new Stop("bootstrap's connect stopped (above). Do what it says, then run cutover again, which runs connect again");
+}
+
+async function productionBack(ctx) {
+  const { run } = ctx;
+  const host = run.host;
+  await waitUntil(15, `https://${host}/api/health/ready to answer "ok":true (Railway gives the address its certificate a few minutes after its CNAME changes)`, async () => (await health(host, "/api/health/ready")).body?.ok === true);
+  const version = String((await health(host, "/api/health/live")).body?.version ?? "");
+  const before = String(run.state.values.cutover?.release ?? "");
+  console.log(`  https://${host} answers "ok":true, from the new project${/^[0-9a-f]{7,40}$/i.test(version) ? `, running ${version.slice(0, 7)}` : ""}`);
+  if (before && /^[0-9a-f]{7,40}$/i.test(version) && version.slice(0, 7) !== before.slice(0, 7)) console.log(`  The old project ran ${before.slice(0, 7)}: the branch moved since it was built. Check that's what you want`);
+  const offline = Date.parse(run.state.values.cutover?.offline ?? "");
+  if (Number.isFinite(offline)) console.log(`  Production was offline for about ${duration((Date.now() - offline) / 1000)}`);
+}
+
+// ---------------------------------------------------------------- check (step 34)
+
+function checkCheck(ctx) {
+  const { run, fresh } = ctx;
+  const next = CUTOVER.find((step) => !run.state.done[step.n]);
+  if (next) throw new Stop(`the cutover hasn't finished: step ${next.n} is next. Run cutover`);
+  assertNew(ctx);
+  if (!hasAddress(fresh, run.host)) throw new Stop(`the new admin doesn't have ${run.host}`);
+}
+
+/** Step 34: what the script can read, then the checks only a person can do, each answered yes or no. */
+async function checks(ctx) {
+  const { run } = ctx;
+  const fresh = assertNew(ctx);
+  const host = run.host;
+  const failed = [];
+  const ready = await health(host, "/api/health/ready");
+  if (ready.body?.ok === true) console.log(`  ok  https://${host}/api/health/ready answers "ok":true`);
+  else {
+    failed.push("health");
+    console.log(`  FIX https://${host}/api/health/ready: ${ready.error ?? `HTTP ${ready.status}${ready.body ? `, ${JSON.stringify(ready.body).slice(0, 200)}` : ""}`}`);
+  }
+  console.log("  The copies, as devops/scale.mjs lists them:");
+  if (child(SCALE, ["--bootstrap", run.copy.file]).status !== 0) {
+    failed.push("copies");
+    console.log("  FIX scale.mjs couldn't list the copies (above)");
+  }
+  const worker = fresh.service("worker")?.instance?.latestDeployment;
+  if (worker) {
+    const logs = await attempt(() => gql(Q.logs, { deploymentId: worker.id, limit: 500 }));
+    const lines = logs?.deploymentLogs ?? [];
+    const errors = lines.filter((line) => /^(err|error|fatal|critical)$/i.test(String(line.severity ?? "")));
+    if (logs?.error) console.log(`  the new worker's log: unknown (${logs.error})`);
+    else console.log(`  the new worker's log: ${count(lines.length, "line")} since it started${errors.length ? `, ${count(errors.length, "error")}; the newest:` : ", no error"}`);
+    for (const line of errors.slice(-3)) console.log(`    ${shortTime(line.timestamp)}  ${String(line.message).slice(0, 200)}`);
+  }
+  const control = fresh.service("control") ? run.copy.values.CONTROL_HOST ?? run.old.CONTROL_HOST : null;
+  if (control) {
+    const answer = await attempt(async () => (await fetch(SITE_URL.replace("{host}", control), { redirect: "manual", signal: AbortSignal.timeout(15_000) })).status);
+    if (typeof answer === "number" && answer < 500) console.log(`  ok  https://${control} answers (HTTP ${answer}), through the new cloudflared`);
+    else {
+      failed.push("control panel");
+      console.log(`  FIX https://${control}: ${typeof answer === "number" ? `HTTP ${answer}` : answer?.error}. Is the new cloudflared running?`);
+    }
+  }
+  if (run.copy.done["connect.billing.verify"]) console.log("  ok  pnpm billing verify passed at the end of connect (step 32)");
+  console.log("\n  Now the checks only you can do. Answer each yes, or no if it fails:");
+  const questions = [
+    ["sign-in", "Sign in with the emailed code: does the dashboard show the businesses, calls and messages?"],
+    ["files", "Open a knowledge document or a call recording, then upload a small file: did both work?"],
+    ["call", "Call a business's number: did the receptionist answer?"],
+    ["text", "Text that number: does the text show in the dashboard? (yes too if it takes no texts)"],
+    ...(run.copy.settings.POLAR ? [["Polar", `In Polar, Settings > Webhooks: is there one endpoint, for https://${host}/api/webhooks/polar, with its newest deliveries answered 200, and does a business's billing portal open?`]] : []),
+    ["worker", "Does the new worker's log in Railway show jobs running, without errors?"],
+    ...(control ? [["control panel", `Does https://${control} open and show the businesses?`]] : []),
+  ];
+  for (const [label, question] of questions) {
+    if ((await ask(`  ${question} `)).toLowerCase() !== "yes") failed.push(label);
+  }
+  run.state.values.checks = { at: new Date().toISOString(), failed };
+  keepState(run);
+  if (failed.length) throw new Stop(`${joined(failed)} didn't pass. Fix ${failed.length === 1 ? "it" : "them"} if it's quick, then run check again; if not, go back within the first hour, before real traffic builds up on the new database: node devops/redeploy.mjs back`);
+  console.log("  Every check passed");
+}
+
+// ---------------------------------------------------------------- back (G1 to G9)
+
+/** Whether the address had left the old admin: going back then moves it back too (G4 to G9). */
+const switched = ({ run, old, fresh }) => Boolean(run.state.done["30"] || run.state.values.cutover?.addressLeftOld || !hasAddress(old, run.host) || hasAddress(fresh, run.host));
+
+function checkBack(ctx) {
+  const { run, old } = ctx;
+  assertNew(ctx);
+  if (old.project.deletedAt) throw new Stop(`Railway is deleting the old project, "${old.project.name}" (step 40), so there's nothing to go back to. Its Settings can cancel the deletion within 48 hours of retire`);
+  const started = run.state.values.backPath || CUTOVER.some((step) => run.state.done[step.n]) || run.state.values.cutover || ["admin", "worker"].some((role) => stoppedNow(old, role)) || !hasAddress(old, run.host);
+  if (!started) throw new Stop("the cutover hasn't started: production runs on the old project, so there's nothing to go back from");
+  ctx.path = run.state.values.backPath ?? (switched(ctx) ? "after" : "before");
+}
+
+function backChanges(ctx, todo) {
+  const { run } = ctx;
+  const lines = [];
+  if (ctx.path === "before") {
+    if (todo.has("G1")) lines.push("let the app's roles connect to the old database again (G1)");
+    if (todo.has("G2")) lines.push("start the old admin, worker and cloudflared again, with their copies (G2)");
+    if (todo.has("G3")) lines.push("empty the new database and deploy the new migrate again, so a sync of the branch can't start a new worker on production's data (G3)");
+    lines.push(`${run.host} stayed on the old admin, so nothing outside Railway changes. The new project stays, for another try from step 22`);
+  } else {
+    if (todo.has("G4")) lines.push(`stop the new admin, worker, control panel and cloudflared, and take ${run.host} off the new admin (G4)`);
+    if (todo.has("G5")) lines.push(`give ${run.host} back to the old admin, and point its records in Cloudflare at the old project, asking first for the CNAME (G5)`);
+    if (todo.has("G6") || todo.has("G7")) lines.push("let the app's roles connect to the old database again, and start the old admin, worker and cloudflared (G6 and G7)");
+    if (todo.has("G8")) lines.push("rename the new database lobbystack_after_switch, which keeps what customers wrote since the switch, make an empty one, and deploy the new migrate again (G8)");
+    lines.push("What was written to the new database since the switch doesn't come back to the old one. The new project stays, for another try from step 22");
+  }
+  if (FINISH.some((step) => run.state.done[step.n])) lines.push("finish has run, so the old services start from the image they last ran: step 36 disconnected them from the repository");
+  return lines;
+}
+
+function backQuestion(ctx) {
+  return ctx.path === "before"
+    ? "Production goes back to the old project, as it was before the cutover."
+    : `Production goes back to the old project, and ${ctx.run.host} with it; what customers wrote since the switch stays behind in the new project.`;
+}
+
+async function openOld(ctx) {
+  const { run } = ctx;
+  const { password, on } = await databases(ctx, { versions: false });
+  pgOrStop(run, password, ["psql", "-X", ...at(on.old), "-d", "postgres", "-c", "grant connect on database lobbystack to public"], "the grant");
+  console.log("  the app's roles can connect to the old database again");
+}
+
+/** G2 and G7: the old services started again, and production answering from them once the address is theirs. */
+async function startOld(ctx) {
+  const { run } = ctx;
+  const old = await readProject(run.old, "old");
+  const roles = ["admin", "worker", "cloudflared"].filter((role) => stoppedNow(old, role));
+  if (!roles.length) console.log("  = the old admin, worker and cloudflared are running");
+  for (const role of roles) {
+    const before = old.service(role).instance.latestDeployment.id;
+    await startService(ctx, old, role);
+    await deployed(old, role, before);
+  }
+  if (roles.length) console.log(`  the old ${joined(roles.map(roleName))} ${roles.length === 1 ? "runs" : "run"} again`);
+  await loadDomains(old);
+  if (!hasAddress(old, run.host)) return;
+  await waitUntil(15, `https://${run.host}/api/health/ready to answer "ok":true from the old project`, async () => (await health(run.host, "/api/health/ready")).body?.ok === true);
+  console.log(`  https://${run.host} answers "ok":true, from the old project`);
+}
+
+/** G3: the new database emptied, so a new worker that a sync starts finds nothing to act on. */
+async function emptyNew(ctx) {
+  const { run } = ctx;
+  const fresh = await readProject(run.copy.values, "new");
+  await stopServices(ctx, fresh, ["admin", "worker", "control"], { quiet: true });
+  const { password, on } = await databases(ctx, { versions: false });
+  pgOrStop(run, password, ["dropdb", ...at(on.new), "--if-exists", "--force", "lobbystack"], "dropdb");
+  pgOrStop(run, password, ["createdb", ...at(on.new), "lobbystack"], "createdb");
+  console.log("  emptied the new database");
+  await deployAgain(fresh, "migrate");
+}
+
+async function stopNewAll(ctx) {
+  const { run } = ctx;
+  const fresh = assertNew(ctx);
+  if (await removeName(fresh, run.host)) console.log(`  took ${run.host} off the new admin`);
+  else console.log(`  = the new admin doesn't have ${run.host}`);
+  await stopServices(ctx, fresh, ["admin", "worker", "control", "cloudflared"]);
+}
+
+/** G5: the address on the old admin again, with the records Railway asks for, which are step 7's unless Railway says otherwise. */
+async function addressBack(ctx) {
+  const { run, old } = ctx;
+  const host = run.host;
+  if (await domainOn(old, host)) console.log(`  = the old admin has ${host}`);
+  else {
+    await waitUntil(10, `${host} to be free in Railway`, async () => (await gql(Q.domainAvailable, { domain: host })).customDomainAvailable?.available !== false);
+    await gql(Q.domainCreate, { input: { domain: host, environmentId: old.environment.id, projectId: old.project.id, serviceId: old.service("admin").id, targetPort: 3000 } });
+    console.log(`  gave ${host} back to the old admin`);
+  }
+  const records = await waitUntil(2, `Railway's DNS records for ${host}`, async () => {
+    const found = recordsOf(await domainOn(old, host), host);
+    return found.length ? found : null;
+  });
+  for (const record of records) {
+    const noted = (run.state.values.noted?.records ?? []).find((item) => item.type === record.type && item.name === record.name);
+    if (noted && unquote(noted.content) !== record.content) console.log(`  Railway asks for ${record.type} ${record.name} ${record.content}, where step 7 noted ${unquote(noted.content)}: Railway's is used`);
+  }
+  const zone = String(run.settings.CLOUDFLARE_ZONE ?? "").toLowerCase();
+  const token = secretOf(run, "CLOUDFLARE_API_TOKEN");
+  if (!zone || !token) {
+    console.log(`  ${zone ? "There's no CLOUDFLARE_API_TOKEN" : "The settings name no CLOUDFLARE_ZONE"}, so set these at the DNS provider now, DNS only:`);
+    for (const record of records) console.log(`    ${record.type.padEnd(5)} ${record.name}  ${record.content}`);
+    await confirm("  Are they set?");
+    return;
+  }
+  const zoneId = await cloudflareZone(token, zone);
+  for (const record of records) {
+    const existing = ((await cloudflare(token, `/zones/${zoneId}/dns_records?type=${record.type}&name=${encodeURIComponent(record.name)}`)) ?? []).filter((item) => item.name === record.name);
+    const same = existing.find((item) => unquote(item.content).toLowerCase() === record.content.toLowerCase());
+    const replace = record.type === "CNAME" ? existing[0] : existing.find((item) => unquote(item.content).startsWith("railway-verify="));
+    if (same) console.log(`  = Cloudflare: ${record.type} ${record.name}`);
+    else if (replace) {
+      if (record.type === "CNAME") await confirm(`  ${record.name} points to ${replace.content} now. Point it to ${record.content}, the old project, again?`);
+      await cloudflare(token, `/zones/${zoneId}/dns_records/${replace.id}`, { method: "PATCH", body: { content: record.content, ttl: 1, proxied: false } });
+      console.log(`  Cloudflare: ${record.type} ${record.name}  ${record.content} (changed)`);
+    } else {
+      await cloudflare(token, `/zones/${zoneId}/dns_records`, { method: "POST", body: { type: record.type, name: record.name, content: record.content, ttl: 1, proxied: false } });
+      console.log(`  Cloudflare: ${record.type} ${record.name}  ${record.content} (made)`);
+    }
+  }
+}
+
+const unquote = (text) => String(text ?? "").replace(/^"|"$/g, "");
+
+/** G8: the new database renamed, keeping what customers wrote since the switch, and an empty one made in its place. */
+async function asideNew(ctx) {
+  const { run } = ctx;
+  const fresh = await readProject(run.copy.values, "new");
+  await stopServices(ctx, fresh, ["admin", "worker", "control"], { quiet: true });
+  const { password, on } = await databases(ctx, { versions: false });
+  const names = pgOrStop(run, password, ["psql", "-X", ...at(on.new), "-d", "postgres", "-Atc", "select datname from pg_database"], "the list of databases").trim().split(/\r?\n/);
+  const kept = run.state.values.aside;
+  if (kept && names.includes(kept)) console.log(`  = the new database was set aside as ${kept} already`);
+  else if (names.includes("lobbystack")) {
+    const aside = names.includes("lobbystack_after_switch") ? `lobbystack_after_switch_${new Date().toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "_")}` : "lobbystack_after_switch";
+    pgOrStop(run, password, ["psql", "-X", ...at(on.new), "-d", "postgres",
+      "-c", "select count(pg_terminate_backend(pid, 5000)) from pg_stat_activity where datname = 'lobbystack' and pid <> pg_backend_pid()",
+      "-c", `alter database lobbystack rename to ${aside}`], "the rename");
+    run.state.values.aside = aside;
+    keepState(run);
+    console.log(`  the new database is ${aside} now: what customers wrote since the switch, to look things up in. Nothing reads it`);
+  }
+  if (!pgOrStop(run, password, ["psql", "-X", ...at(on.new), "-d", "postgres", "-Atc", "select datname from pg_database"], "the list of databases").trim().split(/\r?\n/).includes("lobbystack")) {
+    pgOrStop(run, password, ["createdb", ...at(on.new), "lobbystack"], "createdb");
+  }
+  await deployAgain(fresh, "migrate");
+}
+
+async function polarNote(ctx) {
+  const { run } = ctx;
+  const temporary = run.state.values.temporary ?? "the temporary address";
+  console.log(`  Nothing changes at Twilio, OpenAI or Polar: their webhooks go to https://${run.host}, which is the old project's again. If connect ever ran on the copy while it had ${temporary}, delete Polar's webhook to https://${temporary}/api/webhooks/polar (Polar: Settings > Webhooks)`);
+}
+
+/**
+ * Once every step of going back is done: the TCP proxies step 22 opened are closed, and the cutover's record is
+ * cleared, so another try starts again from step 22.
+ */
+async function wentBack(ctx) {
+  const { run, old, fresh } = ctx;
+  const values = run.state.values;
+  for (const where of [old, fresh]) {
+    if (!where || !(values.proxies ?? []).includes(where.which)) continue;
+    const closed = await attempt(() => closeProxy(run, where));
+    if (closed?.error) console.log(`  couldn't close the ${where.which} database's TCP proxy (${closed.error}): delete it by hand, in Postgres > Settings > Networking`);
+  }
+  (values.wentBack ??= []).push({ at: new Date().toISOString(), path: values.backPath ?? ctx.path, ...(values.aside ? { aside: values.aside } : {}) });
+  for (const step of [...CUTOVER, ...CHECK, ...BACK_BEFORE, ...BACK_AFTER]) delete run.state.done[step.n];
+  for (const key of ["backPath", "cutover", "removed", "servers", "checks", "aside"]) delete values[key];
+  keepState(run);
+  console.log(`\n  Production runs on the old project again. ${run.file} still describes it; the copy, ${path.basename(run.copy.file)}, the new project`);
+}
+
+// ---------------------------------------------------------------- recover (R1)
+
+/** R1: the -pg18 files put back from their newest copy in the backup folder, the ones there now kept aside. */
+async function recoverCommand(run) {
+  const release = options.dryRun ? () => undefined : tryLock(run);
+  if (!release) {
+    const holder = lockHolder(run);
+    throw new Stop(`another run${holder ? ` (${holder.command ?? "a command"}, process ${holder.pid})` : ""} is using ${run.stateFile}. Let it finish; if none is running, delete ${run.stateFile}.lock (R2)`);
+  }
+  run.locked = !options.dryRun;
+  try {
+    if (!options.dryRun) {
+      logFile = `${run.file}.redeploy.log`;
+      logOnly(`\n==== recover ${path.basename(run.file)} | ${new Date().toISOString()} | node ${process.version} on ${process.platform}`);
+    }
+    printFiles(run);
+    const copy = `${run.file}${COPY_SUFFIX}`;
+    const from = ["after-cutover", "after-stage-1"].map((folder) => path.join(run.backup, folder)).find((folder) => fs.existsSync(path.join(folder, path.basename(copy))));
+    if (!from) throw new Stop(`the backup folder has no copy of ${path.basename(copy)}: neither after-cutover (step 31) nor after-stage-1 (step 14). Make the copy again from the original files (devops/redeploy.md, "If a run stops")`);
+    // What the copy's state file learned after the backup was made runs again.
+    const again = (path.basename(from) === "after-cutover" ? ["32", "33"] : ["30", "31", "32", "33"]).filter((n) => run.state.done[n]);
+    const aside = path.join(run.backup, `replaced-${new Date().toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-")}`);
+    const ends = ["", ".secrets", ".state.json"];
+    const here = ends.map((end) => `${copy}${end}`).filter((file) => fs.existsSync(file));
+    console.log(`\nrecover (R1) ${options.dryRun ? "would" : "will"}:`);
+    if (here.length) console.log(`  - move ${here.map((file) => path.basename(file)).join(", ")} into ${aside}`);
+    console.log(`  - copy the three ${COPY_SUFFIX} files back from ${from}`);
+    if (again.length) console.log(`  - record steps ${joined(again)} as not done, so cutover runs ${again.length === 1 ? "it" : "them"} again`);
+    if (options.dryRun) return console.log("\nA dry run: nothing was changed.");
+    await confirm("");
+    if (here.length) {
+      fs.mkdirSync(aside, { recursive: true, mode: 0o700 });
+      for (const file of here) fs.renameSync(file, path.join(aside, path.basename(file)));
+    }
+    for (const end of ends) {
+      const saved = path.join(from, `${path.basename(copy)}${end}`);
+      if (fs.existsSync(saved)) copyPrivate(saved, `${copy}${end}`);
+    }
+    for (const n of again) delete run.state.done[n];
+    if (again.includes("30")) delete run.state.values.cutover?.redo;
+    if (again.includes("32")) delete run.state.values.cutover?.connectRedo;
+    keepState(run);
+    console.log(`\nPut the ${COPY_SUFFIX} files back from ${from}.${here.length ? ` The ones that were here are in ${aside}.` : ""} Next: node devops/redeploy.mjs status ${path.basename(run.file)}, then the command whose step is next.`);
+  } finally {
+    release();
+    run.locked = false;
+  }
 }
 
 // ---------------------------------------------------------------- waiting
@@ -2500,7 +3280,7 @@ async function attempt(read) {
 
 // ---------------------------------------------------------------- the command line
 
-const CHANGE_COMMANDS = ["prepare", "trial", "finish", "retire"];
+const CHANGE_COMMANDS = ["prepare", "trial", "cutover", "check", "back", "recover", "finish", "retire"];
 
 function parseArgs(argv) {
   const parsed = { command: "", target: "", backup: "", save: "", temporary: "", rehearse: "", dryRun: false, noRehearsal: false, sameVersion: false };
@@ -2538,7 +3318,7 @@ function parseArgs(argv) {
   only("--dry-run", CHANGE_COMMANDS);
   only("--temporary", ["prepare"]);
   for (const option of ["--rehearse", "--no-rehearsal"]) only(option, ["trial"]);
-  only("--same-version", ["prepare", "trial"]);
+  only("--same-version", ["prepare", "trial", "cutover"]);
   return parsed;
 }
 
@@ -2550,7 +3330,7 @@ function help() {
 }
 
 function usage(problem) {
-  consoleOriginal.error(`${problem}\n\nUsage: node devops/redeploy.mjs status <settings file or address> [--backup <folder>]\n       node devops/redeploy.mjs prepare|trial|finish|retire <settings file or address> [--dry-run]\n       node devops/redeploy.mjs schema [--save <file>]\nRun it with --help for more, and see devops/redeploy.md.`);
+  consoleOriginal.error(`${problem}\n\nUsage: node devops/redeploy.mjs status <settings file or address> [--backup <folder>]\n       node devops/redeploy.mjs prepare|trial|cutover|check|back|recover|finish|retire <settings file or address> [--dry-run]\n       node devops/redeploy.mjs schema [--save <file>]\nRun it with --help for more, and see devops/redeploy.md.`);
   process.exit(2);
 }
 

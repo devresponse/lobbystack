@@ -1097,7 +1097,7 @@ describe.skipIf(process.platform === "win32")("devops/redeploy.mjs", { timeout: 
     writeTools({ dockerRunning: false, aws: false });
     const stopped = await redeploy(["status", settingsName]);
     expect(stopped.out).toContain("note   Docker 28.1.1 is installed but isn't running: start Docker Desktop before the copy");
-    expect(stopped.out).toContain("FIX    no AWS CLI: the bucket's files are copied with it (guide 7.7)");
+    expect(stopped.out).toContain("FIX    no AWS CLI, version 2: the bucket's files are copied with it (guide 7.7)");
     writeTools({ docker: false, image: false });
     const missing = await redeploy(["status", settingsName]);
     expect(missing.out).toContain("FIX    no Docker: PostgreSQL 18's tools run in it, for the database copy (Docker Desktop on Windows and Mac)");

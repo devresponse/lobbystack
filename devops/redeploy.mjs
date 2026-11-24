@@ -2439,8 +2439,9 @@ async function dumpOld(ctx) {
   const { run } = ctx;
   const { password, on } = await databases(ctx);
   const cutover = (run.state.values.cutover ??= {});
-  // Quiet and unaligned: the sessions it ended, then the database's own settings, or none.
-  const [ended = "?", settings = "none"] = pgOrStop(run, password, ["psql", "-X", "-q", "-At", ...at(on.old), "-d", "lobbystack", "-f", "freeze.sql"], "the freeze").trim().split(/\r?\n/);
+  // Quiet and unaligned: the sessions it ended, then the database's own settings, or none. An error stops it, so the
+  // dump never follows a freeze that didn't happen.
+  const [ended = "?", settings = "none"] = pgOrStop(run, password, ["psql", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", ...at(on.old), "-d", "lobbystack", "-f", "freeze.sql"], "the freeze").trim().split(/\r?\n/);
   cutover.mark = /lobbystack\.reset_protection\s*=\s*on/i.test(settings);
   keepState(run);
   console.log(`  froze the old database: the app's roles can't connect any more, and ${count(Number(ended) || 0, "session")} ended. Its own settings: ${settings}`);

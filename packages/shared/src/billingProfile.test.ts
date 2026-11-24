@@ -167,6 +167,8 @@ describe("billingProfileSchema", () => {
     // A business holds one number at most.
     refused(withPlans({}, (file) => { file.plans.pro.limits.businessNumbers = 2; }), /^plans\.pro\.limits\.businessNumbers: /);
     refused(withPlans({ extra: extra({ limits: { businessNumbers: 2 } }) }), /^plans\.extra\.limits\.businessNumbers: /);
+    // Polar's discount codes on pack checkouts are on or off.
+    refused(withPlans({}, (file) => { file.polar.packDiscountCodes = "yes"; }), /^polar\.packDiscountCodes: /);
   });
 });
 
@@ -255,6 +257,14 @@ describe("the profile hash", () => {
       withPlans({ extra: extra() }),
     ].map(profileHash);
     expect(new Set([base, ...changed]).size).toBe(changed.length + 1);
+  });
+
+  it("leaves a file without packDiscountCodes hashing as before the switch existed, and changes once a file turns it on", () => {
+    // Left out, the stored profile has no such key, so AlloPlace's hash and every applied file's stay as they were.
+    expect(canonicalBillingProfileJson(parse(alloplace()))).not.toContain("packDiscountCodes");
+    const on = withPlans({}, (file) => { file.polar.packDiscountCodes = true; });
+    expect(normalizeBillingProfile(parse(on)).polar).toMatchObject({ packDiscountCodes: true });
+    expect(profileHash(on)).not.toBe(profileHash(alloplace()));
   });
 });
 
@@ -386,6 +396,8 @@ describe("prepaid packs", () => {
     expect(profile.display?.plans?.map((card) => [card.plan ?? card.pack, card.popular === true])).toEqual([["free_cloud", false], ["listing_1_180", false], ["listings_3_365", true], ["listings_6_365", false]]);
     expect(profile.display?.comparison).toEqual([]);
     expect(profile.display?.packs).toBeUndefined();
+    // Its packs' Polar checkouts take a discount code made in Polar's dashboard, such as a promotion's.
+    expect(profile.polar?.packDiscountCodes).toBe(true);
   });
 
   it("takes a pack's allowances and limits as the file gives them, and only receptionists left out from Starter", () => {

@@ -142,7 +142,8 @@ export class PolarBilling implements BillingProvider {
 
   /**
    * The plan checkout's request for the pack's one-time product, with
-   * metadata naming the business, the pack checkout and the role pack.
+   * metadata naming the business, the pack checkout and the role pack, and
+   * with Polar's discount code box only when discountCodes asks for it.
    * Polar's answer doesn't say when its page expires.
    */
   async createPackCheckout(input: Parameters<BillingProvider["createPackCheckout"]>[0]): Promise<{ id: string; url: string; expiresAt: Date | null }> {
@@ -151,6 +152,7 @@ export class PolarBilling implements BillingProvider {
       productId: input.price.ref,
       customer: input.customer.id ? { id: input.customer.id } : { email: input.email, externalId: input.customer.billingKey },
       metadata: { ...input.metadata, lobbystack_business: input.businessId, lobbystack_pack_checkout: input.checkoutId, lobbystack_role: "pack" },
+      ...(input.discountCodes ? { allowDiscountCodes: true } : {}),
       successUrl: input.successUrl,
       // Someone leaving checkout hasn't paid, so it returns to the plan page without the success marker.
       returnUrl: input.cancelUrl,

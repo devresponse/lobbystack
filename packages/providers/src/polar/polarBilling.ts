@@ -197,16 +197,17 @@ export class PolarBillingProvider {
    * A checkout page for one product, made out to a customer: one the caller
    * found or made, whose email the page then fixes, or else an email and
    * external ID, from which Polar picks a customer by email at payment, or
-   * makes one. Discount codes typed into Polar's page are off: a discount
-   * comes only with a promo plan, which the deployment's own codes sell. Its
-   * metadata is copied onto the subscription and its orders. Polar takes no
-   * idempotency key here, so a retry makes another page; a customer can still
-   * hold only one subscription.
+   * makes one. Discount codes typed into Polar's page are off unless
+   * allowDiscountCodes turns them on, which only a pack's checkout does where
+   * the brand's file says so: a plan's discount comes only with a promo plan,
+   * which the deployment's own codes sell. Its metadata is copied onto the
+   * subscription and its orders. Polar takes no idempotency key here, so a
+   * retry makes another page; a customer can still hold only one subscription.
    */
-  async createCheckout(input: { productId: string; customer: { id: string } | { email: string; externalId: string }; metadata: Record<string, string>; discountId?: string | null; successUrl: string; returnUrl: string }): Promise<{ checkoutUrl: string; checkoutId: string }> {
+  async createCheckout(input: { productId: string; customer: { id: string } | { email: string; externalId: string }; metadata: Record<string, string>; discountId?: string | null; allowDiscountCodes?: boolean; successUrl: string; returnUrl: string }): Promise<{ checkoutUrl: string; checkoutId: string }> {
     if ("email" in input.customer) assertCertificationRecipient("email", input.customer.email);
     const customer = "id" in input.customer ? { customer_id: input.customer.id } : { customer_email: input.customer.email, external_customer_id: input.customer.externalId };
-    const result = read("checkout", checkoutAnswer, await this.request(`/v1/checkouts/`, { method: "POST", body: JSON.stringify({ products: [input.productId], ...customer, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.discountId ? { discount_id: input.discountId } : {}), metadata: input.metadata }) }));
+    const result = read("checkout", checkoutAnswer, await this.request(`/v1/checkouts/`, { method: "POST", body: JSON.stringify({ products: [input.productId], ...customer, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: input.allowDiscountCodes === true, ...(input.discountId ? { discount_id: input.discountId } : {}), metadata: input.metadata }) }));
     return { checkoutUrl: result.url, checkoutId: result.id };
   }
 

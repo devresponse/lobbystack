@@ -82,6 +82,16 @@ A business can't buy a pack when the checkout refuses it, in this order, after o
 
 The same person asking again for the same pack and billing email while their checkout is pending or processing gets that checkout back.
 
+## Take money off a pack with a discount code
+
+The deployment's own promo codes unlock plans, never packs ([billing](../billing/README.md#sell-promo-codes-and-promo-plans)). On Polar, a brand's `billing.json` can let a pack's payment page take a discount code made in Polar's dashboard instead: with `"packDiscountCodes": true` in its `polar` block, the worker makes each pack's checkout with Polar's discount code field turned on (`allow_discount_codes`), and whoever pays types the code there. Plan checkouts keep the field off, since a plan's discount comes only with a promo plan, and Stripe's pages take no code either way. RealInfoBot's file turns it on since fork PR #241 (2026-11-24), for promotions on its listing packs; AlloPlace's leaves it out, so its pages are as they were. Checked against `develop/r2` at `64b5699`.
+
+- **Make the code in Polar's dashboard,** in the deployment's own organization, under **Products > Discounts**: a percentage, such as 95, or a fixed amount, the duration **Once**, the pack products it may take money off, a code of letters and digits, and a redemption limit and an end date, which Polar enforces. LobbyStack never makes, reads or ends these discounts, and since they carry no `lobbystack_*` tags, `pnpm billing apply`, `pnpm billing verify` and the daily check leave them alone.
+- **The business gets the whole pack,** whatever it paid: the pack's terms come from its checkout, and nothing compares the payment with the pack's price. The order's total after the discount is the pack's payment, so a partial refund takes its share of what was paid, and refunding all of it ends the pack ([below](#know-what-refunds-and-disputes-do)).
+- **The screens keep the full price.** The pack's card and the **Upgrade plan** dialog show the pack's own price, and the discount appears only on Polar's page. **Have a promo code?** takes only the deployment's codes for plans, so it calls a pack's code not valid; the **Plan** help page tells buyers to type it on the payment page.
+- **It follows the last applied file.** The worker reads the switch from the latest catalog run when it makes each checkout, so turning it on or off takes effect at the next `pnpm billing apply` after the deploy, and a page already made keeps what it was made with. The switch is part of the file's hash, so every deployment of the brand needs that apply: until then `pnpm billing verify` reports drift and the daily check warns `code_hash`. An instance built before it refuses the file, so deploy first. A file that leaves it out hashes as it did before the switch existed.
+- **Tried only in code,** against a stand-in for Polar: the first real code on a deployment is its test.
+
 ## Switch between a pack and a subscription
 
 A business can move either way, and minutes or allowances left at the switch are gone (decision 6). Each step acts only when a pack is involved.

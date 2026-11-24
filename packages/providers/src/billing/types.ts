@@ -96,9 +96,11 @@ export interface BillingProvider {
    * or product, and checkoutId the pack checkout's own ID, which the page's
    * metadata carries back with the payment, beside the role pack. On Stripe,
    * merchantOfRecord sells it with Stripe as the merchant of record (Managed
-   * Payments). expiresAt is null when the provider doesn't say.
+   * Payments). On Polar, discountCodes lets whoever pays type a discount code
+   * made in Polar's dashboard on the page; Stripe's pages take none.
+   * expiresAt is null when the provider doesn't say.
    */
-  createPackCheckout(input: { customer: CustomerRef; email: string; price: Pick<PriceRef, "ref">; businessId: string; checkoutId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; merchantOfRecord?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
+  createPackCheckout(input: { customer: CustomerRef; email: string; price: Pick<PriceRef, "ref">; businessId: string; checkoutId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; merchantOfRecord?: boolean; discountCodes?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
   /**
    * Closes a pack's payment page, the provider's checkout id, so nobody can
    * pay on it any more, as when a plan started while it was open (Stripe

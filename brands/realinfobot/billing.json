@@ -9,7 +9,8 @@
     "allowMultipleSubscriptions": false,
     "portalPlanChanges": true,
     "upgradeProration": "invoice",
-    "downgradeProration": "next_period"
+    "downgradeProration": "next_period",
+    "packDiscountCodes": true
   },
   "stripe": {
     "upgrade": "invoice",

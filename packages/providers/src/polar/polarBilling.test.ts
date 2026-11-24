@@ -122,6 +122,20 @@ describe("PolarBillingProvider", () => {
     expect(plain).not.toHaveProperty("discount_id");
   });
 
+  it("turns Polar's discount code box on only when asked, as a pack's checkout does where the brand's file says so", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "checkout-3", url: "https://polar.example/checkout-3" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+    const checkout = { productId: "product-pack", customer: { id: "customer-1" }, metadata: { lobbystack_business: "1" }, successUrl: "https://app.example/settings/plan?pack=success", returnUrl: "https://app.example/settings/plan" };
+
+    await provider.createCheckout({ ...checkout, allowDiscountCodes: true });
+    await provider.createCheckout({ ...checkout, allowDiscountCodes: false });
+
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+    expect(bodies.map((body) => body.allow_discount_codes)).toEqual([true, false]);
+    expect(bodies[0]).not.toHaveProperty("discount_id");
+  });
+
   it("sends a discount with a product move only when asked, null removing it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-promo", cancel_at_period_end: false, ended_at: null, pending_update: null }) });
     vi.stubGlobal("fetch", fetchMock);

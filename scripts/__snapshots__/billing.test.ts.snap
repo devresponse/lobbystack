@@ -600,7 +600,7 @@ exports[`pnpm billing's output > plans realinfobot on an empty organization 1`] 
   "out": {
     "brand": "realinfobot",
     "catalog": [],
-    "hash": "6d542585db39c0d5dfbc0a224e6a80b356c06c587c0446dcc6ce7aff6bf906cc",
+    "hash": "ec72d0319be891a8ef41d88ca2e93b4ef0b2c40fda328c39f0778ded43233b01",
     "instance": "https://demo.alloplace.com",
     "links": {
       "packs": 3,
@@ -693,7 +693,7 @@ exports[`pnpm billing's output > plans realinfobot on the objects polar-setup.mj
   "out": {
     "brand": "realinfobot",
     "catalog": [],
-    "hash": "6d542585db39c0d5dfbc0a224e6a80b356c06c587c0446dcc6ce7aff6bf906cc",
+    "hash": "ec72d0319be891a8ef41d88ca2e93b4ef0b2c40fda328c39f0778ded43233b01",
     "instance": "https://demo.alloplace.com",
     "links": {
       "packs": 3,

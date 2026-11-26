@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { billingAccounts, billingPlans } from "@lobbystack/db";
 
-// GET /api/billing with its reads stubbed: what it answers about prepaid packs,
-// and the plan's end and waiting change once a pack replaced the subscription.
+// GET /api/billing with its reads stubbed: what it answers about prepaid packs
+// and top-ups, and the plan's end and waiting change once a pack replaced the
+// subscription.
 
 type Row = Record<string, unknown>;
 const fixture = vi.hoisted(() => ({
@@ -13,10 +14,12 @@ const fixture = vi.hoisted(() => ({
   packsConfigured: true,
   offers: [] as Row[],
   packs: [] as Row[],
+  topUps: [] as Row[],
   eligibility: { refusal: null, endsSubscription: null } as Row,
   reads: [] as unknown[],
   loadPackOffers: vi.fn(),
   loadBusinessPacks: vi.fn(),
+  listBusinessTopUps: vi.fn(),
   packCheckoutEligibility: vi.fn(),
   planDisplay: null as Row | null,
 }));
@@ -49,6 +52,7 @@ vi.mock("@lobbystack/domain", () => ({
   deploymentPlanDisplay: () => fixture.planDisplay,
   getKnowledgeStorageUsageBytes: async () => 0,
   isLiveSubscriptionState: (state: string | null | undefined) => ["active", "trialing", "past_due"].includes(state ?? ""),
+  listBusinessTopUps: fixture.listBusinessTopUps,
   isReplacedSubscription: (account: { subscriptionId: string | null; replacedSubscriptionId?: string | null } | null | undefined) => Boolean(account?.replacedSubscriptionId) && account?.replacedSubscriptionId === account?.subscriptionId,
   loadBillingCatalog: async () => ({ catalog: {}, links: {} }),
   loadBusinessPacks: fixture.loadBusinessPacks,
@@ -71,9 +75,10 @@ const offer = (code: string, checkoutAvailable = true) => ({ code, names: { en: 
 const subscription = { source: "stripe", customerId: "cus_1", subscriptionId: "sub_1", plan: "starter", billingKey: "business:business", billingInterval: "monthly", subscriptionState: "active", currentPeriodStart: null, currentPeriodEnd: null, overageSpendingCapCents: null, cancelAt: new Date("2026-12-01T00:00:00.000Z"), nextPlanCode: "pro", nextInterval: "monthly", nextChangeAt: new Date("2026-12-01T00:00:00.000Z"), planCode: null, replacedSubscriptionId: null };
 
 beforeEach(() => {
-  Object.assign(fixture, { account: null, nextPlan: null, plan: "free_cloud", admin: true, packsConfigured: true, offers: [], packs: [], eligibility: { refusal: null, endsSubscription: null }, reads: [], planDisplay: null });
+  Object.assign(fixture, { account: null, nextPlan: null, plan: "free_cloud", admin: true, packsConfigured: true, offers: [], packs: [], topUps: [], eligibility: { refusal: null, endsSubscription: null }, reads: [], planDisplay: null });
   fixture.loadPackOffers.mockImplementation(async (_tx: unknown, input: { checkout: boolean }) => fixture.offers.map((row) => ({ ...row, checkoutAvailable: input.checkout && row.checkoutAvailable === true })));
   fixture.loadBusinessPacks.mockImplementation(async () => fixture.packs);
+  fixture.listBusinessTopUps.mockImplementation(async () => fixture.topUps);
   fixture.packCheckoutEligibility.mockImplementation(async () => fixture.eligibility);
 });
 afterEach(() => { vi.clearAllMocks(); });
@@ -142,6 +147,21 @@ describe("the billing summary's prepaid packs", () => {
     expect(account).not.toHaveProperty("replacedSubscriptionId");
     fixture.account = null;
     expect((await get()).account).toBeNull();
+  });
+});
+
+describe("the billing summary's top-ups", () => {
+  it("answers the business's top-ups as the ledger lists them, to every member", async () => {
+    expect((await get()).topUps).toEqual([]);
+    expect(fixture.listBusinessTopUps).toHaveBeenCalledExactlyOnceWith(expect.anything(), "business");
+    const amounts = { voiceSeconds: 3_600, alertSmsSegments: 0, outboundCallAttempts: 5, chatAiUnits: 0 };
+    fixture.topUps = [
+      { id: "granted", source: "grant", code: null, note: "Spring promotion", gives: amounts, used: { ...amounts, voiceSeconds: 600, outboundCallAttempts: 1 }, status: "active", startsAt: "2026-11-01T00:00:00.000Z", endsAt: "2026-12-01T00:00:00.000Z", createdAt: "2026-11-01T00:00:00.000Z", revokedAt: null },
+      { id: "added", source: "code", code: "SPRING-30", note: null, gives: amounts, used: { voiceSeconds: 0, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 }, status: "scheduled", startsAt: "2026-12-01T00:00:00.000Z", endsAt: null, createdAt: "2026-11-20T00:00:00.000Z", revokedAt: null },
+    ];
+    // The plan screen shows them to everyone on the team, not only to those who manage billing.
+    fixture.admin = false;
+    expect((await get()).topUps).toEqual(fixture.topUps);
   });
 });
 

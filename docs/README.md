@@ -61,7 +61,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [See every business and account in the control panel](features/control-panel.md) | A read-only website for the deployment's operator: every business and account with their emails and phone numbers, usage and billing, on a Railway service of its own behind a Cloudflare Tunnel and Cloudflare Access, reading the database as `lobbystack_control`. The bootstrap script sets it up with `CONTROL=yes`; on `develop/r2` |
 | [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar and Stripe, promo codes, and why it is built this way |
 | [Prepaid minute packs](features/prepaid-packs.md) | Minutes paid once that last a set number of days, beside the plans: the packs on sale, buying one, how calls draw on it, switching to and from a subscription, refunds, disputes and the end of a pack |
-| [Top-ups](features/top-ups.md) | Extra minutes, texts, transfers and chats on top of any plan, which never change it: an operator's grant or a top-up code under **Have a promo code?**, how uses draw on them, and which promotion fits which way; on `develop/r2` |
+| [Top-ups](features/top-ups.md) | Extra minutes, texts, transfers and chats on top of any plan, which never change it: an operator's grant, a top-up code under **Have a promo code?**, or a top-up on sale that a business on Free or a prepaid pack buys once; how uses draw on them, refunds and disputes, and which promotion fits which way; on `develop/r2` |
 | [Sign-in email addresses](auth-email-normalization.md) | How addresses are compared |
 
 ## Understand the architecture

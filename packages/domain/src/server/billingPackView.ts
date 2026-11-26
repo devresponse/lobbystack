@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { billingAccounts, billingPackOffers, billingPackPlans, billingPacks, type DatabaseTransaction } from "@lobbystack/db";
-import { isYearlyBillingInterval, packCapacitySeconds, type BillingPlanSlug } from "@lobbystack/shared";
+import { isYearlyBillingInterval, packCapacitySeconds, topUpSoldOnPlan, type BillingPlanSlug, type BillingTopUpOffer, type TopUpCheckoutRefusal } from "@lobbystack/shared";
 
 import { isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment } from "./billing";
 import { packSecondsLeft } from "./billingPacks";
@@ -96,6 +96,8 @@ export type PackEligibilityAccount = {
 export async function loadPackOffers(tx: DatabaseTransaction, input: { checkout: boolean }): Promise<PackOfferView[]> {
   const rows = await tx.select({ code: billingPackOffers.code, names: billingPackOffers.names, voiceSec: billingPackOffers.voiceSec, days: billingPackOffers.days, smsSeg: billingPackOffers.smsSeg, callsOut: billingPackOffers.callsOut, chatUnits: billingPackOffers.chatUnits, kbBytes: billingPackOffers.kbBytes, numbers: billingPackOffers.numbers, receptionists: billingPackOffers.receptionists, currency: billingPackOffers.currency, cents: billingPackOffers.cents, providerRef: billingPackOffers.providerRef })
     .from(billingPackOffers)
+    // Top-ups on sale share the view (0155); they are sold apart, by loadTopUpOffers.
+    .where(eq(billingPackOffers.kind, "pack"))
     .orderBy(asc(billingPackOffers.sort), asc(billingPackOffers.code));
   return rows.map((row) => ({
     code: row.code,
@@ -173,4 +175,46 @@ async function readEligibilityAccount(tx: DatabaseTransaction, businessId: strin
   const [row] = await tx.select({ source: billingAccounts.source, plan: billingAccounts.plan, planCode: billingAccounts.planCode, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, replacedSubscriptionId: billingAccounts.replacedSubscriptionId, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd })
     .from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   return row ?? null;
+}
+
+// Top-ups on sale (0155): the offers, and whether the business may buy one
+// now, which mirrors the top-up checkout's own refusals that hold for every
+// top-up, in its order (billingPackCheckout.ts).
+
+/**
+ * The top-ups on sale, from billing_pack_offers' top_up rows: active, with a
+ * live price, smallest and shortest first. checkout says whether the caller
+ * may buy now; a top-up also needs the provider's object that sells it, which
+ * a link records. A deployment whose billing.json sells none gets an empty
+ * list.
+ */
+export async function loadTopUpOffers(tx: DatabaseTransaction, input: { checkout: boolean }): Promise<BillingTopUpOffer[]> {
+  const rows = await tx.select({ code: billingPackOffers.code, names: billingPackOffers.names, voiceSec: billingPackOffers.voiceSec, days: billingPackOffers.days, smsSeg: billingPackOffers.smsSeg, callsOut: billingPackOffers.callsOut, chatUnits: billingPackOffers.chatUnits, currency: billingPackOffers.currency, cents: billingPackOffers.cents, providerRef: billingPackOffers.providerRef })
+    .from(billingPackOffers)
+    .where(eq(billingPackOffers.kind, "top_up"))
+    .orderBy(asc(billingPackOffers.sort), asc(billingPackOffers.code));
+  return rows.map((row) => ({
+    code: row.code,
+    names: row.names,
+    gives: { voiceSeconds: row.voiceSec, alertSmsSegments: row.smsSeg, outboundCallAttempts: row.callsOut, chatAiUnits: row.chatUnits },
+    days: row.days,
+    amountCents: row.cents,
+    currency: row.currency,
+    checkoutAvailable: input.checkout && row.providerRef !== null,
+  }));
+}
+
+/**
+ * Why the business may not buy a top-up now, or null when it may: a managed
+ * plan is refused, then any plan but Free and a prepaid pack
+ * (docs/features/top-ups.md: Starter and Pro go on past their allowance and
+ * are billed for it; Enterprise and self-hosted deployments have no
+ * allowances). plan is the plan in force and account the billing account
+ * row, when the caller already read them; each is read here otherwise.
+ */
+export async function topUpCheckoutEligibility(tx: DatabaseTransaction, input: { businessId: string; plan?: BillingPlanSlug; account?: Pick<PackEligibilityAccount, "source" | "subscriptionState"> | null }): Promise<TopUpCheckoutRefusal | null> {
+  const account = input.account !== undefined ? input.account : await readEligibilityAccount(tx, input.businessId);
+  if (isManagedBillingAccount(account)) return "managed_plan";
+  const plan = input.plan ?? (await loadBillingContext(tx, input.businessId)).plan;
+  return topUpSoldOnPlan(plan) ? null : "top_up_not_sold_on_plan";
 }

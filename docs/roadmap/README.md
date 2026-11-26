@@ -41,12 +41,6 @@ Each feature has a status:
 | [Show why a call went wrong](call-diagnostics.md) | A diagnostics tab on each call page | 1 to 2 days for a first cut, 4 to 6 in full | Waiting on a decision | [2026-10-09](../research/observability-options.md) |
 | [Run the phone path on Azure in C#](azure-phone-path.md) | The phone path as Azure Functions, for needs only Azure meets | 44 to 65 days, plus a pilot | On hold | [2026-10-07](../research/azure-port.md) |
 
-**Billing**
-
-| Feature | What it gives | Effort | Status | Study |
-| --- | --- | --- | --- | --- |
-| [Sell top-ups through Polar and Stripe](paid-top-ups.md) | Extra minutes, texts, transfers and chats an owner buys in the app on top of the plan, beside the free top-ups operators give since migration `0154` | About 5 to 8 days in 1 or 2 pull requests | Waiting on 4 decisions | None; the maintainer's request of 2026-11-26 ([top-ups](../features/top-ups.md)) |
-
 **The website, scale and operations**
 
 | Feature | What it gives | Effort | Status | Study |

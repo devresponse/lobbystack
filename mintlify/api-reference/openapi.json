@@ -5246,6 +5246,264 @@
         }
       }
     },
+    "/billing/top-ups/checkout": {
+      "post": {
+        "operationId": "createTopUpCheckout",
+        "summary": "Start a checkout for a top-up",
+        "description": "Asks the billing provider for a page where the customer pays once for a top-up the deployment sells: extra voice minutes, and sometimes alert texts, transfers or website chats, on top of the business's plan, which stays as it is, for the top-up's days from the payment. GET /billing/catalog lists those on sale as packs with kind top_up. Poll GET /billing/top-ups/checkout/{checkout_id} until status is ready, then send them checkout_url; once paid, GET /billing lists the top-up under top_ups. Only a free business and one on a prepaid pack can buy one: Starter and Pro go on past their allowance and are billed for it, and the Enterprise plan, a managed plan and a self-hosted deployment are a 409, as is a top-up this deployment doesn't sell. A business makes one purchase at a time, so a new checkout while a plan checkout, a subscription change, or a pack or top-up checkout of the business is pending or processing is a 409. The same top-up and billing_email asked for again while that person's checkout is still pending or processing returns that checkout, which counts nothing. Each new checkout is a call to the provider, and counts toward a checkout's limits: past them it is a 429. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopUpCheckoutCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TopUpCheckout"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/top-ups/checkout/{checkout_id}": {
+      "get": {
+        "operationId": "getTopUpCheckout",
+        "summary": "Check a checkout for a top-up",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "checkout_id",
+            "in": "path",
+            "required": true,
+            "description": "The top-up checkout id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TopUpCheckout"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/billing/top-ups/{top_up_id}": {
       "delete": {
         "operationId": "revokeTopUp",
@@ -19853,12 +20111,13 @@
                   "type": "string",
                   "enum": [
                     "grant",
-                    "code"
+                    "code",
+                    "purchase"
                   ],
-                  "description": "grant: an operator's platform key gave it with POST /billing/top-ups. code: someone on the team added it with a top-up code."
+                  "description": "grant: an operator's platform key gave it with POST /billing/top-ups. code: someone on the team added it with a top-up code. purchase: the business paid for a top-up on sale, with POST /billing/top-ups/checkout or in Settings > Plan."
                 },
                 "code": {
-                  "description": "The top-up code that added it. Null for a grant.",
+                  "description": "The top-up code that added it. Null for a grant or a purchase.",
                   "type": [
                     "string",
                     "null"
@@ -19866,6 +20125,32 @@
                 },
                 "note": {
                   "description": "The operator's note on a grant, such as the promotion it is for, which the business sees too. Null when there is none.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "top_up": {
+                  "description": "For a purchase, the top-up on sale it was bought as: its code in the billing catalog. Null for a grant or a code.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "amount_cents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "What a purchase paid, in currency. 0 for a grant or a code."
+                },
+                "refunded_cents": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "What of a purchase's payment was refunded. A partial refund takes its share off what the top-up gives; a whole refund ends it."
+                },
+                "currency": {
+                  "description": "A purchase's currency, three lowercase letters. Null for a grant or a code.",
                   "type": [
                     "string",
                     "null"
@@ -19906,7 +20191,7 @@
                     "chat_units"
                   ],
                   "additionalProperties": false,
-                  "description": "What it adds on top of the plan."
+                  "description": "What it adds on top of the plan, after any refund's share."
                 },
                 "used": {
                   "type": "object",
@@ -19943,7 +20228,7 @@
                     "chat_units"
                   ],
                   "additionalProperties": false,
-                  "description": "What uses drew from it, never more than it gives."
+                  "description": "What uses drew from it."
                 },
                 "status": {
                   "type": "string",
@@ -19952,9 +20237,11 @@
                     "active",
                     "used_up",
                     "expired",
+                    "frozen",
+                    "refunded",
                     "revoked"
                   ],
-                  "description": "scheduled until starts_at; active while uses can draw on it; used_up once nothing it gives is left; expired once ends_at passed; revoked once an operator revoked it. Only an active top-up counts."
+                  "description": "scheduled until starts_at; active while uses can draw on it; used_up once nothing it gives is left; expired once ends_at passed; frozen while a dispute holds a purchase's payment; refunded once a purchase's whole payment went back; revoked once an operator revoked it. Only an active top-up counts."
                 },
                 "starts_at": {
                   "type": "string",
@@ -19997,6 +20284,10 @@
                 "source",
                 "code",
                 "note",
+                "top_up",
+                "amount_cents",
+                "refunded_cents",
+                "currency",
                 "gives",
                 "used",
                 "status",
@@ -20345,6 +20636,133 @@
         },
         "required": [
           "pack"
+        ],
+        "additionalProperties": false
+      },
+      "TopUpCheckout": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "top_up": {
+            "type": "string",
+            "description": "The top-up's code."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "ready",
+              "paid",
+              "failed",
+              "expired"
+            ],
+            "description": "pending or processing: the billing provider is making the page. ready: checkout_url is set until expires_at. paid: the payment arrived, and top_up_status says what became of the top-up. failed: the provider made no page, or the business moved to a plan an operator bills directly; error says why, and another checkout can be started. expired: the checkout waited too long to run, or its page expired unpaid; another can be started. A plan the business buys meanwhile leaves the checkout open, and a top-up paid then adds to that plan."
+          },
+          "top_up_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The top-up the payment added, as GET /billing lists it under top_ups. Null until the payment arrives."
+          },
+          "top_up_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "scheduled",
+                  "active",
+                  "used_up",
+                  "expired",
+                  "frozen",
+                  "refunded",
+                  "revoked"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What became of the top-up the payment added. active: the business has it. used_up, expired: as any top-up. frozen: a dispute holds its payment, so nothing draws on it until the dispute is won. refunded: its whole payment was refunded or charged back. Null until the payment arrives."
+          },
+          "checkout_url": {
+            "description": "The billing provider's page where the customer pays once for the top-up. Send it to them. Null unless status is ready.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "true once the payment arrived; top_up_status says whether the business still has the top-up."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the checkout stops being open: 15 minutes after it was asked for while the provider makes the page, then when the page expires."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "id",
+          "top_up",
+          "status",
+          "top_up_id",
+          "top_up_status",
+          "checkout_url",
+          "error",
+          "paid",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "description": "A checkout for a top-up on sale, paid once through the billing provider."
+      },
+      "TopUpCheckoutCreate": {
+        "type": "object",
+        "properties": {
+          "top_up": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "The top-up's code in the deployment's billing catalog, such as topup_100_90: a row of GET /billing/catalog's packs with kind top_up."
+          },
+          "billing_email": {
+            "description": "The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own, which can pay for any number of businesses: on Polar it owns each business's customer, and Stripe allows one email on many customers.",
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          }
+        },
+        "required": [
+          "top_up"
         ],
         "additionalProperties": false
       },
@@ -21261,7 +21679,15 @@
               "properties": {
                 "code": {
                   "type": "string",
-                  "description": "The pack's permanent code, its key in billing.json's packs."
+                  "description": "The pack's permanent code, its key in billing.json's packs, or a top-up's in its topUps."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "pack",
+                    "top_up"
+                  ],
+                  "description": "pack: a plan paid for once that lasts its days. top_up: extra allowances a business on Free or on a pack pays for once on top of its plan, which stays as it is; its limits are 0, since it changes none."
                 },
                 "status": {
                   "type": "string",
@@ -21448,6 +21874,7 @@
               },
               "required": [
                 "code",
+                "kind",
                 "status",
                 "names",
                 "voice_sec",
@@ -21467,7 +21894,7 @@
                 "prices"
               ],
               "additionalProperties": false,
-              "description": "A prepaid pack: a plan paid for once that lasts its days from the payment without renewing, with its voice minutes and every other allowance for that whole length."
+              "description": "A prepaid pack: a plan paid for once that lasts its days from the payment without renewing, with its voice minutes and every other allowance for that whole length. Or, with kind top_up, a top-up on sale: what it gives for its whole length on top of the plan."
             },
             "description": "Every prepaid pack, whatever its status, by sort then code. Empty when no applied file had packs."
           },
@@ -23467,6 +23894,106 @@
                   "additionalProperties": false
                 }
               },
+              "topUps": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "names": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "fr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "es": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "sr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        }
+                      },
+                      "required": [
+                        "en",
+                        "fr",
+                        "es",
+                        "sr"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "days": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1095
+                    },
+                    "prices": {
+                      "type": "object",
+                      "properties": {
+                        "onceCents": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 10000000
+                        }
+                      },
+                      "required": [
+                        "onceCents"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "included": {
+                      "type": "object",
+                      "properties": {
+                        "voiceMinutes": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        },
+                        "alertSmsSegments": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "outboundCallAttempts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "chatAiUnits": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000000
+                        }
+                      },
+                      "required": [
+                        "voiceMinutes",
+                        "alertSmsSegments",
+                        "outboundCallAttempts",
+                        "chatAiUnits"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "names",
+                    "prices",
+                    "included"
+                  ],
+                  "additionalProperties": false
+                }
+              },
               "accounts": {
                 "type": "object",
                 "properties": {
@@ -24074,8 +24601,8 @@
             "description": "Every sold plan that isn't retired, each with every live price."
           },
           "packs": {
-            "description": "Every pack that isn't retired, each with the object that sells its live price. Required once the catalog has packs; left out, the link names none.",
-            "maxItems": 30,
+            "description": "Every pack and top-up on sale that isn't retired, each with the object that sells its live price. Required once the catalog has packs or top-ups; left out, the link names none.",
+            "maxItems": 40,
             "type": "array",
             "items": {
               "type": "object",
@@ -24809,12 +25336,13 @@
             "type": "string",
             "enum": [
               "grant",
-              "code"
+              "code",
+              "purchase"
             ],
-            "description": "grant: an operator's platform key gave it with POST /billing/top-ups. code: someone on the team added it with a top-up code."
+            "description": "grant: an operator's platform key gave it with POST /billing/top-ups. code: someone on the team added it with a top-up code. purchase: the business paid for a top-up on sale, with POST /billing/top-ups/checkout or in Settings > Plan."
           },
           "code": {
-            "description": "The top-up code that added it. Null for a grant.",
+            "description": "The top-up code that added it. Null for a grant or a purchase.",
             "type": [
               "string",
               "null"
@@ -24822,6 +25350,32 @@
           },
           "note": {
             "description": "The operator's note on a grant, such as the promotion it is for, which the business sees too. Null when there is none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "top_up": {
+            "description": "For a purchase, the top-up on sale it was bought as: its code in the billing catalog. Null for a grant or a code.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount_cents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "What a purchase paid, in currency. 0 for a grant or a code."
+          },
+          "refunded_cents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "What of a purchase's payment was refunded. A partial refund takes its share off what the top-up gives; a whole refund ends it."
+          },
+          "currency": {
+            "description": "A purchase's currency, three lowercase letters. Null for a grant or a code.",
             "type": [
               "string",
               "null"
@@ -24862,7 +25416,7 @@
               "chat_units"
             ],
             "additionalProperties": false,
-            "description": "What it adds on top of the plan."
+            "description": "What it adds on top of the plan, after any refund's share."
           },
           "used": {
             "type": "object",
@@ -24899,7 +25453,7 @@
               "chat_units"
             ],
             "additionalProperties": false,
-            "description": "What uses drew from it, never more than it gives."
+            "description": "What uses drew from it."
           },
           "status": {
             "type": "string",
@@ -24908,9 +25462,11 @@
               "active",
               "used_up",
               "expired",
+              "frozen",
+              "refunded",
               "revoked"
             ],
-            "description": "scheduled until starts_at; active while uses can draw on it; used_up once nothing it gives is left; expired once ends_at passed; revoked once an operator revoked it. Only an active top-up counts."
+            "description": "scheduled until starts_at; active while uses can draw on it; used_up once nothing it gives is left; expired once ends_at passed; frozen while a dispute holds a purchase's payment; refunded once a purchase's whole payment went back; revoked once an operator revoked it. Only an active top-up counts."
           },
           "starts_at": {
             "type": "string",
@@ -24953,6 +25509,10 @@
           "source",
           "code",
           "note",
+          "top_up",
+          "amount_cents",
+          "refunded_cents",
+          "currency",
           "gives",
           "used",
           "status",

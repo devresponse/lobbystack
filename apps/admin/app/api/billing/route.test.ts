@@ -15,12 +15,16 @@ const fixture = vi.hoisted(() => ({
   offers: [] as Row[],
   packs: [] as Row[],
   topUps: [] as Row[],
+  topUpOffers: [] as Row[],
+  topUpRefusal: null as string | null,
   eligibility: { refusal: null, endsSubscription: null } as Row,
   reads: [] as unknown[],
   loadPackOffers: vi.fn(),
   loadBusinessPacks: vi.fn(),
   listBusinessTopUps: vi.fn(),
   packCheckoutEligibility: vi.fn(),
+  loadTopUpOffers: vi.fn(),
+  topUpCheckoutEligibility: vi.fn(),
   planDisplay: null as Row | null,
 }));
 
@@ -60,12 +64,14 @@ vi.mock("@lobbystack/domain", () => ({
   loadBusinessPromoPlan: async () => null,
   loadPackOffers: fixture.loadPackOffers,
   loadPlanChangePayment: async () => null,
+  loadTopUpOffers: fixture.loadTopUpOffers,
   packCheckoutConfigured: () => fixture.packsConfigured,
   packCheckoutEligibility: fixture.packCheckoutEligibility,
   polarCheckoutConfigured: () => true,
   readUsageStatusInTransaction: async () => null,
   requireBusinessMembership: async () => ({ role: fixture.admin ? "business_owner" : "viewer" }),
   setOverageSpendingCap: vi.fn(),
+  topUpCheckoutEligibility: fixture.topUpCheckoutEligibility,
 }));
 
 import { GET } from "./route";
@@ -75,11 +81,13 @@ const offer = (code: string, checkoutAvailable = true) => ({ code, names: { en: 
 const subscription = { source: "stripe", customerId: "cus_1", subscriptionId: "sub_1", plan: "starter", billingKey: "business:business", billingInterval: "monthly", subscriptionState: "active", currentPeriodStart: null, currentPeriodEnd: null, overageSpendingCapCents: null, cancelAt: new Date("2026-12-01T00:00:00.000Z"), nextPlanCode: "pro", nextInterval: "monthly", nextChangeAt: new Date("2026-12-01T00:00:00.000Z"), planCode: null, replacedSubscriptionId: null };
 
 beforeEach(() => {
-  Object.assign(fixture, { account: null, nextPlan: null, plan: "free_cloud", admin: true, packsConfigured: true, offers: [], packs: [], topUps: [], eligibility: { refusal: null, endsSubscription: null }, reads: [], planDisplay: null });
+  Object.assign(fixture, { account: null, nextPlan: null, plan: "free_cloud", admin: true, packsConfigured: true, offers: [], packs: [], topUps: [], topUpOffers: [], topUpRefusal: null, eligibility: { refusal: null, endsSubscription: null }, reads: [], planDisplay: null });
   fixture.loadPackOffers.mockImplementation(async (_tx: unknown, input: { checkout: boolean }) => fixture.offers.map((row) => ({ ...row, checkoutAvailable: input.checkout && row.checkoutAvailable === true })));
   fixture.loadBusinessPacks.mockImplementation(async () => fixture.packs);
   fixture.listBusinessTopUps.mockImplementation(async () => fixture.topUps);
   fixture.packCheckoutEligibility.mockImplementation(async () => fixture.eligibility);
+  fixture.loadTopUpOffers.mockImplementation(async (_tx: unknown, input: { checkout: boolean }) => fixture.topUpOffers.map((row) => ({ ...row, checkoutAvailable: input.checkout && row.checkoutAvailable === true })));
+  fixture.topUpCheckoutEligibility.mockImplementation(async () => fixture.topUpRefusal);
 });
 afterEach(() => { vi.clearAllMocks(); });
 
@@ -162,6 +170,29 @@ describe("the billing summary's top-ups", () => {
     // The plan screen shows them to everyone on the team, not only to those who manage billing.
     fixture.admin = false;
     expect((await get()).topUps).toEqual(fixture.topUps);
+  });
+
+  it("answers no top-up on sale for a deployment that sells none, without reading whether the business may buy one", async () => {
+    expect((await get()).topUpOffers).toEqual([]);
+    expect(fixture.loadTopUpOffers).toHaveBeenCalledExactlyOnceWith(expect.anything(), { checkout: true });
+    expect(fixture.topUpCheckoutEligibility).not.toHaveBeenCalled();
+  });
+
+  it("sells the top-ups on sale to those who manage billing on Free or a pack, and shows them unsold otherwise", async () => {
+    const onSale = { code: "topup_100_90", names: { en: "100 extra minutes" }, gives: { voiceSeconds: 6_000, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 }, days: 90, amountCents: 2_500, currency: "cad", checkoutAvailable: true };
+    fixture.topUpOffers = [onSale, { ...onSale, code: "topup_unlinked", checkoutAvailable: false }];
+    expect((await get()).topUpOffers).toEqual([onSale, { ...onSale, code: "topup_unlinked", checkoutAvailable: false }]);
+    expect(fixture.topUpCheckoutEligibility).toHaveBeenCalledExactlyOnceWith(expect.anything(), { businessId: "business", plan: "free_cloud", account: null });
+
+    // Starter goes on past its allowance, so the top-ups show but none can be bought; nor by a member, nor without the provider set up.
+    fixture.topUpRefusal = "top_up_not_sold_on_plan";
+    expect(((await get()).topUpOffers as Row[]).map((offer) => offer.checkoutAvailable)).toEqual([false, false]);
+    fixture.topUpRefusal = null;
+    fixture.admin = false;
+    expect(((await get()).topUpOffers as Row[]).map((offer) => offer.checkoutAvailable)).toEqual([false, false]);
+    fixture.admin = true;
+    fixture.packsConfigured = false;
+    expect(((await get()).topUpOffers as Row[]).map((offer) => offer.checkoutAvailable)).toEqual([false, false]);
   });
 });
 

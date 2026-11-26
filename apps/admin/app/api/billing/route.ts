@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 
 import { billingAccounts, billingPlans, billingTransactions, billingUsageEvents } from "@lobbystack/db";
-import { billingAccess, billingPlanList, isLiveSubscriptionState, isReplacedSubscription, deploymentBrandCatalog, deploymentPlanDisplay, getKnowledgeStorageUsageBytes, listBusinessTopUps, loadBillingCatalog, loadBusinessPacks, loadBusinessPlanLimits, loadBusinessPromoPlan, loadPackOffers, loadPlanChangePayment, packCheckoutConfigured, packCheckoutEligibility, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap, type PackCheckoutEligibility } from "@lobbystack/domain";
+import { billingAccess, billingPlanList, isLiveSubscriptionState, isReplacedSubscription, deploymentBrandCatalog, deploymentPlanDisplay, getKnowledgeStorageUsageBytes, listBusinessTopUps, loadBillingCatalog, loadBusinessPacks, loadBusinessPlanLimits, loadBusinessPromoPlan, loadPackOffers, loadPlanChangePayment, loadTopUpOffers, packCheckoutConfigured, packCheckoutEligibility, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap, topUpCheckoutEligibility, type PackCheckoutEligibility } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -30,8 +30,14 @@ export async function GET(request: Request) {
       // deployment that sells no packs costs these two small reads.
       const onSale = await loadPackOffers(tx, { checkout: true });
       const packs = await loadBusinessPacks(tx, businessId);
-      // Top-ups an operator granted or a code added, on top of the plan: those that count now or will, then the latest that ended.
+      // Top-ups on top of the plan, granted, added by a code or bought: those that count now or will, then the latest that ended.
       const topUps = await listBusinessTopUps(tx, businessId);
+      // Top-ups on sale, which a business on Free or on a prepaid pack may buy, by those who manage billing, through a
+      // provider set up for it. A deployment that sells none costs this one small read.
+      const topUpsOnSale = await loadTopUpOffers(tx, { checkout: true });
+      const topUpRefusal = topUpsOnSale.length > 0 ? await topUpCheckoutEligibility(tx, { businessId, plan: effectivePlan, account: own ?? null }) : null;
+      const topUpBuying = permissions.hasBillingManagementAccess && packCheckoutConfigured(process.env) && topUpRefusal === null;
+      const topUpOffers = topUpBuying ? topUpsOnSale : topUpsOnSale.map((offer) => ({ ...offer, checkoutAvailable: false }));
       const packCheckout: PackCheckoutEligibility = onSale.length > 0 || packs.length > 0 ? await packCheckoutEligibility(tx, { businessId, plan: effectivePlan, account: own ?? null }) : { refusal: null, endsSubscription: null };
       // A pack can be bought here by those who manage billing, through a provider set up for it, when nothing refuses.
       const packBuying = permissions.hasBillingManagementAccess && packCheckoutConfigured(process.env) && packCheckout.refusal === null;
@@ -63,7 +69,7 @@ export async function GET(request: Request) {
       const provider = billingProviderOf(process.env);
       // Cancel plan, Resume and Keep my plan, where the provider lets the app do them, for those who can buy plans.
       const planActions = permissions.hasCheckoutAccess && inAppPlanActions(provider);
-      return { provider, providerName: billingProviderNames[provider], planActions, cancelsAt, nextChange, paymentActionUrl, availableCheckoutPlans, availableCheckoutIntervals, plans, planDisplay, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [], packOffers, packs, packCheckout, topUps };
+      return { provider, providerName: billingProviderNames[provider], planActions, cancelsAt, nextChange, paymentActionUrl, availableCheckoutPlans, availableCheckoutIntervals, plans, planDisplay, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [], packOffers, packs, packCheckout, topUps, topUpOffers };
     }));
   } catch (error) {
     return asApiResponse(error);

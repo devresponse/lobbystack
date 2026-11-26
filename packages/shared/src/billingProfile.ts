@@ -32,6 +32,8 @@ export const PLAN_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,46}[a-z0-9]$/;
 export const MAX_ADDITIONAL_PLANS = 50;
 /** Prepaid packs a file may hold: each size and length is a pack of its own. */
 export const MAX_BILLING_PACKS = 30;
+/** Top-ups on sale a file may hold: each size and length is a top-up of its own. */
+export const MAX_BILLING_TOP_UPS = 10;
 /** How many businesses one account may own when its brand's billing.json leaves accounts out: the limit from before the file could set one. */
 export const DEFAULT_MAX_BUSINESSES_PER_ACCOUNT = 10;
 /** The most businesses a billing.json may let one account own, since each business adds recurring worker jobs. */
@@ -91,6 +93,19 @@ const pack = z.strictObject({
   prices: packPrices,
   included: packIncluded,
   limits,
+});
+
+// A top-up on sale (docs/features/top-ups.md) is extra voice minutes, alert
+// texts, transfers and website chats a business on Free or on a pack pays for
+// once, on top of its plan, which stays as it is. Its included holds what it
+// gives for its whole length, as a pack's does, and it lasts days from its
+// payment, or for good when days is left out. It has no limits: it changes
+// none. Each size and length is a top-up of its own, with its own price.
+const topUp = z.strictObject({
+  names: z.strictObject({ en: name, fr: name, es: name, sr: name } satisfies Record<InterfaceLocale, typeof name>),
+  days: z.number().int().min(1).max(MAX_PACK_DAYS).optional(),
+  prices: packPrices,
+  included: packIncluded,
 });
 
 // Rules for each account rather than each business. maxBusinesses: how many
@@ -199,6 +214,8 @@ const billingProfileShape = z.strictObject({
   plans: z.object({ free_cloud: freePlan, starter: tierPlan, pro: tierPlan, enterprise: customPlan }).catchall(additionalPlan),
   // Prepaid packs by code; a file without the key sells none.
   packs: z.record(z.string(), pack).optional(),
+  // Top-ups on sale by code; a file without the key sells none.
+  topUps: z.record(z.string(), topUp).optional(),
   // Rules for each account, such as how many businesses one may own. The
   // admin enforces them from its build, so like display, the hash, the apply
   // and the stored profile leave them out: a change needs a deploy, not an apply.
@@ -274,6 +291,15 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
     if (Object.hasOwn(profile.plans, code)) packIssue([], "a plan already has this code");
   }
   packs.slice(MAX_BILLING_PACKS).forEach((code) => context.addIssue({ code: "custom", path: ["packs", code], message: `a file holds at most ${MAX_BILLING_PACKS} packs` }));
+  const topUps = Object.keys(profile.topUps ?? {}).sort();
+  for (const code of topUps) {
+    const topUpIssue = (message: string) => context.addIssue({ code: "custom", path: ["topUps", code], message });
+    // C13: a top-up's code is permanent too, and no plan or pack has it, since it sells beside them.
+    if (!PLAN_CODE_PATTERN.test(code)) topUpIssue("a top-up code is 3 to 48 lowercase letters, digits, _ and -, starting and ending with a letter or digit");
+    if (Object.hasOwn(profile.plans, code)) topUpIssue("a plan already has this code");
+    if (Object.hasOwn(profile.packs ?? {}, code)) topUpIssue("a pack already has this code");
+  }
+  topUps.slice(MAX_BILLING_TOP_UPS).forEach((code) => context.addIssue({ code: "custom", path: ["topUps", code], message: `a file holds at most ${MAX_BILLING_TOP_UPS} top-ups` }));
   // C11: the display section's cards, a plan's or one of this file's packs, rows and {{names}}.
   if (profile.display) checkBillingDisplay(profile.display, { starter: profile.plans.starter.sold, pro: profile.plans.pro.sold }, packs, (path, message) => context.addIssue({ code: "custom", path: ["display", ...path], message }));
   // C12: a cap per plan names a plan of this file, or prepaid for a business with a live pack.
@@ -531,9 +557,14 @@ export function resolveBillingPlans(profile: Pick<BillingProfile, "currency" | "
   return resolved.sort((a, b) => a.sort - b.sort || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 }
 
-/** One pack as a complete billing_pack_plans row and its price, under the columns' own names. */
+/** What a billing_pack_plans row sells: a prepaid pack, or a top-up on top of the plan (0155). */
+export const billingPackKinds = ["pack", "top_up"] as const;
+export type BillingPackKind = (typeof billingPackKinds)[number];
+
+/** One pack or top-up as a complete billing_pack_plans row and its price, under the columns' own names. */
 export type ResolvedBillingPack = {
   code: string;
+  kind: BillingPackKind;
   names: Record<InterfaceLocale, string>;
   voice_sec: number;
   /** Null: the pack never ends. */
@@ -558,6 +589,7 @@ export function resolveBillingPacks(profile: Pick<BillingProfile, "currency" | "
   const starter = standardAllowances("starter", profile.plans.starter);
   const packs = Object.entries(profile.packs ?? {}).map(([code, pack]): ResolvedBillingPack => ({
     code,
+    kind: "pack",
     names: { en: pack.names.en, fr: pack.names.fr, es: pack.names.es, sr: pack.names.sr },
     voice_sec: pack.included.voiceMinutes * 60,
     days: pack.days ?? null,
@@ -574,6 +606,33 @@ export function resolveBillingPacks(profile: Pick<BillingProfile, "currency" | "
   const length = (pack: ResolvedBillingPack) => pack.days ?? Number.POSITIVE_INFINITY;
   packs.sort((a, b) => a.voice_sec - b.voice_sec || length(a) - length(b) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
   return packs.map((pack, index) => ({ ...pack, sort: (index + 1) * 10 }));
+}
+
+/**
+ * Every top-up on sale of a checked file as the complete row it becomes,
+ * smallest and shortest first, as packs are: what it gives for its whole
+ * length, and limits of 0, since a top-up changes none. A file without
+ * topUps gives none.
+ */
+export function resolveBillingTopUps(profile: Pick<BillingProfile, "currency" | "topUps">): ResolvedBillingPack[] {
+  const topUps = Object.entries(profile.topUps ?? {}).map(([code, topUp]): ResolvedBillingPack => ({
+    code,
+    kind: "top_up",
+    names: { en: topUp.names.en, fr: topUp.names.fr, es: topUp.names.es, sr: topUp.names.sr },
+    voice_sec: topUp.included.voiceMinutes * 60,
+    days: topUp.days ?? null,
+    sms_seg: topUp.included.alertSmsSegments,
+    calls_out: topUp.included.outboundCallAttempts,
+    chat_units: topUp.included.chatAiUnits,
+    kb_bytes: 0,
+    numbers: 0,
+    receptionists: 0,
+    sort: 0,
+    price: { currency: profile.currency, cents: topUp.prices.onceCents },
+  }));
+  const length = (topUp: ResolvedBillingPack) => topUp.days ?? Number.POSITIVE_INFINITY;
+  topUps.sort((a, b) => a.voice_sec - b.voice_sec || length(a) - length(b) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+  return topUps.map((topUp, index) => ({ ...topUp, sort: (index + 1) * 10 }));
 }
 
 /** The pack columns its terms hash covers, besides the price and currency: everything a buyer gets. */

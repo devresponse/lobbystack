@@ -463,17 +463,22 @@ function packDiff(file: BillingProfile, current: PackRows, plans: Array<Pick<Sto
 }
 
 const withoutPacks = (file: Record<string, any>) => { delete file.packs; };
+const withoutTopUps = (file: Record<string, any>) => { delete file.topUps; };
+/** The brand file without its top-up on sale, for the packs' own tests; the top-ups' block sells both. */
+function packFile(change: (file: Record<string, any>) => void = () => undefined): BillingProfile {
+  return profile((file) => { withoutTopUps(file); change(file); });
+}
 // The brand file's nine packs, in the order a diff lists them: by code.
-const packCodes = desiredBillingPacks(profile()).map((pack) => pack.code).sort();
+const packCodes = desiredBillingPacks(packFile()).map((pack) => pack.code).sort();
 
 describe("billing pack diff", () => {
   it("gives every plan the same row and terms hash whether or not the file has packs", () => {
-    expect(desiredBillingPlans(profile())).toEqual(desiredBillingPlans(profile(withoutPacks)));
-    expect(diff(profile(), { plans: [], prices: [] })).toEqual(diff(profile(withoutPacks), { plans: [], prices: [] }));
+    expect(desiredBillingPlans(packFile())).toEqual(desiredBillingPlans(packFile(withoutPacks)));
+    expect(diff(packFile(), { plans: [], prices: [] })).toEqual(diff(packFile(withoutPacks), { plans: [], prices: [] }));
   });
 
   it("resolves each pack to a complete row, its allowances for its whole length, smallest and shortest first", () => {
-    const packs = desiredBillingPacks(profile());
+    const packs = desiredBillingPacks(packFile());
     expect(packs.map((pack) => [pack.code, pack.voice_sec, pack.days, pack.sort, pack.price.cents])).toEqual([
       ["pack_250_90", 15000, 90, 10, 5500],
       ["pack_250_180", 15000, 180, 20, 5900],
@@ -488,28 +493,28 @@ describe("billing pack diff", () => {
     // Starter's month of texts, transfers and chats for each of its three months, its number and receptionist, and the pack's own storage.
     expect(packs[0]).toMatchObject({ sms_seg: 150, calls_out: 60, chat_units: 150, kb_bytes: 20 * 1_048_576, numbers: 1, receptionists: 1, price: { currency: "cad", cents: 5500 } });
     expect(new Set(packs.map((pack) => pack.terms_hash)).size).toBe(9);
-    expect(desiredBillingPacks(profile(withoutPacks))).toEqual([]);
+    expect(desiredBillingPacks(packFile(withoutPacks))).toEqual([]);
   });
 
   it("seeds a file's packs as drafts, each with one price, in table then key order", () => {
-    const { writes, refusals } = packDiff(profile(), { packs: [], packPrices: [] });
+    const { writes, refusals } = packDiff(packFile(), { packs: [], packPrices: [] });
     expect(refusals).toEqual([]);
     expect(summary(writes)).toEqual([...packCodes.map((code) => `insert billing_pack_plans ${code}`), ...packCodes.map((code) => `insert billing_pack_prices ${code}/cad`)]);
-    const pack = desiredBillingPacks(profile())[0]!;
-    expect(writes.find((write) => write.change.key === "pack_250_90")!.set).toEqual({ code: "pack_250_90", names: pack.names, voice_sec: 15000, days: 90, sms_seg: 150, calls_out: 60, chat_units: 150, kb_bytes: 20 * 1_048_576, numbers: 1, receptionists: 1, terms_hash: pack.terms_hash, sort: 10, status: "draft" });
+    const pack = desiredBillingPacks(packFile())[0]!;
+    expect(writes.find((write) => write.change.key === "pack_250_90")!.set).toEqual({ code: "pack_250_90", kind: "pack", names: pack.names, voice_sec: 15000, days: 90, sms_seg: 150, calls_out: 60, chat_units: 150, kb_bytes: 20 * 1_048_576, numbers: 1, receptionists: 1, terms_hash: pack.terms_hash, sort: 10, status: "draft" });
     expect(writes.find((write) => write.change.key === "pack_250_90/cad")!.set).toEqual({ pack: "pack_250_90", currency: "cad", cents: 5500 });
     expect(writes.every((write) => Object.keys(write.change.fields).length === 0 && !write.change.lowers_allowance && !write.change.raises_price)).toBe(true);
   });
 
   it("writes nothing for a file without packs, and nothing when the pack tables already match the file", () => {
-    expect(packDiff(profile(withoutPacks), { packs: [], packPrices: [] })).toEqual({ writes: [], refusals: [] });
-    const file = profile();
+    expect(packDiff(packFile(withoutPacks), { packs: [], packPrices: [] })).toEqual({ writes: [], refusals: [] });
+    const file = packFile();
     expect(packDiff(file, storedPacks(desiredBillingPacks(file), "active"))).toEqual({ writes: [], refusals: [] });
   });
 
   it("retires every pack the file drops with its price, never deleting one", () => {
-    const current = storedPacks(desiredBillingPacks(profile()), "active");
-    const { writes, refusals } = packDiff(profile((file) => { delete file.packs.pack_250_90; }), current);
+    const current = storedPacks(desiredBillingPacks(packFile()), "active");
+    const { writes, refusals } = packDiff(packFile((file) => { delete file.packs.pack_250_90; }), current);
     expect(refusals).toEqual([]);
     // The packs after it move up a place, which changes no terms.
     expect(writes.filter((write) => write.change.action !== "update" || !("sort" in write.change.fields)).map((write) => [write.change.action, write.change.key, write.set])).toEqual([
@@ -517,12 +522,12 @@ describe("billing pack diff", () => {
       ["retire", "pack_250_90/cad", { retired_at: now }],
     ]);
     expect(writes.filter((write) => write.change.action === "update").every((write) => Object.keys(write.set).join() === "sort")).toBe(true);
-    expect(summary(packDiff(profile(withoutPacks), current).writes)).toEqual([...packCodes.map((code) => `retire billing_pack_plans ${code}`), ...packCodes.map((code) => `retire billing_pack_prices ${code}/cad`)]);
+    expect(summary(packDiff(packFile(withoutPacks), current).writes)).toEqual([...packCodes.map((code) => `retire billing_pack_plans ${code}`), ...packCodes.map((code) => `retire billing_pack_prices ${code}/cad`)]);
   });
 
   it("flags fewer minutes, a shorter length and a higher price, and sends an active pack back to draft when its terms change", () => {
-    const current = storedPacks(desiredBillingPacks(profile()), "active");
-    const { writes, refusals } = packDiff(profile((file) => {
+    const current = storedPacks(desiredBillingPacks(packFile()), "active");
+    const { writes, refusals } = packDiff(packFile((file) => {
       file.packs.pack_250_90.included.voiceMinutes = 200;
       file.packs.pack_500_180.days = 120;
       delete file.packs.pack_1000_365.days;
@@ -542,12 +547,12 @@ describe("billing pack diff", () => {
   });
 
   it("refuses to change a bought pack's minutes or length, and lets its names, price and allowances change", () => {
-    const current = storedPacks(desiredBillingPacks(profile()), "active");
+    const current = storedPacks(desiredBillingPacks(packFile()), "active");
     current.packs.find((pack) => pack.code === "pack_250_90")!.frozen_at = earlier;
-    const minutes = packDiff(profile((file) => { file.packs.pack_250_90.included.voiceMinutes = 300; }), current);
+    const minutes = packDiff(packFile((file) => { file.packs.pack_250_90.included.voiceMinutes = 300; }), current);
     expect(minutes.refusals).toEqual([{ code: "plan_frozen", path: "billing_file.packs.pack_250_90", message: `pack_250_90 has been bought since ${earlier}, so its minutes and length can't change. Put new minutes or a new length under a new code.` }]);
-    expect(packDiff(profile((file) => { delete file.packs.pack_250_90.days; }), current).refusals.map((refusal) => refusal.code)).toEqual(["plan_frozen"]);
-    const allowed = packDiff(profile((file) => {
+    expect(packDiff(packFile((file) => { delete file.packs.pack_250_90.days; }), current).refusals.map((refusal) => refusal.code)).toEqual(["plan_frozen"]);
+    const allowed = packDiff(packFile((file) => {
       file.packs.pack_250_90.prices.onceCents = 6000;
       file.packs.pack_250_90.names.fr = "250 minutes pendant 90 jours";
       file.packs.pack_250_90.included.alertSmsSegments = 80;
@@ -557,22 +562,22 @@ describe("billing pack diff", () => {
   });
 
   it("brings a pack back with its latest price row, and refuses a currency change while a provider sells a live pack price", () => {
-    const current = storedPacks(desiredBillingPacks(profile()), "active");
+    const current = storedPacks(desiredBillingPacks(packFile()), "active");
     const pack = current.packs.find((entry) => entry.code === "pack_500_365")!;
     Object.assign(pack, { status: "retired", retired_at: earlier });
     const price = current.packPrices.find((entry) => entry.pack === "pack_500_365")!;
     Object.assign(price, { retired_at: earlier, provider_ref: "prod_old" });
     current.packPrices.push({ ...price, id: "pack_500_365-cad-older", retired_at: "2026-10-01T08:00:00.000Z", provider_ref: "prod_older" });
-    const restored = packDiff(profile(), current);
+    const restored = packDiff(packFile(), current);
     expect(restored.refusals).toEqual([]);
     expect(restored.writes.map((write) => [write.change.action, write.change.key, write.id ?? null, write.set])).toEqual([
       ["restore", "pack_500_365", null, { status: "draft", retired_at: null }],
       ["restore", "pack_500_365/cad", "pack_500_365-cad", { cents: 10900, retired_at: null }],
     ]);
 
-    const live = storedPacks(desiredBillingPacks(profile()), "active");
+    const live = storedPacks(desiredBillingPacks(packFile()), "active");
     live.packPrices[0]!.provider_ref = "price_1";
-    const usd = profile((file) => { file.currency = "usd"; });
+    const usd = packFile((file) => { file.currency = "usd"; });
     expect(packDiff(usd, live).refusals).toEqual([{ code: "currency_locked", path: "billing_file.currency", message: "The billing provider already sells packs in cad, so the currency can't change to usd while those prices are live." }]);
     live.packPrices[0]!.provider_ref = null;
     const moved = packDiff(usd, live);
@@ -581,15 +586,15 @@ describe("billing pack diff", () => {
   });
 
   it("refuses a pack whose code a plan already has, made through the API or retired", () => {
-    const { writes, refusals } = packDiff(profile(), { packs: [], packPrices: [] }, [{ code: "pack_250_90" }]);
+    const { writes, refusals } = packDiff(packFile(), { packs: [], packPrices: [] }, [{ code: "pack_250_90" }]);
     expect(refusals).toEqual([{ code: "code_taken", path: "billing_file.packs.pack_250_90", message: "A plan already has the code pack_250_90, so a pack can't use it. Pick another code." }]);
     expect(writes.some((write) => write.change.key.startsWith("pack_250_90"))).toBe(false);
   });
 
   it("writes plans before their prices and packs before theirs, retirements first in each table", () => {
-    const current = storedPacks(desiredBillingPacks(profile()), "active");
-    const usd = profile((file) => { file.currency = "usd"; });
-    const ordered = billingCatalogWriteOrder([...diff(usd, stored(desiredBillingPlans(profile()))).writes, ...packDiff(usd, current).writes]);
+    const current = storedPacks(desiredBillingPacks(packFile()), "active");
+    const usd = packFile((file) => { file.currency = "usd"; });
+    const ordered = billingCatalogWriteOrder([...diff(usd, stored(desiredBillingPlans(packFile()))).writes, ...packDiff(usd, current).writes]);
     const tables = [...new Set(ordered.map((write) => write.change.table))];
     expect(tables).toEqual(["billing_pack_plans", "billing_pack_prices", "billing_plans", "billing_prices"]);
     const packPrices = ordered.filter((write) => write.change.table === "billing_pack_prices").map((write) => write.change.action);
@@ -597,7 +602,7 @@ describe("billing pack diff", () => {
   });
 
   it("shows each pack with its live price first, then its retired ones, latest first", () => {
-    const current = storedPacks(desiredBillingPacks(profile()), "active");
+    const current = storedPacks(desiredBillingPacks(packFile()), "active");
     const price = current.packPrices.find((entry) => entry.pack === "pack_250_90")!;
     current.packPrices.push({ ...price, id: "older", cents: 5000, retired_at: "2026-10-01T08:00:00.000Z" }, { ...price, id: "old", cents: 5200, retired_at: earlier });
     const [first] = billingCatalogPacks(current);
@@ -612,7 +617,7 @@ describe("billing pack link diff", () => {
   type LinkPacks = Parameters<typeof diffBillingPackLinks>[0]["body"]["packs"];
   type Rows = PackRows & { prices: StoredBillingPrice[] };
 
-  const fresh = (): Rows => ({ ...storedPacks(desiredBillingPacks(profile())), prices: [] });
+  const fresh = (): Rows => ({ ...storedPacks(desiredBillingPacks(packFile())), prices: [] });
 
   /** A link naming object prod_<pack> for the live price of every pack that isn't retired. */
   function linkFor(current: Rows): LinkPacks {
@@ -685,7 +690,7 @@ describe("billing pack link diff", () => {
     const named = linkFor(both).map((pack, index) => (index === 0 ? { ...pack, provider_ref: "price_shared" } : pack));
     expect(link(both, named, { provider: "stripe", plans }).refusals.map((refusal) => refusal.message)).toEqual(["Stripe price price_shared is named for more than one price. One Stripe price sells one price."]);
     // And the plans' side finds an object a pack's price has.
-    const planRows = stored(desiredBillingPlans(profile()));
+    const planRows = stored(desiredBillingPlans(packFile()));
     const planLinks = planRows.plans.filter((plan) => plan.sold).map((plan) => ({ code: plan.code, terms_hash: plan.terms_hash, provider_disc: null, prices: planRows.prices.filter((price) => price.plan === plan.code).map((price) => ({ period: price.period, currency: price.currency, provider_ref: `prod_${plan.code}_${price.period}` })) }));
     planLinks[0]!.prices[0]!.provider_ref = "prod_pack_250_90";
     const planSide = diffBillingLinks({ body: { plans: planLinks, replace_ids: false, provider: "polar", names: "polar" }, current: { ...planRows, packPrices: current.packPrices }, now });
@@ -707,5 +712,64 @@ describe("billing pack link diff", () => {
     current.packPrices.find((price) => price.pack === "pack_500_180")!.retired_at = now;
     current.packPrices.push({ ...current.packPrices.find((price) => price.pack === "pack_500_180")!, id: "pack_500_180-cad-2", provider_ref: "prod_pack_500_180_2", retired_at: null });
     expect(link(current, linkFor(current).map((pack) => (pack.code === "pack_500_180" ? { ...pack, provider_ref: "prod_pack_500_180" } : pack)), { replaceIds: true }).refusals.map((refusal) => refusal.message)).toEqual(["Product prod_pack_500_180 is already linked to pack_500_180/cad, a retired price. One product sells one price."]);
+  });
+});
+
+describe("billing top-up diff", () => {
+  // A top-up on sale is a billing_pack_plans row of kind top_up beside the packs, applied, linked and checked as they are.
+  const topUp = () => desiredBillingPacks(profile()).find((pack) => pack.kind === "top_up")!;
+
+  it("resolves the file's top-up after its packs, kind top_up, with limits of 0 and terms of its own", () => {
+    const rows = desiredBillingPacks(profile());
+    expect(rows.map((row) => row.kind)).toEqual([...packCodes.map(() => "pack"), "top_up"]);
+    expect(topUp()).toMatchObject({ code: "topup_100_90", voice_sec: 6000, days: 90, sms_seg: 0, calls_out: 0, chat_units: 0, kb_bytes: 0, numbers: 0, receptionists: 0, sort: 10, price: { currency: "cad", cents: 2500 } });
+    expect(new Set(rows.map((row) => row.terms_hash)).size).toBe(rows.length);
+    // The packs resolve as they do without it.
+    expect(rows.filter((row) => row.kind === "pack")).toEqual(desiredBillingPacks(packFile()));
+  });
+
+  it("seeds the top-up as a draft row of kind top_up with its price, beside the packs, and writes nothing once it matches", () => {
+    const { writes, refusals } = packDiff(profile(), { packs: [], packPrices: [] });
+    expect(refusals).toEqual([]);
+    const codes = [...packCodes, "topup_100_90"];
+    expect(summary(writes)).toEqual([...codes.map((code) => `insert billing_pack_plans ${code}`), ...codes.map((code) => `insert billing_pack_prices ${code}/cad`)]);
+    expect(writes.find((write) => write.change.key === "topup_100_90")!.set).toEqual({ code: "topup_100_90", kind: "top_up", names: topUp().names, voice_sec: 6000, days: 90, sms_seg: 0, calls_out: 0, chat_units: 0, kb_bytes: 0, numbers: 0, receptionists: 0, terms_hash: topUp().terms_hash, sort: 10, status: "draft" });
+    expect(writes.find((write) => write.change.key === "topup_100_90/cad")!.set).toEqual({ pack: "topup_100_90", currency: "cad", cents: 2500 });
+    expect(packDiff(profile(), storedPacks(desiredBillingPacks(profile()), "active"))).toEqual({ writes: [], refusals: [] });
+  });
+
+  it("retires a top-up the file drops with its price, leaving the packs alone, and refuses a bought one's new minutes", () => {
+    const current = storedPacks(desiredBillingPacks(profile()), "active");
+    expect(summary(packDiff(packFile(), current).writes)).toEqual(["retire billing_pack_plans topup_100_90", "retire billing_pack_prices topup_100_90/cad"]);
+    current.packs.find((pack) => pack.code === "topup_100_90")!.frozen_at = earlier;
+    const more = packDiff(profile((file) => { file.topUps.topup_100_90.included.voiceMinutes = 120; }), current);
+    expect(more.refusals).toEqual([{ code: "plan_frozen", path: "billing_file.topUps.topup_100_90", message: `topup_100_90 has been bought since ${earlier}, so its minutes and length can't change. Put new minutes or a new length under a new code.` }]);
+  });
+
+  it("refuses a code the catalog holds as the other kind, leaving that row and its price as they are, and a plan's code", () => {
+    const current = storedPacks(desiredBillingPacks(profile()), "active");
+    current.packs.find((pack) => pack.code === "topup_100_90")!.kind = "pack";
+    expect(packDiff(profile(), current)).toEqual({ writes: [], refusals: [{ code: "code_taken", path: "billing_file.topUps.topup_100_90", message: "A pack already has the code topup_100_90, so a top-up can't use it. Pick another code." }] });
+    const other = storedPacks(desiredBillingPacks(profile()), "active");
+    other.packs.find((pack) => pack.code === "pack_250_90")!.kind = "top_up";
+    expect(packDiff(profile(), other)).toEqual({ writes: [], refusals: [{ code: "code_taken", path: "billing_file.packs.pack_250_90", message: "A top-up already has the code pack_250_90, so a pack can't use it. Pick another code." }] });
+    expect(packDiff(profile(), { packs: [], packPrices: [] }, [{ code: "topup_100_90" }]).refusals).toEqual([{ code: "code_taken", path: "billing_file.topUps.topup_100_90", message: "A plan already has the code topup_100_90, so a top-up can't use it. Pick another code." }]);
+  });
+
+  it("links the top-up's price with the packs', makes it active, and names it as a top-up when the link leaves it out", () => {
+    const current = { ...storedPacks(desiredBillingPacks(profile())), prices: [] as StoredBillingPrice[] };
+    const packs = current.packs.map((pack) => ({ code: pack.code, terms_hash: pack.terms_hash, currency: "cad", provider_ref: `price_${pack.code}` }));
+    const linked = diffBillingPackLinks({ body: { plans: [], packs, replace_ids: false, provider: "stripe" }, current, now });
+    expect(linked.refusals).toEqual([]);
+    expect(linked.writes.find((write) => write.change.key === "topup_100_90")).toMatchObject({ set: { status: "active" } });
+    expect(linked.writes.find((write) => write.change.key === "topup_100_90/cad")).toMatchObject({ set: { provider_ref: "price_topup_100_90" } });
+    const without = diffBillingPackLinks({ body: { plans: [], packs: packs.filter((pack) => pack.code !== "topup_100_90"), replace_ids: false, provider: "stripe" }, current, now });
+    expect(without.refusals.map((refusal) => refusal.message)).toEqual(["Top-up topup_100_90 isn't retired and isn't in the link. Name every top-up that isn't retired, with the Stripe price that sells its live price."]);
+  });
+
+  it("shows each row's kind in the catalog", () => {
+    const rows = billingCatalogPacks(storedPacks(desiredBillingPacks(profile()), "active"));
+    expect(rows.filter((row) => row.kind === "top_up").map((row) => row.code)).toEqual(["topup_100_90"]);
+    expect(rows.filter((row) => row.kind === "pack")).toHaveLength(packCodes.length);
   });
 });

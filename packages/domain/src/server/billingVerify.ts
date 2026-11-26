@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { PolarSnapshot } from "@lobbystack/providers";
 import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
-import { billingProfileForProvider, billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, upgradeStoredBillingProfile, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "@lobbystack/shared";
+import { billingProfileForProvider, billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, upgradeStoredBillingProfile, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingPackKind, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "@lobbystack/shared";
 
 import { billingCatalogDeployment, desiredBillingPacks, desiredBillingPlans, diffBillingCatalog, diffBillingPackCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPack, type DesiredBillingPlan, type StoredBillingPack, type StoredBillingPackPrice, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, type PolarStep, type PolarStepObject } from "./billingPolar";
@@ -10,6 +10,25 @@ import { polarProductVariableName } from "./billingPlans";
 import type { DomainContext } from "./context";
 import type { BillingProviderId } from "@lobbystack/providers/billing/types";
 import { plannerFor, readBillingDeployment } from "./billingProvider";
+
+/** A pack's or a top-up's row, as the checks name it. */
+export const packLabel = (kind: BillingPackKind) => (kind === "top_up" ? "Top-up" : "Pack");
+
+/** What the one-time products the rows sell are called in a count: "pack", "top-up", or "pack and top-up" when there are both. */
+export function oneTimeNoun(rows: ReadonlyArray<{ kind: BillingPackKind }>): string {
+  const topUps = rows.some((row) => row.kind === "top_up");
+  return topUps && rows.some((row) => row.kind !== "top_up") ? "pack and top-up" : topUps ? "top-up" : "pack";
+}
+
+/** How many packs and top-ups the rows hold, such as "9 packs" and "1 top-up"; top-ups only when there are some. */
+function packCounts(rows: ReadonlyArray<{ kind: BillingPackKind }>): string[] {
+  const topUps = rows.filter((row) => row.kind === "top_up").length;
+  const packs = rows.length - topUps;
+  return [...(packs > 0 || topUps === 0 ? [`${packs} packs`] : []), ...(topUps > 0 ? [`${topUps} ${topUps === 1 ? "top-up" : "top-ups"}`] : [])];
+}
+
+/** Items as a sentence lists them: "a", "a and b", "a, b and c". */
+const listed = (items: readonly string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
 // Verify compares the three copies of a brand's plans and packs two at a
 // time, so a failure names the side that moved: the repository file (the
@@ -82,7 +101,7 @@ export function fileAndPostgresChecks(input: { file: Pick<BillingVerifyInput["fi
   const refusals = [...diff.refusals, ...packDiff.refusals];
   for (const write of writes) add("plan_rows", "file_postgres", "drift", write.change.key, `${write.change.table} ${write.change.key} would be ${write.change.action === "update" ? `updated (${Object.keys(write.change.fields).join(", ")})` : `${write.change.action}d`} by an apply.`);
   for (const refusal of refusals) add("plan_rows", "file_postgres", "drift", refusal.path, refusal.message);
-  const packRows = packs.length ? `, ${rows.packs.filter((pack) => pack.status !== "retired").length} packs, ${rows.packPrices.filter((price) => price.retired_at === null).length} live pack prices` : "";
+  const packRows = packs.length ? `, ${packCounts(rows.packs.filter((pack) => pack.status !== "retired")).join(", ")}, ${rows.packPrices.filter((price) => price.retired_at === null).length} live ${oneTimeNoun(packs)} prices` : "";
   if (!writes.length && !refusals.length) add("plan_rows", "file_postgres", "ok", "rows", `${rows.plans.filter((plan) => plan.status !== "retired").length} plans, ${rows.prices.filter((price) => price.retired_at === null).length} live prices${packRows}`);
   let unlinked = 0;
   for (const plan of sold) {
@@ -103,14 +122,14 @@ export function fileAndPostgresChecks(input: { file: Pick<BillingVerifyInput["fi
     if (!row) continue;
     if (row.status !== "active") {
       unlinked += 1;
-      add("not_linked", "file_postgres", "drift", pack.code, `Pack ${pack.code} is ${row.status}${row.status === "draft" ? `, so ${words.provider} doesn't sell it as the file says yet` : ""}. Run pnpm billing apply.`);
+      add("not_linked", "file_postgres", "drift", pack.code, `${packLabel(pack.kind)} ${pack.code} is ${row.status}${row.status === "draft" ? `, so ${words.provider} doesn't sell it as the file says yet` : ""}. Run pnpm billing apply.`);
     }
     for (const price of rows.packPrices.filter((entry) => entry.pack === pack.code && entry.retired_at === null && entry.provider_ref === null)) {
       unlinked += 1;
-      add("not_linked", "file_postgres", "drift", `${pack.code}/${price.currency}`, `Pack ${pack.code} has no ${words.provider} ${words.object}. Run pnpm billing apply.`);
+      add("not_linked", "file_postgres", "drift", `${pack.code}/${price.currency}`, `${packLabel(pack.kind)} ${pack.code} has no ${words.provider} ${words.object}. Run pnpm billing apply.`);
     }
   }
-  if (!unlinked) add("not_linked", "file_postgres", "ok", "links", `${sold.length} sold plans${packs.length ? ` and ${packs.length} packs` : ""} active and linked`);
+  if (!unlinked) add("not_linked", "file_postgres", "ok", "links", `${listed([`${sold.length} sold plans`, ...(packs.length ? packCounts(packs) : [])])} active and linked`);
 }
 
 /** Every check of section 7.1 of the step 2 design, ok ones included. Pure. */
@@ -141,11 +160,12 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
     add(stepCodes[refusal.object], "file_polar", "drift", refusal.subject, `${refusal.subject}: ${refusal.message}`);
   }
   const packs = desired.packs.length;
+  const packNoun = oneTimeNoun(file.packs ?? []);
   const okLines: Array<[BillingCheckCode, string]> = [
     ["org_settings", `currency ${desired.currency.toUpperCase()}, ${desired.settings.allowMultipleSubscriptions ? "several subscriptions" : "one subscription"} per customer, plan changes ${desired.settings.portalPlanChanges ? "on" : "off"} in the portal`],
     ["meter", `${desired.meters.length} meters`],
     ["credits", "no Credits on the products: the worker reports only each month's overage"],
-    ["product", `${desired.products.length} products${packs ? ` and ${packs} one-time pack ${packs === 1 ? "product" : "products"}` : ""}, tagged and priced as the file says${desired.products.some((product) => product.meterInterval) ? ", annual ones invoicing overage each month" : ""}`],
+    ["product", `${desired.products.length} products${packs ? ` and ${packs} one-time ${packNoun} ${packs === 1 ? "product" : "products"}` : ""}, tagged and priced as the file says${desired.products.some((product) => product.meterInterval) ? ", annual ones invoicing overage each month" : ""}`],
     ["discount", desired.discounts.length ? `${desired.discounts.length} ${desired.discounts.length === 1 ? "discount" : "discounts"}` : "no discounts"],
     ...(desired.webhook ? [["webhook", `webhook ${desired.webhook.url}, Raw, on, API version ${POLAR_API_VERSION}`] as [BillingCheckCode, string]] : []),
     ["leftover", `nothing else tagged for ${file.brand}`],
@@ -190,11 +210,11 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
         : null;
       if (problem) {
         badLinks += 1;
-        add("linked_id", "postgres_polar", "drift", subject, `Pack ${subject} is linked to product ${price.provider_ref}, which ${problem}.`);
+        add("linked_id", "postgres_polar", "drift", subject, `${packLabel(row.kind)} ${subject} is linked to product ${price.provider_ref}, which ${problem}.`);
       }
     }
   }
-  if (!badLinks) add("linked_id", "postgres_polar", "ok", "links", `${linked} products${packs ? ` and ${packsLinked} pack ${packsLinked === 1 ? "product" : "products"}` : ""} linked, all live, tagged and priced as the rows say`);
+  if (!badLinks) add("linked_id", "postgres_polar", "ok", "links", `${linked} products${packs ? ` and ${packsLinked} ${packNoun} ${packsLinked === 1 ? "product" : "products"}` : ""} linked, all live, tagged and priced as the rows say`);
   for (const row of catalog.plans) {
     for (const price of row.prices.filter((entry) => entry.retired_at !== null && entry.polar_id !== null)) {
       if (!products.has(price.polar_id!)) add("retired_id", "postgres_polar", "info", `${row.code}/${price.period}`, `The retired ${row.code} ${price.period} price's product ${price.polar_id} isn't in Polar any more.`);

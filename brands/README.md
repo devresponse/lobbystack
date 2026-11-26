@@ -10,7 +10,7 @@ See [docs/branding.md](../docs/branding.md) for the fields and how a deployment 
 
 ## billing.json
 
-A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. It may also hold [prepaid packs](#prepaid-packs), the [words of the plan screens](#the-plan-screens-words), and [how many businesses one account may own](#businesses-per-account), overall or on each plan. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
+A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. It may also hold [prepaid packs](#prepaid-packs), [top-ups on sale](#top-ups-on-sale), the [words of the plan screens](#the-plan-screens-words), and [how many businesses one account may own](#businesses-per-account), overall or on each plan. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
 
 It also holds the settings of the billing providers its deployments use: the `polar` block and the `stripe` block ([Stripe billing](../docs/providers/stripe.md)). An apply refuses a file without the block of its deployment's provider. Once a Stripe deployment is linked, an apply refuses a change to `stripe.overage` or `managedPayments` (`selling_mode_changed`): its customers' subscriptions were made that way. AlloPlace's and RealInfoBot's `stripe` blocks sell with Stripe as the merchant of record (`managedPayments`, with `overage` on the plan's checkout), so AlloPlace's Stripe deployments sell monthly prices only, while its Polar deployments sell the yearly ones too. RealInfoBot's file sells packs and no plan.
 
@@ -63,6 +63,28 @@ Once a pack has been bought, its minutes and length can't change: an apply refus
 `pnpm billing apply` makes each pack a product of its own at the provider, after everything the plans need, and links it: a one-time price on Stripe ([Stripe billing](../docs/providers/stripe.md#know-what-apply-makes-for-packs)), a private one-time product on Polar ([Polar billing](../docs/providers/polar.md#create-the-hosted-products)). A pack is on sale once that link has made it active. Deploy the code first: an instance built before migration `0148` refuses a file with `packs`. `lobbystack billing catalog` lists the packs with the plans.
 
 A pack takes none of the deployment's own promo codes. On Polar, `"packDiscountCodes": true` in the file's `polar` block lets each pack's payment page take a discount code made in Polar's dashboard, such as 95% off once, limited to the pack products, with a use limit and an end date: whoever pays types it on Polar's page, and the pack's cards keep the full price. Like `upgradeProration` and `downgradeProration`, and unlike the two settings an apply sets in Polar's organization, it is LobbyStack's own: the worker reads it from the last applied file when it makes each pack's checkout, so it takes effect at the next `pnpm billing apply` after the deploy, and plan checkouts never take a code. Left out, it's off, and the file hashes as it did before the switch existed. RealInfoBot's file turns it on; AlloPlace's leaves it out ([prepaid packs](../docs/features/prepaid-packs.md#take-money-off-a-pack-with-a-discount-code)).
+
+### Top-ups on sale
+
+A top-up on sale is extra minutes, and maybe texts, transfers and website chats, that a business on Free or on a prepaid pack pays for once, on top of its plan, which stays as it is. It lasts a number of days from the payment, and its uses draw on it only once the plan's own allowance of their kind is used up. Each size and length is one more key under `topUps`, with a price of its own. A file without `topUps` sells none, and nothing else in it changes. AlloPlace sells 100 minutes for CA$25, lasting 90 days, and RealInfoBot 100 minutes for CA$39, lasting 180 days ([top-ups](../docs/features/top-ups.md#sell-top-ups)).
+
+```json
+"topUps": {
+  "topup_100_90": {
+    "names": { "en": "100 extra minutes", "fr": "100 minutes supplémentaires", "es": "100 minutos adicionales", "sr": "100 dodatnih minuta" },
+    "days": 90,
+    "prices": { "onceCents": 2500 },
+    "included": { "voiceMinutes": 100, "alertSmsSegments": 0, "outboundCallAttempts": 0, "chatAiUnits": 0 }
+  }
+}
+```
+
+- The key is the top-up's permanent code, written as a pack's. No plan or pack may have it (`code_taken`), and a code that sold a top-up can't become a pack, nor a pack's code a top-up. A file holds at most 10 top-ups.
+- `names`, `prices.onceCents` and `days` are as a pack's: four languages, a price paid once in the file's `currency`, before tax on Stripe, and 1 to 1,095 days from the payment, or none for a top-up that never ends.
+- `included` is what it gives for its whole length, all four needed: `voiceMinutes` from 1 to 100,000, and `alertSmsSegments`, `outboundCallAttempts` and `chatAiUnits`, which may be 0. A top-up has no `limits`, since it changes none.
+- Top-ups are listed by minutes, then length.
+
+`pnpm billing apply` sells each as it sells a pack, with the same rules for new terms, freezing once bought and retiring: a product of its own, a one-time price on Stripe or a private one-time product on Polar, linked once the provider sells it, and checked daily. Its catalog row has `kind` `top_up`. Deploy the code first: an instance built before migration `0155` refuses a file with `topUps`. On Polar, `packDiscountCodes` lets a top-up's payment page take a discount code too, when the discount includes the top-up's product. Who may buy one, and what refunds and disputes do, are on the [top-ups](../docs/features/top-ups.md#know-who-may-buy-one) page.
 
 ### The plan screens' words
 

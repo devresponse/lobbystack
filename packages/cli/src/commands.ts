@@ -9,13 +9,18 @@ import { formatTable, print } from "./output";
 import { LOG_DIR_VARIABLE, logFolder, saveLog } from "./searchLog";
 import { readUploadFile, uploadKnowledgeFile } from "./upload";
 import { userAgent, version } from "./version";
-import { checkoutWait, claimWait, packCheckoutWait, sourceWait, subscriptionChangeWait } from "./waits";
+import { checkoutWait, claimWait, packCheckoutWait, sourceWait, subscriptionChangeWait, topUpCheckoutWait } from "./waits";
 
 /** What a paid pack checkout came to: the business has the pack, unless a plan started first or the payment went back. */
 function packPaidSentence(packStatus: unknown): string {
   if (packStatus === "replaced") return "The pack is paid, but a plan the business bought started first, so the pack ended at once. The operator refunds its payment.";
   if (packStatus === "refunded") return "The pack's payment was refunded or charged back before it arrived, so the business doesn't have the pack.";
   return "The pack is paid, and the business has it.";
+}
+
+function topUpPaidSentence(topUpStatus: unknown): string {
+  if (topUpStatus === "refunded") return "The top-up's payment was refunded or charged back before it arrived, so the business doesn't have the top-up.";
+  return "The top-up is paid, and the business has it.";
 }
 
 // The command groups. Most commands are specs for operationCommand; the few
@@ -234,14 +239,14 @@ function billingStatus(data: Row): string {
   return tables.join("\n\n");
 }
 
-/** Each top-up: where it came from, what it has left of what it gave, and when it starts and ends. */
+/** Each top-up: where it came from (its code, the top-up on sale it was bought as, or a grant), what it has left of what it gave, and when it starts and ends. */
 function topUpTable(topUps: Row[]): string {
   const left = (topUp: Row, kind: string, per = 1) => {
     const gives = Number((topUp.gives as Row)[kind] ?? 0);
     const used = Number((topUp.used as Row)[kind] ?? 0);
     return gives > 0 ? `${Math.floor(Math.max(0, gives - used) / per)}/${Math.floor(gives / per)}` : "";
   };
-  const rows = topUps.map((topUp) => ({ id: topUp.id, source: topUp.code ?? topUp.source, status: topUp.status, minutes: left(topUp, "voice_seconds", 60), texts: left(topUp, "alert_sms_segments"), transfers: left(topUp, "outbound_call_attempts"), chats: left(topUp, "chat_units"), starts_at: topUp.starts_at, ends_at: topUp.ends_at ?? "never ends", note: topUp.note }));
+  const rows = topUps.map((topUp) => ({ id: topUp.id, source: topUp.code ?? (topUp.top_up ? `bought ${String(topUp.top_up)}` : topUp.source), status: topUp.status, minutes: left(topUp, "voice_seconds", 60), texts: left(topUp, "alert_sms_segments"), transfers: left(topUp, "outbound_call_attempts"), chats: left(topUp, "chat_units"), starts_at: topUp.starts_at, ends_at: topUp.ends_at ?? "never ends", note: topUp.note }));
   return formatTable(rows, columns("id", "source", "status", "minutes", "texts", "transfers", "chats", "starts_at", "ends_at", "note"));
 }
 
@@ -527,7 +532,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "add-rule": { operation: "createWebsiteRule" },
     "remove-rule": { operation: "deleteWebsiteRule" },
   }),
-  group("billing", "The plan, its checkout, prepaid packs, cancelling and the spending cap, and with an operator key the deployment's billing catalog, promo codes and top-ups.", {
+  group("billing", "The plan, its checkout, prepaid packs, top-ups on sale, cancelling and the spending cap, and with an operator key the deployment's billing catalog, promo codes and top-up grants.", {
     status: { operation: "getBilling", show: billingStatus },
     plans: { operation: "listBillingPlans", show: planTable },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
@@ -535,6 +540,8 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "checkout-status": { operation: "getCheckout" },
     "buy-pack": { operation: "createPackCheckout", args: ["pack"], wait: packCheckoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays for the pack: ${String(data.checkout_url)}` : data.status === "paid" ? packPaidSentence(data.pack_status) : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing pack-status ${String(data.id)}.` },
     "pack-status": { operation: "getPackCheckout" },
+    "buy-top-up": { operation: "createTopUpCheckout", args: ["top_up"], wait: topUpCheckoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays for the top-up: ${String(data.checkout_url)}` : data.status === "paid" ? topUpPaidSentence(data.top_up_status) : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing top-up-status ${String(data.id)}.` },
+    "top-up-status": { operation: "getTopUpCheckout" },
     cancel: { operation: "cancelBillingPlan", wait: subscriptionChangeWait },
     resume: { operation: "resumeBillingPlan", wait: subscriptionChangeWait },
     "keep-plan": { operation: "keepBillingPlan", wait: subscriptionChangeWait },

@@ -43,8 +43,6 @@ import {
   type ApiCheckout,
   type ApiSubscriptionChange,
   type ApiCheckoutCreate,
-  type ApiPackCheckout,
-  type ApiPackCheckoutCreate,
   type ApiClaimLink,
   type ApiClaimLinkCreate,
   type ApiContact,
@@ -128,7 +126,6 @@ import { createBillingCheckoutRequestInTransaction, isLiveSubscriptionState, isM
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { listBusinessPacks } from "../billingPacks";
 import { listBusinessTopUps, serializeBillingTopUp } from "../billingTopUps";
-import { createPackCheckoutRequestInTransaction, readPackCheckoutInTransaction } from "../billingPackCheckout";
 import { billingSubscriptionChangeShown, createBillingSubscriptionRequestInTransaction, isBillingSubscriptionAction } from "../billingSubscription";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
@@ -478,7 +475,7 @@ async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkou
  * key onboards would otherwise carry one email in Polar, which can tie their
  * payments together. purchase names what is bought in that refusal.
  */
-async function checkoutPayerId(context: DomainContext, caller: ApiCaller, purchase = "a plan"): Promise<string> {
+export async function checkoutPayerId(context: DomainContext, caller: ApiCaller, purchase = "a plan"): Promise<string> {
   if (caller.platformKeyId === undefined) return await resolveActingUserId(context, caller);
   const [owner] = await inBusiness(context, caller, async (tx) => await tx.select({ userId: businessMemberships.userId }).from(businessMemberships).where(and(eq(businessMemberships.businessId, caller.businessId), eq(businessMemberships.role, "business_owner"), eq(businessMemberships.status, "active"), ne(businessMemberships.userId, caller.actingUserId))).orderBy(asc(businessMemberships.createdAt)).limit(1));
   if (!owner) throw conflict(`Only the business's own owner can pay for ${purchase}, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan.`);
@@ -560,51 +557,6 @@ export async function getSubscriptionChangeForApi(context: DomainContext, caller
 
 export async function getCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiCheckout> {
   return await inBusiness(context, caller, async (tx) => await loadCheckout(tx, caller.businessId, checkoutId));
-}
-
-/** A prepaid pack's checkout as the API shows it; paid once billing.reconcile recorded its payment, and pack_status says what became of the pack. */
-async function loadPackCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiPackCheckout> {
-  const checkout = await readPackCheckoutInTransaction(tx, { businessId, checkoutId });
-  if (!checkout) throw notFound("Pack checkout");
-  return {
-    id: checkout.id,
-    pack: checkout.pack,
-    status: checkout.status,
-    pack_status: checkout.packStatus,
-    checkout_url: checkout.checkoutUrl,
-    error: checkout.error,
-    paid: checkout.status === "paid",
-    expires_at: checkout.expiresAt.toISOString(),
-    created_at: checkout.createdAt.toISOString(),
-    updated_at: checkout.updatedAt.toISOString(),
-  };
-}
-
-/**
- * Asks the deployment's billing provider for a page where the customer pays
- * once for a prepaid pack, as Settings > Plan does, with the dashboard's
- * refusals as the API's 409. Callers say whether this deployment sells packs
- * through its provider. Made out to the person the key acts for, or the owner
- * for a platform key. The payer's open checkout for the same pack comes back
- * instead of a new one; checkLimit runs only before a new one is made.
- */
-export async function createPackCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiPackCheckoutCreate, options: { available: boolean; checkLimit?: BillingCheckoutLimit }): Promise<ApiPackCheckout> {
-  if (!options.available) throw conflict(`This deployment doesn't sell packs through ${billingProviderNames[billingProviderOf(process.env)]}.`);
-  const userId = await checkoutPayerId(context, caller, "a pack");
-  return await inBusiness(context, caller, async (tx) => {
-    let checkout: { id: string; created: boolean };
-    try {
-      checkout = await createPackCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, pack: input.pack, billingEmail: input.billing_email, checkLimit: options.checkLimit });
-    } catch (error) {
-      throw apiErrorFromDomain(error, "Pack checkout");
-    }
-    if (checkout.created) await audit(tx, caller, { eventType: "api.billing.pack_checkout_started", entityType: "billing_pack_checkout", entityId: checkout.id, payload: { pack: input.pack, payerUserId: userId } });
-    return await loadPackCheckout(tx, caller.businessId, checkout.id);
-  });
-}
-
-export async function getPackCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiPackCheckout> {
-  return await inBusiness(context, caller, async (tx) => await loadPackCheckout(tx, caller.businessId, checkoutId));
 }
 
 // Phone numbers. A claim buys a real number, so the dashboard's plan,

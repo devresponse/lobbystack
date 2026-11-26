@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { billingPlanIncluded, billingPlanName, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type BillingSubscriptionAction, type BillingTopUpHolding, type PlanChangeRefusal } from "@lobbystack/shared";
+import { billingPlanIncluded, billingPlanName, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type BillingSubscriptionAction, type BillingTopUpHolding, type BillingTopUpOffer, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowUpRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
-import { paidPackToastKey, usePackCheckoutReturn } from "@/hooks/use-pack-checkout";
+import { paidPackToastKey, paidTopUpToastKey, usePackCheckoutReturn, type PackCheckoutKind } from "@/hooks/use-pack-checkout";
 import type { BillingPermissions } from "./billing-past-due-banner";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
@@ -28,7 +28,7 @@ import { packPriceSuffix } from "@/lib/plan-display";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
 import { HeldPacks } from "./billing-packs";
-import { HeldTopUps } from "./billing-top-ups";
+import { HeldTopUps, TopUpOffers } from "./billing-top-ups";
 
 type Billing = {
   /** The deployment's billing provider, and its name. */
@@ -58,8 +58,10 @@ type Billing = {
   packOffers?: BillingPackOfferViewModel[];
   packs?: BillingPackViewModel[];
   packCheckout?: PackCheckoutViewModel | null;
-  /** Top-ups on top of the plan, which an operator granted or a code added; absent from answers before top-ups. */
+  /** Top-ups on top of the plan, which an operator granted, a code added or the business bought; absent from answers before top-ups. */
   topUps?: BillingTopUpHolding[];
+  /** The top-ups on sale, each saying whether the caller may buy it now; absent from answers before top-ups were sold. */
+  topUpOffers?: BillingTopUpOffer[];
 };
 
 /** The plan a waiting change moves to: its own name, its tier's, or its code when the business can't read it. */
@@ -72,6 +74,33 @@ function nextPlanName(next: NonNullable<Billing["nextChange"]>, locale: string, 
 const planActionToasts: Record<BillingSubscriptionAction, string> = { cancel: "billing.toast.planCanceled", resume: "billing.toast.planResumed", keep: "billing.toast.planKept" };
 
 function formatBillingDate(value: string | null, locale = "en"): string { return value ? formatDateTime(value, locale, { month: "short", day: "numeric", year: "numeric" }) : "—"; }
+
+/**
+ * Back from a pack's payment page (?pack=success) or a top-up's (?topUp=success), with packCheckoutId: wait for the
+ * payment, then show what it bought and say how it went, once, and clean the address.
+ */
+function useCheckoutReturn(businessId: string | undefined, kind: PackCheckoutKind) {
+  const { t } = useTranslation("settings");
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const checkoutId = searchParams.get(kind === "top_up" ? "topUp" : "pack") === "success" ? searchParams.get("packCheckoutId") : null;
+  const { outcome } = usePackCheckoutReturn(businessId, checkoutId, kind);
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!businessId || !checkoutId || !outcome || outcome === "waiting") return;
+    const key = `${businessId}:${checkoutId}`;
+    if (announced.current === key) return;
+    announced.current = key;
+    const words = kind === "top_up" ? "billing.topUps.buy" : "billing.packs";
+    if (outcome === "paid") toast.success(t(`${words}.toast.added`));
+    else if (outcome === "failed") toast.error(t(`${words}.toast.failed`));
+    else if (outcome === "replaced" || outcome === "refunded") toast.error(t(kind === "top_up" ? paidTopUpToastKey("refunded") : paidPackToastKey(outcome)));
+    else toast(t(`${words}.toast.processing`));
+    void queryClient.invalidateQueries({ queryKey: ["billing", businessId] });
+    router.replace("/settings/plan");
+  }, [businessId, checkoutId, kind, outcome, queryClient, router, t]);
+}
 
 
 export function LivePlanSurface() {
@@ -103,23 +132,9 @@ export function LivePlanSurface() {
 
   useEffect(() => { if (searchParams.get("checkout") && business?.businessId) void queryClient.invalidateQueries({ queryKey: ["billing", business.businessId] }); }, [business?.businessId, queryClient, searchParams]);
 
-  // Back from a pack's payment page: wait for the payment, then show the pack and say how it went, once.
-  const packReturnId = searchParams.get("pack") === "success" ? searchParams.get("packCheckoutId") : null;
-  const packReturn = usePackCheckoutReturn(business?.businessId, packReturnId);
-  const announcedPackReturn = useRef<string | null>(null);
-  useEffect(() => {
-    const outcome = packReturn.outcome;
-    if (!business || !packReturnId || !outcome || outcome === "waiting") return;
-    const key = `${business.businessId}:${packReturnId}`;
-    if (announcedPackReturn.current === key) return;
-    announcedPackReturn.current = key;
-    if (outcome === "paid") toast.success(t("billing.packs.toast.added"));
-    else if (outcome === "failed") toast.error(t("billing.packs.toast.failed"));
-    else if (outcome === "replaced" || outcome === "refunded") toast.error(t(paidPackToastKey(outcome)));
-    else toast(t("billing.packs.toast.processing"));
-    void queryClient.invalidateQueries({ queryKey: ["billing", business.businessId] });
-    router.replace("/settings/plan");
-  }, [business, packReturnId, packReturn.outcome, queryClient, router, t]);
+  // Back from a pack's or a top-up's payment page: wait for the payment, then show what it bought and say how it went, once.
+  useCheckoutReturn(business?.businessId, "pack");
+  useCheckoutReturn(business?.businessId, "top_up");
 
   const planActionMutation = useMutation({
     mutationFn: (input: { businessId: string; action: BillingSubscriptionAction }) => requestJson<{ requestId: string }>("/api/billing/subscription", { method: "POST", body: JSON.stringify(input) }),
@@ -309,6 +324,8 @@ export function LivePlanSurface() {
           {packs.length > 0 && !planPack && plan !== "self_host" && plan !== "enterprise" ? <HeldPacks locale={locale} packs={packs} /> : null}
           {/* Top-ups add to the plan without changing it; on Enterprise, which has no allowances, nothing draws on them. */}
           {plan !== "self_host" ? <HeldTopUps counted={plan !== "enterprise"} locale={locale} topUps={billing.data.topUps ?? []} /> : null}
+          {/* Top-ups on sale, on Free or a pack, for those who manage billing; nothing shows when none may be bought. */}
+          <TopUpOffers key={business.businessId} businessId={business.businessId} locale={locale} offers={billing.data.topUpOffers ?? []} />
           {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null} /> : null}
           {(canUpgrade || canManage || paymentActionUrl || planActions) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

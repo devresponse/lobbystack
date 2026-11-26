@@ -12,7 +12,8 @@ import { PACK_CHECKOUT_CLOSED_FOR_PLAN } from "./billingPacks";
 import { workUnderWay } from "./businessDeletion";
 import { generateApiKey } from "./publicApi/apiKeys";
 import { PublicApiError } from "./publicApi/errors";
-import { createPackCheckoutForApi, getPackCheckoutForApi, type ApiKeyCaller, type PlatformKeyCaller } from "./publicApi/operations";
+import type { ApiKeyCaller, PlatformKeyCaller } from "./publicApi/operations";
+import { createPackCheckoutForApi, getPackCheckoutForApi } from "./publicApi/packCheckouts";
 
 // Prepaid pack checkouts against PostgreSQL: who may buy a pack, the one open
 // purchase a business makes at a time across packs and plans, and the steps
@@ -400,7 +401,7 @@ describe.skipIf(!testUrl)("prepaid pack checkouts against PostgreSQL", () => {
       const id = await checkoutRow(tx, { businessId, userId, pack: sold, status: "processing" });
       const load = async () => await as(tx, "lobbystack_worker", (context) => loadPackCheckoutRequest(context, { businessId, checkoutId: id }));
 
-      expect(await load()).toEqual({ id, businessId, pack: sold.code, priceId: sold.priceId, status: "processing", priceRef: sold.priceRef, customerEmail: `${userId}@example.invalid`, billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: `cus_${businessId}`, businessName: "Pack checkout test", onboardingStage: "create_business" });
+      expect(await load()).toEqual({ id, businessId, kind: "pack", pack: sold.code, priceId: sold.priceId, status: "processing", priceRef: sold.priceRef, customerEmail: `${userId}@example.invalid`, billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: `cus_${businessId}`, businessName: "Pack checkout test", onboardingStage: "create_business" });
       await tx.update(billingPackPrices).set({ retiredAt: new Date() }).where(eq(billingPackPrices.id, sold.priceId));
       expect((await load())?.priceRef).toBeNull();
       await tx.update(billingPackPrices).set({ retiredAt: null }).where(eq(billingPackPrices.id, sold.priceId));

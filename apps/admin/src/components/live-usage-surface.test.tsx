@@ -96,12 +96,12 @@ describe("the usage page on prepaid packs", () => {
 describe("top-ups on the usage page", () => {
   const allowance = (total: number, used: number) => ({ total, used, left: Math.max(0, total - used) });
   const topUp = { voiceSeconds: allowance(3_600, 900), alertSmsSegments: allowance(0, 0), outboundCallAttempts: allowance(10, 0), chatAiUnits: allowance(0, 0), nextEndsAt: "2026-12-31T00:00:00.000Z", lastEndsAt: "2026-12-31T00:00:00.000Z" };
-  function setupTopUp(plan: "free_cloud" | "prepaid" | "enterprise", usageStatus: Record<string, unknown>) {
+  function setupTopUp(plan: "free_cloud" | "prepaid" | "enterprise", usageStatus: Record<string, unknown>, extra: Record<string, unknown> = {}) {
     language.value = "en";
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-    client.setQueryData(["billing", "business"], { effectivePlan: plan, limits: builtInBillingPlanLimits[plan], account: null, usageStatus: { voiceSecondsUsed: 600, outboundCallAttemptsUsed: 0, alertSmsSegmentsUsed: 0, voiceBlocked: false, ...usageStatus }, knowledgeStorageBytesUsed: 0 });
+    client.setQueryData(["billing", "business"], { effectivePlan: plan, limits: builtInBillingPlanLimits[plan], account: null, usageStatus: { voiceSecondsUsed: 600, outboundCallAttemptsUsed: 0, alertSmsSegmentsUsed: 0, voiceBlocked: false, ...usageStatus }, knowledgeStorageBytesUsed: 0, ...extra });
     render(<QueryClientProvider client={client}><LiveUsageSurface /></QueryClientProvider>);
   }
   const topUpLines = () => screen.queryAllByText((text) => text.startsWith("billing.usage.topUpLeft"));
@@ -126,5 +126,18 @@ describe("top-ups on the usage page", () => {
   it("says nothing about top-ups on Enterprise, where nothing draws on them", () => {
     setupTopUp("enterprise", { topUp });
     expect(topUpLines()).toHaveLength(0);
+  });
+
+  it("links to Settings > Plan's top-ups when the business may buy one now, and not otherwise", () => {
+    const offer = { code: "topup_100_90", names: { en: "100 extra minutes" }, gives: { voiceSeconds: 6_000, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 }, days: 90, amountCents: 2_500, currency: "cad", checkoutAvailable: true };
+    setupTopUp("free_cloud", {}, { topUpOffers: [offer] });
+    // A link drawn as a button.
+    expect(screen.getByText("billing.usage.buyTopUp").closest("a")?.getAttribute("href")).toBe("/settings/plan#top-ups");
+    cleanup();
+    setupTopUp("free_cloud", {}, { topUpOffers: [{ ...offer, checkoutAvailable: false }] });
+    expect(screen.queryByText("billing.usage.buyTopUp")).toBeNull();
+    cleanup();
+    setupTopUp("free_cloud", {});
+    expect(screen.queryByText("billing.usage.buyTopUp")).toBeNull();
   });
 });

@@ -65,6 +65,14 @@
       "limits": { "knowledgeStorageMb": 120, "businessNumbers": 1, "receptionists": 6 }
     }
   },
+  "topUps": {
+    "topup_100_180": {
+      "names": { "en": "100 extra minutes", "fr": "100 minutes supplémentaires", "es": "100 minutos adicionales", "sr": "100 dodatnih minuta" },
+      "days": 180,
+      "prices": { "onceCents": 3900 },
+      "included": { "voiceMinutes": 100, "alertSmsSegments": 0, "outboundCallAttempts": 0, "chatAiUnits": 0 }
+    }
+  },
   "display": {
     "plans": [
       {

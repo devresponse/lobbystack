@@ -1,7 +1,7 @@
-// The pack checkout job: a one-time payment page for a prepaid pack, as the plan checkout job (checkout.ts) makes a plan's.
+// The pack checkout job: a one-time payment page for a prepaid pack, or for a top-up on sale (0155), as the plan checkout job (checkout.ts) makes a plan's.
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { billingProviderNames, planChangeRefusalSentence } from "@lobbystack/shared";
-import { claimPackCheckout, loadPackCheckoutRequest, loadPolarPackDiscountCodes, loadStripeSelling, markPackCheckoutFailed, markPackCheckoutReady, PACK_NOT_ON_SALE, releasePackCheckout } from "@lobbystack/domain";
+import { claimPackCheckout, loadPackCheckoutRequest, loadPolarPackDiscountCodes, loadStripeSelling, markPackCheckoutFailed, markPackCheckoutReady, PACK_NOT_ON_SALE, releasePackCheckout, TOP_UP_NOT_ON_SALE } from "@lobbystack/domain";
 import { reportError } from "@lobbystack/telemetry/node";
 import type { JobExecution, JobResult, WorkerDependencies } from "../handlers";
 import { businessIdOrThrow } from "../jobInput";
@@ -20,11 +20,12 @@ async function failPackCheckoutTry(dependencies: WorkerDependencies, input: { bu
 
 /**
  * billing.createPackCheckout: asks the deployment's provider for the page
- * where the business pays for a pack, on its own customer, and records it.
- * The deployment's own promo codes don't apply and nothing changes a plan: a
- * pack is a one-time payment, and billing.reconcile adds it once the payment
- * arrives, for whatever the page took. On Polar, the brand's file may let the
- * page take a discount code made in Polar's dashboard (packDiscountCodes).
+ * where the business pays for a pack or a top-up, on its own customer, and
+ * records it. The deployment's own promo codes don't apply and nothing
+ * changes a plan: either is a one-time payment, and billing.reconcile adds it
+ * once the payment arrives, for whatever the page took. On Polar, the brand's
+ * file may let the page take a discount code made in Polar's dashboard
+ * (packDiscountCodes), for a top-up as for a pack.
  */
 export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerDependencies, execution: JobExecution = {}): Promise<JobResult> {
   const businessId = businessIdOrThrow(job);
@@ -48,9 +49,9 @@ export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerD
   }
   const request = await loadPackCheckoutRequest(dependencies.domain, { businessId, checkoutId });
   if (!request) return { status: "skipped", entityId: checkoutId };
-  // The price the business saw when it asked, while the provider still sells the pack at it.
+  // The price the business saw when it asked, while the provider still sells the pack or top-up at it.
   if (!request.priceRef) {
-    await markPackCheckoutFailed(dependencies.domain, { businessId, checkoutId, error: PACK_NOT_ON_SALE });
+    await markPackCheckoutFailed(dependencies.domain, { businessId, checkoutId, error: request.kind === "top_up" ? TOP_UP_NOT_ON_SALE : PACK_NOT_ON_SALE });
     return { status: "skipped", entityId: checkoutId };
   }
   try {
@@ -69,8 +70,8 @@ export async function createPackCheckout(job: JobEnvelope, dependencies: WorkerD
       checkoutId,
       // The pack and its price ride on the payment, so the payment's events find the pack without reading the checkout's lines.
       metadata: { lobbystack_business: businessId, lobbystack_pack: request.pack, lobbystack_pack_price: request.priceId },
-      // Its own marker: the plan screens read checkout=success as a plan's request.
-      successUrl: `${planUrl}?pack=success&packCheckoutId=${encodeURIComponent(checkoutId)}`,
+      // Its own marker: the plan screens read checkout=success as a plan's request, and a top-up's page says so.
+      successUrl: `${planUrl}?${request.kind === "top_up" ? "topUp" : "pack"}=success&packCheckoutId=${encodeURIComponent(checkoutId)}`,
       // Someone leaving checkout hasn't paid, so it returns to the plan page without the success marker.
       cancelUrl: planUrl,
       locale: null,

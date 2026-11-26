@@ -583,6 +583,7 @@
       "packBlockedDescription": "No minutes left. Calls get a busy signal until you buy another pack.",
       "packAllowanceBlockedDescription": "None left. Buy another pack to get more.",
       "topUpLeft": "Top-ups: {{left}} of {{total}} {{unit}} left",
+      "buyTopUp": "Buy a top-up",
       "overageCount": "{{count}} over limit",
       "overageCost": "≈ {{amount}} in overages",
       "noOverages": "No overages — usage hard-capped at the included pool.",
@@ -669,6 +670,7 @@
       "notCounted": "Your plan has no limits, so these aren't used while you're on it.",
       "granted": "Top-up",
       "fromCode": "Top-up from code {{code}}",
+      "bought": "Bought top-up",
       "kinds": {
         "voice": "Voice minutes",
         "transfers": "Transfer attempts",
@@ -689,6 +691,7 @@
       "startsOn": "Starts on {{date}}",
       "endsOn": "Ends on {{date}}",
       "neverEnds": "Never ends",
+      "frozen": "On hold while a payment dispute is open",
       "code": {
         "adds": "This code adds to your plan:",
         "lasts_one": "Lasts {{count}} day from when you add it.",
@@ -702,6 +705,29 @@
         "usedByYou": "You already added this code.",
         "usedError": "This code was already added.",
         "failed": "Unable to add this code. Try again."
+      },
+      "buy": {
+        "title": "Buy a top-up",
+        "description": "Extra allowances on top of your plan, paid once. Your plan stays as it is: these are used once its own allowance runs out.",
+        "lasts_one": "Lasts {{count}} day from your payment.",
+        "lasts_other": "Lasts {{count}} days from your payment.",
+        "noEnd": "It doesn't expire.",
+        "buy": "Buy",
+        "buying": "Opening the payment page...",
+        "toast": {
+          "added": "Your top-up was added.",
+          "failed": "Your payment didn't go through, so no top-up was added.",
+          "processing": "Your payment is processing. Your top-up shows here once it arrives.",
+          "refundedFirst": "This payment was refunded or charged back, so no top-up was added.",
+          "checkoutFailed": "Unable to open the payment page. Try again.",
+          "checkoutExpired": "The payment page expired. Try again."
+        },
+        "refusals": {
+          "managed_plan": "Your plan is managed for you, so top-ups can't be bought here.",
+          "top_up_not_sold_on_plan": "Top-ups are sold on Free and on prepaid packs. Your plan goes on past its allowance instead.",
+          "top_up_not_on_sale": "This top-up isn't on sale right now.",
+          "plan_change_pending": "Another purchase for this business is still in progress. Try again in a minute."
+        }
       }
     },
     "transactions": {

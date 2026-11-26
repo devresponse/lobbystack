@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { billingPackStatuses, billingPlanSlugs, billingProviderEnvs, billingProviders, billingSubscriptionActions, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
-import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema, MAX_BILLING_PACKS } from "../billingProfile";
+import { billingPackKinds, billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema, MAX_BILLING_PACKS, MAX_BILLING_TOP_UPS } from "../billingProfile";
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
@@ -424,7 +424,7 @@ export const apiBillingCatalogLinkSchema = z.strictObject({
     terms_hash: sha256Hex.describe("The pack's terms_hash its provider object was made from. It must be the row's."),
     currency: z.string().regex(/^[a-z]{3}$/).describe("The currency of the pack's live price."),
     provider_ref: providerObjectId.describe("The provider's object that sells the pack's live price: a Polar product or a Stripe price."),
-  })).max(MAX_BILLING_PACKS).optional().describe("Every pack that isn't retired, each with the object that sells its live price. Required once the catalog has packs; left out, the link names none."),
+  })).max(MAX_BILLING_PACKS + MAX_BILLING_TOP_UPS).optional().describe("Every pack and top-up on sale that isn't retired, each with the object that sells its live price. Required once the catalog has packs or top-ups; left out, the link names none."),
   objects: z.record(z.string(), z.unknown()).optional().describe("The provider's objects beyond plans and prices, which a Stripe link records: its meters, overage prices, billing portal configuration and webhook endpoint, with the endpoint secret's SHA-256. Not with provider polar."),
   replace_ids: z.boolean().optional().describe("true lets a live price or a plan that already has a provider object take another one: the old price row is retired with its object, and a new live row takes the new one. Defaults to false."),
   dry_run: z.boolean().optional().describe("true shows what the link would change and anything that would stop it, and changes nothing. Defaults to false."),
@@ -641,7 +641,8 @@ export const apiBillingCatalogPackPriceSchema = z.object({
 });
 
 export const apiBillingCatalogPackSchema = z.object({
-  code: z.string().describe("The pack's permanent code, its key in billing.json's packs."),
+  code: z.string().describe("The pack's permanent code, its key in billing.json's packs, or a top-up's in its topUps."),
+  kind: z.enum(billingPackKinds).describe("pack: a plan paid for once that lasts its days. top_up: extra allowances a business on Free or on a pack pays for once on top of its plan, which stays as it is; its limits are 0, since it changes none."),
   status: z.enum(["draft", "active", "retired"]).describe("draft until the billing provider can sell it as defined, active, or retired."),
   names: z.record(z.string(), z.string()).describe("Display names by language."),
   voice_sec: z.number().int().describe("Voice seconds the pack holds for its whole length."),
@@ -659,7 +660,7 @@ export const apiBillingCatalogPackSchema = z.object({
   created_at: timestamp,
   updated_at: timestamp,
   prices: z.array(apiBillingCatalogPackPriceSchema).describe("Every price of the pack, the live one first."),
-}).describe("A prepaid pack: a plan paid for once that lasts its days from the payment without renewing, with its voice minutes and every other allowance for that whole length.");
+}).describe("A prepaid pack: a plan paid for once that lasts its days from the payment without renewing, with its voice minutes and every other allowance for that whole length. Or, with kind top_up, a top-up on sale: what it gives for its whole length on top of the plan.");
 
 export const apiBillingCatalogPolarSchema = z.object({
   env: z.enum(billingPolarEnvs).describe("The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."),

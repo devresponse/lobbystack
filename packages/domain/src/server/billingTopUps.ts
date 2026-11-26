@@ -1,14 +1,15 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 
-import { auditLogs, billingTopUpDraws, billingTopUps, enqueueOutbox, type DatabaseTransaction } from "@lobbystack/db";
-import { billingTopUpStatus, isBillingCode, normalizeBillingCode, type ApiBillingTopUp, type BillingTopUpAmounts, type BillingTopUpCodeView, type BillingTopUpHolding, type BillingTopUpSource } from "@lobbystack/shared";
+import { auditLogs, billingPackPlans, billingTopUpDraws, billingTopUps, enqueueOutbox, type DatabaseTransaction } from "@lobbystack/db";
+import { billingTopUpStatus, isBillingCode, normalizeBillingCode, packCapacity, topUpEndsAt, type ApiBillingTopUp, type BillingTopUpAmounts, type BillingTopUpCodeView, type BillingTopUpHolding, type BillingTopUpSource } from "@lobbystack/shared";
 
 import { packUsageKinds, type PackAllowance, type PackUsageKind } from "./billingPacks";
 
-// The top-up ledger (migration 0154, docs/features/top-ups.md). A top-up is
-// extra voice seconds, alert texts, transfers and website chats on top of the
-// business's plan: an operator grants one with a platform key, or someone on
-// the team adds one with a top-up code. It never changes the plan. Its uses
+// The top-up ledger (migrations 0154 and 0155, docs/features/top-ups.md). A
+// top-up is extra voice seconds, alert texts, transfers and website chats on
+// top of the business's plan: an operator grants one with a platform key,
+// someone on the team adds one with a top-up code, or the business pays for
+// one on sale through the billing provider. It never changes the plan. Its uses
 // draw on it only once the plan's own allowance of their kind is used up (on
 // the prepaid tier, once the packs hold none of it), the top-up that ends
 // first first, and what it paid for is never counted against the allowance,
@@ -79,7 +80,24 @@ const liveColumns = {
   chatUsed: billingTopUps.chatUsed,
   startsAt: billingTopUps.startsAt,
   endsAt: billingTopUps.endsAt,
+  amountCents: billingTopUps.amountCents,
+  refundedCents: billingTopUps.refundedCents,
 };
+
+/**
+ * What a top-up gives after refunds: a purchase partly refunded gives its
+ * unrefunded share of each allowance, as a pack does (packCapacity). A grant
+ * or a code's top-up, never paid for, gives what it gave.
+ */
+export function topUpGives<T extends { voiceSec: number; smsSeg: number; callsOut: number; chatUnits: number; amountCents: number; refundedCents: number }>(row: T): T {
+  if (row.refundedCents <= 0) return row;
+  return { ...row, voiceSec: packCapacity(row.voiceSec, row), smsSeg: packCapacity(row.smsSeg, row), callsOut: packCapacity(row.callsOut, row), chatUnits: packCapacity(row.chatUnits, row) };
+}
+
+function liveTopUp(row: LiveTopUp & { amountCents: number; refundedCents: number }): LiveTopUp {
+  const { amountCents: _paid, refundedCents: _refunded, ...topUp } = topUpGives(row);
+  return topUp;
+}
 
 /** Takes the business's top-up lock for the rest of the transaction. */
 export async function lockBusinessTopUps(tx: DatabaseTransaction, businessId: string): Promise<void> {
@@ -98,7 +116,8 @@ export async function readLiveTopUps(tx: DatabaseTransaction, businessId: string
   const query = tx.select(liveColumns).from(billingTopUps)
     .where(and(eq(billingTopUps.businessId, businessId), liveAt(options.now ?? new Date())))
     .orderBy(sql`${billingTopUps.endsAt} asc nulls last`, asc(billingTopUps.startsAt), asc(billingTopUps.id));
-  return options.forUpdate ? await query.for("update") : await query;
+  // What each gives after refunds, which is what uses may draw.
+  return (options.forUpdate ? await query.for("update") : await query).map(liveTopUp);
 }
 
 /** What the live top-ups add up to, or null without one. */
@@ -263,6 +282,10 @@ const heldColumns = {
   source: billingTopUps.source,
   code: billingTopUps.code,
   note: billingTopUps.note,
+  offer: billingTopUps.offer,
+  amountCents: billingTopUps.amountCents,
+  refundedCents: billingTopUps.refundedCents,
+  currency: billingTopUps.currency,
   voiceSec: billingTopUps.voiceSec,
   smsSeg: billingTopUps.smsSeg,
   callsOut: billingTopUps.callsOut,
@@ -283,6 +306,10 @@ type HeldRow = {
   source: string;
   code: string | null;
   note: string | null;
+  offer: string | null;
+  amountCents: number;
+  refundedCents: number;
+  currency: string | null;
   voiceSec: number;
   smsSeg: number;
   callsOut: number;
@@ -307,14 +334,25 @@ function topUpUsed(row: { voiceUsed: number; smsUsed: number; callsUsed: number;
   return { voiceSeconds: row.voiceUsed, alertSmsSegments: row.smsUsed, outboundCallAttempts: row.callsUsed, chatAiUnits: row.chatUsed };
 }
 
-export function topUpHolding(row: HeldRow, now = new Date()): BillingTopUpHolding {
-  const gives = topUpAmounts(row);
+function topUpSource(source: string): BillingTopUpSource {
+  return source === "code" || source === "purchase" ? source : "grant";
+}
+
+/** A top-up as the business sees it. names are those of a purchase's top-up on sale, which the caller joins in; null otherwise. */
+export function topUpHolding(row: HeldRow & { names?: Record<string, string> | null }, now = new Date()): BillingTopUpHolding {
+  // A partial refund takes its share off what a purchase gives.
+  const gives = topUpAmounts(topUpGives(row));
   const used = topUpUsed(row);
   return {
     id: row.id,
-    source: (row.source === "code" ? "code" : "grant") satisfies BillingTopUpSource,
+    source: topUpSource(row.source),
     code: row.code,
     note: row.note,
+    offer: row.offer,
+    names: row.names ?? null,
+    amountCents: row.amountCents,
+    refundedCents: row.refundedCents,
+    currency: row.currency?.toLowerCase() ?? null,
     gives,
     used,
     status: billingTopUpStatus({ status: row.status, startsAt: row.startsAt, endsAt: row.endsAt, gives, used }, now),
@@ -325,22 +363,34 @@ export function topUpHolding(row: HeldRow, now = new Date()): BillingTopUpHoldin
   };
 }
 
+/** The business's top-ups with a purchase's names, which its top-up on sale keeps. */
+function selectHeld(tx: DatabaseTransaction) {
+  return tx.select({ ...heldColumns, names: billingPackPlans.names }).from(billingTopUps).leftJoin(billingPackPlans, eq(billingPackPlans.code, billingTopUps.offer));
+}
+
 /**
  * The business's top-ups as Settings > Plan and the API show them: those that
- * count now or will (active, scheduled and used up), the one that ends first
- * first, then the latest LISTED_ENDED_TOP_UPS that ended or were revoked,
- * newest first. A business that never had one gets an empty list from one
- * indexed read.
+ * count now or will (active, scheduled and used up) and those a dispute holds
+ * (frozen), the one that ends first first, then the latest
+ * LISTED_ENDED_TOP_UPS that ended, were refunded or were revoked, newest
+ * first. A business that never had one gets an empty list from one indexed
+ * read.
  */
 export async function listBusinessTopUps(tx: DatabaseTransaction, businessId: string, now = new Date()): Promise<BillingTopUpHolding[]> {
-  const open = and(eq(billingTopUps.status, "active"), or(isNull(billingTopUps.endsAt), gt(billingTopUps.endsAt, now)));
-  const held = await tx.select(heldColumns).from(billingTopUps)
+  const open = and(inArray(billingTopUps.status, ["active", "frozen"]), or(isNull(billingTopUps.endsAt), gt(billingTopUps.endsAt, now)));
+  const held = await selectHeld(tx)
     .where(and(eq(billingTopUps.businessId, businessId), open))
     .orderBy(sql`${billingTopUps.endsAt} asc nulls last`, asc(billingTopUps.startsAt), asc(billingTopUps.id));
-  const ended = await tx.select(heldColumns).from(billingTopUps)
-    .where(and(eq(billingTopUps.businessId, businessId), or(ne(billingTopUps.status, "active"), lte(billingTopUps.endsAt, now))))
+  const ended = await selectHeld(tx)
+    .where(and(eq(billingTopUps.businessId, businessId), or(notInArray(billingTopUps.status, ["active", "frozen"]), lte(billingTopUps.endsAt, now))))
     .orderBy(desc(billingTopUps.createdAt), desc(billingTopUps.id)).limit(LISTED_ENDED_TOP_UPS);
   return [...held, ...ended].map((row) => topUpHolding(row, now));
+}
+
+/** One of the business's top-ups as the business sees it, or null for one it doesn't have. */
+export async function readBusinessTopUp(tx: DatabaseTransaction, businessId: string, topUpId: string, now = new Date()): Promise<BillingTopUpHolding | null> {
+  const [row] = await selectHeld(tx).where(and(eq(billingTopUps.businessId, businessId), eq(billingTopUps.id, topUpId))).limit(1);
+  return row ? topUpHolding(row, now) : null;
 }
 
 function apiTopUpAmounts(amounts: BillingTopUpAmounts): ApiBillingTopUp["gives"] {
@@ -349,7 +399,7 @@ function apiTopUpAmounts(amounts: BillingTopUpAmounts): ApiBillingTopUp["gives"]
 
 /** A top-up as the v1 API shows it: in GET /billing, and to the operator who grants or revokes it. */
 export function serializeBillingTopUp(topUp: BillingTopUpHolding): ApiBillingTopUp {
-  return { id: topUp.id, source: topUp.source, code: topUp.code, note: topUp.note, gives: apiTopUpAmounts(topUp.gives), used: apiTopUpAmounts(topUp.used), status: topUp.status, starts_at: topUp.startsAt, ends_at: topUp.endsAt, created_at: topUp.createdAt, revoked_at: topUp.revokedAt };
+  return { id: topUp.id, source: topUp.source, code: topUp.code, note: topUp.note, top_up: topUp.offer, amount_cents: topUp.amountCents, refunded_cents: topUp.refundedCents, currency: topUp.currency, gives: apiTopUpAmounts(topUp.gives), used: apiTopUpAmounts(topUp.used), status: topUp.status, starts_at: topUp.startsAt, ends_at: topUp.endsAt, created_at: topUp.createdAt, revoked_at: topUp.revokedAt };
 }
 
 // Operator grants (POST /v1/billing/top-ups) and revokes.
@@ -369,7 +419,7 @@ export type TopUpGrant = {
 export type TopUpGrantor = { keyId: string; partner: string };
 
 /** Publishes billing.updated for the business, as other billing changes do. No screen listens for it yet, so Settings > Plan and Usage show the change when they next load the billing summary. */
-async function announceTopUp(tx: DatabaseTransaction, businessId: string, topUpId: string, change: "granted" | "revoked" | "added"): Promise<void> {
+async function announceTopUp(tx: DatabaseTransaction, businessId: string, topUpId: string, change: "granted" | "revoked" | "added" | "bought" | TopUpChange["status"]): Promise<void> {
   await enqueueOutbox(tx, { topic: "realtime.publish", businessId, aggregateType: "billing_top_up", aggregateId: topUpId, dedupeKey: `billing-top-up:${topUpId}:${change}`, payload: { type: "billing.updated", entityId: topUpId } });
 }
 
@@ -410,12 +460,10 @@ export async function revokeTopUpInTransaction(tx: DatabaseTransaction, input: {
   const [revoked] = await tx.update(billingTopUps).set({ status: "revoked", revokedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(billingTopUps.businessId, input.businessId), eq(billingTopUps.id, input.topUpId), eq(billingTopUps.status, "active")))
     .returning(heldColumns);
-  if (revoked) {
-    await announceTopUp(tx, input.businessId, revoked.id, "revoked");
-    return { topUp: topUpHolding(revoked), revoked: true };
-  }
-  const [row] = await tx.select(heldColumns).from(billingTopUps).where(and(eq(billingTopUps.businessId, input.businessId), eq(billingTopUps.id, input.topUpId))).limit(1);
-  return row ? { topUp: topUpHolding(row), revoked: false } : null;
+  if (revoked) await announceTopUp(tx, input.businessId, revoked.id, "revoked");
+  // Read back with a purchase's names.
+  const topUp = await readBusinessTopUp(tx, input.businessId, input.topUpId);
+  return topUp ? { topUp, revoked: Boolean(revoked) } : null;
 }
 
 // Top-up codes, as someone on the team types them under Have a promo code?
@@ -481,4 +529,151 @@ export async function redeemTopUpCodeInTransaction(tx: DatabaseTransaction, inpu
   await announceTopUp(tx, input.businessId, row.id, "added");
   await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: "billing.top_up_code_redeemed", entityType: "billing_top_up", entityId: row.id, payload: { code: row.code, voiceSec: row.voiceSec, smsSeg: row.smsSeg, callsOut: row.callsOut, chatUnits: row.chatUnits, endsAt: row.endsAt?.toISOString() ?? null } });
   return { topUp: topUpHolding(row) };
+}
+
+// Top-ups on sale (0155): a business on Free or on a prepaid pack pays for one
+// once through the billing provider, and billing.reconcile adds it here when
+// the payment arrives (billingPackEvents.ts). One per payment, so an event
+// delivered twice adds nothing. Refunds and disputes change it as they change
+// a pack: a partial refund takes its share off what it gives, a whole one ends
+// it, and a dispute holds it until it closes.
+
+/** A top-up on sale as its checkout kept it, or the catalog has it: what its payment adds. */
+export type TopUpOfferTerms = { code: string; voiceSec: number; smsSeg: number; callsOut: number; chatUnits: number; days: number | null };
+
+/** A payment for a top-up on sale, as the provider's event reports it. */
+export type TopUpPurchase = {
+  businessId: string;
+  offer: TopUpOfferTerms;
+  priceId: string | null;
+  provider: "polar" | "stripe";
+  /** The Stripe PaymentIntent or the Polar order. */
+  providerRef: string;
+  amountCents: number;
+  currency: string;
+  paidAt: Date;
+  transactionId: string | null;
+};
+
+/**
+ * Adds the top-up a payment bought, once: a second delivery of the same
+ * payment finds the first's row. What it gives is copied from the terms its
+ * checkout kept, and it lasts its days from the payment, as 24-hour days.
+ * created says whether this call added it.
+ */
+export async function recordTopUpPurchaseInTransaction(tx: DatabaseTransaction, purchase: TopUpPurchase): Promise<{ topUpId: string; created: boolean }> {
+  await lockBusinessTopUps(tx, purchase.businessId);
+  const [inserted] = await tx.insert(billingTopUps).values({
+    businessId: purchase.businessId,
+    source: "purchase",
+    offer: purchase.offer.code,
+    priceId: purchase.priceId,
+    provider: purchase.provider,
+    providerRef: purchase.providerRef,
+    transactionId: purchase.transactionId,
+    amountCents: Math.max(0, Math.round(purchase.amountCents)),
+    currency: purchase.currency.toLowerCase(),
+    voiceSec: purchase.offer.voiceSec,
+    smsSeg: purchase.offer.smsSeg,
+    callsOut: purchase.offer.callsOut,
+    chatUnits: purchase.offer.chatUnits,
+    startsAt: purchase.paidAt,
+    endsAt: topUpEndsAt(purchase.paidAt, purchase.offer.days),
+  }).onConflictDoNothing({ target: [billingTopUps.provider, billingTopUps.providerRef] }).returning({ id: billingTopUps.id });
+  if (inserted) {
+    // Its minutes and length are fixed once a business has bought it, as a pack's are.
+    await tx.update(billingPackPlans).set({ frozenAt: sql`coalesce(${billingPackPlans.frozenAt}, now())`, updatedAt: new Date() }).where(eq(billingPackPlans.code, purchase.offer.code));
+    await announceTopUp(tx, purchase.businessId, inserted.id, "bought");
+    return { topUpId: inserted.id, created: true };
+  }
+  const [existing] = await tx.select({ id: billingTopUps.id }).from(billingTopUps).where(and(eq(billingTopUps.provider, purchase.provider), eq(billingTopUps.providerRef, purchase.providerRef))).limit(1);
+  if (!existing) throw new Error("The top-up's payment could not be read back.");
+  return { topUpId: existing.id, created: false };
+}
+
+/** A bought top-up's change: its status in the ledger before and after. */
+export type TopUpChange = { topUpId: string; status: "active" | "frozen" | "revoked" | "refunded"; previous: "active" | "frozen" | "revoked" | "refunded" };
+
+type PaidTopUp = { id: string; status: TopUpChange["status"]; amountCents: number; refundedCents: number };
+
+function ledgerStatus(status: string): TopUpChange["status"] {
+  return status === "frozen" || status === "revoked" || status === "refunded" ? status : "active";
+}
+
+async function topUpByPayment(tx: DatabaseTransaction, businessId: string, provider: string, providerRef: string): Promise<PaidTopUp | null> {
+  const [row] = await tx.select({ id: billingTopUps.id, status: billingTopUps.status, amountCents: billingTopUps.amountCents, refundedCents: billingTopUps.refundedCents })
+    .from(billingTopUps)
+    .where(and(eq(billingTopUps.businessId, businessId), eq(billingTopUps.provider, provider), eq(billingTopUps.providerRef, providerRef)))
+    .limit(1)
+    .for("update");
+  return row ? { ...row, status: ledgerStatus(row.status) } : null;
+}
+
+const unchanged = (topUp: PaidTopUp): TopUpChange => ({ topUpId: topUp.id, status: topUp.status, previous: topUp.status });
+
+async function changed(tx: DatabaseTransaction, businessId: string, topUp: PaidTopUp, status: TopUpChange["status"]): Promise<TopUpChange> {
+  await announceTopUp(tx, businessId, topUp.id, status);
+  return { topUpId: topUp.id, status, previous: topUp.status };
+}
+
+/**
+ * Applies a refund of a top-up's payment: refundedCents is the payment's whole
+ * refunded amount so far, as the provider reports it, so a repeated or late
+ * event never takes off more. A partial refund takes its share off what the
+ * top-up gives; one of the whole payment ends it at once, whatever it still
+ * held. A revoked top-up only records the refund. Null when no top-up has the
+ * payment.
+ */
+export async function applyTopUpRefundInTransaction(tx: DatabaseTransaction, input: { businessId: string; provider: "polar" | "stripe"; providerRef: string; refundedCents: number; at: Date }): Promise<TopUpChange | null> {
+  await lockBusinessTopUps(tx, input.businessId);
+  const topUp = await topUpByPayment(tx, input.businessId, input.provider, input.providerRef);
+  if (!topUp) return null;
+  const refunded = Math.max(topUp.refundedCents, Math.round(input.refundedCents));
+  if (refunded === topUp.refundedCents) return unchanged(topUp);
+  if (refunded >= topUp.amountCents && (topUp.status === "active" || topUp.status === "frozen")) {
+    await tx.update(billingTopUps).set({ status: "refunded", refundedAt: input.at, refundedCents: refunded, updatedAt: new Date() }).where(eq(billingTopUps.id, topUp.id));
+    return await changed(tx, input.businessId, topUp, "refunded");
+  }
+  await tx.update(billingTopUps).set({ refundedCents: refunded, updatedAt: new Date() }).where(eq(billingTopUps.id, topUp.id));
+  await announceTopUp(tx, input.businessId, topUp.id, topUp.status);
+  return unchanged(topUp);
+}
+
+/**
+ * Freezes a live top-up whose payment is disputed: nothing draws on it until
+ * the dispute closes. alreadyClosed is asked only once a live top-up is
+ * found: when it says the dispute's close was applied before this opening,
+ * the top-up stays live.
+ */
+export async function freezeTopUpInTransaction(tx: DatabaseTransaction, input: { businessId: string; provider: "polar" | "stripe"; providerRef: string; alreadyClosed?: () => Promise<boolean> }): Promise<TopUpChange | null> {
+  await lockBusinessTopUps(tx, input.businessId);
+  const topUp = await topUpByPayment(tx, input.businessId, input.provider, input.providerRef);
+  if (!topUp) return null;
+  if (topUp.status !== "active" || (input.alreadyClosed && await input.alreadyClosed())) return unchanged(topUp);
+  await tx.update(billingTopUps).set({ status: "frozen", updatedAt: new Date() }).where(eq(billingTopUps.id, topUp.id));
+  return await changed(tx, input.businessId, topUp, "frozen");
+}
+
+/**
+ * Closes a top-up's dispute: won, a frozen top-up counts again until its end;
+ * lost, the payment went back, so it ends refunded, also when the dispute's
+ * opening never reached LobbyStack and it was still live. A lost dispute of a
+ * top-up already refunded or revoked only records the whole payment as
+ * refunded.
+ */
+export async function closeTopUpDisputeInTransaction(tx: DatabaseTransaction, input: { businessId: string; provider: "polar" | "stripe"; providerRef: string; won: boolean; at: Date }): Promise<TopUpChange | null> {
+  await lockBusinessTopUps(tx, input.businessId);
+  const topUp = await topUpByPayment(tx, input.businessId, input.provider, input.providerRef);
+  if (!topUp) return null;
+  if (!input.won) {
+    if (topUp.status === "refunded" || topUp.status === "revoked") {
+      if (topUp.refundedCents < topUp.amountCents) await tx.update(billingTopUps).set({ refundedCents: topUp.amountCents, updatedAt: new Date() }).where(eq(billingTopUps.id, topUp.id));
+      return unchanged(topUp);
+    }
+    await tx.update(billingTopUps).set({ status: "refunded", refundedAt: input.at, refundedCents: topUp.amountCents, updatedAt: new Date() }).where(eq(billingTopUps.id, topUp.id));
+    return await changed(tx, input.businessId, topUp, "refunded");
+  }
+  if (topUp.status !== "frozen") return unchanged(topUp);
+  await tx.update(billingTopUps).set({ status: "active", updatedAt: new Date() }).where(eq(billingTopUps.id, topUp.id));
+  return await changed(tx, input.businessId, topUp, "active");
 }

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { auditLogs, billingPackDraws, billingPackPlans, billingPacks, enqueueOutbox, phoneNumbers, type BillingPackCheckoutTerms, type DatabaseTransaction } from "@lobbystack/db";
-import { isBillingPackStatus, MAX_PHONE_CALL_MS, packCapacity, packCapacitySeconds, packEndsAt, type BillingPackHolding, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
+import { isBillingPackStatus, MAX_PHONE_CALL_MS, packCapacity, packCapacitySeconds, packEndsAt, type BillingPackHolding, type BillingPackKind, type BillingPackStatus, type BillingPlanLimits } from "@lobbystack/shared";
 
 import { isSharedSmsSender } from "./smsSender";
 
@@ -387,11 +387,11 @@ export type PackPlanTerms = {
   receptionists: number;
 };
 
-/** A pack's catalog row, or null for a code the catalog doesn't have. */
-export async function readPackPlan(tx: DatabaseTransaction, code: string): Promise<PackPlanTerms | null> {
-  const [row] = await tx.select({ code: billingPackPlans.code, voiceSec: billingPackPlans.voiceSec, days: billingPackPlans.days, smsSeg: billingPackPlans.smsSeg, callsOut: billingPackPlans.callsOut, chatUnits: billingPackPlans.chatUnits, kbBytes: billingPackPlans.kbBytes, numbers: billingPackPlans.numbers, receptionists: billingPackPlans.receptionists })
+/** A pack's catalog row, or a top-up's (0155) with its kind, or null for a code the catalog doesn't have. */
+export async function readPackPlan(tx: DatabaseTransaction, code: string): Promise<(PackPlanTerms & { kind: BillingPackKind }) | null> {
+  const [row] = await tx.select({ code: billingPackPlans.code, kind: billingPackPlans.kind, voiceSec: billingPackPlans.voiceSec, days: billingPackPlans.days, smsSeg: billingPackPlans.smsSeg, callsOut: billingPackPlans.callsOut, chatUnits: billingPackPlans.chatUnits, kbBytes: billingPackPlans.kbBytes, numbers: billingPackPlans.numbers, receptionists: billingPackPlans.receptionists })
     .from(billingPackPlans).where(eq(billingPackPlans.code, code)).limit(1);
-  return row ? { ...row, kbBytes: Number(row.kbBytes) } : null;
+  return row ? { ...row, kind: row.kind === "top_up" ? "top_up" : "pack", kbBytes: Number(row.kbBytes) } : null;
 }
 
 /** The terms a pack checkout keeps (0149), from a pack's terms as an offer or the catalog has them. */

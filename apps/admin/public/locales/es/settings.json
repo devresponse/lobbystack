@@ -603,6 +603,7 @@
       "packBlockedDescription": "No quedan minutos. Las llamadas dan tono de ocupado hasta que compre otro paquete de minutos.",
       "packAllowanceBlockedDescription": "No queda nada. Compre otro paquete de minutos para tener más.",
       "topUpLeft": "Recargas: quedan {{left}} de {{total}} {{unit}}",
+      "buyTopUp": "Comprar una recarga",
       "overageCount": "{{count}} por encima del límite",
       "overageCost": "≈ {{amount}} en excedentes",
       "noOverages": "Sin excedentes: el uso tiene un tope fijo en el volumen incluido.",
@@ -690,6 +691,7 @@
       "notCounted": "Su plan no tiene límites, así que estas recargas no se usan mientras lo tenga.",
       "granted": "Recarga",
       "fromCode": "Recarga del código {{code}}",
+      "bought": "Recarga comprada",
       "kinds": {
         "voice": "Minutos de voz",
         "transfers": "Intentos de transferencia",
@@ -714,6 +716,7 @@
       "startsOn": "Empieza el {{date}}",
       "endsOn": "Termina el {{date}}",
       "neverEnds": "Sin fecha de fin",
+      "frozen": "En espera mientras haya una disputa de pago abierta",
       "code": {
         "adds": "Este código añade a su plan:",
         "lasts_one": "Dura {{count}} día desde que lo añade.",
@@ -728,6 +731,30 @@
         "usedByYou": "Ya añadió este código.",
         "usedError": "Este código ya se añadió.",
         "failed": "No se pudo añadir este código. Inténtelo de nuevo."
+      },
+      "buy": {
+        "title": "Comprar una recarga",
+        "description": "Asignaciones adicionales a su plan, con un solo pago. Su plan no cambia: se usan cuando se agotan las asignaciones de su plan.",
+        "lasts_one": "Dura {{count}} día desde su pago.",
+        "lasts_many": "Dura {{count}} días desde su pago.",
+        "lasts_other": "Dura {{count}} días desde su pago.",
+        "noEnd": "No caduca.",
+        "buy": "Comprar",
+        "buying": "Abriendo la página de pago...",
+        "toast": {
+          "added": "Se agregó su recarga.",
+          "failed": "Su pago no se completó, así que no se agregó ninguna recarga.",
+          "processing": "Su pago se está procesando. Su recarga aparecerá aquí en cuanto llegue.",
+          "refundedFirst": "Este pago se reembolsó o se anuló por un contracargo, así que no se agregó ninguna recarga.",
+          "checkoutFailed": "No se pudo abrir la página de pago. Inténtelo de nuevo.",
+          "checkoutExpired": "La página de pago caducó. Inténtelo de nuevo."
+        },
+        "refusals": {
+          "managed_plan": "Su plan se gestiona en su nombre, así que aquí no se pueden comprar recargas.",
+          "top_up_not_sold_on_plan": "Las recargas se venden con el plan Free y con los paquetes de minutos. En su lugar, su plan continúa más allá de sus asignaciones.",
+          "top_up_not_on_sale": "Esta recarga no está a la venta por ahora.",
+          "plan_change_pending": "Otra compra para este negocio sigue en curso. Inténtelo de nuevo en un minuto."
+        }
       }
     },
     "transactions": {

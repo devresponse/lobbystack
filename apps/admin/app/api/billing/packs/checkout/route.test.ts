@@ -74,7 +74,7 @@ describe("buying a pack from the dashboard", () => {
 });
 
 describe("reading a pack checkout from the dashboard", () => {
-  const view = { id: "checkout", pack: "minutes_500_90", status: "ready", packStatus: null, checkoutUrl: "https://checkout.stripe.com/c/pay/cs_1", error: null, expiresAt: new Date("2026-11-09T13:00:00Z"), createdAt: new Date("2026-11-09T12:00:00Z"), updatedAt: new Date("2026-11-09T12:00:05Z") };
+  const view = { id: "checkout", pack: "minutes_500_90", kind: "pack", status: "ready", packStatus: null, topUpId: null, topUpStatus: null, checkoutUrl: "https://checkout.stripe.com/c/pay/cs_1", error: null, expiresAt: new Date("2026-11-09T13:00:00Z"), createdAt: new Date("2026-11-09T12:00:00Z"), updatedAt: new Date("2026-11-09T12:00:05Z") };
 
   function inBusiness() {
     fixture.transaction.mockImplementation(async (_request: Request, callback: (input: { businessId: string; tx: unknown }) => Promise<unknown>, options: unknown) => {
@@ -127,5 +127,8 @@ describe("reading a pack checkout from the dashboard", () => {
     const missing = await get("?checkoutId=other");
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: "Pack checkout not found." });
+    // A top-up's checkout shares the table, and is read at its own address.
+    fixture.read.mockResolvedValueOnce({ ...view, kind: "top_up" });
+    expect((await get("?checkoutId=checkout")).status).toBe(404);
   });
 });

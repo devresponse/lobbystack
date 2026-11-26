@@ -18,6 +18,7 @@ export * from "./billingPolar";
 export * from "./billingPromoEnd";
 export * from "./billingStripe";
 export * from "./billingSweep";
+export * from "./billingTopUps";
 export * from "./billingVerify";
 export * from "./branding";
 export * from "./analytics";

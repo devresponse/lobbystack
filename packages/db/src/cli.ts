@@ -264,6 +264,19 @@ async function main(): Promise<void> {
             ,('lobbystack_app', 'billing_pack_draws', 'SELECT')
             ,('lobbystack_worker', 'billing_pack_draws', 'INSERT')
             ,('lobbystack_worker', 'billing_pack_draws', 'UPDATE')
+            ,('lobbystack_app', 'billing_top_ups', 'SELECT')
+            ,('lobbystack_app', 'billing_top_ups', 'UPDATE')
+            ,('lobbystack_worker', 'billing_top_ups', 'SELECT')
+            ,('lobbystack_worker', 'billing_top_ups', 'INSERT')
+            ,('lobbystack_worker', 'billing_top_ups', 'UPDATE')
+            ,('lobbystack_readonly', 'billing_top_ups', 'SELECT')
+            ,('lobbystack_app', 'billing_top_up_draws', 'SELECT')
+            ,('lobbystack_app', 'billing_top_up_draws', 'INSERT')
+            ,('lobbystack_app', 'billing_top_up_draws', 'UPDATE')
+            ,('lobbystack_worker', 'billing_top_up_draws', 'SELECT')
+            ,('lobbystack_worker', 'billing_top_up_draws', 'INSERT')
+            ,('lobbystack_worker', 'billing_top_up_draws', 'UPDATE')
+            ,('lobbystack_readonly', 'billing_top_up_draws', 'SELECT')
           ) as expected(role_name, table_name, privilege_type)
           where not has_table_privilege(expected.role_name, 'public.' || expected.table_name, expected.privilege_type)
         `);
@@ -271,12 +284,14 @@ async function main(): Promise<void> {
           throw new Error(`Database grant verification failed for: ${grantFailures.rows.map((row) => `${row.role_name}:${row.table_name}:${row.privilege_type}`).join(", ")}`);
         }
         // The billing catalog, the pack catalog and its codes are retired or revoked, never deleted, a code's
-        // uses and a business's packs go only with their business; the app never reads a code or a use but
-        // through app.billing_code_offers; and the views read with each caller's own policies.
+        // uses, a business's packs and its top-ups go only with their business; the app never reads a code or
+        // a use but through app.billing_code_offers, or a top-up code but through app.billing_top_up_code and
+        // app.redeem_billing_top_up_code, and never adds a top-up itself; and the views read with each caller's
+        // own policies.
         const billingCatalogFailures = await migrator.db.execute<{ failure: string }>(sql`
           select role_name || ':' || table_name || ':DELETE' as failure
           from unnest(array['lobbystack_app', 'lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
-          cross join unnest(array['billing_runs', 'billing_plans', 'billing_prices', 'billing_codes', 'billing_code_redemptions', 'billing_pack_plans', 'billing_pack_prices', 'billing_packs']) as table_name
+          cross join unnest(array['billing_runs', 'billing_plans', 'billing_prices', 'billing_codes', 'billing_code_redemptions', 'billing_pack_plans', 'billing_pack_prices', 'billing_packs', 'billing_top_ups', 'billing_top_up_draws']) as table_name
           where exists (select 1 from pg_roles where rolname = role_name)
             and has_table_privilege(role_name, 'public.' || table_name, 'DELETE')
           union all
@@ -284,9 +299,22 @@ async function main(): Promise<void> {
           from unnest(array['billing_codes', 'billing_code_redemptions']) as table_name
           where has_table_privilege('lobbystack_app', 'public.' || table_name, 'SELECT')
           union all
+          select 'lobbystack_app:billing_top_ups:INSERT'
+          where has_table_privilege('lobbystack_app', 'public.billing_top_ups', 'INSERT')
+          union all
           select role_name || ':app.billing_code_offers(text):EXECUTE'
           from unnest(array['lobbystack_app', 'lobbystack_worker']) as role_name
           where not has_function_privilege(role_name, 'app.billing_code_offers(text)', 'EXECUTE')
+          union all
+          select 'lobbystack_app:' || function_name || ':EXECUTE'
+          from unnest(array['app.billing_top_up_code(text)', 'app.redeem_billing_top_up_code(text)']) as function_name
+          where not has_function_privilege('lobbystack_app', function_name, 'EXECUTE')
+          union all
+          select role_name || ':' || function_name || ':EXECUTE'
+          from unnest(array['lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
+          cross join unnest(array['app.billing_top_up_code(text)', 'app.redeem_billing_top_up_code(text)']) as function_name
+          where exists (select 1 from pg_roles where rolname = role_name)
+            and has_function_privilege(role_name, function_name, 'EXECUTE')
           union all
           select view_name || ':security_invoker'
           from unnest(array['billing_offers', 'billing_pack_offers']) as view_name

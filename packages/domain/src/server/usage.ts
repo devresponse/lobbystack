@@ -3,8 +3,9 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, enqueueOutbox, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, isBillingPlanSlug, isReplacedSubscription, isUuid, liveSubscriptionStates, MAX_PHONE_CALL_MS, PHONE_RESERVATION_SLICE_SECONDS, type BillingPlanLimits, type BillingPlanLimitTable, type BillingPlanSlug } from "@lobbystack/shared";
 
-import { lockBusinessPacks, packBalance, readLivePacks, setPackDraw, type PackAllowance, type PackBalance } from "./billingPacks";
+import { drawnSeconds, lockBusinessPacks, packBalance, readLivePacks, setPackDraw, type PackAllowance, type PackBalance } from "./billingPacks";
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
+import { drawnTopUpUnits, lockBusinessTopUps, readLiveTopUps, setTopUpDraw, topUpBalance, type TopUpAllowance, type TopUpBalance } from "./billingTopUps";
 
 export type NonAiBillingUsageKind = "voice_seconds" | "alert_sms_segments" | "outbound_call_attempts" | "chat_ai_tokens";
 
@@ -46,6 +47,25 @@ export type UsageStatus = {
   usageComplete: boolean;
   /** The business's live prepaid packs, on the prepaid tier: their allowances for their whole length, which uses draw on instead of a monthly allowance. */
   pack: PackUsage | null;
+  /**
+   * The business's live top-ups (docs/features/top-ups.md): what they hold on
+   * top of the plan, which uses draw on once the plan's own allowance of their
+   * kind is used up. The used counts above leave out what a top-up paid for.
+   * Null without one.
+   */
+  topUp: TopUpUsage | null;
+};
+
+/** What a business's live top-ups hold, as the usage status reports it: each allowance, with what uses drew and what is left. */
+export type TopUpUsage = {
+  voiceSeconds: TopUpAllowance;
+  alertSmsSegments: TopUpAllowance;
+  outboundCallAttempts: TopUpAllowance;
+  chatAiUnits: TopUpAllowance;
+  /** When the live top-up that ends first ends; null when none ends. */
+  nextEndsAt: Date | null;
+  /** When the last live top-up ends; null when one never ends. */
+  lastEndsAt: Date | null;
 };
 
 /** What a business's live packs hold, as the usage status reports it: their voice seconds, and each other allowance for their whole length. */
@@ -135,7 +155,14 @@ type ReplayEvent = {
   billingIntervalAtRecordTime: string | null;
   createdAt: Date;
   isFinal: boolean;
+  /** The part of quantity a top-up paid for (migration 0154); 0 or absent on every other row. */
+  topUpQuantity?: number | undefined;
 };
+
+/** The part of a usage row its plan pays for: all of it but what a top-up paid for. */
+function planQuantity(event: Pick<ReplayEvent, "quantity" | "topUpQuantity">): number {
+  return Math.max(0, event.quantity - Math.max(0, event.topUpQuantity ?? 0));
+}
 
 /** A business's plan: the tier it behaves as, and its own plan's code when that is a promo plan. */
 export type PlanInForce = { plan: BillingPlanSlug; planCode: string | null };
@@ -145,7 +172,9 @@ function eventLimits(event: ReplayEvent, current: PlanInForce, limits: BillingPl
   return isBillingPlanSlug(event.planAtRecordTime) ? limitsFor(limits, event.planAtRecordTime, event.planCodeAtRecordTime) : limitsFor(limits, current.plan, current.planCode);
 }
 
-// Each event counts under the plan it was recorded on, at that plan's terms now.
+// Each event counts under the plan it was recorded on, at that plan's terms
+// now. What a top-up paid for counts against neither the allowance nor the
+// overage: only the plan's part of each row is counted.
 export function replayEvents(events: ReplayEvent[], current: PlanInForce, limits: BillingPlanLimitBook): { usage: UsageCounts; rawSpendCents: number } {
   const usage = { ...emptyUsage };
   let rawSpendCents = 0;
@@ -154,7 +183,7 @@ export function replayEvents(events: ReplayEvent[], current: PlanInForce, limits
     const kind = event.usageKind as NonAiBillingUsageKind;
     const terms = eventLimits(event, current, limits);
     const before = usage[kind];
-    const after = before + Math.max(0, event.quantity);
+    const after = before + planQuantity(event);
     usage[kind] = after;
     rawSpendCents += overageSpendFor(terms, kind, after) - overageSpendFor(terms, kind, before);
   }
@@ -165,8 +194,9 @@ export function replayEvents(events: ReplayEvent[], current: PlanInForce, limits
  * noOverage: a Stripe account without its overage subscription, as before it's made or after Stripe ended it unpaid, so usage stops at the allowance.
  * allowancesSince: where the month's allowances start counting after a switch between a prepaid pack and a subscription; null or absent, the whole month.
  * packs: the live prepaid packs, on the prepaid tier.
+ * topUps: the live top-ups, on any plan but self-hosting; null or absent without one.
  */
-type BillingContext = PlanInForce & { capCents: number | null; billingInterval: string | null; noOverage?: boolean; allowancesSince?: Date | null; packs?: PackBalance | null };
+type BillingContext = PlanInForce & { capCents: number | null; billingInterval: string | null; noOverage?: boolean; allowancesSince?: Date | null; packs?: PackBalance | null; topUps?: TopUpBalance | null };
 // The business's plan with every plan's limits, which replaying the month needs.
 type UsageContext = BillingContext & { limits: BillingPlanLimitBook };
 
@@ -192,23 +222,69 @@ function pushesPastCap(capCents: number | null, before: number, after: number): 
 }
 
 // Self-host, and a paid plan with no overage cap, never run out of voice, so calls reserve nothing.
-function hasUnlimitedVoice(billing: Pick<UsageContext, "plan" | "planCode" | "capCents" | "limits" | "packs">): boolean {
+function hasUnlimitedVoice(billing: Pick<UsageContext, "plan" | "planCode" | "capCents" | "limits" | "packs" | "topUps">): boolean {
   return billing.plan === "self_host" || (currentLimits(billing).overagesBillable && billing.capCents === null);
 }
 
 // The voice seconds a limited plan can still reserve: its included seconds
-// left, plus what the overage cap still pays for, which is no limit when extra
-// minutes cost nothing. 0 on an unlimited plan. On the prepaid tier, what the
-// live packs still hold, whatever the month's usage.
-function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" | "capCents" | "limits" | "packs">, current: { usage: UsageCounts; rawSpendCents: number }): number {
-  if (billing.plan === "prepaid") return billing.packs?.secondsLeft ?? 0;
+// left, plus what its top-ups hold, plus what the overage cap still pays for,
+// which is no limit when extra minutes cost nothing. 0 on an unlimited plan.
+// On the prepaid tier, what the live packs and top-ups still hold, whatever
+// the month's usage.
+function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" | "capCents" | "limits" | "packs" | "topUps">, current: { usage: UsageCounts; rawSpendCents: number }): number {
+  const extra = topUpLeft(billing, "voice_seconds");
+  if (billing.plan === "prepaid") return (billing.packs?.secondsLeft ?? 0) + extra;
   const config = currentLimits(billing);
   const included = includedQuantity(config, "voice_seconds");
   const remainingIncluded = included === null ? 0 : Math.max(0, included - current.usage.voice_seconds);
+  const topUp = topUpPays(config, "voice_seconds") ? extra : 0;
   const remainingCap = billing.capCents === null ? 0 : Math.max(0, billing.capCents - current.rawSpendCents);
   const rate = rateCents(config, "voice_seconds");
   const capSeconds = rate > 0 ? Math.floor((remainingCap + 1e-9) / rate) : Number.POSITIVE_INFINITY;
-  return config.overagesBillable ? (billing.capCents === null ? 0 : remainingIncluded + capSeconds) : remainingIncluded;
+  return config.overagesBillable ? (billing.capCents === null ? 0 : remainingIncluded + topUp + capSeconds) : remainingIncluded + topUp;
+}
+
+/**
+ * Whether a use of `kind` past the plan's allowance draws on top-ups under
+ * these limits: past an allowance that stops there, as Free's does, or whose
+ * overage costs money. Past one whose overage costs nothing, as a paid plan's
+ * website chats, a top-up would pay for what is free, and an unlimited
+ * allowance never runs out.
+ */
+function topUpPays(config: BillingPlanLimits, kind: NonAiBillingUsageKind): boolean {
+  if (includedQuantity(config, kind) === null) return false;
+  return !config.overagesBillable || rateCents(config, kind) > 0;
+}
+
+/** What the business's live top-ups still hold of a kind. */
+function topUpLeft(billing: Pick<BillingContext, "topUps">, kind: NonAiBillingUsageKind): number {
+  return billing.topUps?.allowances[kind].left ?? 0;
+}
+
+/**
+ * How much of a use of `quantity` a top-up pays for: what `room` can't take,
+ * as far as the top-ups hold it (`available`, with what the use already drew
+ * from them). room is what the plan's own allowance still takes of it: on the
+ * prepaid tier what the packs hold, else the allowance left after the other
+ * uses, or null where a top-up never pays (topUpPays). Whole units, as a
+ * top-up is drawn, and never more than the use.
+ */
+function topUpShare(input: { quantity: number; available: number; room: number | null }): number {
+  if (input.room === null || input.available <= 0) return 0;
+  const over = Math.max(0, input.quantity - Math.max(0, input.room));
+  if (over <= 1e-9) return 0;
+  return Math.min(input.quantity, input.available, Math.ceil(over - 1e-9));
+}
+
+/**
+ * The business's live top-ups under its top-up lock, for a use about to draw
+ * on them or settle what it drew (`drew`). A business without a top-up, whose
+ * use drew none, takes no lock and reads nothing more.
+ */
+async function lockedTopUps(tx: DatabaseTransaction, businessId: string, billing: Pick<BillingContext, "topUps">, drew = false): Promise<TopUpBalance | null> {
+  if (!billing.topUps && !drew) return null;
+  await lockBusinessTopUps(tx, businessId);
+  return topUpBalance(await readLiveTopUps(tx, businessId));
 }
 
 /** The billing account columns that decide a business's plan in force; undefined for a business without a billing account. */
@@ -247,6 +323,8 @@ export async function loadBillingContext(tx: DatabaseTransaction, businessId: st
   // Only a business that would be on Free reads its packs.
   const packs = accountTier(deploymentMode, account) === "free_cloud" ? packBalance(await readLivePacks(tx, businessId)) : null;
   const { plan, planCode } = planInForce(deploymentMode, account, packs !== null);
+  // Top-ups count on every plan but self-hosting, which limits nothing; they never change the plan.
+  const topUps = plan === "self_host" ? null : topUpBalance(await readLiveTopUps(tx, businessId));
   return {
     plan,
     planCode,
@@ -255,6 +333,7 @@ export async function loadBillingContext(tx: DatabaseTransaction, businessId: st
     noOverage: account?.source === "stripe" && !account.overageSubscriptionId,
     allowancesSince: account?.allowancesSince ?? null,
     packs,
+    topUps,
   };
 }
 
@@ -321,7 +400,7 @@ function syncPlanFor(rowPlan: string | null, billing: Pick<PlanInForce, "plan">)
 }
 
 async function loadEvents(tx: DatabaseTransaction, businessId: string, periodKey: string): Promise<ReplayEvent[]> {
-  return await tx.select({ sourceKey: billingUsageEvents.sourceKey, quantity: billingUsageEvents.quantity, usageKind: billingUsageEvents.usageKind, planAtRecordTime: billingUsageEvents.planAtRecordTime, planCodeAtRecordTime: billingUsageEvents.planCodeAtRecordTime, billingIntervalAtRecordTime: billingUsageEvents.billingIntervalAtRecordTime, createdAt: billingUsageEvents.createdAt, isFinal: billingUsageEvents.isFinal })
+  return await tx.select({ sourceKey: billingUsageEvents.sourceKey, quantity: billingUsageEvents.quantity, usageKind: billingUsageEvents.usageKind, planAtRecordTime: billingUsageEvents.planAtRecordTime, planCodeAtRecordTime: billingUsageEvents.planCodeAtRecordTime, billingIntervalAtRecordTime: billingUsageEvents.billingIntervalAtRecordTime, createdAt: billingUsageEvents.createdAt, isFinal: billingUsageEvents.isFinal, topUpQuantity: billingUsageEvents.topUpQuantity })
     .from(billingUsageEvents)
     .where(and(eq(billingUsageEvents.businessId, businessId), eq(billingUsageEvents.periodKey, periodKey)))
     .orderBy(asc(billingUsageEvents.createdAt));
@@ -332,14 +411,16 @@ async function loadEvents(tx: DatabaseTransaction, businessId: string, periodKey
 // on the first of each UTC month whatever day the subscription renews, and
 // Polar's products need no Credits. Only the other final events have been
 // billed, so open reservations never count against this one. An event that
-// was already final keeps what it billed and moves only by its own change.
+// was already final keeps what it billed and moves only by its own change:
+// `billed` is the plan's part of the row it billed, and what it billed. What a
+// top-up paid for is no one's overage, so only each row's plan part counts.
 export function billableQuantityForEvent(others: ReplayEvent[], event: ReplayEvent, current: PlanInForce, limits: BillingPlanLimitBook, billed?: { quantity: number; billableQuantity: number }): number {
   const plan = isBillingPlanSlug(event.planAtRecordTime) ? event.planAtRecordTime : current.plan;
   const included = includedQuantity(eventLimits(event, current, limits), event.usageKind as NonAiBillingUsageKind);
   if ((plan !== "starter" && plan !== "pro") || included === null) return Math.max(0, event.quantity);
-  const before = others.reduce((sum, row) => (row.isFinal && row.usageKind === event.usageKind ? sum + Math.max(0, row.quantity) : sum), 0);
+  const before = others.reduce((sum, row) => (row.isFinal && row.usageKind === event.usageKind ? sum + planQuantity(row) : sum), 0);
   const overage = (quantity: number) => Math.max(0, before + Math.max(0, quantity) - included);
-  return billed ? Math.max(0, billed.billableQuantity + overage(event.quantity) - overage(billed.quantity)) : overage(event.quantity) - overage(0);
+  return billed ? Math.max(0, billed.billableQuantity + overage(planQuantity(event)) - overage(billed.quantity)) : overage(planQuantity(event)) - overage(0);
 }
 
 async function ensureUsageMonth(tx: DatabaseTransaction, businessId: string, periodKey: string, plan: BillingPlanSlug): Promise<void> {
@@ -360,12 +441,16 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
   // Free never can, and a capped plan can't once one more unit would push
   // spend past the cap. A paid plan's chats cost nothing past their allowance,
   // so the cap never blocks them. On a pack, once the packs hold none of it.
+  // A top-up that still holds some of a kind runs past the allowance first.
   const blocked = (kind: NonAiBillingUsageKind): boolean => {
-    if (billing.plan === "prepaid") return (pack?.allowances[kind].left ?? 0) <= 0;
+    const extra = topUpLeft(billing, kind);
+    if (billing.plan === "prepaid") return (pack?.allowances[kind].left ?? 0) <= 0 && extra <= 0;
     const included = includedQuantity(config, kind);
     if (included === null || replay.usage[kind] < included) return false;
+    if (topUpPays(config, kind) && extra > 0) return false;
     return !config.overagesBillable || pushesPastCap(billing.capCents, replay.rawSpendCents, replay.rawSpendCents + rateCents(config, kind));
   };
+  const topUps = billing.topUps ?? null;
   const voiceSecondsLeft = hasUnlimitedVoice(billing) ? Number.POSITIVE_INFINITY : reservableVoiceSeconds(billing, replay);
   return {
     periodKey: input.periodKey,
@@ -390,6 +475,7 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
     voiceSecondsLeft: Number.isFinite(voiceSecondsLeft) ? voiceSecondsLeft : null,
     usageComplete: events.every((event) => event.isFinal),
     pack: pack ? { secondsTotal: pack.secondsTotal, secondsUsed: pack.secondsUsed, secondsLeft: pack.secondsLeft, alertSmsSegments: pack.allowances.alert_sms_segments, outboundCallAttempts: pack.allowances.outbound_call_attempts, chatAiUnits: pack.allowances.chat_ai_tokens, nextEndsAt: pack.nextEndsAt, lastEndsAt: pack.lastEndsAt } : null,
+    topUp: topUps ? { voiceSeconds: topUps.allowances.voice_seconds, alertSmsSegments: topUps.allowances.alert_sms_segments, outboundCallAttempts: topUps.allowances.outbound_call_attempts, chatAiUnits: topUps.allowances.chat_ai_tokens, nextEndsAt: topUps.nextEndsAt, lastEndsAt: topUps.lastEndsAt } : null,
   };
 }
 
@@ -448,6 +534,8 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
     await lockBusinessPacks(tx, input.businessId);
     billing = { ...billing, packs: packBalance(await readLivePacks(tx, input.businessId)) };
   }
+  // Top-ups span months too, so a business with one reads them under their lock.
+  if (billing.topUps) billing = { ...billing, topUps: await lockedTopUps(tx, input.businessId, billing) };
   const events = await loadEvents(tx, input.businessId, periodKey);
   const counted = countedEvents(events, billing, periodKey);
   const current = replayEvents(counted, billing, billing.limits);
@@ -460,28 +548,40 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
     if (input.usageKind === "voice_seconds" && hasUnlimitedVoice(billing)) return { allowed: true, errorCode: null, syncNeeded: false, periodKey, plan: billing.plan };
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
-  // A use never reserves more than the packs still hold of its kind.
-  if (fromPacks && quantity > (billing.packs?.allowances[input.usageKind].left ?? 0)) {
+  const extra = topUpLeft(billing, input.usageKind);
+  const packLeft = billing.packs?.allowances[input.usageKind].left ?? 0;
+  // A use never reserves more than the packs and the top-ups still hold of its kind.
+  if (fromPacks && quantity > packLeft + extra) {
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   const limits = currentLimits(billing);
   const included = includedQuantity(limits, input.usageKind);
-  if (!limits.overagesBillable && included !== null && current.usage[input.usageKind] + quantity > included) {
+  // What the plan's own allowance can't take, a top-up pays for when it can: on a pack, what the packs don't hold.
+  const room = fromPacks ? packLeft : topUpPays(limits, input.usageKind) && included !== null ? included - current.usage[input.usageKind] : null;
+  const topUp = topUpShare({ quantity, available: extra, room });
+  if (!limits.overagesBillable && included !== null && current.usage[input.usageKind] + quantity - topUp > included) {
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
-  const eventPayload = { sourceKey: input.sourceKey, quantity, usageKind: input.usageKind, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, createdAt: recordedAt, isFinal: input.usageKind === "outbound_call_attempts" || input.usageKind === "chat_ai_tokens" };
+  const eventPayload: ReplayEvent = { sourceKey: input.sourceKey, quantity, usageKind: input.usageKind, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, createdAt: recordedAt, isFinal: input.usageKind === "outbound_call_attempts" || input.usageKind === "chat_ai_tokens", topUpQuantity: topUp };
   const simulated = replayEvents([...counted, eventPayload], billing, billing.limits);
   if (pushesPastCap(billing.capCents, current.rawSpendCents, simulated.rawSpendCents)) {
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
+  // Allowed: the top-ups pay their share first, then the row records what they paid.
+  if (topUp > 0) {
+    const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, units: topUp });
+    eventPayload.topUpQuantity = Math.min(topUp, drawn.drawn);
+    billing = { ...billing, topUps: drawn.after };
+  }
+  const topUpQuantity = eventPayload.topUpQuantity ?? 0;
   const syncNeeded = billing.plan === "starter" || billing.plan === "pro";
   const others = events.filter((row) => row.sourceKey !== input.sourceKey);
   const billableQuantity = billableQuantityForEvent(countedEvents(others, billing, periodKey), eventPayload, billing, billing.limits);
   const [event] = existing
-    ? await tx.update(billingUsageEvents).set({ quantity, billableQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, ...usageSyncFields(existing, billableQuantity, billing.plan), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id)).returning({ id: billingUsageEvents.id })
-    : await tx.insert(billingUsageEvents).values({ businessId: input.businessId, periodKey, sourceKey: input.sourceKey, usageKind: input.usageKind, quantity, billableQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, syncStatus: syncNeeded ? "pending" : "skipped", createdAt: recordedAt, updatedAt: new Date() }).returning({ id: billingUsageEvents.id });
+    ? await tx.update(billingUsageEvents).set({ quantity, billableQuantity, topUpQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, ...usageSyncFields(existing, billableQuantity, billing.plan), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id)).returning({ id: billingUsageEvents.id })
+    : await tx.insert(billingUsageEvents).values({ businessId: input.businessId, periodKey, sourceKey: input.sourceKey, usageKind: input.usageKind, quantity, billableQuantity, topUpQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, syncStatus: syncNeeded ? "pending" : "skipped", createdAt: recordedAt, updatedAt: new Date() }).returning({ id: billingUsageEvents.id });
   if (!event) throw new Error("Billing usage event could not be recorded.");
-  if (fromPacks) billing = { ...billing, packs: (await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, seconds: quantity })).after };
+  if (fromPacks) billing = { ...billing, packs: (await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, seconds: quantity - topUpQuantity })).after };
   await refreshUsageMonth(tx, { businessId: input.businessId, periodKey, billing, events: [...others, eventPayload] });
   return { allowed: true, errorCode: null, usageEventId: event.id, syncNeeded, periodKey, plan: billing.plan, quantity };
 }
@@ -518,24 +618,39 @@ export async function extendPhoneReservationInTransaction(tx: DatabaseTransactio
   const events = await loadEvents(tx, input.businessId, reservation.periodKey);
   const event = events.find((row) => row.sourceKey === sourceKey);
   if (!event) return 0;
+  const drewTopUp = (event.topUpQuantity ?? 0) > 0;
   if (event.planAtRecordTime === "prepaid") {
     if (billing.plan !== "prepaid") return 0;
     await lockBusinessPacks(tx, input.businessId);
     const packs = packBalance(await readLivePacks(tx, input.businessId));
-    const granted = Math.min(PHONE_RESERVATION_SLICE_SECONDS, packs?.secondsLeft ?? 0, MAX_PHONE_CALL_MS / 1_000 - event.quantity);
+    const topUps = await lockedTopUps(tx, input.businessId, billing, drewTopUp);
+    const extra = topUps?.allowances.voice_seconds.left ?? 0;
+    const granted = Math.min(PHONE_RESERVATION_SLICE_SECONDS, (packs?.secondsLeft ?? 0) + extra, MAX_PHONE_CALL_MS / 1_000 - event.quantity);
     if (granted <= 0) return 0;
     const quantity = event.quantity + granted;
-    await tx.update(billingUsageEvents).set({ quantity, billableQuantity: quantity, updatedAt: new Date() }).where(eq(billingUsageEvents.id, reservation.id));
-    const drawn = await setPackDraw(tx, { businessId: input.businessId, sourceKey, seconds: quantity });
-    const replayed = events.map((row) => (row === event ? { ...row, quantity } : row));
-    await refreshUsageMonth(tx, { businessId: input.businessId, periodKey: reservation.periodKey, billing: { ...billing, packs: drawn.after }, events: replayed });
+    // The packs pay first, with what this call already drew from them; the top-ups pay what they can't.
+    let topUpQuantity = 0;
+    let after = topUps;
+    if (topUps || drewTopUp) {
+      const own = { packs: await drawnSeconds(tx, input.businessId, sourceKey), topUps: await drawnTopUpUnits(tx, input.businessId, sourceKey) };
+      const topUp = topUpShare({ quantity, available: extra + own.topUps, room: (packs?.secondsLeft ?? 0) + own.packs });
+      const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey, usageKind: "voice_seconds", units: topUp });
+      topUpQuantity = Math.min(topUp, drawn.drawn);
+      after = drawn.after;
+    }
+    await tx.update(billingUsageEvents).set({ quantity, billableQuantity: quantity, topUpQuantity, updatedAt: new Date() }).where(eq(billingUsageEvents.id, reservation.id));
+    const drawn = await setPackDraw(tx, { businessId: input.businessId, sourceKey, seconds: quantity - topUpQuantity });
+    const replayed = events.map((row) => (row === event ? { ...row, quantity, topUpQuantity } : row));
+    await refreshUsageMonth(tx, { businessId: input.businessId, periodKey: reservation.periodKey, billing: { ...billing, packs: drawn.after, topUps: after }, events: replayed });
     return granted;
   }
   // A call that began before a switch to or from a pack, or on another plan
   // while a pack is in force, runs on under its own plan within its part of
   // the month. Every other call grows under the plan in force, as before packs.
   const own = billing.plan === "prepaid" || beforeSwitch(billing, reservation.periodKey, event.createdAt);
-  const terms = own ? rowTerms(billing, event) : billing;
+  const topUps = await lockedTopUps(tx, input.businessId, billing, drewTopUp);
+  const locked = { ...billing, topUps };
+  const terms = own ? rowTerms(locked, event) : locked;
   const scope = own ? segmentEvents(events, billing, reservation.periodKey, event) : countedEvents(events, billing, reservation.periodKey);
   // The replay already counts this call's reservation. A plan upgraded to
   // unlimited mid-call still grows it, up to the longest call.
@@ -543,12 +658,27 @@ export async function extendPhoneReservationInTransaction(tx: DatabaseTransactio
   const free = hasUnlimitedVoice(terms) ? Number.POSITIVE_INFINITY : reservableVoiceSeconds(terms, current);
   const granted = Math.min(PHONE_RESERVATION_SLICE_SECONDS, free, MAX_PHONE_CALL_MS / 1_000 - event.quantity);
   if (granted <= 0) return 0;
-  const grown = scope.map((row) => (row === event ? { ...row, quantity: row.quantity + granted } : row));
+  const quantity = event.quantity + granted;
+  const others = scope.filter((row) => row !== event);
+  // The top-ups pay what passes the allowance the other uses leave, with what this call already drew from them.
+  const config = currentLimits(terms);
+  const included = includedQuantity(config, "voice_seconds");
+  const ownTopUp = drewTopUp ? await drawnTopUpUnits(tx, input.businessId, sourceKey) : 0;
+  const room = topUpPays(config, "voice_seconds") && included !== null ? included - replayEvents(others, terms, terms.limits).usage.voice_seconds : null;
+  const topUp = topUps || ownTopUp > 0 ? topUpShare({ quantity, available: (topUps?.allowances.voice_seconds.left ?? 0) + ownTopUp, room }) : 0;
+  const grown = scope.map((row) => (row === event ? { ...row, quantity, topUpQuantity: topUp } : row));
   if (pushesPastCap(terms.capCents, current.rawSpendCents, replayEvents(grown, terms, terms.limits).rawSpendCents)) return 0;
-  const billableQuantity = billableQuantityForEvent(scope.filter((row) => row !== event), { ...event, quantity: event.quantity + granted }, terms, terms.limits);
-  await tx.update(billingUsageEvents).set({ quantity: event.quantity + granted, billableQuantity, updatedAt: new Date() }).where(eq(billingUsageEvents.id, reservation.id));
-  const replayed = events.map((row) => (row === event ? { ...row, quantity: row.quantity + granted } : row));
-  await refreshUsageMonth(tx, { businessId: input.businessId, periodKey: reservation.periodKey, billing, events: replayed });
+  let topUpQuantity = 0;
+  let after = topUps;
+  if (topUp > 0 || ownTopUp > 0) {
+    const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey, usageKind: "voice_seconds", units: topUp });
+    topUpQuantity = Math.min(topUp, drawn.drawn);
+    after = drawn.after;
+  }
+  const billableQuantity = billableQuantityForEvent(others, { ...event, quantity, topUpQuantity }, terms, terms.limits);
+  await tx.update(billingUsageEvents).set({ quantity, billableQuantity, topUpQuantity, updatedAt: new Date() }).where(eq(billingUsageEvents.id, reservation.id));
+  const replayed = events.map((row) => (row === event ? { ...row, quantity, topUpQuantity } : row));
+  await refreshUsageMonth(tx, { businessId: input.businessId, periodKey: reservation.periodKey, billing: { ...billing, topUps: after }, events: replayed });
   return granted;
 }
 
@@ -576,26 +706,31 @@ async function recordingBeforePackSwitch(tx: DatabaseTransaction, input: { busin
   return { plan, planCode: plan === stored ? account?.planCode ?? null : null, billingInterval: account?.billingInterval ?? null, createdAt: new Date(since.getTime() - 1) };
 }
 
+// The limits a row's top-up share follows: the plan in force's, as
+// reservations enforce them, for a row recorded under it; else its own plan's.
+function rowLimits(billing: UsageContext, row: ReplayEvent): BillingPlanLimits {
+  return row.planAtRecordTime === billing.plan && (row.planCodeAtRecordTime ?? null) === billing.planCode ? currentLimits(billing) : eventLimits(row, billing, billing.limits);
+}
+
 export async function correctUsageInTransaction(tx: DatabaseTransaction, input: { businessId: string; sourceKey: string; usageKind: NonAiBillingUsageKind; quantity: number; recordedAt?: Date | undefined }): Promise<string> {
   const recordedAt = input.recordedAt ?? new Date();
+  const quantity = Math.max(0, input.quantity);
   const existingBeforeLock = (await tx.select({ id: billingUsageEvents.id, periodKey: billingUsageEvents.periodKey }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1))[0];
   let periodKey = existingBeforeLock?.periodKey ?? periodKeyFor(recordedAt);
   await lockUsagePeriod(tx, input.businessId, periodKey);
   const billing = await loadUsageContext(tx, input.businessId);
   // Locked, so the worker's claim and confirmation of its Polar event wait for the correction.
-  const existing = (await tx.select({ id: billingUsageEvents.id, periodKey: billingUsageEvents.periodKey, planAtRecordTime: billingUsageEvents.planAtRecordTime, planCodeAtRecordTime: billingUsageEvents.planCodeAtRecordTime, billingIntervalAtRecordTime: billingUsageEvents.billingIntervalAtRecordTime, createdAt: billingUsageEvents.createdAt, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, isFinal: billingUsageEvents.isFinal, syncStatus: billingUsageEvents.syncStatus, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1).for("update"))[0];
-  let eventId: string;
-  let draws = false;
+  const existing = (await tx.select({ id: billingUsageEvents.id, periodKey: billingUsageEvents.periodKey, planAtRecordTime: billingUsageEvents.planAtRecordTime, planCodeAtRecordTime: billingUsageEvents.planCodeAtRecordTime, billingIntervalAtRecordTime: billingUsageEvents.billingIntervalAtRecordTime, createdAt: billingUsageEvents.createdAt, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, topUpQuantity: billingUsageEvents.topUpQuantity, isFinal: billingUsageEvents.isFinal, syncStatus: billingUsageEvents.syncStatus, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1).for("update"))[0];
+  // The row as it will be recorded, and the usage it counts with.
+  let replacement: ReplayEvent;
+  let others: ReplayEvent[];
+  let draws: boolean;
   if (existing) {
     const events = await loadEvents(tx, input.businessId, periodKey);
     // A correction keeps the plan the usage was recorded under.
-    const replacement: ReplayEvent = { sourceKey: input.sourceKey, quantity: Math.max(0, input.quantity), usageKind: input.usageKind, planAtRecordTime: existing.planAtRecordTime ?? billing.plan, planCodeAtRecordTime: existing.planAtRecordTime ? existing.planCodeAtRecordTime : billing.planCode, billingIntervalAtRecordTime: existing.billingIntervalAtRecordTime ?? billing.billingInterval, createdAt: existing.createdAt, isFinal: true };
-    const billed = existing.isFinal ? { quantity: existing.quantity, billableQuantity: existing.billableQuantity ?? existing.quantity } : undefined;
+    replacement = { sourceKey: input.sourceKey, quantity, usageKind: input.usageKind, planAtRecordTime: existing.planAtRecordTime ?? billing.plan, planCodeAtRecordTime: existing.planAtRecordTime ? existing.planCodeAtRecordTime : billing.planCode, billingIntervalAtRecordTime: existing.billingIntervalAtRecordTime ?? billing.billingInterval, createdAt: existing.createdAt, isFinal: true };
     // It counts with the usage in its own part of the month, before or after a switch to or from a pack.
-    const others = segmentEvents(events, billing, periodKey, replacement).filter((row) => row.sourceKey !== input.sourceKey);
-    const billableQuantity = billableQuantityForEvent(others, replacement, billing, billing.limits, billed);
-    await tx.update(billingUsageEvents).set({ quantity: Math.max(0, input.quantity), billableQuantity, isFinal: true, ...usageSyncFields(existing, billableQuantity, syncPlanFor(existing.planAtRecordTime, billing)), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id));
-    eventId = existing.id;
+    others = segmentEvents(events, billing, periodKey, replacement).filter((row) => row.sourceKey !== input.sourceKey);
     draws = existing.planAtRecordTime === "prepaid";
   } else {
     const before = await recordingBeforePackSwitch(tx, { businessId: input.businessId, sourceKey: input.sourceKey, billing });
@@ -605,24 +740,61 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
       await lockUsagePeriod(tx, input.businessId, periodKey);
     }
     const row = before ?? { plan: billing.plan, planCode: billing.planCode, billingInterval: billing.billingInterval, createdAt: recordedAt };
-    const replacement: ReplayEvent = { sourceKey: input.sourceKey, quantity: Math.max(0, input.quantity), usageKind: input.usageKind, planAtRecordTime: row.plan, planCodeAtRecordTime: row.planCode, billingIntervalAtRecordTime: row.billingInterval, createdAt: row.createdAt, isFinal: true };
+    replacement = { sourceKey: input.sourceKey, quantity, usageKind: input.usageKind, planAtRecordTime: row.plan, planCodeAtRecordTime: row.planCode, billingIntervalAtRecordTime: row.billingInterval, createdAt: row.createdAt, isFinal: true };
     const events = await loadEvents(tx, input.businessId, periodKey);
     // A call from before the switch counts with the usage before it, as one that reserved there does.
-    const billableQuantity = billableQuantityForEvent(before ? segmentEvents(events, billing, periodKey, replacement) : countedEvents(events, billing, periodKey), replacement, billing, billing.limits);
-    const [event] = await tx.insert(billingUsageEvents).values({ businessId: input.businessId, periodKey, sourceKey: input.sourceKey, usageKind: input.usageKind, quantity: Math.max(0, input.quantity), billableQuantity, planAtRecordTime: row.plan, planCodeAtRecordTime: row.planCode, billingIntervalAtRecordTime: row.billingInterval, isFinal: true, syncStatus: row.plan === "starter" || row.plan === "pro" ? "pending" : "skipped", createdAt: row.createdAt, updatedAt: new Date() }).returning({ id: billingUsageEvents.id });
+    others = before ? segmentEvents(events, billing, periodKey, replacement) : countedEvents(events, billing, periodKey);
+    draws = row.plan === "prepaid";
+  }
+  // A use settles what it drew from the top-ups: what passes what the plan's
+  // own allowance takes, or on a pack what the packs hold, as far as the
+  // top-ups hold it with what the use already drew. A business without a
+  // top-up, whose use drew none, skips all of it. The packs' lock comes first.
+  const drewTopUp = (existing?.topUpQuantity ?? 0) > 0;
+  const packsNow = draws && (billing.topUps || drewTopUp) ? (await lockBusinessPacks(tx, input.businessId), packBalance(await readLivePacks(tx, input.businessId))) : null;
+  const topUps = await lockedTopUps(tx, input.businessId, billing, drewTopUp);
+  let topUpQuantity = 0;
+  if (topUps || drewTopUp) {
+    const ownTopUp = drewTopUp ? await drawnTopUpUnits(tx, input.businessId, input.sourceKey) : 0;
+    let room: number | null;
+    if (draws) room = (packsNow?.allowances[input.usageKind].left ?? 0) + (existing ? await drawnSeconds(tx, input.businessId, input.sourceKey) : 0);
+    else {
+      const config = rowLimits(billing, replacement);
+      const included = includedQuantity(config, input.usageKind);
+      room = topUpPays(config, input.usageKind) && included !== null ? included - replayEvents(others, billing, billing.limits).usage[input.usageKind] : null;
+    }
+    const topUp = topUpShare({ quantity, available: (topUps?.allowances[input.usageKind].left ?? 0) + ownTopUp, room });
+    if (topUp > 0 || ownTopUp > 0) {
+      const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, units: topUp });
+      topUpQuantity = Math.min(topUp, drawn.drawn);
+    }
+  }
+  replacement.topUpQuantity = topUpQuantity;
+  let eventId: string;
+  if (existing) {
+    // What the row billed counts by its plan part then.
+    const billed = existing.isFinal ? { quantity: planQuantity(existing), billableQuantity: existing.billableQuantity ?? existing.quantity } : undefined;
+    const billableQuantity = billableQuantityForEvent(others, replacement, billing, billing.limits, billed);
+    await tx.update(billingUsageEvents).set({ quantity, billableQuantity, topUpQuantity, isFinal: true, ...usageSyncFields(existing, billableQuantity, syncPlanFor(existing.planAtRecordTime, billing)), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id));
+    eventId = existing.id;
+  } else {
+    const billableQuantity = billableQuantityForEvent(others, replacement, billing, billing.limits);
+    const plan = replacement.planAtRecordTime;
+    const [event] = await tx.insert(billingUsageEvents).values({ businessId: input.businessId, periodKey, sourceKey: input.sourceKey, usageKind: input.usageKind, quantity, billableQuantity, topUpQuantity, planAtRecordTime: plan, planCodeAtRecordTime: replacement.planCodeAtRecordTime ?? null, billingIntervalAtRecordTime: replacement.billingIntervalAtRecordTime, isFinal: true, syncStatus: plan === "starter" || plan === "pro" ? "pending" : "skipped", createdAt: replacement.createdAt, updatedAt: new Date() }).returning({ id: billingUsageEvents.id });
     if (!event) throw new Error("Billing usage correction could not be recorded.");
     eventId = event.id;
-    draws = row.plan === "prepaid";
   }
   // A use made on a pack settles what it drew: what a call or a text didn't
   // use goes back to the packs, and more than it reserved comes from them as
-  // far as they hold it.
+  // far as they hold it, all but what the top-ups paid.
   let packs = billing.packs ?? null;
   if (draws) {
-    const drawn = await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, seconds: Math.max(0, input.quantity) });
+    const drawn = await setPackDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, seconds: quantity - topUpQuantity });
     if (billing.plan === "prepaid") packs = drawn.after;
   }
-  await refreshUsageMonth(tx, { businessId: input.businessId, periodKey, billing: { ...billing, packs } });
+  // The balance after the draws, for the month's blocked flags.
+  const topUpsAfter = topUps || drewTopUp ? topUpBalance(await readLiveTopUps(tx, input.businessId)) : billing.topUps ?? null;
+  await refreshUsageMonth(tx, { businessId: input.businessId, periodKey, billing: { ...billing, packs, topUps: topUpsAfter } });
   return eventId;
 }
 

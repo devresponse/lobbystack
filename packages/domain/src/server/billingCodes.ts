@@ -201,7 +201,15 @@ function codeResource(row: Row, baseUrl: string): ApiBillingCode {
   return {
     id: String(row.id),
     code: String(row.code),
-    plan: String(row.plan),
+    plan: textOrNull(row.plan),
+    // A top-up code has no plan, and carries the top-up it adds.
+    top_up: row.plan === null || row.plan === undefined ? {
+      voice_seconds: Number(row.voice_sec ?? 0),
+      alert_sms_segments: Number(row.sms_seg ?? 0),
+      outbound_call_attempts: Number(row.calls_out ?? 0),
+      chat_units: Number(row.chat_units ?? 0),
+      days: numberOrNull(row.days),
+    } : null,
     business_id: textOrNull(row.business_id),
     max_uses: maxUses,
     uses,
@@ -231,9 +239,11 @@ function pgErrorCode(error: unknown): string | undefined {
 }
 
 /**
- * Issues a code for a plan whose access is code. With an Idempotency-Key, the
- * same key and request return the code it made, and the same key with another
- * request is a 422. A code typed by the operator that is taken is a 409.
+ * Issues a code for a plan whose access is code, or a top-up code (migration
+ * 0154), which adds a top-up instead of unlocking a plan. With an
+ * Idempotency-Key, the same key and request return the code it made, and the
+ * same key with another request is a 422. A code typed by the operator that
+ * is taken is a 409.
  */
 export async function createBillingCodeForApi(context: DomainContext, input: { caller: BillingCatalogCaller; idempotencyKey: string | null; body: ApiBillingCodeCreate; brandName: string; baseUrl: string }): Promise<{ code: ApiBillingCode; replayed: boolean }> {
   const { body, caller } = input;
@@ -256,17 +266,22 @@ export async function createBillingCodeForApi(context: DomainContext, input: { c
         return { code: codeResource(reused, input.baseUrl), replayed: true };
       }
     }
-    const [plan] = (await tx.execute<Row>(sql`select access, status from public.billing_plans where code = ${body.plan}`)).rows;
-    if (!plan) throw invalidRequest(`No plan has the code ${body.plan}. Apply a billing.json that has it first.`, [{ path: "plan", message: "No such plan." }]);
-    if (plan.access !== "code") throw conflict(`${body.plan} isn't a promo plan: its access is ${String(plan.access)}. A promo code unlocks a plan whose access is code in billing.json.`);
-    if (plan.status === "retired") throw conflict(`${body.plan} is retired, so no one new may take it.`);
+    if (body.plan !== undefined) {
+      const [plan] = (await tx.execute<Row>(sql`select access, status from public.billing_plans where code = ${body.plan}`)).rows;
+      if (!plan) throw invalidRequest(`No plan has the code ${body.plan}. Apply a billing.json that has it first.`, [{ path: "plan", message: "No such plan." }]);
+      if (plan.access !== "code") throw conflict(`${body.plan} isn't a promo plan: its access is ${String(plan.access)}. A promo code unlocks a plan whose access is code in billing.json.`);
+      if (plan.status === "retired") throw conflict(`${body.plan} is retired, so no one new may take it.`);
+    }
+    // A top-up code carries what it adds; the schema checked it gives something.
+    const topUp = body.top_up;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const code = chosen ?? madeUpCode(prefix);
       let row: Row | undefined;
       try {
         [row] = (await tx.execute<Row>(sql`
-          insert into public.billing_codes (code, plan, business_id, max_uses, expires_at, note, key_id, partner, idem_key, req_hash)
-          values (${code}, ${body.plan}, ${body.business_id ?? null}, ${maxUses}, ${expiresAt?.toISOString() ?? null}, ${body.note || null}, ${caller.platformKeyId}::uuid, ${caller.partnerId}, ${input.idempotencyKey}, ${requestHash})
+          insert into public.billing_codes (code, plan, voice_sec, sms_seg, calls_out, chat_units, days, business_id, max_uses, expires_at, note, key_id, partner, idem_key, req_hash)
+          values (${code}, ${body.plan ?? null}, ${topUp ? topUp.voice_seconds ?? 0 : null}, ${topUp ? topUp.alert_sms_segments ?? 0 : null}, ${topUp ? topUp.outbound_call_attempts ?? 0 : null}, ${topUp ? topUp.chat_units ?? 0 : null}, ${topUp?.days ?? null},
+            ${body.business_id ?? null}, ${maxUses}, ${expiresAt?.toISOString() ?? null}, ${body.note || null}, ${caller.platformKeyId}::uuid, ${caller.partnerId}, ${input.idempotencyKey}, ${requestHash})
           on conflict (code) do nothing
           returning *`)).rows;
       } catch (error) {
@@ -280,13 +295,15 @@ export async function createBillingCodeForApi(context: DomainContext, input: { c
   });
 }
 
-/** Every code, newest first, of one plan or bound to one business when asked. */
-export async function listBillingCodesForApi(context: DomainContext, input: PageRequest & { plan?: string | undefined; businessId?: string | undefined; baseUrl: string }): Promise<Page<ApiBillingCode>> {
+/** Every code, newest first, of one plan, of one kind or bound to one business when asked. */
+export async function listBillingCodesForApi(context: DomainContext, input: PageRequest & { plan?: string | undefined; kind?: string | undefined; businessId?: string | undefined; baseUrl: string }): Promise<Page<ApiBillingCode>> {
   const limit = pageSize(input.limit);
   const cursor = decodeCursor(input.cursor);
   if (input.businessId !== undefined && !isUuid(input.businessId)) throw invalidRequest("business_id must be a business id.", [{ path: "business_id", message: "Must be a UUID." }]);
+  if (input.kind !== undefined && input.kind !== "plan" && input.kind !== "top_up") throw invalidRequest("kind must be plan or top_up.", [{ path: "kind", message: "Must be plan or top_up." }]);
   const conditions: SQL[] = [];
   if (input.plan !== undefined) conditions.push(sql`plan = ${input.plan}`);
+  if (input.kind !== undefined) conditions.push(input.kind === "plan" ? sql`plan is not null` : sql`plan is null`);
   if (input.businessId !== undefined) conditions.push(sql`business_id = ${input.businessId}::uuid`);
   // Codes are issued to the millisecond, as the cursor carries them, so the comparison is exact.
   if (cursor) conditions.push(sql`(created_at, id) < (${cursor.at.toISOString()}::timestamptz, ${cursor.id}::uuid)`);
@@ -295,7 +312,7 @@ export async function listBillingCodesForApi(context: DomainContext, input: Page
   return toPage(rows, limit, (row) => codeResource(row, input.baseUrl), (row) => ({ at: new Date(iso(row.created_at)), id: String(row.id) }));
 }
 
-/** Revokes a code, so no new checkout can use it; businesses on its plan keep it. A revoked code is returned as it is. */
+/** Revokes a code, so no new checkout can use it and no one can add its top-up; businesses on its plan keep it, and top-ups it added stay. A revoked code is returned as it is. */
 export async function revokeBillingCodeForApi(context: DomainContext, input: { codeId: string; baseUrl: string }): Promise<ApiBillingCode> {
   return await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
     const [revoked] = (await tx.execute<Row>(sql`update public.billing_codes set status = 'revoked', revoked_at = now(), updated_at = now() where id = ${input.codeId}::uuid and status = 'active' returning *`)).rows;

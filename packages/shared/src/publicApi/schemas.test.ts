@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "../receptionist";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
 import { apiAppointmentCreateSchema, apiBillingCatalogLinkSchema, billingCatalogLinkRequest, apiAppointmentRescheduleSchema, apiBillingCodeCreateSchema, apiCheckoutCreateSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
+import { apiBillingTopUpCreateSchema } from "./topUpSchemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -116,6 +117,27 @@ describe("parseApiInput", () => {
     expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch" })).toEqual({ ok: false, details: [{ path: "max_uses", message: "Required for a shared code." }, { path: "expires_at", message: "Required for a shared code." }] });
     expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", business_id: business, code: "SPRING25", prefix: "ALLO" })).toEqual({ ok: false, details: [{ path: "prefix", message: "Send code or prefix, not both." }] });
     expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", business_id: business, max_uses: 0 }).ok).toBe(false);
+  });
+
+  it("makes a top-up code from top_up instead of a plan, which gives something", () => {
+    const shared = { max_uses: 50, expires_at: "2026-12-31T00:00:00Z" };
+    expect(parseApiInput(apiBillingCodeCreateSchema, { top_up: { voice_seconds: 3_600, days: 30 }, ...shared })).toEqual({ ok: true, data: { top_up: { voice_seconds: 3_600, days: 30 }, ...shared } });
+    expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", top_up: { voice_seconds: 60 }, ...shared })).toEqual({ ok: false, details: [{ path: "plan", message: "Send plan or top_up, not both." }] });
+    expect(parseApiInput(apiBillingCodeCreateSchema, shared)).toEqual({ ok: false, details: [{ path: "plan", message: "Send plan or top_up, not both." }] });
+    expect(parseApiInput(apiBillingCodeCreateSchema, { top_up: { voice_seconds: 0 }, ...shared })).toMatchObject({ ok: false, details: [{ path: "top_up.voice_seconds" }] });
+    for (const bad of [{ voice_seconds: 6_000_001 }, { chat_units: -1 }, { alert_sms_segments: 1.5 }, { voice_seconds: 60, days: 0 }, { voice_seconds: 60, days: 1_096 }, { voice_seconds: 60, minutes: 1 }]) {
+      expect(parseApiInput(apiBillingCodeCreateSchema, { top_up: bad, ...shared }).ok).toBe(false);
+    }
+  });
+
+  it("grants a top-up that gives something, ending at a time or after days but not both", () => {
+    expect(parseApiInput(apiBillingTopUpCreateSchema, { voice_seconds: 3_600, days: 30, note: " Spring promotion " })).toEqual({ ok: true, data: { voice_seconds: 3_600, days: 30, note: "Spring promotion" } });
+    expect(parseApiInput(apiBillingTopUpCreateSchema, { outbound_call_attempts: 5 }).ok).toBe(true);
+    expect(parseApiInput(apiBillingTopUpCreateSchema, {})).toMatchObject({ ok: false, details: [{ path: "voice_seconds" }] });
+    expect(parseApiInput(apiBillingTopUpCreateSchema, { voice_seconds: 60, ends_at: "2026-12-31T00:00:00Z", days: 3 })).toEqual({ ok: false, details: [{ path: "days", message: "Send ends_at or days, not both." }] });
+    for (const bad of [{ voice_seconds: 6_000_001 }, { alert_sms_segments: 1_000_001 }, { voice_seconds: 60, days: 1_096 }, { voice_seconds: 60, ends_at: "next week" }, { voice_seconds: 60, note: "x".repeat(201) }, { voice_seconds: 60, plan: "pro" }]) {
+      expect(parseApiInput(apiBillingTopUpCreateSchema, bad).ok).toBe(false);
+    }
   });
 
   it("accepts start times with or without seconds", () => {

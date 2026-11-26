@@ -3,6 +3,7 @@ export * from "./errors";
 export * from "./idempotency";
 export * from "./knowledgeSearch";
 export * from "./operations";
+export * from "./operatorBilling";
 export * from "./platformKeys";
 export * from "./resources";
 export * from "./webhookNetwork";

@@ -59,6 +59,8 @@ const domain = vi.hoisted(() => ({
   billingCatalogDeployment: vi.fn((brand: string) => ({ brand, polar: { env: "sandbox", org: "org_test", secretSha256: null, productVars: {} } })),
   listBillingCatalogRunsForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
   createBillingCodeForApi: vi.fn(),
+  grantTopUpForApi: vi.fn(),
+  revokeTopUpForApi: vi.fn(),
   listBillingCodesForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
   revokeBillingCodeForApi: vi.fn(),
   listBillingPlansForApi: vi.fn(),
@@ -703,6 +705,42 @@ describe("billing", () => {
       vi.unstubAllEnvs();
     }
     expect(domain.endPromoPlanForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets only an operator's platform key grant or revoke a top-up", async () => {
+    const topUpId = "6d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6";
+    const revoke = (request: Request, id = topUpId) => v1.revokeTopUp(request, { params: Promise.resolve({ top_up_id: id }) });
+    const body = { voice_seconds: 3_600, days: 30, note: "Spring promotion" };
+    // A per-business key, even with billing:manage, is refused.
+    expect((await v1.createTopUp(call("/billing/top-ups", { method: "POST", body: JSON.stringify(body) }))).status).toBe(403);
+    expect((await revoke(call(`/billing/top-ups/${topUpId}`, { method: "DELETE" }))).status).toBe(403);
+    const partner = generatePlatformKey({ name: "Partner", partner: "acme", ownerEmail: "ops@acme.example", access: "partner" });
+    const operator = platformKey();
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([partner.entry, operator.entry]));
+    try {
+      const asKey = (key: string, path: string, init: RequestInit = {}) => new Request(`https://app.example.com/api/v1${path}`, { ...init, headers: { authorization: `Bearer ${key}`, "LobbyStack-Business": "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", ...init.headers } });
+      expect((await v1.createTopUp(asKey(partner.key, "/billing/top-ups", { method: "POST", body: JSON.stringify(body) }))).status).toBe(403);
+      expect(domain.grantTopUpForApi).not.toHaveBeenCalled();
+      const topUp = { id: topUpId, source: "grant", code: null, note: "Spring promotion", gives: { voice_seconds: 3_600, alert_sms_segments: 0, outbound_call_attempts: 0, chat_units: 0 }, used: { voice_seconds: 0, alert_sms_segments: 0, outbound_call_attempts: 0, chat_units: 0 }, status: "active", starts_at: "2026-11-26T12:00:00.000Z", ends_at: "2026-12-26T12:00:00.000Z", created_at: "2026-11-26T12:00:00.000Z", revoked_at: null };
+      domain.grantTopUpForApi.mockResolvedValue(topUp);
+      const granted = await v1.createTopUp(asKey(operator.key, "/billing/top-ups", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": "grant-1" } }));
+      expect(granted.status).toBe(201);
+      expect(await granted.json()).toEqual({ data: topUp });
+      expect(domain.grantTopUpForApi).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ platformKeyId: operator.entry.id, businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }), body);
+      // A grant that gives nothing, or ends two ways, is refused before the domain sees it.
+      expect((await v1.createTopUp(asKey(operator.key, "/billing/top-ups", { method: "POST", body: JSON.stringify({ note: "Nothing" }) }))).status).toBe(400);
+      expect((await v1.createTopUp(asKey(operator.key, "/billing/top-ups", { method: "POST", body: JSON.stringify({ voice_seconds: 60, days: 3, ends_at: "2026-12-31T00:00:00Z" }) }))).status).toBe(400);
+      expect(domain.grantTopUpForApi).toHaveBeenCalledTimes(1);
+      domain.revokeTopUpForApi.mockResolvedValue({ ...topUp, status: "revoked", revoked_at: "2026-11-27T12:00:00.000Z" });
+      expect((await revoke(asKey(partner.key, `/billing/top-ups/${topUpId}`, { method: "DELETE" }))).status).toBe(403);
+      const revoked = await revoke(asKey(operator.key, `/billing/top-ups/${topUpId}`, { method: "DELETE" }));
+      expect(revoked.status).toBe(200);
+      expect(await revoked.json()).toMatchObject({ data: { id: topUpId, status: "revoked" } });
+      expect(domain.revokeTopUpForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), topUpId);
+      expect((await revoke(asKey(operator.key, "/billing/top-ups/x", { method: "DELETE" }), "x")).status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("counts each promo code a key tries against the business's hour and the key's own, and sells promo plans only where Polar is set up", async () => {

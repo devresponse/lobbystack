@@ -582,6 +582,7 @@
       "packDescription": "Your allowances come from your packs and last until each one ends, rather than reset each month.",
       "packBlockedDescription": "No minutes left. Calls get a busy signal until you buy another pack.",
       "packAllowanceBlockedDescription": "None left. Buy another pack to get more.",
+      "topUpLeft": "Top-ups: {{left}} of {{total}} {{unit}} left",
       "overageCount": "{{count}} over limit",
       "overageCost": "≈ {{amount}} in overages",
       "noOverages": "No overages — usage hard-capped at the included pool.",
@@ -660,6 +661,47 @@
         "gaveWay": "A plan started before this payment arrived, so no pack was added. The payment will be refunded.",
         "refundedFirst": "This payment was refunded or charged back, so no pack was added.",
         "closedForPlan": "A plan started for this business, so this pack's checkout closed."
+      }
+    },
+    "topUps": {
+      "title": "Top-ups",
+      "description": "Extra allowances on top of your plan, used once your plan's own allowance runs out. Your plan stays as it is.",
+      "notCounted": "Your plan has no limits, so these aren't used while you're on it.",
+      "granted": "Top-up",
+      "fromCode": "Top-up from code {{code}}",
+      "kinds": {
+        "voice": "Voice minutes",
+        "transfers": "Transfer attempts",
+        "sms": "SMS alerts",
+        "chats": "Website chats"
+      },
+      "amounts": {
+        "voice_one": "{{amount}} voice minute",
+        "voice_other": "{{amount}} voice minutes",
+        "transfers_one": "{{amount}} transfer attempt",
+        "transfers_other": "{{amount}} transfer attempts",
+        "sms_one": "{{amount}} SMS alert",
+        "sms_other": "{{amount}} SMS alerts",
+        "chats_one": "{{amount}} website chat",
+        "chats_other": "{{amount}} website chats"
+      },
+      "left": "{{left}} of {{total}} left",
+      "startsOn": "Starts on {{date}}",
+      "endsOn": "Ends on {{date}}",
+      "neverEnds": "Never ends",
+      "code": {
+        "adds": "This code adds to your plan:",
+        "lasts_one": "Lasts {{count}} day from when you add it.",
+        "lasts_other": "Lasts {{count}} days from when you add it.",
+        "noEnd": "It doesn't expire.",
+        "planStays": "Your plan stays as it is. These are used once its own allowance runs out.",
+        "add": "Add to my plan",
+        "adding": "Adding...",
+        "added": "Top-up added.",
+        "usedHere": "This business already added this code.",
+        "usedByYou": "You already added this code.",
+        "usedError": "This code was already added.",
+        "failed": "Unable to add this code. Try again."
       }
     },
     "transactions": {

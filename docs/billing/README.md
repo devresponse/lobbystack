@@ -9,6 +9,7 @@ The other billing pages:
 - [`brands/README.md`](../../brands/README.md#billingjson): how to write a brand's `billing.json`, its promo plans and its codes.
 - [Data model](data-model.md): the billing tables, columns and migrations.
 - [Design history](design-history.md): the options weighed, the ten steps, the two reviews and the decisions.
+- [Top-ups](../features/top-ups.md): extra minutes, texts, transfers and chats on top of any plan, which an operator grants or a top-up code adds, without a payment and without changing the plan (migration `0154`, on `develop/r2`).
 - [Stripe billing's history](stripe-history.md): the nineteen steps that added Stripe beside Polar, merchant of record as a second mode, the review and the technical debt left.
 - [Selling plans (Polar)](../deployment/guide/part-3-outside-services.md#selling-plans-polar) and [Selling plans (Stripe)](../deployment/guide/part-3-outside-services.md#selling-plans-stripe) in the deployment guide: setting a provider up for a new instance, step by step.
 
@@ -136,19 +137,20 @@ On Stripe, new terms for a pack already linked make a new price under a new look
 
 | Command | Does |
 | --- | --- |
-| `status` | One business's plan, usage, spending cap, promo plan and when it ends, then its prepaid packs |
+| `status` | One business's plan, usage, spending cap, promo plan and when it ends, then its prepaid packs and its top-ups, with what each has left |
 | `plans` | The plans the business can buy, with what each includes, its receptionists among it, and their prices |
 | `cap <cents>` | Sets the spending cap on a paid plan's overage |
 | `checkout`, `checkout-status <id>` | Starts a checkout and prints the page to send whoever pays, or says the existing subscription moved |
 | `buy-pack <pack>`, `pack-status <id>` | Starts a checkout for a prepaid pack, such as `pack_500_180`, and with `--wait` prints the page to send whoever pays, or for one already paid what became of the pack; `pack-status` shows its status, its page while it's `ready`, and once paid its `pack_status` |
 | `cancel`, `resume`, `keep-plan`, `change-status <id>` | On Stripe, ends the plan at its renewal, undoes that, or drops a change waiting for the renewal; Polar does these in its billing portal |
 | `managed-plan`, `end-managed-plan` | Puts a business on Enterprise outside the billing provider, and takes it off |
+| `top-up`, `top-up-revoke <id>` | Grants a business a top-up, with `--voice-seconds`, `--alert-sms-segments`, `--outbound-call-attempts` or `--chat-units`, and `--days` or `--ends-at`, and revokes one ([top-ups](../features/top-ups.md#grant-a-top-up)) |
 | `end-promo-plan` | Ends a business's promo plan at its next renewal; its owners get an email |
 | `catalog` | The applied file, plans, prices, packs and links |
 | `catalog-preview <brand>`, `catalog-apply <brand>` | Preview or apply a `billing.json` to the tables only; `pnpm billing apply` does both sides |
 | `catalog-link <brand>` | Records which provider objects sell the catalog, Polar's products and discounts or Stripe's prices and coupons, and each pack's product or price; `pnpm billing apply` sends it |
 | `catalog-runs --kind catalog\|polar\|link\|verify` | Past applies, links and daily checks (`link`: every provider's links) |
-| `code-create <plan>`, `codes`, `code-revoke <id>` | Issue, list and revoke promo codes |
+| `code-create <plan>`, `top-up-code`, `codes`, `code-revoke <id>` | Issue a plan's promo code or a top-up code (`--top-up` with what it adds and its `days`), list them (`--kind plan` or `top_up` for one kind), and revoke one |
 
 ## Sell promo codes and promo plans
 
@@ -158,6 +160,8 @@ A plan whose `access` is `code` in `billing.json` is sold only to a business tha
 2. Issue codes with an operator key: `pnpm lobbystack billing code-create <plan> --business-id <id>` for one business, or `--max-uses <n> --expires-at <time>` for a shared code. The command prints a link, `/signup?promo=<code>`, which survives sign-up; a signed-in owner lands on **Settings > Plan**.
 3. The business enters the code under **Have a promo code?** and buys the plan's own product at its discount. It uses each code once (fork PR #70). A code unlocks a plan, never a [prepaid pack](../features/prepaid-packs.md): on Polar, money off a pack comes from a discount code made in Polar's dashboard, which a pack's payment page takes where the brand's file sets `polar.packDiscountCodes`, as RealInfoBot's does ([prepaid packs](../features/prepaid-packs.md#take-money-off-a-pack-with-a-discount-code)).
 4. A plan with a set number of months ends at the first renewal after they run out. A week before, the worker emails the owners in their language and tells the provider to move the subscription to its tier's standard product or price, or to cancel it, at the renewal (fork PR #65; on Stripe, through a subscription schedule). On Polar, switching plans in its portal leaves the promo plan, and the worker removes its discount.
+
+**A promo code can add a top-up instead of a plan.** A top-up code, issued with `pnpm lobbystack billing top-up-code --top-up '{"voice_seconds":1800,"days":30}'` and the same `--business-id`, or `--max-uses` and `--expires-at`, adds extra minutes, texts, transfers or chats on top of the business's plan when an owner or admin selects **Add to my plan** under **Have a promo code?**: at once, without a payment and without changing the plan, once per business and once per person. Its uses never pass `max_uses`. An operator can also grant a top-up with no code ([top-ups](../features/top-ups.md#choose-how-a-promotion-reaches-a-business)).
 
 **A promo plan freezes when its first business takes it.** From then on an apply refuses to change its terms, directly or through the tier it inherits from, and to lower its receptionists the same way (`plan_frozen`), so the businesses on it keep what they bought: put new terms or a lower number under a new code, or write what it inherits into its entry. Its names, access and offer end can still change, it can include more receptionists, and it can be retired. Standard plans never freeze (fork PR #134).
 
@@ -243,14 +247,15 @@ Each pack payment also records the product event `billing.pack_purchased`, with 
 | Catalog of plans and packs, provider setup and the daily check | `packages/domain/src/server/billingCatalog.ts`, `billingPolar.ts`, `billingStripe.ts` (Stripe's planner, which pnpm billing runs from step 11 of the Stripe plan), `billingVerify.ts`, `billingProvider.ts` (the planner for the deployment's provider), `packages/providers/src/polar/polarCatalog.ts` and `packages/providers/src/stripe/catalog.ts` (the catalog clients, which run a plan's calls), `scripts/billing.ts` |
 | Promo codes and endings | `packages/domain/src/server/billingCodes.ts`, `billingPromoEnd.ts`, `packages/shared/src/billingCodes.ts` |
 | Prepaid packs | `packages/domain/src/server/billingPacks.ts` (the ledger: balances, draws, refunds, disputes and the number's release), `billingPackCheckout.ts`, `billingPackEvents.ts` (what the provider's events do to packs), `billingPackExpiry.ts` (ends, reminders and settling the last pack), `billingPlanEndForPack.ts` (what ending a replaced plan reads) and `billingPackView.ts` (what the plan screens show) ([prepaid packs](../features/prepaid-packs.md)) |
+| Top-ups | `packages/domain/src/server/billingTopUps.ts` (the ledger, grants, revokes and codes), the draws in `usage.ts`, `packages/domain/src/server/publicApi/operatorBilling.ts` for the v1 routes, and `apps/admin/src/components/billing-top-ups.tsx` for the screens ([top-ups](../features/top-ups.md#find-the-code)) |
 | The sweep | `packages/domain/src/server/billingSweep.ts` |
-| Dashboard routes | `apps/admin/app/api/billing/` (plan, `checkout`, `packs/checkout`, `portal`, `promo`), `apps/admin/app/api/webhooks/polar/route.ts`, `stripe/route.ts` and `stripe/meter-errors/route.ts` with the shared `apps/admin/src/lib/billing-webhook.ts`, `apps/admin/src/lib/billing-limit.ts` |
+| Dashboard routes | `apps/admin/app/api/billing/` (plan, `checkout`, `packs/checkout`, `portal`, `promo`, `top-ups`), `apps/admin/app/api/webhooks/polar/route.ts`, `stripe/route.ts` and `stripe/meter-errors/route.ts` with the shared `apps/admin/src/lib/billing-webhook.ts`, `apps/admin/src/lib/billing-limit.ts` |
 | Pack routes of the v1 API | `apps/admin/app/api/v1/billing/packs/checkout/route.ts` (POST) and `[checkout_id]/route.ts` (GET), handled in `apps/admin/src/lib/public-api/routes.ts` and `packages/domain/src/server/publicApi/operations.ts` |
 | The plan screens' words from billing.json | `packages/shared/src/billingDisplay.ts` (the `display` section and its checks), `apps/admin/src/lib/plan-display.ts`, used by `onboarding-plan-surface.tsx`, `onboarding-plan-comparison.tsx` and `upgrade-plan-dialog.tsx`; a pack's card is bought through `use-pack-checkout.ts`, from the dialog by `live-upgrade-plan-provider.tsx` |
 | Businesses per account from billing.json | `packages/shared/src/billingProfile.ts` (the `accounts` section, `planBusinessCap`, `accountBusinessCap` and `highestBusinessCap`), `brandAccountLimits` in `packages/shared/src/brands/resolve.ts`, `assertBusinessAllowanceInTransaction`, `listUserBusinessesWithAllowance` and `deploymentBusinessCaps` in `packages/domain/src/server/tenancy.ts`, called by `createBusiness`, `acceptInvitation` and `claimProspectDemo` (`demos.ts`); each business's plan from `planInForce` in `usage.ts` and `app.list_user_business_plans` (migration `0150`) |
 | Pack screens | Pack cards, drawn as plan cards (`PlanCardView` and the pack helpers in `apps/admin/src/lib/plan-display.ts`), on `onboarding-plan-surface.tsx` and `upgrade-plan-dialog.tsx`, which also says how many pack minutes a new plan ends; `apps/admin/src/hooks/use-pack-checkout.ts` buys one; `apps/admin/src/components/billing-packs.tsx` (`HeldPacks`, `PackEndsPlanDialog`) for `live-plan-surface.tsx`, which shows a pack held as the plan; `live-usage-surface.tsx` meters the packs' minutes, transfers and texts, and `live-phone-number-settings-surface.tsx` explains a number set to go after the last pack ended |
 | Worker jobs and schedules | `apps/worker/src/billing/`, one file per flow (`packCheckout.ts`, `packs.ts` and `packPlanEnd.ts` for packs), and `apps/worker/src/scheduler.ts` |
-| Tables | Migrations `0108` to `0116`, `0146` for the provider-neutral columns, and `0148`, `0149` and `0151` for the prepaid packs, in `packages/db/migrations/` ([data model](data-model.md)) |
+| Tables | Migrations `0108` to `0116`, `0146` for the provider-neutral columns, `0148`, `0149` and `0151` for the prepaid packs, and `0154` for top-ups, in `packages/db/migrations/` ([data model](data-model.md)) |
 
 ## Know the known problems
 

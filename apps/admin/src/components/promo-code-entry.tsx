@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { billingPlanName, type BillingCodeView, type BillingInterval, type PlanChangeRefusal, type ResolvedBillingDiscount } from "@lobbystack/shared";
+import { billingPlanName, type BillingCodeView, type BillingInterval, type BillingTopUpCodeView, type PlanChangeRefusal, type ResolvedBillingDiscount } from "@lobbystack/shared";
 import { Check, LoaderCircle } from "lucide-react";
 
 import { formatMoney, includedLines, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
@@ -13,6 +13,7 @@ import { requestJson } from "@/lib/request-json";
 import { capturePromoCodeFromUrl, clearStoredPromoCode, getStoredPromoCode } from "@/lib/promo-code";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "./billing-email-form";
+import { TopUpCodeOffer } from "./billing-top-ups";
 import { Button } from "./ui/button";
 import { FieldError } from "./ui/field";
 import { Input } from "./ui/input";
@@ -21,9 +22,16 @@ import { Label } from "./ui/label";
 type Translate = ReturnType<typeof useTranslation>["t"];
 type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null; providerName: string };
 type Checkout = { requestId: string; interval: BillingInterval; billingEmail: string | null };
+/** What the code field found: a plan a code unlocks, or the top-up a top-up code adds. */
+type CodeView = BillingCodeView | BillingTopUpCodeView;
+
+function isTopUpView(view: CodeView): view is BillingTopUpCodeView {
+  return "kind" in view && view.kind === "top_up";
+}
 
 const errorKeys: Record<string, string> = {
   promo_invalid: "billing.promo.errors.invalid",
+  promo_used: "billing.topUps.code.usedError",
   promo_current: "billing.promo.errors.current",
   promo_interval: "billing.promo.errors.interval",
   promo_rate_limited: "billing.promo.errors.rateLimited",
@@ -51,14 +59,16 @@ export function promoDiscountText(discount: ResolvedBillingDiscount, currency: s
  * promo link (?promo=, kept through sign-up) is filled in and checked at once.
  * A business that already pays has its subscription moved instead of a checkout.
  * leavesPacks holds the minutes left on the business's packs, which a code's
- * plan ends when it starts, as the plan dialog warns.
+ * plan ends when it starts, as the plan dialog warns. A top-up code shows the
+ * top-up it adds instead, which Add puts on top of the plan at once, without a
+ * payment and without changing the plan.
  */
 export function PromoCodeEntry({ businessId, changesPlan = false, leavesPacks = null }: { businessId: string; changesPlan?: boolean; leavesPacks?: { minutesLeft: number } | null }) {
   const { i18n, t } = useTranslation("settings");
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
-  const [view, setView] = useState<BillingCodeView | null>(null);
+  const [view, setView] = useState<CodeView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkout, setCheckout] = useState<Checkout | null>(null);
   // A checkout Polar couldn't make this business's customer for starts again with a billing email.
@@ -67,13 +77,13 @@ export function PromoCodeEntry({ businessId, changesPlan = false, leavesPacks = 
   const announced = useRef<string | null>(null);
 
   const lookup = useMutation({
-    mutationFn: (code: string) => requestJson<BillingCodeView>(`/api/billing/promo?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ code }) }),
+    mutationFn: (code: string) => requestJson<CodeView>(`/api/billing/promo?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ code }) }),
     onMutate: () => { setError(null); setView(null); setEmailPrompt(null); },
     onSuccess: (result) => {
       setView(result);
       setValue(result.code);
-      // Nor should one for the plan the business already has: each check spends one of its tries.
-      if (result.current) clearStoredPromoCode();
+      // Nor should one for the plan the business already has, or a top-up already added: each check spends one of its tries.
+      if (isTopUpView(result) ? result.usedHere || result.usedByYou : result.current) clearStoredPromoCode();
     },
     onError: (cause) => {
       setError(errorMessage(cause, t, t("billing.promo.errors.failed")));
@@ -86,6 +96,17 @@ export function PromoCodeEntry({ businessId, changesPlan = false, leavesPacks = 
     onMutate: () => setError(null),
     onSuccess: (result, input) => setCheckout({ requestId: result.requestId, interval: input.interval, billingEmail: input.billingEmail ?? null }),
     onError: (cause) => setError(errorMessage(cause, t, t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed"))),
+  });
+  // A top-up code's top-up is added at once, with no checkout.
+  const addTopUp = useMutation({
+    mutationFn: (code: string) => requestJson<{ topUp: unknown }>(`/api/billing/top-ups?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ code }) }),
+    onMutate: () => setError(null),
+    onSuccess: () => {
+      toast.success(t("billing.topUps.code.added"));
+      void client.invalidateQueries({ queryKey: ["billing", businessId] });
+      close();
+    },
+    onError: (cause) => setError(errorMessage(cause, t, t("billing.topUps.code.failed"))),
   });
   const status = useQuery({
     queryKey: ["billing-promo-checkout", businessId, checkout?.requestId],
@@ -161,13 +182,14 @@ export function PromoCodeEntry({ businessId, changesPlan = false, leavesPacks = 
     clearStoredPromoCode();
   }
 
-  const busy = start.isPending || Boolean(checkout);
+  const buying = start.isPending || Boolean(checkout);
+  const busy = buying || addTopUp.isPending;
   useEffect(() => {
     // Buying the code's plan, or waiting for the change to it, is not leaving.
-    if (!busy) return;
+    if (!buying) return;
     setUpgradeInProgress(true, "promo");
     return () => setUpgradeInProgress(false, "promo");
-  }, [busy]);
+  }, [buying]);
   const locale = i18n.language;
   if (!open) {
     return <button className="self-start text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={() => setOpen(true)} type="button">{t("billing.promo.link")}</button>;
@@ -184,8 +206,9 @@ export function PromoCodeEntry({ businessId, changesPlan = false, leavesPacks = 
       </div>
     </form>
     {error ? <FieldError>{error}</FieldError> : null}
-    {view ? <PromoOffer busy={busy} changesPlan={changesPlan} leavesPacks={leavesPacks} locale={locale} onChoose={(interval) => { setEmailPrompt(null); start.mutate({ code: view, interval }); }} pendingInterval={start.isPending ? start.variables.interval : checkout?.interval ?? null} t={t} view={view} /> : null}
-    {view && emailPrompt ? <BillingEmailForm key={emailPrompt.interval} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => start.mutate({ code: view, interval: emailPrompt.interval, billingEmail })} pending={busy} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /> : null}
+    {view && isTopUpView(view) ? <TopUpCodeOffer busy={busy} locale={locale} onAdd={() => addTopUp.mutate(view.code)} pending={addTopUp.isPending} view={view} /> : null}
+    {view && !isTopUpView(view) ? <PromoOffer busy={busy} changesPlan={changesPlan} leavesPacks={leavesPacks} locale={locale} onChoose={(interval) => { setEmailPrompt(null); start.mutate({ code: view, interval }); }} pendingInterval={start.isPending ? start.variables.interval : checkout?.interval ?? null} t={t} view={view} /> : null}
+    {view && !isTopUpView(view) && emailPrompt ? <BillingEmailForm key={emailPrompt.interval} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => start.mutate({ code: view, interval: emailPrompt.interval, billingEmail })} pending={busy} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /> : null}
   </div>;
 }
 

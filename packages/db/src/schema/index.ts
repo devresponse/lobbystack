@@ -20,6 +20,8 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { topUpCodeColumns, topUpTables, topUpUsageColumns } from "./billingTopUps";
+export * from "./billingTopUps";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -1388,6 +1390,7 @@ export const billingUsageEvents = pgTable(
     rateCents: integer("rate_cents"),
     /** When the row's latest event last went to the provider. */
     syncSentAt: timestamp("sync_sent_at", { withTimezone: true }),
+    ...topUpUsageColumns,
     ...timestamps,
   },
   (table) => [uniqueIndex("billing_usage_source_unique").on(table.businessId, table.sourceKey), index("billing_usage_status_idx").on(table.syncStatus, table.createdAt), index("billing_usage_events_plan_code_idx").on(table.businessId, table.planCodeAtRecordTime).where(sql`${table.planCodeAtRecordTime} is not null`)],
@@ -1576,9 +1579,9 @@ export const billingPrices = pgTable(
 
 /**
  * Promo codes of migration 0109. An operator's platform key issues each for a
- * plan whose access is code; only the worker reads or writes them, and they are
- * revoked, never deleted. A business finds its code's offer through
- * app.billing_code_offers, by the whole code.
+ * plan whose access is code, or for a top-up (migration 0154); only the worker
+ * reads or writes them, and they are revoked, never deleted. A business finds
+ * its code's offer through app.billing_code_offers, by the whole code.
  */
 export const billingCodes = pgTable(
   "billing_codes",
@@ -1586,8 +1589,9 @@ export const billingCodes = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     /** What people type, in upper case; compared regardless of case. */
     code: varchar("code", { length: 32 }).notNull(),
-    /** The plan it unlocks. */
-    plan: varchar("plan", { length: 48 }).notNull().references(() => billingPlans.code),
+    /** The plan it unlocks; null for a top-up code, which adds what topUpCodeColumns hold instead. */
+    plan: varchar("plan", { length: 48 }).references(() => billingPlans.code),
+    ...topUpCodeColumns,
     /** The one business that may use it; null for a shared code. */
     businessId: uuid("business_id").references(() => businesses.id, { onDelete: "cascade" }),
     /** How many businesses may subscribe with it; null for no limit, which only a bound code may have. */
@@ -2633,6 +2637,7 @@ export const schema = {
   billingPrices,
   billingCodes,
   billingCodeRedemptions,
+  ...topUpTables,
   complianceRecords,
   feedbackSubmissions,
   affiliateProfiles,

@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { builtInBillingPlanLimits, builtInBillingPlanList, type BillingCodeView, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
+import { builtInBillingPlanLimits, builtInBillingPlanList, type BillingCodeView, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type BillingTopUpHolding } from "@lobbystack/shared";
 import { PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { LivePlanSurface } from "./live-plan-surface";
 import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
@@ -418,5 +418,39 @@ describe("prepaid packs on the plan page", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("top-ups on the plan page", () => {
+  const none = { voiceSeconds: 0, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 };
+  const topUp = (fields: Partial<BillingTopUpHolding>): BillingTopUpHolding => ({ id: "top-up", source: "grant", code: null, note: null, gives: none, used: none, status: "active", startsAt: "2026-11-01T00:00:00Z", endsAt: null, createdAt: "2026-11-01T00:00:00Z", revokedAt: null, ...fields });
+  const held = [
+    topUp({ id: "spring", note: "Spring promotion", gives: { ...none, voiceSeconds: 3_600, outboundCallAttempts: 10 }, used: { ...none, voiceSeconds: 900 }, endsAt: "2026-12-31T00:00:00Z" }),
+    topUp({ id: "code", source: "code", code: "SPRING-HOURS", status: "scheduled", gives: { ...none, alertSmsSegments: 50 }, startsAt: "2027-01-01T12:00:00Z" }),
+    topUp({ id: "ended", note: "Last year's promotion", status: "expired", gives: { ...none, voiceSeconds: 600 }, endsAt: "2026-01-01T00:00:00Z" }),
+  ];
+
+  it("lists those that count now or will under the plan, with what each has left, and none that ended", () => {
+    setup({ plan: "starter", extra: { topUps: held } });
+    expect(screen.getByText("billing.topUps.title")).toBeTruthy();
+    expect(screen.getByText("billing.topUps.description")).toBeTruthy();
+    expect(screen.getByText("Spring promotion")).toBeTruthy();
+    // 45 of its 60 minutes and all 10 transfers left; a code's top-up named by its code, and when it starts.
+    expect(translate).toHaveBeenCalledWith("billing.topUps.left", { left: "45", total: "60" });
+    expect(translate).toHaveBeenCalledWith("billing.topUps.left", { left: "10", total: "10" });
+    expect(translate).toHaveBeenCalledWith("billing.topUps.fromCode", { code: "SPRING-HOURS" });
+    expect(translate).toHaveBeenCalledWith("billing.topUps.startsOn", { date: "Jan 1, 2027" });
+    expect(screen.queryByText("Last year's promotion")).toBeNull();
+  });
+
+  it("says nothing draws on them on Enterprise, and shows none on a self-hosted deployment or without any", () => {
+    setup({ plan: "enterprise", extra: { topUps: held } });
+    expect(screen.getByText("billing.topUps.notCounted")).toBeTruthy();
+    cleanup();
+    setup({ plan: "self_host", extra: { topUps: held } });
+    expect(screen.queryByText("billing.topUps.title")).toBeNull();
+    cleanup();
+    setup({ plan: "starter" });
+    expect(screen.queryByText("billing.topUps.title")).toBeNull();
   });
 });

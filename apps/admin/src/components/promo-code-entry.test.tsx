@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BillingCodeView } from "@lobbystack/shared";
+import type { BillingCodeView, BillingTopUpCodeView } from "@lobbystack/shared";
 import { isUpgradeInProgress, setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { PromoCodeEntry } from "./promo-code-entry";
 
@@ -23,6 +23,14 @@ const view: BillingCodeView = {
   prices: [{ interval: "monthly", cents: 2900, discountedCents: 1450, checkoutAvailable: true }, { interval: "annual", cents: 29000, discountedCents: 14500, checkoutAvailable: false }],
   included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1, receptionists: 1 },
   moreThanTier: ["voiceSeconds", "knowledgeStorageBytes"],
+};
+const topUpView: BillingTopUpCodeView = {
+  kind: "top_up",
+  code: "SPRING-HOURS",
+  gives: { voiceSeconds: 3_600, alertSmsSegments: 0, outboundCallAttempts: 10, chatAiUnits: 0 },
+  days: 30,
+  usedHere: false,
+  usedByYou: false,
 };
 let store: Record<string, string> = {};
 const clients: QueryClient[] = [];
@@ -166,5 +174,56 @@ describe("Have a promo code?", () => {
     expect(isUpgradeInProgress()).toBe(true);
     cleanup();
     expect(isUpgradeInProgress()).toBe(false);
+  });
+
+  describe("a top-up code", () => {
+    it("shows what it adds on top of the plan and adds it at once, without a checkout", async () => {
+      const { fetchMock } = setup((url, init) => {
+        if (url.startsWith("/api/billing/promo?")) return Response.json(topUpView);
+        if (url.startsWith("/api/billing/top-ups?") && init?.method === "POST") return Response.json({ topUp: { id: "top-up" } }, { status: 201 });
+        return Response.json({}, { status: 404 });
+      });
+      await userEvent.click(screen.getByRole("button", { name: "billing.promo.link" }));
+      await userEvent.type(screen.getByLabelText("billing.promo.label"), "spring-hours");
+      await userEvent.click(screen.getByRole("button", { name: "billing.promo.apply" }));
+      await screen.findByText('billing.topUps.amounts.voice {"count":60,"amount":"60"}');
+      // Only what it gives: an hour of calls and ten transfers, for 30 days, and the plan stays.
+      expect(screen.getByText('billing.topUps.amounts.transfers {"count":10,"amount":"10"}')).toBeTruthy();
+      expect(screen.queryByText(/billing\.topUps\.amounts\.(sms|chats)/)).toBeNull();
+      expect(screen.getByText('billing.topUps.code.lasts {"count":30}')).toBeTruthy();
+      expect(screen.getByText("billing.topUps.code.planStays")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /billing\.promo\.subscribe/ })).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "billing.topUps.code.add" }));
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.topUps.code.added"));
+      const add = fetchMock.mock.calls.find(([url]) => url.startsWith("/api/billing/top-ups?"));
+      expect(add![0]).toBe("/api/billing/top-ups?businessId=business");
+      expect(body(add![1])).toEqual({ code: "SPRING-HOURS" });
+      expect(fetchMock.mock.calls.some(([url]) => url.startsWith("/api/billing/checkout"))).toBe(false);
+      // Added, the field closes back to its link.
+      expect(await screen.findByRole("button", { name: "billing.promo.link" })).toBeTruthy();
+      expect(isUpgradeInProgress()).toBe(false);
+    });
+
+    it("says the business already added it, and forgets a link's code for it", async () => {
+      store["lobbystack.billing.promoCode"] = "SPRING-HOURS";
+      setup(() => Response.json({ ...topUpView, usedHere: true }));
+      await screen.findByText("billing.topUps.code.usedHere");
+      expect(screen.queryByRole("button", { name: "billing.topUps.code.add" })).toBeNull();
+      expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
+    });
+
+    it("says so when someone else on the team added it first", async () => {
+      setup((url, init) => {
+        if (url.startsWith("/api/billing/promo?")) return Response.json(topUpView);
+        if (url.startsWith("/api/billing/top-ups?") && init?.method === "POST") return Response.json({ error: "This code was already added.", code: "promo_used" }, { status: 409 });
+        return Response.json({}, { status: 404 });
+      });
+      await userEvent.click(screen.getByRole("button", { name: "billing.promo.link" }));
+      await userEvent.type(screen.getByLabelText("billing.promo.label"), "spring-hours");
+      await userEvent.click(screen.getByRole("button", { name: "billing.promo.apply" }));
+      await userEvent.click(await screen.findByRole("button", { name: "billing.topUps.code.add" }));
+      await screen.findByText("billing.topUps.code.usedError");
+      expect(toast.success).not.toHaveBeenCalled();
+    });
   });
 });

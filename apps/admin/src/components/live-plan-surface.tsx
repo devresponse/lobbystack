@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { billingPlanIncluded, billingPlanName, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type BillingSubscriptionAction, type PlanChangeRefusal } from "@lobbystack/shared";
+import { billingPlanIncluded, billingPlanName, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type BillingSubscriptionAction, type BillingTopUpHolding, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowUpRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { requestJson } from "@/lib/request-json";
@@ -28,6 +28,7 @@ import { packPriceSuffix } from "@/lib/plan-display";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
 import { HeldPacks } from "./billing-packs";
+import { HeldTopUps } from "./billing-top-ups";
 
 type Billing = {
   /** The deployment's billing provider, and its name. */
@@ -57,6 +58,8 @@ type Billing = {
   packOffers?: BillingPackOfferViewModel[];
   packs?: BillingPackViewModel[];
   packCheckout?: PackCheckoutViewModel | null;
+  /** Top-ups on top of the plan, which an operator granted or a code added; absent from answers before top-ups. */
+  topUps?: BillingTopUpHolding[];
 };
 
 /** The plan a waiting change moves to: its own name, its tier's, or its code when the business can't read it. */
@@ -304,6 +307,8 @@ export function LivePlanSurface() {
           </div>
           {/* Several packs, or one held beside another plan such as one a dispute froze, are each listed under the plan. */}
           {packs.length > 0 && !planPack && plan !== "self_host" && plan !== "enterprise" ? <HeldPacks locale={locale} packs={packs} /> : null}
+          {/* Top-ups add to the plan without changing it; on Enterprise, which has no allowances, nothing draws on them. */}
+          {plan !== "self_host" ? <HeldTopUps counted={plan !== "enterprise"} locale={locale} topUps={billing.data.topUps ?? []} /> : null}
           {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null} /> : null}
           {(canUpgrade || canManage || paymentActionUrl || planActions) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

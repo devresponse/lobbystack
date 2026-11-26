@@ -50,6 +50,8 @@ import {
   deleteWebhookEndpoint,
   endManagedPlanForApi,
   endPromoPlanForApi,
+  grantTopUpForApi,
+  revokeTopUpForApi,
   expandKnowledgeSourceForApi,
   generateContactPasscodesForApi,
   getAppointmentForApi,
@@ -144,6 +146,7 @@ import {
   apiBillingCatalogApplySchema,
   apiBillingCatalogLinkSchema,
   apiBillingCodeCreateSchema,
+  apiBillingTopUpCreateSchema,
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
   apiUserCreateSchema,
@@ -437,6 +440,15 @@ export const v1 = {
     requireOperatorKey(credential, "end a promo plan");
     return { body: data(await endPromoPlanForApi(context, caller)) };
   }),
+  // A top-up adds to what a business may use without a payment, so only the operator's own keys give or take one.
+  createTopUp: (request: Request) => handleApiRequest(request, "createTopUp", async ({ context, caller, credential }) => {
+    requireOperatorKey(credential, "grant a top-up");
+    return { status: 201, body: data(await grantTopUpForApi(context, caller, await readApiBody(request, apiBillingTopUpCreateSchema))) };
+  }),
+  revokeTopUp: (request: Request, { params }: Params<"top_up_id">) => handleApiRequest(request, "revokeTopUp", async ({ context, caller, credential }) => {
+    requireOperatorKey(credential, "revoke a top-up");
+    return { body: data(await revokeTopUpForApi(context, caller, uuidParam((await params).top_up_id, "top_up_id"))) };
+  }),
   getBillingCatalog: (request: Request) => handleApiRequest(request, "getBillingCatalog", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage the billing catalog");
     return { body: data(await getBillingCatalogForApi(context, { deployment: billingDeployment() })) };
@@ -465,7 +477,7 @@ export const v1 = {
   }),
   listBillingCodes: (request: Request) => handleApiRequest(request, "listBillingCodes", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage promo codes");
-    return { body: await listBillingCodesForApi(context, { ...pageQuery(request), plan: textParam(request, "plan", 48), businessId: optionalUuidParam(request, "business_id"), baseUrl: appOrigin(request) }) };
+    return { body: await listBillingCodesForApi(context, { ...pageQuery(request), plan: textParam(request, "plan", 48), kind: textParam(request, "kind", 8), businessId: optionalUuidParam(request, "business_id"), baseUrl: appOrigin(request) }) };
   }),
   revokeBillingCode: (request: Request, { params }: Params<"code_id">) => handleApiRequest(request, "revokeBillingCode", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage promo codes");

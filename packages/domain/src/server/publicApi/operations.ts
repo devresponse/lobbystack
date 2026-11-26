@@ -124,12 +124,12 @@ import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } f
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
-import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
+import { createBillingCheckoutRequestInTransaction, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { listBusinessPacks } from "../billingPacks";
+import { listBusinessTopUps, serializeBillingTopUp } from "../billingTopUps";
 import { createPackCheckoutRequestInTransaction, readPackCheckoutInTransaction } from "../billingPackCheckout";
 import { billingSubscriptionChangeShown, createBillingSubscriptionRequestInTransaction, isBillingSubscriptionAction } from "../billingSubscription";
-import { endPromoPlanInTransaction } from "../billingPromoEnd";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -296,11 +296,11 @@ function keyOwnerInactive(): PublicApiError {
   return new PublicApiError(403, "key_owner_inactive", "This API key's creator is no longer an owner or admin of the business, so the key can't do this. Create a new key.");
 }
 
-async function inBusiness<T>(context: DomainContext, caller: ApiCaller, callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+export async function inBusiness<T>(context: DomainContext, caller: ApiCaller, callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
   return await withBusinessTransaction(context.db, { businessId: caller.businessId, actorType: "worker" }, callback);
 }
 
-async function audit(tx: DatabaseTransaction, caller: ApiCaller, input: { eventType: string; entityType: string; entityId?: string; payload?: Record<string, unknown> }) {
+export async function audit(tx: DatabaseTransaction, caller: ApiCaller, input: { eventType: string; entityType: string; entityId?: string; payload?: Record<string, unknown> }) {
   await tx.insert(auditLogs).values({ businessId: caller.businessId, eventType: input.eventType, entityType: input.entityType, ...(input.entityId ? { entityId: input.entityId } : {}), ...(callerAudit(caller).actorUserId ? { actorUserId: callerAudit(caller).actorUserId } : {}), payload: { ...callerAudit(caller).payload, ...input.payload } });
 }
 
@@ -378,7 +378,7 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 // Billing
 
 /** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
-async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
+export async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
   const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith, cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode, nextInterval: billingAccounts.nextInterval, nextChangeAt: billingAccounts.nextChangeAt, replacedSubscriptionId: billingAccounts.replacedSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   // A subscription a prepaid pack replaced counts as ended while the provider ends it, whatever its own state, end date or next change says.
@@ -410,6 +410,7 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
     provider: billingProviderOf(process.env),
     provider_name: billingProviderNames[billingProviderOf(process.env)],
     packs: (await listBusinessPacks(tx, businessId)).map(serializeBillingPack),
+    top_ups: (await listBusinessTopUps(tx, businessId)).map(serializeBillingTopUp),
   };
 }
 
@@ -604,35 +605,6 @@ export async function createPackCheckoutForApi(context: DomainContext, caller: A
 
 export async function getPackCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiPackCheckout> {
   return await inBusiness(context, caller, async (tx) => await loadPackCheckout(tx, caller.businessId, checkoutId));
-}
-
-/** Puts the business on the managed enterprise plan. Callers check that an operator's platform key asked. */
-export async function setManagedPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
-  return await inBusiness(context, caller, async (tx) => {
-    const outcome = await setManagedPlanInTransaction(tx, { businessId: caller.businessId });
-    if (outcome === "paid_through_provider") throw conflict(`This business pays through ${billingProviderNames[billingProviderOf(process.env)]}. Cancel that subscription before giving it a managed plan.`);
-    if (outcome === "set") await audit(tx, caller, { eventType: "api.billing.managed_plan_set", entityType: "billing_account", entityId: caller.businessId, payload: { plan: "enterprise" } });
-    return await loadBilling(tx, caller.businessId);
-  });
-}
-
-/** Moves the business off its managed plan, back to the free plan. Callers check that an operator's platform key asked. */
-export async function endManagedPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
-  return await inBusiness(context, caller, async (tx) => {
-    if (!await endManagedPlanInTransaction(tx, { businessId: caller.businessId })) throw notFound("Managed plan");
-    await audit(tx, caller, { eventType: "api.billing.managed_plan_ended", entityType: "billing_account", entityId: caller.businessId });
-    return await loadBilling(tx, caller.businessId);
-  });
-}
-
-/** Ends the business's promo plan at its next renewal. Callers check that an operator's platform key asked. */
-export async function endPromoPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
-  return await inBusiness(context, caller, async (tx) => {
-    const ended = await endPromoPlanInTransaction(tx, { businessId: caller.businessId });
-    if (!ended) throw notFound("Promo plan");
-    await audit(tx, caller, { eventType: "api.billing.promo_plan_ended", entityType: "billing_account", entityId: caller.businessId, payload: { plan: ended.plan, endsWith: ended.ending, planEnds: ended.planEnds.toISOString() } });
-    return await loadBilling(tx, caller.businessId);
-  });
 }
 
 // Phone numbers. A claim buys a real number, so the dashboard's plan,

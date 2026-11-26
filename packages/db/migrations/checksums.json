@@ -149,6 +149,7 @@
   "0152_audit_logs_outlive_business.sql": "84e275bb80732dd44951a8ae327f3bae8553b4f2efcb6aa1ce49bd2c468280dc",
   "0153_control_panel_role.sql": "bf9b5970227cbe35f32112ecb29f2570bfa743e694ce4e0583826695c6e69795",
   "0154_billing_top_ups.sql": "c28c89e610b42b0eb694196c1db3145f1a322dd4c4679bbf99e0608a90dc2236",
+  "0155_billing_top_up_sales.sql": "60de3d3c812909e0c3e5834bbdd0ed31b752433439ed604aa19f89a67a15f3f5",
   "generated/0000_noisy_weapon_omega.sql": "faf67061a09ff1ea18aa3f660e71d4e00e3ba6fb4ef97c91d5881b44df4a7af9",
   "generated/0001_wet_mauler.sql": "02548b98bde85f9358272d1a996b5523d708c5899468e50ba906e8dc7c1a3886"
 }

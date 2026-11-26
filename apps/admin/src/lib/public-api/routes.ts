@@ -75,6 +75,8 @@ import {
   listAiTracesForApi,
   getCheckoutForApi,
   getPackCheckoutForApi,
+  createTopUpCheckoutForApi,
+  getTopUpCheckoutForApi,
   getSubscriptionChangeForApi,
   getPhoneNumberClaimForApi,
   getContactForApi,
@@ -153,6 +155,7 @@ import {
   apiCalendarConnectionUpdateSchema,
   apiCheckoutCreateSchema,
   apiPackCheckoutCreateSchema,
+  apiTopUpCheckoutCreateSchema,
   apiClaimLinkCreateSchema,
   apiManagedPlanCreateSchema,
   apiNotificationPreferencesUpdateSchema,
@@ -422,6 +425,9 @@ export const v1 = {
   // A prepaid pack's checkout is a call to the billing provider too, counted with plan checkouts.
   createPackCheckout: (request: Request) => handleApiRequest(request, "createPackCheckout", async ({ context, caller }) => ({ body: data(await createPackCheckoutForApi(context, caller, await readApiBody(request, apiPackCheckoutCreateSchema), { available: packCheckoutConfigured(process.env), checkLimit: requireCheckoutAllowed })) })),
   getPackCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getPackCheckout", async ({ context, caller }) => ({ body: data(await getPackCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
+  // A top-up's checkout is a call to the billing provider as a pack's is, counted with plan checkouts.
+  createTopUpCheckout: (request: Request) => handleApiRequest(request, "createTopUpCheckout", async ({ context, caller }) => ({ body: data(await createTopUpCheckoutForApi(context, caller, await readApiBody(request, apiTopUpCheckoutCreateSchema), { available: packCheckoutConfigured(process.env), checkLimit: requireCheckoutAllowed })) })),
+  getTopUpCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getTopUpCheckout", async ({ context, caller }) => ({ body: data(await getTopUpCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
   // Each new change is a call to the billing provider, so it counts toward the checkout limits.
   cancelBillingPlan: (request: Request) => handleApiRequest(request, "cancelBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "cancel", { checkLimit: requireCheckoutAllowed })) })),
   resumeBillingPlan: (request: Request) => handleApiRequest(request, "resumeBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "resume", { checkLimit: requireCheckoutAllowed })) })),

@@ -107,5 +107,13 @@
       "included": { "voiceMinutes": 1000, "alertSmsSegments": 600, "outboundCallAttempts": 240, "chatAiUnits": 600 },
       "limits": { "knowledgeStorageMb": 20, "businessNumbers": 1, "receptionists": 1 }
     }
+  },
+  "topUps": {
+    "topup_100_90": {
+      "names": { "en": "100 extra minutes", "fr": "100 minutes supplémentaires", "es": "100 minutos adicionales", "sr": "100 dodatnih minuta" },
+      "days": 90,
+      "prices": { "onceCents": 2500 },
+      "included": { "voiceMinutes": 100, "alertSmsSegments": 0, "outboundCallAttempts": 0, "chatAiUnits": 0 }
+    }
   }
 }

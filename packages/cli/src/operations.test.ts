@@ -144,6 +144,29 @@ describe("one command per endpoint", () => {
     }
   });
 
+  it("buys a top-up on sale as a pack is bought, and says what came of a paid one", async () => {
+    const checkout = (status: string, extra: Record<string, unknown> = {}) => ({ body: { data: { id: otherId, top_up: "topup_100_90", status, top_up_id: null, top_up_status: null, checkout_url: null, error: null, paid: false, ...extra } } });
+    const api = fakeApi({ "POST /api/v1/billing/top-ups/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/top-ups/checkout/${otherId}`]: [checkout("processing"), checkout("ready", { checkout_url: "https://checkout.stripe.com/c/pay/cs_2" })] });
+    const bought = await runCli(["billing", "buy-top-up", "topup_100_90", "--billing-email", "billing@example.com", "--wait"], { fetch: api.fetch });
+    expect(bought.code).toBe(exitCodes.ok);
+    expect(bought.out).toContain("Send this page to whoever pays for the top-up: https://checkout.stripe.com/c/pay/cs_2");
+    expect(api.sent[0]).toMatchObject({ method: "POST", path: "/api/v1/billing/top-ups/checkout", body: { top_up: "topup_100_90", billing_email: "billing@example.com" } });
+
+    // Without --wait it says how to check, which top-up-status does.
+    const queued = fakeApi({ "POST /api/v1/billing/top-ups/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/top-ups/checkout/${otherId}`]: checkout("paid", { paid: true, top_up_status: "active" }) });
+    expect((await runCli(["billing", "buy-top-up", "topup_100_90"], { fetch: queued.fetch })).out).toContain(`lobbystack billing top-up-status ${otherId}`);
+    expect(JSON.parse((await runCli(["billing", "top-up-status", otherId, "--json"], { fetch: queued.fetch })).out)).toMatchObject({ status: "paid", top_up_status: "active" });
+
+    for (const [topUpStatus, sentence] of [["active", "The top-up is paid, and the business has it."], ["refunded", "refunded or charged back before it arrived"]] as const) {
+      const paid = fakeApi({ "POST /api/v1/billing/top-ups/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/top-ups/checkout/${otherId}`]: checkout("paid", { paid: true, top_up_status: topUpStatus }) });
+      expect((await runCli(["billing", "buy-top-up", "topup_100_90", "--wait"], { fetch: paid.fetch })).out).toContain(sentence);
+    }
+    const failed = fakeApi({ "POST /api/v1/billing/top-ups/checkout": { status: 202, ...checkout("pending") }, [`GET /api/v1/billing/top-ups/checkout/${otherId}`]: checkout("expired", { error: "This request waited too long to run." }) });
+    const result = await runCli(["billing", "buy-top-up", "topup_100_90", "--wait", "--json"], { fetch: failed.fetch });
+    expect(result.code).toBe(exitCodes.failed);
+    expect(JSON.parse(result.err)).toEqual({ error: { message: "The top-up's checkout expired: This request waited too long to run. Start another checkout.", exit_code: exitCodes.failed } });
+  });
+
   it("makes up an Idempotency-Key for every operation that takes one, and shows it to scripts when the call fails", async () => {
     const failed = fakeApi({ "POST /api/v1/services": { status: 503, body: { error: { code: "rate_limit_unavailable", message: "The API is temporarily unavailable. Retry shortly." } } } });
     const result = await runCli(["services", "add", "Cut", "--duration-minutes", "30", "--json"], { fetch: failed.fetch });

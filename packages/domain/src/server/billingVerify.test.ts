@@ -284,12 +284,20 @@ describe("verifyBillingCatalog", () => {
     expect(billingProblems(result.checks)).toEqual([{ code: "unreadable", pair: "file_polar", level: "drift", subject: "Polar", message: "Polar answered 401 to GET /v1/organizations/" }]);
   });
 
-  it("passes an instance whose packs are linked to their live one-time products, and names packs in what passes only when the file has some", async () => {
+  it("passes an instance whose packs and top-up are linked to their live one-time products, and names them in what passes only when the file has some", async () => {
     const result = await verify(await syncedInstance(profile(), true));
     expect(notOk(result)).toEqual([]);
     expect(result.status).toBe("passed");
     const message = (key: string) => result.checks.find((check) => `${check.pair} ${check.code}` === key)!.message;
+    // A top-up on sale is sold through a one-time product of its own, as a pack is, and is counted as a top-up.
     expect(["file_postgres plan_rows", "file_postgres not_linked", "file_polar product", "postgres_polar linked_id"].map(message)).toEqual([
+      "4 plans, 4 live prices, 9 packs, 1 top-up, 10 live pack and top-up prices",
+      "2 sold plans, 9 packs and 1 top-up active and linked",
+      "4 products and 10 one-time pack and top-up products, tagged and priced as the file says, annual ones invoicing overage each month",
+      "4 products and 10 pack and top-up products linked, all live, tagged and priced as the rows say",
+    ]);
+    const withoutTopUp = await verify(await syncedInstance(profile((file) => { delete file.topUps; }), true));
+    expect(["file_postgres plan_rows", "file_postgres not_linked", "file_polar product", "postgres_polar linked_id"].map((key) => withoutTopUp.checks.find((check) => `${check.pair} ${check.code}` === key)!.message)).toEqual([
       "4 plans, 4 live prices, 9 packs, 9 live pack prices",
       "2 sold plans and 9 packs active and linked",
       "4 products and 9 one-time pack products, tagged and priced as the file says, annual ones invoicing overage each month",

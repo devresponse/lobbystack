@@ -42,7 +42,7 @@ Measuring parses every file the budget covers: about 2 seconds on an idle machin
 
 **When a change wants more room than a ceiling allows, take the seam instead of raising the number.** The audit named four that already exist:
 
-- `packages/domain/src/server/publicApi/operations.ts` and `packages/shared/src/publicApi/schemas.ts` split by v1 resource, behind an index file;
+- `packages/domain/src/server/publicApi/operations.ts` and `packages/shared/src/publicApi/schemas.ts` split by v1 resource, behind an index file, as the operator's billing calls (`operatorBilling.ts`) and the pack and top-up checkouts (`packCheckouts.ts`, fork PR #244) already are;
 - `dispatchJob` in `apps/worker/src/handlers.ts` into a map from job type to a handler module;
 - billing reconciliation in `packages/domain/src/server/billing.ts` into one handler per event type;
 - `createReceptionistTools` in `packages/agent-core/src/tools.ts` by tool.

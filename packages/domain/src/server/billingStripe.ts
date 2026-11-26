@@ -5,7 +5,7 @@ import { STRIPE_API_VERSION, STRIPE_METER_ERROR_EVENTS, STRIPE_PACK_WEBHOOK_EVEN
 import type { DesiredBillingPack, DesiredBillingPlan } from "./billingCatalog";
 import { billingPlanLabel } from "./billingPolar";
 import type { CatalogDesiredInput, CatalogPlanner, CatalogPlanOptions } from "./billingProvider";
-import { fileAndPostgresChecks, type AddBillingCheck, type BillingCheckResult, type BillingVerifyResult } from "./billingVerify";
+import { fileAndPostgresChecks, oneTimeNoun, packLabel, type AddBillingCheck, type BillingCheckResult, type BillingVerifyResult } from "./billingVerify";
 
 // What a billing.json makes Stripe sell, the calls that get it there, what a
 // link records and what verify checks (the Stripe plan's step 10). Pure, like
@@ -748,11 +748,12 @@ export function verifyStripeCatalog(input: StripeVerifyInput): BillingVerifyResu
   }
   // Packs are named only when the file has some, so a file without them reads as before.
   const packs = desired.packs.length;
+  const packNoun = oneTimeNoun(file.packs ?? []);
   const okLines: Array<[BillingCheckCode, string]> = [
     ["meter", `${desired.overage.length} meters, each summing dollars of overage`],
     ["overage", `${desired.overage.length} overage prices at ${money(STRIPE_OVERAGE_UNIT_CENTS, desired.currency)} a dollar of usage`],
-    ["product", `${desired.products.length} products${packs ? ` and ${packs} pack ${packs === 1 ? "product" : "products"}` : ""}, tagged and taxed as ${desired.taxCode}`],
-    ["price", `${desired.prices.length} prices${packs ? ` and ${packs} one-time pack ${packs === 1 ? "price" : "prices"}` : ""} before tax, each under its lookup key`],
+    ["product", `${desired.products.length} products${packs ? ` and ${packs} ${packNoun} ${packs === 1 ? "product" : "products"}` : ""}, tagged and taxed as ${desired.taxCode}`],
+    ["price", `${desired.prices.length} prices${packs ? ` and ${packs} one-time ${packNoun} ${packs === 1 ? "price" : "prices"}` : ""} before tax, each under its lookup key`],
     ["discount", desired.coupons.length ? `${desired.coupons.length} ${desired.coupons.length === 1 ? "coupon" : "coupons"}` : "no coupons"],
     ["portal", `billing portal with plan changes ${desired.portal.planChanges ? "on" : "off"} and cancelling ${desired.portal.cancel ? "on" : "off"}`],
     ...(desired.webhook ? [["webhook", `webhook ${desired.webhook.url}, ${desired.webhook.events.length} events, API version ${STRIPE_API_VERSION}, and the meter error destination`] as [BillingCheckCode, string]] : []),
@@ -813,11 +814,11 @@ export function verifyStripeCatalog(input: StripeVerifyInput): BillingVerifyResu
         : null;
       if (problem) {
         badLinks += 1;
-        add("linked_id", "postgres_provider", "drift", subject, `Pack ${subject} is linked to price ${price.provider_ref}, which ${problem}.`);
+        add("linked_id", "postgres_provider", "drift", subject, `${packLabel(row.kind)} ${subject} is linked to price ${price.provider_ref}, which ${problem}.`);
       }
     }
   }
-  if (!badLinks) add("linked_id", "postgres_provider", "ok", "links", `${linked} prices${packs ? ` and ${packsLinked} pack ${packsLinked === 1 ? "price" : "prices"}` : ""} linked, all live and priced as the rows say`);
+  if (!badLinks) add("linked_id", "postgres_provider", "ok", "links", `${linked} prices${packs ? ` and ${packsLinked} ${packNoun} ${packsLinked === 1 ? "price" : "prices"}` : ""} linked, all live and priced as the rows say`);
   for (const row of catalog.plans) {
     for (const price of row.prices.filter((entry) => entry.retired_at !== null && entry.provider_ref !== null)) {
       if (!prices.has(price.provider_ref!)) add("retired_id", "postgres_provider", "info", `${row.code}/${price.period}`, `The retired ${row.code} ${price.period} price ${price.provider_ref} isn't in Stripe any more.`);

@@ -137,8 +137,8 @@ const prices = async (tx: DatabaseTransaction, code: string) => await rows(tx, s
 const actions = (run: ApiBillingCatalogRun) => run.changes.map((change) => `${change.action} ${change.key}`);
 const pack = async (tx: DatabaseTransaction, code: string) => (await rows(tx, sql`select * from public.billing_pack_plans where code = ${code}`))[0]!;
 const packPrices = async (tx: DatabaseTransaction, code: string) => await rows(tx, sql`select * from public.billing_pack_prices where pack = ${code} order by retired_at nulls first, created_at desc`);
-// The brand file's nine packs, in the order a run lists their changes.
-const packCodes = Object.keys(JSON.parse(fileText).packs as Record<string, unknown>).sort();
+// The brand file's nine packs and its top-up on sale, rows of the same tables, in the order a run lists their changes.
+const packCodes = [...Object.keys(JSON.parse(fileText).packs as Record<string, unknown>), ...Object.keys((JSON.parse(fileText).topUps ?? {}) as Record<string, unknown>)].sort();
 /** What a run does to each of the brand file's packs and then to each pack's price. */
 const packActions = (pack: (code: string) => string, price: (code: string) => string | string[]) => [...packCodes.map(pack), ...packCodes.flatMap(price)];
 const hashOf = (value: Record<string, any>) => createHash("sha256").update(canonicalBillingProfileJson(apiBillingCatalogApplySchema.parse({ brand: "alloplace", billing_file: value }).billing_file)).digest("hex");
@@ -336,7 +336,8 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect(removed.run.changes.filter((change) => change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${change.key}`)).toEqual(["retire pack_250_90", "retire pack_250_90/cad"]);
       expect(removed.run.changes.filter((change) => !change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${Object.keys(change.fields).join(",")}`)).toEqual(Array(8).fill("update sort"));
       expect(await pack(tx, "pack_250_90")).toMatchObject({ status: "retired", retired_at: expect.anything(), frozen_at: expect.anything() });
-      expect(await count(tx, "billing_pack_plans")).toBe(9);
+      // The nine packs, one retired, and the top-up on sale.
+      expect(await count(tx, "billing_pack_plans")).toBe(10);
 
       const back = await apply(tx, file());
       expect(back.run.changes.filter((change) => change.key.startsWith("pack_250_90")).map((change) => `${change.action} ${change.key} ${Object.keys(change.fields).sort().join(",")}`)).toEqual([
@@ -428,8 +429,8 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     await rollbackTest(async (tx) => {
       const empty = await apply(tx, file(), { dryRun: true, key: null });
       expect(empty).toMatchObject({ status: 200, replayed: false, run: { id: null, status: "preview", blocked_by: [], prev_hash: null, key_id: caller.platformKeyId } });
-      // The brand file's 4 plans and 4 prices, then its 9 packs and their 9 prices.
-      expect(empty.run.changes).toHaveLength(26);
+      // The brand file's 4 plans and 4 prices, then its 9 packs and its top-up on sale, and their 10 prices.
+      expect(empty.run.changes).toHaveLength(28);
       expect(await count(tx, "billing_runs") + await count(tx, "billing_plans") + await count(tx, "billing_prices") + await count(tx, "billing_pack_plans") + await count(tx, "billing_pack_prices")).toBe(0);
       await apply(tx, file());
       const changed = file((value) => { withExamples("pro-plus")(value); value.plans.pro.included.voiceMinutes = 450; });
@@ -528,8 +529,8 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       const preview = await link(tx, { hash: deployedHash, plans, packs, polar_org: "org_other", dry_run: true }, { key: null });
       expect(preview).toMatchObject({ status: 200, run: { id: null, status: "preview", kind: "polar" } });
       expect(preview.run.blocked_by.map((item) => item.code)).toEqual(["polar_org_mismatch"]);
-      // The 2 sold plans and their 4 prices, then the 9 packs and their 9 prices.
-      expect(preview.run.changes).toHaveLength(24);
+      // The 2 sold plans and their 4 prices, then the 9 packs and the top-up, and their 10 prices.
+      expect(preview.run.changes).toHaveLength(26);
       expect(await count(tx, "billing_runs")).toBe(1);
       expect((await rows(tx, sql`select count(*) as n from public.billing_prices where provider_ref is not null`))[0]!.n).toBe("0");
       expect((await rows(tx, sql`select count(*) as n from public.billing_pack_prices where provider_ref is not null`))[0]!.n).toBe("0");
@@ -592,8 +593,10 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       // A link sent as before packs names none of them.
       const older = await refusal(link(tx, { hash: deployedHash, plans }));
       expect(older).toMatchObject({ status: 409, code: "conflict" });
-      expect(older.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(Array(9).fill("links_incomplete packs"));
+      expect(older.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(Array(10).fill("links_incomplete packs"));
       expect(older.details![0]!.message).toMatch(/^Pack pack_\d+_\d+ isn't retired and isn't in the link\. Name every pack that isn't retired, with the product that sells its live price\.$/);
+      // The top-up on sale is named with the packs, as a top-up.
+      expect(older.details!.map((detail) => detail.message)).toContain("Top-up topup_100_90 isn't retired and isn't in the link. Name every top-up that isn't retired, with the product that sells its live price.");
       // One product sells one price, a plan's or a pack's; the plan's field goes by the request's Polar names.
       const crossed = structuredClone(packs);
       crossed[0]!.provider_ref = plans[0]!.prices[0]!.provider_ref;
@@ -889,7 +892,7 @@ describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
       const linked = catalog.plans.filter((plan) => plan.sold).flatMap((plan) => plan.prices.map((price) => [price.provider_ref, price.polar_id]));
       expect(linked.length).toBe(4);
       expect(linked.every(([ref, polarId]) => typeof ref === "string" && ref.startsWith("price_") && polarId === null)).toBe(true);
-      // Each pack's live price is the one-time Stripe price the link named.
+      // Each pack's and the top-up's live price is the one-time Stripe price the link named, packs first.
       expect(catalog.packs.map((entry) => [entry.code, entry.status, entry.prices.map((price) => price.provider_ref)])).toEqual(packs.map((entry) => [entry.code, "active", [entry.provider_ref]]));
       expect(packs.every((entry) => entry.provider_ref.startsWith("price_"))).toBe(true);
 
@@ -913,8 +916,8 @@ describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
       expect(await linked()).toBe(false);
       const withStripe = file((value) => { value.stripe = stripeBlock; });
       await apply(tx, withStripe, { deployment: stripeDeployment() });
-      // The apply writes each pack's price; only a link records the Stripe price that sells it.
-      expect(await count(tx, "billing_pack_prices")).toBe(9);
+      // The apply writes each pack's and the top-up's price; only a link records the Stripe price that sells it.
+      expect(await count(tx, "billing_pack_prices")).toBe(10);
       expect(await linked()).toBe(false);
       const { plans, packs, objects } = seededStripe(withStripe);
       await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: hashOf(withStripe), provider: "stripe", provider_env: "sandbox", provider_account: "acct_test", plans, packs, objects }), deployment: stripeDeployment() });
@@ -1155,8 +1158,8 @@ describe.skipIf(!testUrl)("billing catalog applies at the same time", () => {
       const results = settled.map((result) => { if (result.status === "rejected") throw result.reason; return result.value; });
       const [first, second] = [...results].sort((a, b) => (a.run.started_at < b.run.started_at ? -1 : 1)).map((result) => result.run);
       expect(first!.prev_hash).toBeNull();
-      // The brand file's 4 plans and 4 prices, then its 9 packs and their 9 prices.
-      expect(first!.changes).toHaveLength(26);
+      // The brand file's 4 plans and 4 prices, then its 9 packs and its top-up on sale, and their 10 prices.
+      expect(first!.changes).toHaveLength(28);
       expect(second).toMatchObject({ prev_hash: first!.hash, status: "applied", changes: [] });
       expect((await listBillingCatalogRunsForApi({ db }, {})).data.map((run) => run.id)).toEqual([second!.id, first!.id]);
       expect((await getBillingCatalogForApi({ db }, { deployment: deployed })).last_run!.id).toBe(second!.id);

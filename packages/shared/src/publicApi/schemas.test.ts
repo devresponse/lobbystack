@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "../receptionist";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
 import { apiAppointmentCreateSchema, apiBillingCatalogLinkSchema, billingCatalogLinkRequest, apiAppointmentRescheduleSchema, apiBillingCodeCreateSchema, apiCheckoutCreateSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
-import { apiBillingTopUpCreateSchema } from "./topUpSchemas";
+import { apiBillingTopUpCreateSchema, apiTopUpCheckoutCreateSchema } from "./topUpSchemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -137,6 +137,14 @@ describe("parseApiInput", () => {
     expect(parseApiInput(apiBillingTopUpCreateSchema, { voice_seconds: 60, ends_at: "2026-12-31T00:00:00Z", days: 3 })).toEqual({ ok: false, details: [{ path: "days", message: "Send ends_at or days, not both." }] });
     for (const bad of [{ voice_seconds: 6_000_001 }, { alert_sms_segments: 1_000_001 }, { voice_seconds: 60, days: 1_096 }, { voice_seconds: 60, ends_at: "next week" }, { voice_seconds: 60, note: "x".repeat(201) }, { voice_seconds: 60, plan: "pro" }]) {
       expect(parseApiInput(apiBillingTopUpCreateSchema, bad).ok).toBe(false);
+    }
+  });
+
+  it("buys a top-up on sale by its code, with a billing email when the provider asked for one", () => {
+    expect(parseApiInput(apiTopUpCheckoutCreateSchema, { top_up: " topup_100_90 " })).toEqual({ ok: true, data: { top_up: "topup_100_90" } });
+    expect(parseApiInput(apiTopUpCheckoutCreateSchema, { top_up: "topup_100_90", billing_email: "billing@example.com" }).ok).toBe(true);
+    for (const bad of [{}, { top_up: "" }, { top_up: "x".repeat(49) }, { top_up: "topup_100_90", billing_email: "nope" }, { top_up: "topup_100_90", pack: "pack_250_90" }]) {
+      expect(parseApiInput(apiTopUpCheckoutCreateSchema, bad).ok).toBe(false);
     }
   });
 

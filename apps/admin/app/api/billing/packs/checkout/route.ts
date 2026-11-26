@@ -25,7 +25,8 @@ export async function GET(request: Request) {
     if (!checkoutId) throw invalid("A checkoutId is required.");
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
       const checkout = await readPackCheckoutInTransaction(tx, { businessId, checkoutId });
-      if (!checkout) throw Object.assign(new Error("Pack checkout not found."), { status: 404 });
+      // A top-up's checkout shares the table, and is read at /api/billing/top-ups/checkout.
+      if (!checkout || checkout.kind !== "pack") throw Object.assign(new Error("Pack checkout not found."), { status: 404 });
       return {
         id: checkout.id,
         pack: checkout.pack,

@@ -243,21 +243,21 @@ describe("pnpm billing", () => {
     const made = context.fake.writes.filter((entry) => entry.method === "POST" && !entry.path.endsWith("/benefits"));
     const forPack = (entry: { body: unknown }) => (entry.body as { metadata: Record<string, string> }).metadata.lobbystack_pack !== undefined;
     expect(made.filter((entry) => !forPack(entry)).map((entry) => [entry.path, (entry.body as { name: string; meter_interval?: string }).name, (entry.body as { meter_interval?: string }).meter_interval])).toEqual([["/v1/products/", "Starter annual", "month"], ["/v1/products/", "Pro annual", "month"]]);
-    // Then the brand file's nine packs, each a private product paid once.
-    expect(made.filter(forPack).map((entry) => [(entry.body as { visibility: string }).visibility, (entry.body as { recurring_interval: string | null }).recurring_interval])).toEqual(Array.from({ length: 9 }, () => ["private", null]));
+    // Then the brand file's nine packs and its top-up on sale, each a private product paid once.
+    expect(made.filter(forPack).map((entry) => [(entry.body as { visibility: string }).visibility, (entry.body as { recurring_interval: string | null }).recurring_interval])).toEqual(Array.from({ length: 10 }, () => ["private", null]));
     expect(applied.out).toContain('detach Product "Starter monthly"');
     expect(context.fake.state.products.slice(0, 4).map((product) => product.id)).toEqual(ids);
     const live = context.fake.state.products.filter((product) => !product.is_archived);
     expect(live.map((product) => product.id)).toEqual(expect.arrayContaining(ids.filter((_id, index) => context.fake.state.products[index]!.recurring_interval === "month")));
-    // The 2 sold plans and their 4 prices, then the 9 packs and their 9 prices.
-    expect(applied.out).toContain("Links: recorded 24 changes in run");
+    // The 2 sold plans and their 4 prices, then the 9 packs, the top-up and their 10 prices.
+    expect(applied.out).toContain("Links: recorded 26 changes in run");
     // The annual variables polar-setup.mjs left on Railway name the archived products, which checkout ignores.
     expect(applied.out).toContain("warn   product_vars: POLAR_STARTER_ANNUAL_PRODUCT_ID is");
     expect(applied.out).toContain("Result: in sync (exit 0).");
     // Postgres wasn't asked to apply again, only for dry runs: the file was applied in step 1.
     expect(context.instance.requests.filter((request) => request.path === "POST /api/v1/billing/catalog/runs").map((request) => (request.body as { dry_run?: boolean }).dry_run)).toEqual([true, true, true, true]);
     expect(context.instance.plans.filter((entry) => entry.sold).map((entry) => entry.status)).toEqual(["active", "active"]);
-    expect(context.instance.packs.map((entry) => entry.status)).toEqual(Array.from({ length: 9 }, () => "active"));
+    expect(context.instance.packs.map((entry) => entry.status)).toEqual(Array.from({ length: 10 }, () => "active"));
     // Every live product sells one linked row: a plan's price or a pack's.
     expect([...context.instance.prices, ...context.instance.packPrices].map((price) => price.provider_ref).sort()).toEqual(live.map((product) => product.id).sort());
 
@@ -373,8 +373,8 @@ describe("pnpm billing", () => {
     expect(plan.code).toBe(0);
     const shown = JSON.parse(plan.out) as { catalog: Array<{ key: string; action: string }>; steps: Array<{ action: string; object: string }>; refusals: string[] };
     expect(shown.catalog.map((change) => `${change.action} ${change.key}`)).toEqual(["update pro", "update pro/monthly/cad"]);
-    // The 4 plans' products, then the 9 packs'.
-    expect(shown.steps.filter((step) => step.object === "product").map((step) => step.action)).toEqual(Array.from({ length: 13 }, () => "create"));
+    // The 4 plans' products, then the 9 packs' and the top-up's.
+    expect(shown.steps.filter((step) => step.object === "product").map((step) => step.action)).toEqual(Array.from({ length: 14 }, () => "create"));
     expect(shown.refusals).toEqual([]);
 
     context.instance.requests.length = 0;

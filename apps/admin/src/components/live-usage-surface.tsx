@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
@@ -48,7 +49,9 @@ export function LiveUsageSurface() {
   const topUp = plan === "enterprise" ? null : status.topUp ?? null;
   const topUpLine = (allowance: { total: number; left: number } | undefined, unit: string, per = 1) => !allowance || allowance.total <= 0 ? undefined
     : t("billing.usage.topUpLeft", { left: (Math.floor((allowance.left / per) * 10) / 10).toLocaleString(intlLocale(i18n.language)), total: (Math.floor((allowance.total / per) * 10) / 10).toLocaleString(intlLocale(i18n.language)), unit });
-  return <div className="flex w-full flex-col gap-10"><SectionBlock description={description} title={t("billing.usage.title")}><Surface className="p-0"><>
+  // A top-up the viewer may buy now, on Free or a pack, is a link away: Settings > Plan sells them.
+  const canBuyTopUp = billing.data?.topUpOffers?.some((offer) => offer.checkoutAvailable) === true;
+  return <div className="flex w-full flex-col gap-10"><SectionBlock action={canBuyTopUp ? <Button nativeButton={false} render={<Link href="/settings/plan#top-ups" />} size="sm" variant="outline">{t("billing.usage.buyTopUp")}</Button> : undefined} description={description} title={t("billing.usage.title")}><Surface className="p-0"><>
     {pack ? <UsageMeter blocked={pack.secondsLeft <= 0 && !topUp?.voiceSeconds.left} blockedText={t("billing.usage.packBlockedDescription")} extra={topUpLine(topUp?.voiceSeconds, t("billing.usage.units.voice"), 60)} included={Math.round((pack.secondsTotal / 60) * 10) / 10} label={t("billing.usage.voiceTitle")} unit={t("billing.usage.units.voice")} used={Math.round((pack.secondsUsed / 60) * 10) / 10} /> : <UsageMeter blocked={status.voiceBlocked} extra={topUpLine(topUp?.voiceSeconds, t("billing.usage.units.voice"), 60)} included={included(limits?.voiceSecondsIncluded, 60)} label={t("billing.usage.voiceTitle")} unit={t("billing.usage.units.voice")} used={Math.round((status.voiceSecondsUsed / 60) * 10) / 10} />}
     {pack ? <UsageMeter blocked={pack.outboundCallAttempts.left <= 0 && !topUp?.outboundCallAttempts.left} blockedText={t("billing.usage.packAllowanceBlockedDescription")} extra={topUpLine(topUp?.outboundCallAttempts, t("billing.usage.units.outboundAttempts"))} included={pack.outboundCallAttempts.total} label={t("billing.usage.outboundAttemptsTitle")} unit={t("billing.usage.units.outboundAttempts")} used={pack.outboundCallAttempts.used} /> : <UsageMeter blocked={status.outboundCallAttemptsBlocked} extra={topUpLine(topUp?.outboundCallAttempts, t("billing.usage.units.outboundAttempts"))} included={included(limits?.outboundCallAttemptsIncluded)} label={t("billing.usage.outboundAttemptsTitle")} unit={t("billing.usage.units.outboundAttempts")} used={status.outboundCallAttemptsUsed} />}
     {pack ? <UsageMeter blocked={pack.alertSmsSegments.left <= 0 && !topUp?.alertSmsSegments.left} blockedText={t("billing.usage.packAllowanceBlockedDescription")} extra={topUpLine(topUp?.alertSmsSegments, t("billing.usage.units.segments"))} included={pack.alertSmsSegments.total} label={t("billing.usage.alertSmsTitle")} unit={t("billing.usage.units.segments")} used={pack.alertSmsSegments.used} /> : <UsageMeter blocked={status.alertSmsBlocked} extra={topUpLine(topUp?.alertSmsSegments, t("billing.usage.units.segments"))} included={included(limits?.alertSmsSegmentsIncluded)} label={t("billing.usage.alertSmsTitle")} unit={t("billing.usage.units.segments")} used={status.alertSmsSegmentsUsed} />}

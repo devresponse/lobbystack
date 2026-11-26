@@ -16,6 +16,7 @@ import {
   planTermsJson,
   polarEnvForBaseUrl,
   resolveBillingPacks,
+  resolveBillingTopUps,
   resolveBillingPlans,
   billingCatalogLinkRequest,
   billingProviderNames,
@@ -165,7 +166,8 @@ function sha256(text: string): string {
 const priceKey = (price: { plan: string; period: string; currency: string }) => `${price.plan}/${price.period}/${price.currency}`;
 const planPath = (code: string) => `billing_file.plans.${code}`;
 const packPriceKey = (price: { pack: string; currency: string }) => `${price.pack}/${price.currency}`;
-const packPath = (code: string) => `billing_file.packs.${code}`;
+const packPath = (code: string, kind: ResolvedBillingPack["kind"] = "pack") => `billing_file.${kind === "top_up" ? "topUps" : "packs"}.${code}`;
+const packNoun = (kind: ResolvedBillingPack["kind"]) => (kind === "top_up" ? "top-up" : "pack");
 
 function goesDown(from: unknown, to: unknown): boolean {
   return typeof from === "number" && typeof to === "number" && to < from;
@@ -198,9 +200,9 @@ export function desiredBillingPlans(profile: BillingProfile): DesiredBillingPlan
   return resolveBillingPlans(profile).map((plan) => ({ ...plan, terms_hash: sha256(planTermsJson(plan)) }));
 }
 
-/** The rows a file's packs resolve to, each with its terms hash. A file without packs gives none. */
-export function desiredBillingPacks(profile: Pick<BillingProfile, "currency" | "plans" | "packs">): DesiredBillingPack[] {
-  return resolveBillingPacks(profile).map((pack) => ({ ...pack, terms_hash: sha256(packTermsJson(pack)) }));
+/** The rows a file's packs and top-ups resolve to, packs first, each with its terms hash: billing_pack_plans rows told apart by kind. A file without either gives none. */
+export function desiredBillingPacks(profile: Pick<BillingProfile, "currency" | "plans" | "packs" | "topUps">): DesiredBillingPack[] {
+  return [...resolveBillingPacks(profile), ...resolveBillingTopUps(profile)].map((pack) => ({ ...pack, terms_hash: sha256(packTermsJson(pack)) }));
 }
 
 /**
@@ -338,25 +340,28 @@ export function diffBillingPackCatalog(input: { packs: readonly DesiredBillingPa
     writes.push({ change: { lowers_allowance: false, raises_price: false, ...change }, set, ...(id ? { id } : {}) });
   };
 
-  // Packs: matched by code.
+  // Packs and top-ups: matched by code. A code refused here leaves its rows and prices as they are.
   const applied = new Map<string, DesiredBillingPack>();
+  const refused = new Set<string>();
   for (const pack of input.packs) {
-    // The file's own plans can't have a pack's code (C10), and neither can a plan made through the API or retired.
-    if (planCodes.has(pack.code)) {
-      refusals.push({ code: "code_taken", message: `A plan already has the code ${pack.code}, so a pack can't use it. Pick another code.`, path: packPath(pack.code) });
+    const existing = stored.get(pack.code);
+    // The file's own plans can't have a pack's or a top-up's code (C10, C13), nor can a plan made through the API or retired, and a code stays a pack or a top-up for good: businesses may hold what it sold.
+    const holder = planCodes.has(pack.code) ? "A plan" : existing && existing.kind !== pack.kind ? `A ${packNoun(existing.kind)}` : null;
+    if (holder) {
+      refusals.push({ code: "code_taken", message: `${holder} already has the code ${pack.code}, so a ${packNoun(pack.kind)} can't use it. Pick another code.`, path: packPath(pack.code, pack.kind) });
+      refused.add(pack.code);
       continue;
     }
     applied.set(pack.code, pack);
-    const existing = stored.get(pack.code);
     const values: Record<string, unknown> = Object.fromEntries(packValueColumns.map((column) => [column, pack[column]]));
     if (!existing) {
-      // The provider must sell a pack before it is active.
-      write({ table: "billing_pack_plans", key: pack.code, action: "insert", fields: {} }, { code: pack.code, ...values, status: "draft" });
+      // The provider must sell a pack or a top-up before it is active.
+      write({ table: "billing_pack_plans", key: pack.code, action: "insert", fields: {} }, { code: pack.code, kind: pack.kind, ...values, status: "draft" });
       continue;
     }
     const retired = existing.status === "retired";
     if (existing.frozen_at !== null && frozenPackColumns.some((column) => !same(existing[column], pack[column]))) {
-      refusals.push({ code: "plan_frozen", message: `${pack.code} has been bought since ${existing.frozen_at}, so its minutes and length can't change. Put new minutes or a new length under a new code.`, path: packPath(pack.code) });
+      refusals.push({ code: "plan_frozen", message: `${pack.code} has been bought since ${existing.frozen_at}, so its minutes and length can't change. Put new minutes or a new length under a new code.`, path: packPath(pack.code, pack.kind) });
     }
     const set: Record<string, unknown> = {};
     const fields: ApiBillingCatalogChange["fields"] = {};
@@ -385,7 +390,7 @@ export function diffBillingPackCatalog(input: { packs: readonly DesiredBillingPa
     }, set);
   }
   for (const existing of input.current.packs) {
-    if (existing.status === "retired" || applied.has(existing.code)) continue;
+    if (existing.status === "retired" || applied.has(existing.code) || refused.has(existing.code)) continue;
     // Businesses may still hold it and the provider keeps its object, so it is retired, never deleted.
     write({ table: "billing_pack_plans", key: existing.code, action: "retire", fields: {} }, { status: "retired", retired_at: input.now });
   }
@@ -420,7 +425,7 @@ export function diffBillingPackCatalog(input: { packs: readonly DesiredBillingPa
   }
   for (const price of livePrices) {
     // Its currency left the file, or its pack did.
-    if (!kept.has(price.id)) write({ table: "billing_pack_prices", key: packPriceKey(price), action: "retire", fields: {} }, { retired_at: input.now }, price.id);
+    if (!kept.has(price.id) && !refused.has(price.pack)) write({ table: "billing_pack_prices", key: packPriceKey(price), action: "retire", fields: {} }, { retired_at: input.now }, price.id);
   }
 
   writes.sort((a, b) => byKey(a.change.table, b.change.table) || byKey(a.change.key, b.change.key) || actionOrder[a.change.action] - actionOrder[b.change.action]);
@@ -501,6 +506,7 @@ function storedPrice(row: Row): StoredBillingPrice {
 function storedPack(row: Row): StoredBillingPack {
   return {
     code: String(row.code),
+    kind: row.kind === "top_up" ? "top_up" : "pack",
     status: row.status as PlanStatus,
     names: row.names as StoredBillingPack["names"],
     voice_sec: Number(row.voice_sec),
@@ -593,7 +599,7 @@ async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "link" | "ve
 async function readCatalog(tx: DatabaseTransaction): Promise<CatalogState> {
   const plans = (await tx.execute<Row>(sql`select * from public.billing_plans order by sort, code`)).rows.map(storedPlan);
   const prices = (await tx.execute<Row>(sql`select * from public.billing_prices order by plan, period, retired_at nulls first`)).rows.map(storedPrice);
-  const packs = (await tx.execute<Row>(sql`select * from public.billing_pack_plans order by sort, code`)).rows.map(storedPack);
+  const packs = (await tx.execute<Row>(sql`select * from public.billing_pack_plans order by kind, sort, code`)).rows.map(storedPack);
   const packPrices = (await tx.execute<Row>(sql`select * from public.billing_pack_prices order by pack, retired_at nulls first`)).rows.map(storedPackPrice);
   return { plans, prices, packs, packPrices, latest: await latestRun(tx, "catalog"), latestLink: await latestRun(tx, "link") };
 }
@@ -1011,30 +1017,31 @@ export function diffBillingPackLinks(input: { body: Pick<BillingCatalogLinkReque
   const targets = new Map(input.current.packs.filter((pack) => pack.status !== "retired").map((pack) => [pack.code, pack]));
   const sentIds = sentObjects(input.body);
 
+  const kindOf = (code: string) => input.current.packs.find((entry) => entry.code === code)?.kind ?? "pack";
   const named = new Set(input.body.packs.map((pack) => pack.code));
   for (const pack of targets.values()) {
-    if (!named.has(pack.code)) refuse("links_incomplete", "packs", `Pack ${pack.code} isn't retired and isn't in the link. Name every pack that isn't retired, with the ${words.object} that sells its live price.`);
+    if (!named.has(pack.code)) refuse("links_incomplete", "packs", `${sentence(packNoun(pack.kind))} ${pack.code} isn't retired and isn't in the link. Name every ${packNoun(pack.kind)} that isn't retired, with the ${words.object} that sells its live price.`);
   }
 
   const seen = new Set<string>();
   input.body.packs.forEach((sent, index) => {
     const path = `packs[${index}]`;
     if (seen.has(sent.code)) {
-      refuse("unknown_price", `${path}.code`, `Pack ${sent.code} is named twice.`);
+      refuse("unknown_price", `${path}.code`, `${sentence(packNoun(kindOf(sent.code)))} ${sent.code} is named twice.`);
       return;
     }
     seen.add(sent.code);
     const pack = targets.get(sent.code);
     if (!pack) {
-      refuse("unknown_price", `${path}.code`, input.current.packs.some((entry) => entry.code === sent.code) ? `Pack ${sent.code} is retired, so nothing sells it.` : `There's no pack ${sent.code}.`);
+      refuse("unknown_price", `${path}.code`, input.current.packs.some((entry) => entry.code === sent.code) ? `${sentence(packNoun(kindOf(sent.code)))} ${sent.code} is retired, so nothing sells it.` : `There's no pack ${sent.code}.`);
       return;
     }
-    if (sent.terms_hash !== pack.terms_hash) refuse("terms_changed", `${path}.terms_hash`, `Pack ${pack.code}'s terms are ${pack.terms_hash.slice(0, 12)} now, not ${sent.terms_hash.slice(0, 12)}: its ${name} ${words.object} was made from other terms. Set ${name} up from the latest file again.`);
+    if (sent.terms_hash !== pack.terms_hash) refuse("terms_changed", `${path}.terms_hash`, `${sentence(packNoun(pack.kind))} ${pack.code}'s terms are ${pack.terms_hash.slice(0, 12)} now, not ${sent.terms_hash.slice(0, 12)}: its ${name} ${words.object} was made from other terms. Set ${name} up from the latest file again.`);
 
     const linkPrice = () => {
       const row = input.current.packPrices.find((entry) => entry.pack === pack.code && entry.retired_at === null);
       if (!row || row.currency !== sent.currency) {
-        refuse("unknown_price", `${path}.currency`, `Pack ${pack.code} has no live price in ${sent.currency}.`);
+        refuse("unknown_price", `${path}.currency`, `${sentence(packNoun(pack.kind))} ${pack.code} has no live price in ${sent.currency}.`);
         return;
       }
       const taken = linkOwner(input.current, sent.provider_ref);

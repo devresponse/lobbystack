@@ -1,4 +1,4 @@
-import type { BillingPlanLimits, BillingPlanSlug } from "@lobbystack/shared";
+import type { BillingPlanLimits, BillingPlanSlug, BillingTopUpOffer } from "@lobbystack/shared";
 import type { AnalyticsChannelCounts } from "./analytics-channels";
 
 export type WorkspaceViewModel = {
@@ -133,6 +133,8 @@ export type BillingUsageViewModel = {
     /** What the live top-ups hold on top of the plan, which uses draw once the plan's own allowance is used up; null without one. */
     topUp?: TopUpUsageViewModel | null;
   } | null;
+  /** The top-ups on sale, each saying whether the viewer may buy it now; absent from answers before top-ups were sold. */
+  topUpOffers?: BillingTopUpOffer[];
 };
 
 /** What a business's live top-ups hold of each allowance, as GET /api/billing's usage status reports it. */

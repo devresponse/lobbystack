@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { hostedCheckoutPlanSlugs } from "./billing";
-import { accountBusinessCap, billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, canonicalBillingProfileJson, highestBusinessCap, normalizeBillingProfile, packTermsJson, planBusinessCap, planTermsJson, resolveBillingPacks, resolveBillingPlans, upgradeStoredBillingProfile, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
+import { accountBusinessCap, billingProfileForProvider, billingProfileSchema, billingProfileForCatalog, canonicalBillingProfileJson, highestBusinessCap, normalizeBillingProfile, packTermsJson, planBusinessCap, planTermsJson, resolveBillingPacks, resolveBillingPlans, resolveBillingTopUps, upgradeStoredBillingProfile, type BillingProfile, type ResolvedBillingPack, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
 const alloplace = (): Record<string, any> => JSON.parse(fileText);
@@ -364,6 +364,7 @@ describe("prepaid packs", () => {
       expect(packs.map((row) => row.sort)).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 90]);
       expect(packs.find((row) => row.code === "pack_500_180")).toEqual({
         code: "pack_500_180",
+        kind: "pack",
         names: { en: "500 minutes, 180 days", fr: "500 minutes, 180 jours", es: "500 minutos, 180 días", sr: "500 minuta, 180 dana" },
         voice_sec: 30_000,
         days: 180,
@@ -477,6 +478,72 @@ describe("prepaid packs", () => {
     const current = normalizeBillingProfile(parse(alloplace()));
     expect(upgradeStoredBillingProfile(current)).toEqual(current);
     expect(upgradeStoredBillingProfile(null)).toBeNull();
+  });
+});
+
+describe("top-ups on sale", () => {
+  // A top-up on sale is extra allowances a business on Free or a pack pays for once, on top of its plan: a pack's
+  // allowances and price, and no limits, since it changes none.
+  const topUpEntry = (overrides: Record<string, unknown> = {}) => ({
+    names: name("100 extra minutes"),
+    days: 90,
+    prices: { onceCents: 2500 },
+    included: { voiceMinutes: 100, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 },
+    ...overrides,
+  });
+  const withTopUps = (topUps: Record<string, unknown>) => withPlans({}, (file) => { file.topUps = topUps; });
+  const realinfobot = (): Record<string, any> => JSON.parse(readFileSync(new URL("../../../brands/realinfobot/billing.json", import.meta.url), "utf8"));
+
+  it("sells 100 minutes in each brand's file, priced near its smallest pack's rate: 90 days for CA$25 at AlloPlace, 180 days for CA$39 at RealInfoBot", () => {
+    expect(resolveBillingTopUps(parse(alloplace()))).toEqual([{
+      code: "topup_100_90",
+      kind: "top_up",
+      names: { en: "100 extra minutes", fr: "100 minutes supplémentaires", es: "100 minutos adicionales", sr: "100 dodatnih minuta" },
+      voice_sec: 6_000,
+      days: 90,
+      sms_seg: 0,
+      calls_out: 0,
+      chat_units: 0,
+      kb_bytes: 0,
+      numbers: 0,
+      receptionists: 0,
+      sort: 10,
+      price: { currency: "cad", cents: 2500 },
+    }]);
+    expect(resolveBillingTopUps(parse(realinfobot())).map((row) => [row.code, row.kind, row.voice_sec / 60, row.days, row.price.cents, row.price.currency])).toEqual([["topup_100_180", "top_up", 100, 180, 3900, "cad"]]);
+    // The packs stay packs.
+    expect(resolveBillingPacks(parse(alloplace())).every((row) => row.kind === "pack")).toBe(true);
+  });
+
+  it("allows a file without top-ups, and lists them by minutes, then length, one that never ends last", () => {
+    expect(resolveBillingTopUps(parse(withPlans({}, (file) => { delete file.topUps; })))).toEqual([]);
+    const more = (voiceMinutes: number) => ({ included: { voiceMinutes, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 } });
+    const file = withTopUps({ forever: topUpEntry({ days: undefined }), long: topUpEntry({ days: 180 }), big: topUpEntry(more(500)), short: topUpEntry() });
+    expect(resolveBillingTopUps(parse(file)).map((row) => [row.code, row.days, row.sort])).toEqual([["short", 90, 10], ["long", 180, 20], ["forever", null, 30], ["big", 90, 40]]);
+  });
+
+  it("checks each top-up's code, length, price and allowances, and refuses limits", () => {
+    expect(problems(withTopUps({ "Top-Up": topUpEntry() }))).toEqual([expect.stringMatching(/^topUps\.Top-Up: a top-up code is/)]);
+    expect(problems(withTopUps({ starter: topUpEntry() }))).toEqual([expect.stringMatching(/^topUps\.starter: a plan already has this code/)]);
+    expect(problems(withPlans({}, (file) => { file.topUps = { pack_250_90: topUpEntry() }; }))).toEqual([expect.stringMatching(/^topUps\.pack_250_90: a pack already has this code/)]);
+    const many = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`topup-${String(index).padStart(2, "0")}`, topUpEntry()]));
+    expect(problems(withTopUps(many))).toEqual([expect.stringMatching(/^topUps\.topup-10: a file holds at most 10 top-ups/)]);
+    const refused = (file: unknown, path: RegExp) => expect(problems(file).some((problem) => path.test(problem)), `${path} in ${problems(file).join("; ")}`).toBe(true);
+    refused(withTopUps({ tu1: topUpEntry({ days: 0 }) }), /^topUps\.tu1\.days: /);
+    refused(withTopUps({ tu1: topUpEntry({ days: 1_096 }) }), /^topUps\.tu1\.days: /);
+    // Every top-up on sale has voice minutes, as a pack does.
+    refused(withTopUps({ tu1: topUpEntry({ included: { voiceMinutes: 0, alertSmsSegments: 50, outboundCallAttempts: 0, chatAiUnits: 0 } }) }), /^topUps\.tu1\.included\.voiceMinutes: /);
+    refused(withTopUps({ tu1: topUpEntry({ prices: { onceCents: 0 } }) }), /^topUps\.tu1\.prices\.onceCents: /);
+    refused(withTopUps({ tu1: topUpEntry({ limits: { knowledgeStorageMb: 20, businessNumbers: 1 } }) }), /^topUps\.tu1: Unrecognized key/);
+    expect(problems(withTopUps({ tu1: topUpEntry({ days: 1_095 }) }))).toEqual([]);
+  });
+
+  it("hashes into the file but leaves every plan's and pack's terms hash as it was", () => {
+    const without = withPlans({}, (file) => { delete file.topUps; });
+    expect(profileHash(alloplace())).not.toBe(profileHash(without));
+    for (const code of ["free_cloud", "starter", "pro", "enterprise"]) expect(termsHash(alloplace(), code)).toBe(termsHash(without, code));
+    const packHashes = (file: unknown) => resolveBillingPacks(parse(file)).map((row) => createHash("sha256").update(packTermsJson(row)).digest("hex"));
+    expect(packHashes(alloplace())).toEqual(packHashes(without));
   });
 });
 

@@ -49,6 +49,8 @@ const domain = vi.hoisted(() => ({
   getCheckoutForApi: vi.fn(),
   createPackCheckoutForApi: vi.fn(),
   getPackCheckoutForApi: vi.fn(),
+  createTopUpCheckoutForApi: vi.fn(),
+  getTopUpCheckoutForApi: vi.fn(),
   packCheckoutConfigured: vi.fn((_env: Record<string, string | undefined>) => true),
   setManagedPlanForApi: vi.fn(),
   endManagedPlanForApi: vi.fn(),
@@ -659,6 +661,34 @@ describe("billing", () => {
       expect(await read.json()).toMatchObject({ data: { status: "ready", checkout_url: "https://checkout.stripe.com/c/pay/cs_1" } });
       expect(domain.getPackCheckoutForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), checkoutId);
       expect((await v1.getPackCheckout(call("/billing/packs/checkout/x"), { params: Promise.resolve({ checkout_id: "x" }) })).status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("starts a top-up's checkout as a pack's, only where the deployment's provider is set up, counted with plan checkouts", async () => {
+    const topUp = { id: checkoutId, top_up: "topup_100_90", status: "pending", top_up_id: null, top_up_status: null, checkout_url: null, error: null, paid: false, expires_at: "2026-11-26T12:15:00.000Z", created_at: "2026-11-26T12:00:00.000Z", updated_at: "2026-11-26T12:00:00.000Z" };
+    const buy = async (body: Record<string, unknown>) => await v1.createTopUpCheckout(call("/billing/top-ups/checkout", { method: "POST", body: JSON.stringify(body) }));
+    domain.createTopUpCheckoutForApi.mockResolvedValue(topUp);
+    try {
+      const response = await buy({ top_up: "topup_100_90", billing_email: "billing@example.com" });
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ data: topUp });
+      expect(domain.createTopUpCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { top_up: "topup_100_90", billing_email: "billing@example.com" }, { available: true, checkLimit: expect.any(Function) });
+      domain.packCheckoutConfigured.mockReturnValueOnce(false);
+      await buy({ top_up: "topup_100_90" });
+      expect(domain.createTopUpCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { top_up: "topup_100_90" }, { available: false, checkLimit: expect.any(Function) });
+      for (const bad of [{}, { top_up: " " }, { pack: "topup_100_90" }, { top_up: "topup_100_90", billing_email: "billing" }]) {
+        expect((await buy(bad)).status, JSON.stringify(bad)).toBe(400);
+      }
+      expect(domain.createTopUpCheckoutForApi).toHaveBeenCalledTimes(2);
+
+      domain.getTopUpCheckoutForApi.mockResolvedValue({ ...topUp, status: "paid", paid: true, top_up_id: "4b0c5a1e-6f7d-4c39-9a51-5d5b8f0a2c11", top_up_status: "active" });
+      const read = await v1.getTopUpCheckout(call(`/billing/top-ups/checkout/${checkoutId}`), { params: Promise.resolve({ checkout_id: checkoutId }) });
+      expect(read.status).toBe(200);
+      expect(await read.json()).toMatchObject({ data: { status: "paid", paid: true, top_up_status: "active" } });
+      expect(domain.getTopUpCheckoutForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), checkoutId);
+      expect((await v1.getTopUpCheckout(call("/billing/top-ups/checkout/x"), { params: Promise.resolve({ checkout_id: "x" }) })).status).toBe(400);
     } finally {
       vi.unstubAllEnvs();
     }

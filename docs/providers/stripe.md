@@ -74,6 +74,8 @@ For each of the file's [prepaid packs](../../brands/README.md#prepaid-packs), `p
 
 The link records each pack's price, and the billing portal never offers a pack. Stripe never changes a price, so new terms for a pack, such as a new price or allowance, make a new price under a new lookup key: the run archives the old price only with `--allow-archive`, and links the new one only with `--allow-replace`, as for a plan. A price found under a pack's lookup key that bills on a cycle is replaced only with `--allow-replace`. Packs bought through an old price keep their minutes. Verify checks that each linked pack price is live, one-time, on its pack's product and at the row's price.
 
+Since migration `0155`, each [top-up on sale](../../brands/README.md#top-ups-on-sale) in the file's `topUps` gets the same: a product named as the top-up and tagged `lobbystack_pack` with its code, and a one-time price under the same kind of lookup key, made, linked, replaced and archived as a pack's, and a file with top-ups adds the packs' events to the webhook endpoint as packs do. A top-up's payment adds a top-up instead of a pack, and its refunds and disputes change that top-up ([top-ups](../features/top-ups.md#refund-or-dispute-a-bought-top-up)).
+
 ## Know the keys
 
 Stripe's names for each permission are confirmed by the first sandbox run, so this table names the resources each key uses. None of these keys is a webhook secret, and none of them goes in `billing.json`.

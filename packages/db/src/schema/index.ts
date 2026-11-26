@@ -20,7 +20,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { topUpCodeColumns, topUpTables, topUpUsageColumns } from "./billingTopUps";
+import { topUpCheckoutColumns, topUpCodeColumns, topUpPackPlanColumns, topUpTables, topUpUsageColumns } from "./billingTopUps";
 export * from "./billingTopUps";
 
 const timestamps = {
@@ -1679,13 +1679,15 @@ export const billingOffers = pgView("billing_offers", {
 // packs section and their prices (the whole deployment's, written only by the
 // worker, retired and never deleted, like the plan catalog), each business's
 // pack checkouts, the ledger of packs bought, and which pack paid for each call.
+// billing_pack_offers, what is on sale now, top-ups too, is in billingTopUps.ts.
 export const billingPackPlans = pgTable(
   "billing_pack_plans",
   {
-    /** Permanent pack code, its key in billing.json's packs. */
+    /** Permanent pack code, its key in billing.json's packs, or a top-up's in its topUps. */
     code: varchar("code", { length: 48 }).primaryKey(),
     /** draft (not sellable yet), active, or retired (no one new may buy it). */
     status: varchar("status", { length: 8 }).default("draft").notNull(),
+    ...topUpPackPlanColumns,
     /** Display names by language (en, fr, es, sr). */
     names: jsonb("names").$type<Record<string, string>>().notNull(),
     /** Voice seconds the pack holds for its whole length. */
@@ -1767,6 +1769,7 @@ export const billingPackCheckouts = pgTable(
     terms: jsonb("terms").$type<BillingPackCheckoutTerms>(),
     /** The pack the checkout's payment added, once it arrived. */
     packId: uuid("pack_id").references(() => billingPacks.id, { onDelete: "set null" }),
+    ...topUpCheckoutColumns,
     /** The subscription live on the account when the checkout was asked for, which its payment replaces; null when none was. Read only on a row with terms: a row from before 0149 has neither. */
     subscriptionId: text("subscription_id"),
     ...timestamps,
@@ -1857,25 +1860,6 @@ export const billingPackDraws = pgTable(
     index("billing_pack_draws_source_idx").on(table.businessId, table.sourceKey),
   ],
 );
-
-/** The packs on sale now, each with its live price. Reads with the caller's row-level security. */
-export const billingPackOffers = pgView("billing_pack_offers", {
-  code: varchar("code", { length: 48 }).notNull(),
-  names: jsonb("names").$type<Record<string, string>>().notNull(),
-  voiceSec: integer("voice_sec").notNull(),
-  days: smallint("days"),
-  smsSeg: integer("sms_seg").notNull(),
-  callsOut: integer("calls_out").notNull(),
-  chatUnits: integer("chat_units").notNull(),
-  kbBytes: bigint("kb_bytes", { mode: "number" }).notNull(),
-  numbers: smallint("numbers").notNull(),
-  receptionists: smallint("receptionists").notNull(),
-  sort: smallint("sort").notNull(),
-  priceId: uuid("price_id").notNull(),
-  currency: char("currency", { length: 3 }).notNull(),
-  cents: integer("cents").notNull(),
-  providerRef: text("provider_ref"),
-}).existing();
 
 export const complianceRecords = pgTable(
   "compliance_records",

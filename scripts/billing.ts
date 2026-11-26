@@ -177,8 +177,21 @@ function parse(argv: string[]): Options {
   };
 }
 
-/** packs: empty for a file without them, which then makes, links and checks nothing for packs. */
+/** packs: the file's packs, then its top-ups on sale, which are sold as packs are; empty for a file with neither, which then makes, links and checks nothing for them. */
 type BillingFile = { json: unknown; profile: BillingProfile; hash: string; plans: ReturnType<typeof desiredBillingPlans>; packs: ReturnType<typeof desiredBillingPacks> };
+
+/** The packs and the top-ups a link names, counted apart, each only when the file has some, so a file without them prints as before. */
+function saleCounts(packs: BillingFile["packs"]): { packs?: number; top_ups?: number } {
+  const topUps = packs.filter((pack) => pack.kind === "top_up").length;
+  const sold = packs.length - topUps;
+  return { ...(sold ? { packs: sold } : {}), ...(topUps ? { top_ups: topUps } : {}) };
+}
+
+/** The same counts in the summary's words, such as "9 packs" and "1 top-up". */
+function saleWords(packs: BillingFile["packs"]): string[] {
+  const { packs: sold = 0, top_ups: topUps = 0 } = saleCounts(packs);
+  return [...(sold ? [`${sold} ${sold === 1 ? "pack" : "packs"}`] : []), ...(topUps ? [`${topUps} ${topUps === 1 ? "top-up" : "top-ups"}`] : [])];
+}
 
 async function readBillingFile(root: string, brand: string, provider: BillingProvider): Promise<BillingFile> {
   const path = join(root, "brands", brand, "billing.json");
@@ -308,8 +321,9 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   reasons.push(...polarPlan.refusals.map(refusalLine));
   const sold = file.plans.filter((plan) => plan.sold && plan.prices.length);
   const linkCount = sold.reduce((total, plan) => total + plan.prices.length, 0);
-  // Packs are counted only when the file has some, so a file without them prints as before.
-  const packLinks = file.packs.length ? ` and ${file.packs.length} ${file.packs.length === 1 ? "pack" : "packs"}` : "";
+  // "2 sold plans and 9 packs", or "2 sold plans, 9 packs and 1 top-up" once the file sells a top-up too.
+  const linked = [`${sold.length} sold plans`, ...saleWords(file.packs)];
+  const linkedWords = linked.length > 1 ? `${linked.slice(0, -1).join(", ")} and ${linked.at(-1)}` : linked[0];
 
   // Step 5: the plan.
   if (options.json) {
@@ -320,7 +334,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
       polar: { env: polarWord(options.polar), organization: org.id },
       catalog: catalogChanges,
       steps: polarPlan.steps.map(({ object, action, subject, changes, leftover }) => ({ object, action, subject, changes, ...(leftover ? { leftover } : {}) })),
-      links: { plans: sold.length, prices: linkCount, ...(file.packs.length ? { packs: file.packs.length } : {}) },
+      links: { plans: sold.length, prices: linkCount, ...saleCounts(file.packs) },
       refusals: reasons,
     }, null, 2));
   } else {
@@ -330,7 +344,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
     for (const change of catalogChanges) io.out(changeLine(change));
     io.out(polarPlan.steps.length ? `Polar: ${polarPlan.steps.length} ${polarPlan.steps.length === 1 ? "call" : "calls"}` : "Polar: sells what the file says");
     for (const step of polarPlan.steps) io.out(stepLine(step));
-    io.out(`Links: ${linkCount} live prices of ${sold.length} sold plans${packLinks}, written once Polar sells what the file says`);
+    io.out(`Links: ${linkCount} live prices of ${linkedWords}, written once Polar sells what the file says`);
   }
   if (reasons.length) throw new Refused(reasons);
   if (options.command === "plan") {
@@ -519,7 +533,7 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
   reasons.push(...stripePlan.refusals.map(refusalLine));
   const sold = file.plans.filter((plan) => plan.sold && plan.prices.length);
   const linkCount = sold.reduce((total, plan) => total + plan.prices.length, 0);
-  const packLinks = file.packs.length ? `, ${file.packs.length} ${file.packs.length === 1 ? "pack" : "packs"}` : "";
+  const packLinks = saleWords(file.packs).map((words) => `, ${words}`).join("");
   const dashboard = stripeDashboardLines(desired);
 
   // Step 5: the plan.
@@ -531,7 +545,7 @@ async function planOrApplyStripe(options: Options, io: BillingIo, input: StripeI
       stripe: { env: stripeWord(options.stripe), account: account.id },
       catalog: catalogChanges,
       steps: stripePlan.steps.map(({ object, action, subject, changes, leftover }) => ({ object, action, subject, changes, ...(leftover ? { leftover } : {}) })),
-      links: { plans: sold.length, prices: linkCount, ...(file.packs.length ? { packs: file.packs.length } : {}) },
+      links: { plans: sold.length, prices: linkCount, ...saleCounts(file.packs) },
       dashboard: dashboard.slice(1).map((line) => line.trim()),
       refusals: reasons,
     }, null, 2));

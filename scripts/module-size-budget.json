@@ -10,7 +10,7 @@
     "packages/domain/src/server/billingCatalog.ts": 1350,
     "packages/domain/src/server/billingStripe.ts": 900,
     "packages/domain/src/server/knowledge.ts": 1025,
-    "packages/domain/src/server/publicApi/operations.ts": 2700,
+    "packages/domain/src/server/publicApi/operations.ts": 2675,
     "packages/domain/src/server/publicApi/resources.ts": 825,
     "packages/providers/src/email/templates.ts": 1450,
     "packages/shared/src/billing.ts": 925,

@@ -69,8 +69,6 @@ CREATE TABLE IF NOT EXISTS public.billing_top_ups (
   ends_at timestamptz,
   status varchar(8) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
   revoked_at timestamptz,
-  idem_key varchar(255),
-  req_hash char(64),
   created_at timestamptz NOT NULL DEFAULT date_trunc('milliseconds', now())
     CHECK (created_at = date_trunc('milliseconds', created_at)),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -85,8 +83,7 @@ CREATE TABLE IF NOT EXISTS public.billing_top_ups (
     OR (source = 'code' AND code_id IS NOT NULL AND code IS NOT NULL AND key_id IS NULL AND partner IS NULL)
   ),
   CONSTRAINT billing_top_ups_ends CHECK (ends_at IS NULL OR ends_at > starts_at),
-  CONSTRAINT billing_top_ups_revoked CHECK ((status = 'revoked') = (revoked_at IS NOT NULL)),
-  CONSTRAINT billing_top_ups_idem CHECK ((idem_key IS NULL) = (req_hash IS NULL))
+  CONSTRAINT billing_top_ups_revoked CHECK ((status = 'revoked') = (revoked_at IS NOT NULL))
 );
 
 -- A business's top-ups, newest first: Settings > Plan, the API and the delete that cascades from businesses.
@@ -100,9 +97,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS billing_top_ups_code_business_unique
   ON public.billing_top_ups (code_id, business_id) WHERE code_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS billing_top_ups_code_person_unique
   ON public.billing_top_ups (code_id, redeemed_by) WHERE code_id IS NOT NULL AND redeemed_by IS NOT NULL;
--- One grant per operator key and Idempotency-Key.
-CREATE UNIQUE INDEX IF NOT EXISTS billing_top_ups_idem_unique
-  ON public.billing_top_ups (key_id, idem_key) WHERE idem_key IS NOT NULL;
 
 -- Which top-up paid for each use: the usage row's key, its kind and what it
 -- took. A use that grows or shrinks updates its own rows, in the same
@@ -147,10 +141,6 @@ ALTER TABLE public.billing_codes ADD CONSTRAINT billing_codes_kind CHECK (
   )
 );
 
--- The operator's list of a business's codes reads plan codes and top-up codes alike.
-CREATE INDEX IF NOT EXISTS billing_codes_top_up_idx
-  ON public.billing_codes (created_at, id) WHERE plan IS NULL;
-
 COMMENT ON TABLE public.billing_top_ups IS 'Top-ups: extra allowances a business gets on top of its plan, granted by an operator or added by a code.';
 COMMENT ON COLUMN public.billing_top_ups.source IS 'grant (an operator''s platform key) or code (a business typed a top-up code).';
 COMMENT ON COLUMN public.billing_top_ups.code_id IS 'The top-up code that added it.';
@@ -171,8 +161,6 @@ COMMENT ON COLUMN public.billing_top_ups.starts_at IS 'When it was granted or ad
 COMMENT ON COLUMN public.billing_top_ups.ends_at IS 'When it stops counting, fixed when it is made; null means never.';
 COMMENT ON COLUMN public.billing_top_ups.status IS 'active, or revoked by an operator, which stops what it still holds.';
 COMMENT ON COLUMN public.billing_top_ups.revoked_at IS 'When it was revoked; set exactly when status is revoked.';
-COMMENT ON COLUMN public.billing_top_ups.idem_key IS 'The grant request''s Idempotency-Key.';
-COMMENT ON COLUMN public.billing_top_ups.req_hash IS 'SHA-256 of that request.';
 COMMENT ON COLUMN public.billing_top_ups.created_at IS 'When it was made, to the millisecond.';
 
 COMMENT ON TABLE public.billing_top_up_draws IS 'Which top-up paid for each use, by the usage row''s key.';
@@ -189,11 +177,12 @@ COMMENT ON COLUMN public.billing_codes.calls_out IS 'A top-up code''s outbound c
 COMMENT ON COLUMN public.billing_codes.chat_units IS 'A top-up code''s website chat AI units.';
 COMMENT ON COLUMN public.billing_codes.days IS 'How long a top-up code''s top-up lasts from when it is added, in 24-hour days; null for no end.';
 
--- A business's top-ups and draws, with billing_packs' policy (0148): the app
--- and the worker both reserve minutes for calls. Only the worker makes a
--- grant, as the v1 API's worker actor; a code adds its top-up through
--- app.redeem_billing_top_up_code, as that function's owner. Nobody deletes
--- one but with its business.
+-- A business's top-ups and draws, with billing_packs' policy (0148). Only the
+-- worker role writes them: it makes an operator's grant, as the v1 API's
+-- worker actor, and every use draws on them through it, the admin's call,
+-- chat and text routes included. The dashboard only reads them, and a code
+-- adds its top-up through app.redeem_billing_top_up_code, as that function's
+-- owner. Nobody deletes one but with its business.
 DO $$
 DECLARE
   table_name text;
@@ -208,9 +197,8 @@ BEGIN
   END LOOP;
 END
 $$;
-GRANT SELECT, UPDATE ON public.billing_top_ups TO lobbystack_app;
-GRANT SELECT, INSERT, UPDATE ON public.billing_top_ups TO lobbystack_worker;
-GRANT SELECT, INSERT, UPDATE ON public.billing_top_up_draws TO lobbystack_app, lobbystack_worker;
+GRANT SELECT ON public.billing_top_ups, public.billing_top_up_draws TO lobbystack_app;
+GRANT SELECT, INSERT, UPDATE ON public.billing_top_ups, public.billing_top_up_draws TO lobbystack_worker;
 
 -- What a top-up code adds for the business and the person in the
 -- transaction, or no row for a code that doesn't work for them: unknown, a

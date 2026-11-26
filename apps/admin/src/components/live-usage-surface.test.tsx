@@ -6,7 +6,7 @@ import { builtInBillingPlanLimits } from "@lobbystack/shared";
 import { LiveUsageSurface } from "./live-usage-surface";
 
 const language = vi.hoisted(() => ({ value: "en" }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: language.value }, t: (key: string, options?: Record<string, unknown>) => key === "billing.usage.description" ? `${key} ${JSON.stringify(options)}` : key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: language.value }, t: (key: string, options?: Record<string, unknown>) => key === "billing.usage.description" || key === "billing.usage.topUpLeft" ? `${key} ${JSON.stringify(options)}` : key }) }));
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; });
 function setup(locale: string, blocked = false) {
@@ -90,5 +90,41 @@ describe("the usage page on prepaid packs", () => {
     setupPack({ secondsTotal: 30_000, secondsUsed: 100, secondsLeft: 29_900 }, { alertSmsSegments: allowance(300, 300), outboundCallAttempts: allowance(120, 120), chatAiUnits: allowance(300, 0) });
     expect(screen.getAllByText("billing.usage.packAllowanceBlockedDescription")).toHaveLength(2);
     expect(screen.queryByText("billing.usage.blockedDescription")).toBeNull();
+  });
+});
+
+describe("top-ups on the usage page", () => {
+  const allowance = (total: number, used: number) => ({ total, used, left: Math.max(0, total - used) });
+  const topUp = { voiceSeconds: allowance(3_600, 900), alertSmsSegments: allowance(0, 0), outboundCallAttempts: allowance(10, 0), chatAiUnits: allowance(0, 0), nextEndsAt: "2026-12-31T00:00:00.000Z", lastEndsAt: "2026-12-31T00:00:00.000Z" };
+  function setupTopUp(plan: "free_cloud" | "prepaid" | "enterprise", usageStatus: Record<string, unknown>) {
+    language.value = "en";
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    client.setQueryData(["billing", "business"], { effectivePlan: plan, limits: builtInBillingPlanLimits[plan], account: null, usageStatus: { voiceSecondsUsed: 600, outboundCallAttemptsUsed: 0, alertSmsSegmentsUsed: 0, voiceBlocked: false, ...usageStatus }, knowledgeStorageBytesUsed: 0 });
+    render(<QueryClientProvider client={client}><LiveUsageSurface /></QueryClientProvider>);
+  }
+  const topUpLines = () => screen.queryAllByText((text) => text.startsWith("billing.usage.topUpLeft"));
+
+  it("says under each meter what the top-ups have left on top of the plan, only for what they give", () => {
+    setupTopUp("free_cloud", { topUp });
+    expect(screen.getByText('billing.usage.topUpLeft {"left":"45","total":"60","unit":"billing.usage.units.voice"}')).toBeTruthy();
+    expect(screen.getByText('billing.usage.topUpLeft {"left":"10","total":"10","unit":"billing.usage.units.outboundAttempts"}')).toBeTruthy();
+    // They give no texts, so the texts' meter says nothing about them.
+    expect(topUpLines()).toHaveLength(2);
+  });
+
+  it("keeps a pack's calls going while a top-up still has minutes, and says they stop once neither has any", () => {
+    const pack = { secondsTotal: 30_000, secondsUsed: 30_000, secondsLeft: 0, alertSmsSegments: allowance(300, 0), outboundCallAttempts: allowance(120, 0), chatAiUnits: allowance(300, 0), nextEndsAt: "2027-01-30T00:00:00.000Z", lastEndsAt: "2027-01-30T00:00:00.000Z" };
+    setupTopUp("prepaid", { pack, topUp });
+    expect(screen.queryByText("billing.usage.packBlockedDescription")).toBeNull();
+    cleanup();
+    setupTopUp("prepaid", { pack, topUp: { ...topUp, voiceSeconds: allowance(3_600, 3_600) } });
+    expect(screen.getByText("billing.usage.packBlockedDescription")).toBeTruthy();
+  });
+
+  it("says nothing about top-ups on Enterprise, where nothing draws on them", () => {
+    setupTopUp("enterprise", { topUp });
+    expect(topUpLines()).toHaveLength(0);
   });
 });

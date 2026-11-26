@@ -9,14 +9,13 @@ import { ENTRY_LINK_LABEL_MAX_LENGTH, entryLinkStatuses, knowledgeAudiences, MAX
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
+import { id, nullableTimestamp, timestamp } from "./primitives";
+import { apiBillingCodeTopUpCreateSchema, apiBillingCodeTopUpSchema, apiBillingTopUpSchema, requireTopUpGives } from "./topUpSchemas";
 
 // The v1 public contract. Responses built by packages/domain are typed from
 // these schemas, and the OpenAPI document is generated from them, so the docs,
 // the REST API and webhook payloads cannot drift apart.
 
-const id = z.uuid().describe("Stable identifier (UUID).");
-const timestamp = z.iso.datetime().describe("ISO 8601 timestamp in UTC.");
-const nullableTimestamp = timestamp.nullable();
 // Zod 4 requires seconds once a timestamp has Z or an offset. The v1 API has always
 // accepted minute precision too, such as 2026-10-09T14:00-04:00.
 const withSeconds = z.iso.datetime({ offset: true });
@@ -309,6 +308,7 @@ export const apiBillingSchema = z.object({
   provider: z.enum(billingProviders).describe("The deployment's billing provider, which sells its plans: polar or stripe."),
   provider_name: z.string().describe("How to name the provider to the business, such as Polar."),
   packs: z.array(apiBillingPackSchema).describe("The prepaid packs bought: active and frozen ones first, the one that ends first first, then the latest 20 that ended, newest first. Calls draw on them only while plan is prepaid; a pack bought beside a yearly, past-due or managed plan waits, and its end date still comes. Empty when none was bought."),
+  top_ups: z.array(apiBillingTopUpSchema).describe("The top-ups the business has on top of its plan: those that count now or will, the one that ends first first, then the latest 20 that ended or were revoked, newest first. Empty when it never had one."),
 }).describe("The business's plan and what it spends.");
 
 export const apiBillingUpdateSchema = z.strictObject({
@@ -548,29 +548,33 @@ export const billingCodeStatuses = ["active", "expired", "used_up", "revoked"] a
 export const apiBillingCodeSchema = z.object({
   id,
   code: z.string().describe("What people type, in upper case. It is compared regardless of case and spaces."),
-  plan: z.string().describe("The plan it unlocks: a billing.json plan whose access is code."),
+  plan: z.string().nullable().describe("The plan it unlocks: a billing.json plan whose access is code. Null for a top-up code."),
+  top_up: apiBillingCodeTopUpSchema.nullable().describe("What a top-up code adds to the business that enters it, at once and without a payment, once per business and once per person, as a top-up that lasts days from then. Null for a plan's code."),
   business_id: id.nullable().describe("The one business that may use it. Null for a shared code, which anyone may enter."),
-  max_uses: z.number().int().nullable().describe("How many businesses may subscribe with it. Null for no limit, which only a bound code may have."),
-  uses: z.number().int().describe("Businesses that subscribed with it. Checkouts opened at the same time can take it past max_uses."),
-  expires_at: nullableTimestamp.describe("No new checkout after this. Null for no end, which only a bound code may have."),
-  status: z.enum(billingCodeStatuses).describe("active: it works. expired, used_up or revoked: it doesn't, and whoever enters it reads only that it isn't valid. Businesses already on its plan keep it."),
+  max_uses: z.number().int().nullable().describe("How many businesses may use it: subscribe with a plan's code, or add a top-up code's top-up. Null for no limit, which only a bound code may have."),
+  uses: z.number().int().describe("Businesses that subscribed with it, or added its top-up. Checkouts opened at the same time can take a plan's code past max_uses; a top-up code never passes it."),
+  expires_at: nullableTimestamp.describe("No new checkout, or top-up added, after this. Null for no end, which only a bound code may have."),
+  status: z.enum(billingCodeStatuses).describe("active: it works. expired, used_up or revoked: it doesn't, and whoever enters it reads only that it isn't valid. Businesses already on its plan keep it, and top-ups it added stay."),
   note: z.string().nullable(),
   link: z.string().describe("The sign-up page with the code filled in, to send to whoever will use it. Someone already signed in goes on to Settings > Plan with it."),
   key_id: id.describe("The operator platform key that issued it."),
   partner: z.string().describe("That key's partner."),
   created_at: timestamp,
   revoked_at: nullableTimestamp,
-}).describe("A promo code that unlocks a plan whose access is code.");
+}).describe("A promo code: one that unlocks a plan whose access is code, or a top-up code, which adds a top-up.");
 
 export const apiBillingCodeCreateSchema = z.strictObject({
-  plan: z.string().min(3).max(48).describe("The plan it unlocks, by its billing.json code. Its access must be code, and it must not be retired. A plan that isn't on sale yet takes codes, which work once it is."),
+  plan: z.string().min(3).max(48).optional().describe("The plan it unlocks, by its billing.json code. Its access must be code, and it must not be retired. A plan that isn't on sale yet takes codes, which work once it is. Send plan or top_up."),
+  top_up: apiBillingCodeTopUpCreateSchema.optional().describe("Makes a top-up code, which adds this top-up to the business that enters it, at once and without a payment, once per business and once per person. Send plan or top_up."),
   code: z.string().min(4).max(64).optional().describe("The code itself, such as SPRING25: 4 to 32 letters and digits, groups joined by single hyphens, stored in upper case. Left out, one is made up, such as ALLO-7K2Q-PX9M."),
   prefix: z.string().regex(/^[A-Za-z0-9]{2,8}$/).optional().describe("For a made-up code, its first group. Defaults to the first four letters of the brand's name. Not with code."),
   business_id: id.optional().describe("Bind it to one business, which then is the only one that can use it."),
-  max_uses: z.number().int().min(1).max(100_000).optional().describe("How many businesses may subscribe with it. Required for a shared code. A bound code defaults to 1."),
-  expires_at: z.iso.datetime({ offset: true }).optional().describe("No new checkout after this. Required for a shared code, and in the future."),
+  max_uses: z.number().int().min(1).max(100_000).optional().describe("How many businesses may use it: subscribe with a plan's code, or add a top-up code's top-up. Required for a shared code. A bound code defaults to 1."),
+  expires_at: z.iso.datetime({ offset: true }).optional().describe("No new checkout, or top-up added, after this. Required for a shared code, and in the future."),
   note: z.string().trim().max(200).optional().describe("Who it is for or why, for the operator's own records."),
 }).superRefine((value, context) => {
+  if ((value.plan === undefined) === (value.top_up === undefined)) context.addIssue({ code: "custom", path: ["plan"], message: "Send plan or top_up, not both." });
+  if (value.top_up !== undefined) requireTopUpGives(value.top_up, context, ["top_up"]);
   if (value.code !== undefined && value.prefix !== undefined) context.addIssue({ code: "custom", path: ["prefix"], message: "Send code or prefix, not both." });
   if (value.business_id !== undefined) return;
   // A code anyone may enter needs a use limit and an end, so a leaked one can't run forever.

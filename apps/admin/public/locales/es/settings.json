@@ -602,6 +602,7 @@
       "packDescription": "Sus asignaciones vienen de sus paquetes de minutos y duran hasta que termina cada paquete, en lugar de reiniciarse cada mes.",
       "packBlockedDescription": "No quedan minutos. Las llamadas dan tono de ocupado hasta que compre otro paquete de minutos.",
       "packAllowanceBlockedDescription": "No queda nada. Compre otro paquete de minutos para tener más.",
+      "topUpLeft": "Recargas: quedan {{left}} de {{total}} {{unit}}",
       "overageCount": "{{count}} por encima del límite",
       "overageCost": "≈ {{amount}} en excedentes",
       "noOverages": "Sin excedentes: el uso tiene un tope fijo en el volumen incluido.",
@@ -681,6 +682,52 @@
         "gaveWay": "Un plan comenzó antes de que llegara este pago, así que no se agregó ningún paquete de minutos. Se le reembolsará el pago.",
         "refundedFirst": "Este pago se reembolsó o se anuló por un contracargo, así que no se agregó ningún paquete de minutos.",
         "closedForPlan": "Comenzó un plan para este negocio, así que se cerró el pago de este paquete de minutos."
+      }
+    },
+    "topUps": {
+      "title": "Recargas",
+      "description": "Asignaciones adicionales a su plan, que se usan cuando se agotan las de su plan. Su plan no cambia.",
+      "notCounted": "Su plan no tiene límites, así que estas recargas no se usan mientras lo tenga.",
+      "granted": "Recarga",
+      "fromCode": "Recarga del código {{code}}",
+      "kinds": {
+        "voice": "Minutos de voz",
+        "transfers": "Intentos de transferencia",
+        "sms": "Alertas por SMS",
+        "chats": "Conversaciones de chat del sitio web"
+      },
+      "amounts": {
+        "voice_one": "{{amount}} minuto de voz",
+        "voice_many": "{{amount}} minutos de voz",
+        "voice_other": "{{amount}} minutos de voz",
+        "transfers_one": "{{amount}} intento de transferencia",
+        "transfers_many": "{{amount}} intentos de transferencia",
+        "transfers_other": "{{amount}} intentos de transferencia",
+        "sms_one": "{{amount}} alerta por SMS",
+        "sms_many": "{{amount}} alertas por SMS",
+        "sms_other": "{{amount}} alertas por SMS",
+        "chats_one": "{{amount}} conversación de chat del sitio web",
+        "chats_many": "{{amount}} conversaciones de chat del sitio web",
+        "chats_other": "{{amount}} conversaciones de chat del sitio web"
+      },
+      "left": "Quedan {{left}} de {{total}}",
+      "startsOn": "Empieza el {{date}}",
+      "endsOn": "Termina el {{date}}",
+      "neverEnds": "Sin fecha de fin",
+      "code": {
+        "adds": "Este código añade a su plan:",
+        "lasts_one": "Dura {{count}} día desde que lo añade.",
+        "lasts_many": "Dura {{count}} días desde que lo añade.",
+        "lasts_other": "Dura {{count}} días desde que lo añade.",
+        "noEnd": "No caduca.",
+        "planStays": "Su plan no cambia. Esto se usa cuando se agotan las asignaciones de su plan.",
+        "add": "Añadir a mi plan",
+        "adding": "Añadiendo...",
+        "added": "Recarga añadida.",
+        "usedHere": "Este negocio ya añadió este código.",
+        "usedByYou": "Ya añadió este código.",
+        "usedError": "Este código ya se añadió.",
+        "failed": "No se pudo añadir este código. Inténtelo de nuevo."
       }
     },
     "transactions": {

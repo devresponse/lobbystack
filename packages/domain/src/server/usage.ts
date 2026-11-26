@@ -5,7 +5,7 @@ import { billingErrorCodes, isBillingPlanSlug, isReplacedSubscription, isUuid, l
 
 import { drawnSeconds, lockBusinessPacks, packBalance, readLivePacks, setPackDraw, type PackAllowance, type PackBalance } from "./billingPacks";
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
-import { drawnTopUpUnits, lockBusinessTopUps, readLiveTopUps, setTopUpDraw, topUpBalance, type TopUpAllowance, type TopUpBalance } from "./billingTopUps";
+import { drawnTopUpUnits, drawTopUpShare, lockedTopUps, readLiveTopUps, topUpBalance, topUpLeft, topUpShare, topUpUsage, type TopUpBalance, type TopUpUsage } from "./billingTopUps";
 
 export type NonAiBillingUsageKind = "voice_seconds" | "alert_sms_segments" | "outbound_call_attempts" | "chat_ai_tokens";
 
@@ -54,18 +54,6 @@ export type UsageStatus = {
    * Null without one.
    */
   topUp: TopUpUsage | null;
-};
-
-/** What a business's live top-ups hold, as the usage status reports it: each allowance, with what uses drew and what is left. */
-export type TopUpUsage = {
-  voiceSeconds: TopUpAllowance;
-  alertSmsSegments: TopUpAllowance;
-  outboundCallAttempts: TopUpAllowance;
-  chatAiUnits: TopUpAllowance;
-  /** When the live top-up that ends first ends; null when none ends. */
-  nextEndsAt: Date | null;
-  /** When the last live top-up ends; null when one never ends. */
-  lastEndsAt: Date | null;
 };
 
 /** What a business's live packs hold, as the usage status reports it: their voice seconds, and each other allowance for their whole length. */
@@ -232,7 +220,7 @@ function hasUnlimitedVoice(billing: Pick<UsageContext, "plan" | "planCode" | "ca
 // On the prepaid tier, what the live packs and top-ups still hold, whatever
 // the month's usage.
 function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" | "capCents" | "limits" | "packs" | "topUps">, current: { usage: UsageCounts; rawSpendCents: number }): number {
-  const extra = topUpLeft(billing, "voice_seconds");
+  const extra = topUpLeft(billing.topUps, "voice_seconds");
   if (billing.plan === "prepaid") return (billing.packs?.secondsLeft ?? 0) + extra;
   const config = currentLimits(billing);
   const included = includedQuantity(config, "voice_seconds");
@@ -254,37 +242,6 @@ function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" 
 function topUpPays(config: BillingPlanLimits, kind: NonAiBillingUsageKind): boolean {
   if (includedQuantity(config, kind) === null) return false;
   return !config.overagesBillable || rateCents(config, kind) > 0;
-}
-
-/** What the business's live top-ups still hold of a kind. */
-function topUpLeft(billing: Pick<BillingContext, "topUps">, kind: NonAiBillingUsageKind): number {
-  return billing.topUps?.allowances[kind].left ?? 0;
-}
-
-/**
- * How much of a use of `quantity` a top-up pays for: what `room` can't take,
- * as far as the top-ups hold it (`available`, with what the use already drew
- * from them). room is what the plan's own allowance still takes of it: on the
- * prepaid tier what the packs hold, else the allowance left after the other
- * uses, or null where a top-up never pays (topUpPays). Whole units, as a
- * top-up is drawn, and never more than the use.
- */
-function topUpShare(input: { quantity: number; available: number; room: number | null }): number {
-  if (input.room === null || input.available <= 0) return 0;
-  const over = Math.max(0, input.quantity - Math.max(0, input.room));
-  if (over <= 1e-9) return 0;
-  return Math.min(input.quantity, input.available, Math.ceil(over - 1e-9));
-}
-
-/**
- * The business's live top-ups under its top-up lock, for a use about to draw
- * on them or settle what it drew (`drew`). A business without a top-up, whose
- * use drew none, takes no lock and reads nothing more.
- */
-async function lockedTopUps(tx: DatabaseTransaction, businessId: string, billing: Pick<BillingContext, "topUps">, drew = false): Promise<TopUpBalance | null> {
-  if (!billing.topUps && !drew) return null;
-  await lockBusinessTopUps(tx, businessId);
-  return topUpBalance(await readLiveTopUps(tx, businessId));
 }
 
 /** The billing account columns that decide a business's plan in force; undefined for a business without a billing account. */
@@ -443,14 +400,13 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
   // so the cap never blocks them. On a pack, once the packs hold none of it.
   // A top-up that still holds some of a kind runs past the allowance first.
   const blocked = (kind: NonAiBillingUsageKind): boolean => {
-    const extra = topUpLeft(billing, kind);
+    const extra = topUpLeft(billing.topUps, kind);
     if (billing.plan === "prepaid") return (pack?.allowances[kind].left ?? 0) <= 0 && extra <= 0;
     const included = includedQuantity(config, kind);
     if (included === null || replay.usage[kind] < included) return false;
     if (topUpPays(config, kind) && extra > 0) return false;
     return !config.overagesBillable || pushesPastCap(billing.capCents, replay.rawSpendCents, replay.rawSpendCents + rateCents(config, kind));
   };
-  const topUps = billing.topUps ?? null;
   const voiceSecondsLeft = hasUnlimitedVoice(billing) ? Number.POSITIVE_INFINITY : reservableVoiceSeconds(billing, replay);
   return {
     periodKey: input.periodKey,
@@ -475,7 +431,7 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
     voiceSecondsLeft: Number.isFinite(voiceSecondsLeft) ? voiceSecondsLeft : null,
     usageComplete: events.every((event) => event.isFinal),
     pack: pack ? { secondsTotal: pack.secondsTotal, secondsUsed: pack.secondsUsed, secondsLeft: pack.secondsLeft, alertSmsSegments: pack.allowances.alert_sms_segments, outboundCallAttempts: pack.allowances.outbound_call_attempts, chatAiUnits: pack.allowances.chat_ai_tokens, nextEndsAt: pack.nextEndsAt, lastEndsAt: pack.lastEndsAt } : null,
-    topUp: topUps ? { voiceSeconds: topUps.allowances.voice_seconds, alertSmsSegments: topUps.allowances.alert_sms_segments, outboundCallAttempts: topUps.allowances.outbound_call_attempts, chatAiUnits: topUps.allowances.chat_ai_tokens, nextEndsAt: topUps.nextEndsAt, lastEndsAt: topUps.lastEndsAt } : null,
+    topUp: topUpUsage(billing.topUps ?? null),
   };
 }
 
@@ -535,7 +491,7 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
     billing = { ...billing, packs: packBalance(await readLivePacks(tx, input.businessId)) };
   }
   // Top-ups span months too, so a business with one reads them under their lock.
-  if (billing.topUps) billing = { ...billing, topUps: await lockedTopUps(tx, input.businessId, billing) };
+  if (billing.topUps) billing = { ...billing, topUps: await lockedTopUps(tx, input.businessId, billing.topUps) };
   const events = await loadEvents(tx, input.businessId, periodKey);
   const counted = countedEvents(events, billing, periodKey);
   const current = replayEvents(counted, billing, billing.limits);
@@ -548,7 +504,7 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
     if (input.usageKind === "voice_seconds" && hasUnlimitedVoice(billing)) return { allowed: true, errorCode: null, syncNeeded: false, periodKey, plan: billing.plan };
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
-  const extra = topUpLeft(billing, input.usageKind);
+  const extra = topUpLeft(billing.topUps, input.usageKind);
   const packLeft = billing.packs?.allowances[input.usageKind].left ?? 0;
   // A use never reserves more than the packs and the top-ups still hold of its kind.
   if (fromPacks && quantity > packLeft + extra) {
@@ -568,12 +524,9 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   // Allowed: the top-ups pay their share first, then the row records what they paid.
-  if (topUp > 0) {
-    const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, units: topUp });
-    eventPayload.topUpQuantity = Math.min(topUp, drawn.drawn);
-    billing = { ...billing, topUps: drawn.after };
-  }
-  const topUpQuantity = eventPayload.topUpQuantity ?? 0;
+  const { topUpQuantity, after } = await drawTopUpShare(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, units: topUp, drew: false, balance: billing.topUps ?? null });
+  eventPayload.topUpQuantity = topUpQuantity;
+  billing = { ...billing, topUps: after };
   const syncNeeded = billing.plan === "starter" || billing.plan === "pro";
   const others = events.filter((row) => row.sourceKey !== input.sourceKey);
   const billableQuantity = billableQuantityForEvent(countedEvents(others, billing, periodKey), eventPayload, billing, billing.limits);
@@ -623,21 +576,15 @@ export async function extendPhoneReservationInTransaction(tx: DatabaseTransactio
     if (billing.plan !== "prepaid") return 0;
     await lockBusinessPacks(tx, input.businessId);
     const packs = packBalance(await readLivePacks(tx, input.businessId));
-    const topUps = await lockedTopUps(tx, input.businessId, billing, drewTopUp);
+    const topUps = await lockedTopUps(tx, input.businessId, billing.topUps, drewTopUp);
     const extra = topUps?.allowances.voice_seconds.left ?? 0;
     const granted = Math.min(PHONE_RESERVATION_SLICE_SECONDS, (packs?.secondsLeft ?? 0) + extra, MAX_PHONE_CALL_MS / 1_000 - event.quantity);
     if (granted <= 0) return 0;
     const quantity = event.quantity + granted;
     // The packs pay first, with what this call already drew from them; the top-ups pay what they can't.
-    let topUpQuantity = 0;
-    let after = topUps;
-    if (topUps || drewTopUp) {
-      const own = { packs: await drawnSeconds(tx, input.businessId, sourceKey), topUps: await drawnTopUpUnits(tx, input.businessId, sourceKey) };
-      const topUp = topUpShare({ quantity, available: extra + own.topUps, room: (packs?.secondsLeft ?? 0) + own.packs });
-      const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey, usageKind: "voice_seconds", units: topUp });
-      topUpQuantity = Math.min(topUp, drawn.drawn);
-      after = drawn.after;
-    }
+    const own = topUps || drewTopUp ? { packs: await drawnSeconds(tx, input.businessId, sourceKey), topUps: await drawnTopUpUnits(tx, input.businessId, sourceKey) } : { packs: 0, topUps: 0 };
+    const topUp = topUpShare({ quantity, available: extra + own.topUps, room: (packs?.secondsLeft ?? 0) + own.packs });
+    const { topUpQuantity, after } = await drawTopUpShare(tx, { businessId: input.businessId, sourceKey, usageKind: "voice_seconds", units: topUp, drew: drewTopUp, balance: topUps });
     await tx.update(billingUsageEvents).set({ quantity, billableQuantity: quantity, topUpQuantity, updatedAt: new Date() }).where(eq(billingUsageEvents.id, reservation.id));
     const drawn = await setPackDraw(tx, { businessId: input.businessId, sourceKey, seconds: quantity - topUpQuantity });
     const replayed = events.map((row) => (row === event ? { ...row, quantity, topUpQuantity } : row));
@@ -648,7 +595,7 @@ export async function extendPhoneReservationInTransaction(tx: DatabaseTransactio
   // while a pack is in force, runs on under its own plan within its part of
   // the month. Every other call grows under the plan in force, as before packs.
   const own = billing.plan === "prepaid" || beforeSwitch(billing, reservation.periodKey, event.createdAt);
-  const topUps = await lockedTopUps(tx, input.businessId, billing, drewTopUp);
+  const topUps = await lockedTopUps(tx, input.businessId, billing.topUps, drewTopUp);
   const locked = { ...billing, topUps };
   const terms = own ? rowTerms(locked, event) : locked;
   const scope = own ? segmentEvents(events, billing, reservation.periodKey, event) : countedEvents(events, billing, reservation.periodKey);
@@ -668,13 +615,7 @@ export async function extendPhoneReservationInTransaction(tx: DatabaseTransactio
   const topUp = topUps || ownTopUp > 0 ? topUpShare({ quantity, available: (topUps?.allowances.voice_seconds.left ?? 0) + ownTopUp, room }) : 0;
   const grown = scope.map((row) => (row === event ? { ...row, quantity, topUpQuantity: topUp } : row));
   if (pushesPastCap(terms.capCents, current.rawSpendCents, replayEvents(grown, terms, terms.limits).rawSpendCents)) return 0;
-  let topUpQuantity = 0;
-  let after = topUps;
-  if (topUp > 0 || ownTopUp > 0) {
-    const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey, usageKind: "voice_seconds", units: topUp });
-    topUpQuantity = Math.min(topUp, drawn.drawn);
-    after = drawn.after;
-  }
+  const { topUpQuantity, after } = await drawTopUpShare(tx, { businessId: input.businessId, sourceKey, usageKind: "voice_seconds", units: topUp, drew: ownTopUp > 0, balance: topUps });
   const billableQuantity = billableQuantityForEvent(others, { ...event, quantity, topUpQuantity }, terms, terms.limits);
   await tx.update(billingUsageEvents).set({ quantity, billableQuantity, topUpQuantity, updatedAt: new Date() }).where(eq(billingUsageEvents.id, reservation.id));
   const replayed = events.map((row) => (row === event ? { ...row, quantity, topUpQuantity } : row));
@@ -752,7 +693,7 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
   // top-up, whose use drew none, skips all of it. The packs' lock comes first.
   const drewTopUp = (existing?.topUpQuantity ?? 0) > 0;
   const packsNow = draws && (billing.topUps || drewTopUp) ? (await lockBusinessPacks(tx, input.businessId), packBalance(await readLivePacks(tx, input.businessId))) : null;
-  const topUps = await lockedTopUps(tx, input.businessId, billing, drewTopUp);
+  const topUps = await lockedTopUps(tx, input.businessId, billing.topUps, drewTopUp);
   let topUpQuantity = 0;
   if (topUps || drewTopUp) {
     const ownTopUp = drewTopUp ? await drawnTopUpUnits(tx, input.businessId, input.sourceKey) : 0;
@@ -764,10 +705,7 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
       room = topUpPays(config, input.usageKind) && included !== null ? included - replayEvents(others, billing, billing.limits).usage[input.usageKind] : null;
     }
     const topUp = topUpShare({ quantity, available: (topUps?.allowances[input.usageKind].left ?? 0) + ownTopUp, room });
-    if (topUp > 0 || ownTopUp > 0) {
-      const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, units: topUp });
-      topUpQuantity = Math.min(topUp, drawn.drawn);
-    }
+    ({ topUpQuantity } = await drawTopUpShare(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, units: topUp, drew: ownTopUp > 0, balance: topUps }));
   }
   replacement.topUpQuantity = topUpQuantity;
   let eventId: string;

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 
-import { auditLogs, billingTopUpDraws, billingTopUps, type DatabaseTransaction } from "@lobbystack/db";
-import { billingTopUpStatus, isBillingCode, normalizeBillingCode, type BillingTopUpAmounts, type BillingTopUpCodeView, type BillingTopUpHolding, type BillingTopUpSource } from "@lobbystack/shared";
+import { auditLogs, billingTopUpDraws, billingTopUps, enqueueOutbox, type DatabaseTransaction } from "@lobbystack/db";
+import { billingTopUpStatus, isBillingCode, normalizeBillingCode, type ApiBillingTopUp, type BillingTopUpAmounts, type BillingTopUpCodeView, type BillingTopUpHolding, type BillingTopUpSource } from "@lobbystack/shared";
 
 import { packUsageKinds, type PackAllowance, type PackUsageKind } from "./billingPacks";
 
@@ -119,6 +119,54 @@ export function topUpBalance(topUps: readonly LiveTopUp[]): TopUpBalance | null 
   };
 }
 
+/** What a business's live top-ups hold, as the usage status reports it: each allowance, with what uses drew and what is left. */
+export type TopUpUsage = {
+  voiceSeconds: TopUpAllowance;
+  alertSmsSegments: TopUpAllowance;
+  outboundCallAttempts: TopUpAllowance;
+  chatAiUnits: TopUpAllowance;
+  /** When the live top-up that ends first ends; null when none ends. */
+  nextEndsAt: Date | null;
+  /** When the last live top-up ends; null when one never ends. */
+  lastEndsAt: Date | null;
+};
+
+/** A balance as the usage status reports it; null without a live top-up. */
+export function topUpUsage(balance: TopUpBalance | null): TopUpUsage | null {
+  return balance ? { voiceSeconds: balance.allowances.voice_seconds, alertSmsSegments: balance.allowances.alert_sms_segments, outboundCallAttempts: balance.allowances.outbound_call_attempts, chatAiUnits: balance.allowances.chat_ai_tokens, nextEndsAt: balance.nextEndsAt, lastEndsAt: balance.lastEndsAt } : null;
+}
+
+/** What the business's live top-ups still hold of a kind. */
+export function topUpLeft(balance: TopUpBalance | null | undefined, kind: TopUpUsageKind): number {
+  return balance?.allowances[kind].left ?? 0;
+}
+
+/**
+ * How much of a use of `quantity` a top-up pays for: what `room` can't take,
+ * as far as the top-ups hold it (`available`, with what the use already drew
+ * from them). room is what the plan's own allowance still takes of it: on the
+ * prepaid tier what the packs hold, else the allowance left after the other
+ * uses, or null where a top-up never pays (usage.ts decides). Whole units, as
+ * a top-up is drawn, and never more than the use.
+ */
+export function topUpShare(input: { quantity: number; available: number; room: number | null }): number {
+  if (input.room === null || input.available <= 0) return 0;
+  const over = Math.max(0, input.quantity - Math.max(0, input.room));
+  if (over <= 1e-9) return 0;
+  return Math.min(input.quantity, input.available, Math.ceil(over - 1e-9));
+}
+
+/**
+ * The business's live top-ups under its top-up lock, for a use about to draw
+ * on them or settle what it drew (`drew`). A business without a live top-up
+ * (balance null), whose use drew none, takes no lock and reads nothing more.
+ */
+export async function lockedTopUps(tx: DatabaseTransaction, businessId: string, balance: TopUpBalance | null | undefined, drew = false): Promise<TopUpBalance | null> {
+  if (!balance && !drew) return null;
+  await lockBusinessTopUps(tx, businessId);
+  return topUpBalance(await readLiveTopUps(tx, businessId));
+}
+
 /** What the usage row sourceKey drew from the business's top-ups, by top-up. */
 async function readTopUpDraws(tx: DatabaseTransaction, businessId: string, sourceKey: string): Promise<Array<{ topUpId: string; units: number }>> {
   return await tx.select({ topUpId: billingTopUpDraws.topUpId, units: billingTopUpDraws.units }).from(billingTopUpDraws)
@@ -171,6 +219,19 @@ export async function setTopUpDraw(tx: DatabaseTransaction, input: { businessId:
     need -= take;
   }
   return { drawn: target - need, after: topUpBalance(await readLiveTopUps(tx, input.businessId, { now })) };
+}
+
+/**
+ * Makes the usage row sourceKey draw its share, `units` (topUpShare), from the
+ * business's top-ups when that is more than nothing or the row drew before
+ * (`drew`), which gives back what it no longer needs. What the row draws then,
+ * never more than its share, and the balance after; `balance` as it is when
+ * the row neither draws nor drew.
+ */
+export async function drawTopUpShare(tx: DatabaseTransaction, input: { businessId: string; sourceKey: string; usageKind: TopUpUsageKind; units: number; drew: boolean; balance: TopUpBalance | null }): Promise<{ topUpQuantity: number; after: TopUpBalance | null }> {
+  if (input.units <= 0 && !input.drew) return { topUpQuantity: 0, after: input.balance };
+  const drawn = await setTopUpDraw(tx, { businessId: input.businessId, sourceKey: input.sourceKey, usageKind: input.usageKind, units: input.units });
+  return { topUpQuantity: Math.min(input.units, drawn.drawn), after: drawn.after };
 }
 
 /** Gives `amount` of a kind back from the row's draws, to the top-up drawn on last first. */
@@ -282,6 +343,15 @@ export async function listBusinessTopUps(tx: DatabaseTransaction, businessId: st
   return [...held, ...ended].map((row) => topUpHolding(row, now));
 }
 
+function apiTopUpAmounts(amounts: BillingTopUpAmounts): ApiBillingTopUp["gives"] {
+  return { voice_seconds: amounts.voiceSeconds, alert_sms_segments: amounts.alertSmsSegments, outbound_call_attempts: amounts.outboundCallAttempts, chat_units: amounts.chatAiUnits };
+}
+
+/** A top-up as the v1 API shows it: in GET /billing, and to the operator who grants or revokes it. */
+export function serializeBillingTopUp(topUp: BillingTopUpHolding): ApiBillingTopUp {
+  return { id: topUp.id, source: topUp.source, code: topUp.code, note: topUp.note, gives: apiTopUpAmounts(topUp.gives), used: apiTopUpAmounts(topUp.used), status: topUp.status, starts_at: topUp.startsAt, ends_at: topUp.endsAt, created_at: topUp.createdAt, revoked_at: topUp.revokedAt };
+}
+
 // Operator grants (POST /v1/billing/top-ups) and revokes.
 
 /** What a grant gives, how long it lasts and the operator's note, as the API checked them. */
@@ -298,85 +368,54 @@ export type TopUpGrant = {
 /** The operator platform key that grants, for the ledger. */
 export type TopUpGrantor = { keyId: string; partner: string };
 
-function pgErrorCode(error: unknown): string | undefined {
-  const cause = typeof error === "object" && error !== null && "cause" in error ? (error as { cause: unknown }).cause : undefined;
-  for (const value of [error, cause]) {
-    if (typeof value === "object" && value !== null && "code" in value && typeof (value as { code: unknown }).code === "string") return (value as { code: string }).code;
-  }
-  return undefined;
-}
-
-/** A grant's Idempotency-Key went with another request, for this business or another. */
-export class TopUpIdempotencyConflict extends Error {
-  constructor() {
-    super("This Idempotency-Key was used with a different request.");
-    this.name = "TopUpIdempotencyConflict";
-  }
+/** Publishes billing.updated for the business, as other billing changes do. No screen listens for it yet, so Settings > Plan and Usage show the change when they next load the billing summary. */
+async function announceTopUp(tx: DatabaseTransaction, businessId: string, topUpId: string, change: "granted" | "revoked" | "added"): Promise<void> {
+  await enqueueOutbox(tx, { topic: "realtime.publish", businessId, aggregateType: "billing_top_up", aggregateId: topUpId, dedupeKey: `billing-top-up:${topUpId}:${change}`, payload: { type: "billing.updated", entityId: topUpId } });
 }
 
 /**
  * Grants the business in the transaction a top-up, as the worker actor of an
- * operator's platform key. With an Idempotency-Key, the same key and request
- * return the top-up it made (replayed), and the same key with another request,
- * for this business or another, throws TopUpIdempotencyConflict. Callers check
- * that an operator's key asked and that the grant gives something.
+ * operator's platform key. Callers check that an operator's key asked and that
+ * the grant gives something, and audit it; the v1 API's Idempotency-Key makes
+ * a retry return the first grant.
  */
-export async function grantTopUpInTransaction(tx: DatabaseTransaction, input: { businessId: string; grantor: TopUpGrantor; grant: TopUpGrant; idempotencyKey: string | null; requestHash: string | null }): Promise<{ topUp: BillingTopUpHolding; replayed: boolean }> {
-  if (input.idempotencyKey) {
-    // One request per key at a time, so a retry racing the first can't grant twice.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`billing-top-up:${input.grantor.keyId}:${input.idempotencyKey}`}, 0))`);
-    const [reused] = await tx.select({ ...heldColumns, reqHash: billingTopUps.reqHash }).from(billingTopUps)
-      .where(and(eq(billingTopUps.businessId, input.businessId), eq(billingTopUps.keyId, input.grantor.keyId), eq(billingTopUps.idemKey, input.idempotencyKey))).limit(1);
-    if (reused) {
-      if (reused.reqHash !== input.requestHash) throw new TopUpIdempotencyConflict();
-      return { topUp: topUpHolding(reused), replayed: true };
-    }
-  }
+export async function grantTopUpInTransaction(tx: DatabaseTransaction, input: { businessId: string; grantor: TopUpGrantor; grant: TopUpGrant }): Promise<BillingTopUpHolding> {
   const { grant } = input;
-  let row: HeldRow | undefined;
-  try {
-    [row] = await tx.insert(billingTopUps).values({
-      businessId: input.businessId,
-      source: "grant",
-      keyId: input.grantor.keyId,
-      partner: input.grantor.partner,
-      note: grant.note,
-      voiceSec: grant.voiceSec,
-      smsSeg: grant.smsSeg,
-      callsOut: grant.callsOut,
-      chatUnits: grant.chatUnits,
-      startsAt: grant.startsAt,
-      endsAt: grant.endsAt,
-      idemKey: input.idempotencyKey,
-      reqHash: input.requestHash,
-    }).returning(heldColumns);
-  } catch (error) {
-    // The key's Idempotency-Key went with a grant to another business, which this one can't read.
-    if (pgErrorCode(error) === "23505") throw new TopUpIdempotencyConflict();
-    throw error;
-  }
+  const [row] = await tx.insert(billingTopUps).values({
+    businessId: input.businessId,
+    source: "grant",
+    keyId: input.grantor.keyId,
+    partner: input.grantor.partner,
+    note: grant.note,
+    voiceSec: grant.voiceSec,
+    smsSeg: grant.smsSeg,
+    callsOut: grant.callsOut,
+    chatUnits: grant.chatUnits,
+    startsAt: grant.startsAt,
+    endsAt: grant.endsAt,
+  }).returning(heldColumns);
   if (!row) throw new Error("The top-up could not be recorded.");
-  await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.top_up_granted", entityType: "billing_top_up", entityId: row.id, payload: { keyId: input.grantor.keyId, partner: input.grantor.partner, voiceSec: grant.voiceSec, smsSeg: grant.smsSeg, callsOut: grant.callsOut, chatUnits: grant.chatUnits, startsAt: grant.startsAt.toISOString(), endsAt: grant.endsAt?.toISOString() ?? null } });
-  return { topUp: topUpHolding(row), replayed: false };
+  await announceTopUp(tx, input.businessId, row.id, "granted");
+  return topUpHolding(row);
 }
 
 /**
  * Revokes one of the business's top-ups: what it still holds stops counting at
  * once, and uses it already paid for stay paid. A revoked top-up comes back as
- * it is; null for one the business doesn't have. Takes the top-up lock, so no
- * use draws on it while it is revoked.
+ * it is, with revoked false; null for one the business doesn't have. Takes the
+ * top-up lock, so no use draws on it while it is revoked.
  */
-export async function revokeTopUpInTransaction(tx: DatabaseTransaction, input: { businessId: string; topUpId: string }): Promise<BillingTopUpHolding | null> {
+export async function revokeTopUpInTransaction(tx: DatabaseTransaction, input: { businessId: string; topUpId: string }): Promise<{ topUp: BillingTopUpHolding; revoked: boolean } | null> {
   await lockBusinessTopUps(tx, input.businessId);
   const [revoked] = await tx.update(billingTopUps).set({ status: "revoked", revokedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(billingTopUps.businessId, input.businessId), eq(billingTopUps.id, input.topUpId), eq(billingTopUps.status, "active")))
     .returning(heldColumns);
   if (revoked) {
-    await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.top_up_revoked", entityType: "billing_top_up", entityId: revoked.id, payload: { source: revoked.source } });
-    return topUpHolding(revoked);
+    await announceTopUp(tx, input.businessId, revoked.id, "revoked");
+    return { topUp: topUpHolding(revoked), revoked: true };
   }
   const [row] = await tx.select(heldColumns).from(billingTopUps).where(and(eq(billingTopUps.businessId, input.businessId), eq(billingTopUps.id, input.topUpId))).limit(1);
-  return row ? topUpHolding(row) : null;
+  return row ? { topUp: topUpHolding(row), revoked: false } : null;
 }
 
 // Top-up codes, as someone on the team types them under Have a promo code?
@@ -410,6 +449,17 @@ export async function topUpCodeView(tx: DatabaseTransaction, code: string): Prom
 /** Why a top-up code added nothing: it doesn't work for the business (invalid), or the business or the person already added it (used). */
 export type TopUpCodeRefusal = "invalid" | "used";
 
+const topUpCodeRefusalErrors: Record<TopUpCodeRefusal, { status: number; code: string; message: string }> = {
+  invalid: { status: 400, code: "promo_invalid", message: "This code isn't valid." },
+  used: { status: 409, code: "promo_used", message: "This code was already added." },
+};
+
+/** What the dashboard tells someone whose top-up code added nothing; every reason the code itself fails reads as invalid. */
+export function topUpCodeRefusalError(refusal: TopUpCodeRefusal): Error {
+  const { message, ...rest } = topUpCodeRefusalErrors[refusal];
+  return Object.assign(new Error(message), rest);
+}
+
 /**
  * Adds a top-up code's top-up to the business in the transaction for the
  * person in it, at once and without a payment: the new top-up, or why not.
@@ -417,7 +467,7 @@ export type TopUpCodeRefusal = "invalid" | "used";
  * taken twice. Callers authorize the person and count the try against the
  * promo code limits.
  */
-export async function redeemTopUpCodeInTransaction(tx: DatabaseTransaction, input: { businessId: string; code: string }): Promise<{ topUp: BillingTopUpHolding } | { refusal: TopUpCodeRefusal }> {
+export async function redeemTopUpCodeInTransaction(tx: DatabaseTransaction, input: { businessId: string; userId: string; code: string }): Promise<{ topUp: BillingTopUpHolding } | { refusal: TopUpCodeRefusal }> {
   const normalized = normalizeBillingCode(input.code);
   if (!isBillingCode(normalized)) return { refusal: "invalid" };
   const [redeemed] = (await tx.execute<{ id: string | null }>(sql`select app.redeem_billing_top_up_code(${normalized}) as id`)).rows;
@@ -428,6 +478,7 @@ export async function redeemTopUpCodeInTransaction(tx: DatabaseTransaction, inpu
   }
   const [row] = await tx.select(heldColumns).from(billingTopUps).where(and(eq(billingTopUps.businessId, input.businessId), eq(billingTopUps.id, topUpId))).limit(1);
   if (!row) throw new Error("The top-up the code added could not be read.");
-  await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.top_up_code_redeemed", entityType: "billing_top_up", entityId: row.id, payload: { code: row.code, voiceSec: row.voiceSec, smsSeg: row.smsSeg, callsOut: row.callsOut, chatUnits: row.chatUnits, endsAt: row.endsAt?.toISOString() ?? null } });
+  await announceTopUp(tx, input.businessId, row.id, "added");
+  await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: "billing.top_up_code_redeemed", entityType: "billing_top_up", entityId: row.id, payload: { code: row.code, voiceSec: row.voiceSec, smsSeg: row.smsSeg, callsOut: row.callsOut, chatUnits: row.chatUnits, endsAt: row.endsAt?.toISOString() ?? null } });
   return { topUp: topUpHolding(row) };
 }

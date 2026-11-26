@@ -2,12 +2,15 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingCodes, billingPackPlans, billingPacks, billingTopUpDraws, billingTopUps, billingUsageEvents, businesses, createDatabaseClient, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingCodes, billingPackPlans, billingPacks, billingTopUpDraws, billingTopUps, billingUsageEvents, businesses, createDatabaseClient, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiBillingCodeCreateSchema, apiBillingTopUpCreateSchema } from "@lobbystack/shared";
 
 import { correctAlertSmsUsage, getBillingUsageStatus, getWidgetChatAllowance, reserveAlertSmsUsage, reserveOutboundCallAttempt, reserveWidgetChatUsageInTransaction } from "./billing";
-import { findBillingCodeOffer } from "./billingCodes";
-import { grantTopUpInTransaction, listBusinessTopUps, redeemTopUpCodeInTransaction, revokeTopUpInTransaction, topUpCodeView, TopUpIdempotencyConflict } from "./billingTopUps";
+import { createBillingCodeForApi, findBillingCodeOffer, listBillingCodesForApi } from "./billingCodes";
+import { grantTopUpInTransaction, listBusinessTopUps, redeemTopUpCodeInTransaction, revokeTopUpInTransaction, topUpCodeView } from "./billingTopUps";
 import { extendLiveCallReservation, finishLiveCall, startLivePhoneCall } from "./liveCalls";
+import { getBillingForApi, type ApiCaller } from "./publicApi/operations";
+import { grantTopUpForApi, revokeTopUpForApi } from "./publicApi/operatorBilling";
 import { createBusiness } from "./tenancy";
 import { correctUsageInTransaction, periodKeyFor } from "./usage";
 
@@ -93,14 +96,13 @@ const keyId = randomUUID();
 type Gives = { voiceSec?: number; smsSeg?: number; callsOut?: number; chatUnits?: number };
 
 /** An operator's grant, as POST /v1/billing/top-ups makes it. */
-async function grant(tx: DatabaseTransaction, businessId: string, gives: Gives, options: { startsAt?: Date; endsAt?: Date | null; key?: string; hash?: string } = {}) {
-  return await inBusiness(tx, businessId, (scoped) => grantTopUpInTransaction(scoped, {
+async function grant(tx: DatabaseTransaction, businessId: string, gives: Gives, options: { startsAt?: Date; endsAt?: Date | null } = {}) {
+  const topUp = await inBusiness(tx, businessId, (scoped) => grantTopUpInTransaction(scoped, {
     businessId,
     grantor: { keyId, partner: "lobbystack" },
     grant: { voiceSec: gives.voiceSec ?? 0, smsSeg: gives.smsSeg ?? 0, callsOut: gives.callsOut ?? 0, chatUnits: gives.chatUnits ?? 0, startsAt: options.startsAt ?? new Date(), endsAt: options.endsAt ?? null, note: "Spring promotion" },
-    idempotencyKey: options.key ?? null,
-    requestHash: options.hash ?? null,
   }));
+  return { topUp };
 }
 
 async function topUpRow(tx: DatabaseTransaction, id: string) {
@@ -293,9 +295,9 @@ describe.skipIf(!testUrl)("top-ups against PostgreSQL", () => {
       const started = await asWorker(tx, (context) => startLivePhoneCall(context, call(businessId, "+14165550134")));
       expect(started.maxDurationMs).toBe(300_000);
       const revoked = await inBusiness(tx, businessId, (scoped) => revokeTopUpInTransaction(scoped, { businessId, topUpId: live.topUp.id }));
-      expect(revoked).toMatchObject({ status: "revoked", used: { voiceSeconds: 300 } });
+      expect(revoked).toMatchObject({ revoked: true, topUp: { status: "revoked", used: { voiceSeconds: 300 } } });
       // Revoking again returns it as it is; uses it paid for stay paid, and it holds nothing more.
-      expect(await inBusiness(tx, businessId, (scoped) => revokeTopUpInTransaction(scoped, { businessId, topUpId: live.topUp.id }))).toMatchObject({ status: "revoked" });
+      expect(await inBusiness(tx, businessId, (scoped) => revokeTopUpInTransaction(scoped, { businessId, topUpId: live.topUp.id }))).toMatchObject({ revoked: false, topUp: { status: "revoked" } });
       expect(await asWorker(tx, (context) => extendLiveCallReservation(context, { businessId, callId: started.callId }))).toBe(0);
       expect(await status(tx, businessId)).toMatchObject({ voiceSecondsLeft: 0, voiceBlocked: true, topUp: null });
       // Every grant here shares one transaction's now(); the ended one was added a day earlier.
@@ -303,21 +305,6 @@ describe.skipIf(!testUrl)("top-ups against PostgreSQL", () => {
       const listed = await inBusiness(tx, businessId, (scoped) => listBusinessTopUps(scoped, businessId));
       expect(listed.map((topUp) => [topUp.id, topUp.status])).toEqual([[later.topUp.id, "scheduled"], [live.topUp.id, "revoked"], [ended.topUp.id, "expired"]]);
       expect(await inBusiness(tx, businessId, (scoped) => revokeTopUpInTransaction(scoped, { businessId, topUpId: randomUUID() }))).toBeNull();
-    });
-  });
-
-  it("returns a grant its Idempotency-Key made, and refuses the key with another request", async () => {
-    await rollbackTest(async (tx) => {
-      const businessId = await business(tx);
-      const other = await business(tx);
-      const first = await grant(tx, businessId, { voiceSec: 600 }, { key: "grant-1", hash: "a".repeat(64) });
-      const again = await grant(tx, businessId, { voiceSec: 600 }, { key: "grant-1", hash: "a".repeat(64) });
-      expect(again).toEqual({ topUp: first.topUp, replayed: true });
-      await expect(grant(tx, businessId, { voiceSec: 900 }, { key: "grant-1", hash: "b".repeat(64) })).rejects.toBeInstanceOf(TopUpIdempotencyConflict);
-      // The same key for another business, which this one can't see, is refused too.
-      await expect(tx.transaction(() => grant(tx, other, { voiceSec: 600 }, { key: "grant-1", hash: "a".repeat(64) }))).rejects.toBeInstanceOf(TopUpIdempotencyConflict);
-      const [count] = await tx.select({ n: sql<number>`count(*)::int` }).from(billingTopUps).where(eq(billingTopUps.businessId, businessId));
-      expect(count!.n).toBe(1);
     });
   });
 
@@ -343,7 +330,7 @@ describe.skipIf(!testUrl)("top-ups against PostgreSQL", () => {
       // A top-up code is never a plan's offer.
       expect(await asPerson(tx, first, (scoped) => findBillingCodeOffer(scoped, "SPRING-MINUTES"))).toBeNull();
 
-      const added = await asPerson(tx, first, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: first.businessId, code: "spring-minutes" }));
+      const added = await asPerson(tx, first, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: first.businessId, userId: first.userId, code: "spring-minutes" }));
       expect(added).toMatchObject({ topUp: { source: "code", code: "SPRING-MINUTES", status: "active", gives: { voiceSeconds: 1_200, alertSmsSegments: 20 } } });
       const topUp = "topUp" in added ? added.topUp : null;
       expect(Date.parse(topUp!.endsAt!) - Date.parse(topUp!.startsAt)).toBe(30 * DAY);
@@ -351,13 +338,59 @@ describe.skipIf(!testUrl)("top-ups against PostgreSQL", () => {
       // Once per business, whoever on its team types it, and once per person, whatever business they type it for.
       const teammate = await person(tx, "teammate");
       await tx.execute(sql`insert into public.business_memberships (business_id, user_id, role, status) values (${first.businessId}::uuid, ${teammate}::uuid, 'business_admin', 'active')`);
-      expect(await asPerson(tx, { userId: teammate, businessId: first.businessId }, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: first.businessId, code: "SPRING-MINUTES" }))).toEqual({ refusal: "used" });
+      expect(await asPerson(tx, { userId: teammate, businessId: first.businessId }, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: first.businessId, userId: teammate, code: "SPRING-MINUTES" }))).toEqual({ refusal: "used" });
       expect(await asPerson(tx, { userId: teammate, businessId: first.businessId }, (scoped) => topUpCodeView(scoped, "SPRING-MINUTES"))).toMatchObject({ usedHere: true, usedByYou: false });
       await tx.execute(sql`insert into public.business_memberships (business_id, user_id, role, status) values (${second.businessId}::uuid, ${first.userId}::uuid, 'business_admin', 'active')`);
-      expect(await asPerson(tx, { userId: first.userId, businessId: second.businessId }, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: second.businessId, code: "SPRING-MINUTES" }))).toEqual({ refusal: "used" });
-      expect(await asPerson(tx, second, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: second.businessId, code: "SPRING-MINUTES" }))).toMatchObject({ topUp: { code: "SPRING-MINUTES" } });
+      expect(await asPerson(tx, { userId: first.userId, businessId: second.businessId }, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: second.businessId, userId: first.userId, code: "SPRING-MINUTES" }))).toEqual({ refusal: "used" });
+      expect(await asPerson(tx, second, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: second.businessId, userId: second.userId, code: "SPRING-MINUTES" }))).toMatchObject({ topUp: { code: "SPRING-MINUTES" } });
       const [row] = await tx.select({ uses: billingCodes.uses }).from(billingCodes).where(eq(billingCodes.code, "SPRING-MINUTES"));
       expect(row!.uses).toBe(2);
+    });
+  });
+
+  it("grants and revokes a top-up, and issues a top-up code, through the v1 API", async () => {
+    await rollbackTest(async (tx) => {
+      const owner = await ownedBusiness(tx, "api");
+      const operator: ApiCaller = { businessId: owner.businessId, platformKeyId: keyId, partnerId: "lobbystack", actingUserId: owner.userId, actor: "platform_key" };
+      const grant = (body: unknown) => asWorker(tx, (context) => grantTopUpForApi(context, operator, apiBillingTopUpCreateSchema.parse(body)));
+      const granted = await grant({ voice_seconds: 3_600, alert_sms_segments: 10, days: 30, note: "Spring promotion" });
+      expect(granted).toMatchObject({ source: "grant", code: null, note: "Spring promotion", status: "active", gives: { voice_seconds: 3_600, alert_sms_segments: 10, outbound_call_attempts: 0, chat_units: 0 }, used: { voice_seconds: 0 }, revoked_at: null });
+      expect(Date.parse(granted.ends_at!) - Date.parse(granted.starts_at)).toBe(30 * DAY);
+      // A start already past starts it now; one that starts later is scheduled.
+      const later = await grant({ chat_units: 5, starts_at: new Date(Date.now() + 2 * DAY).toISOString() });
+      expect(later).toMatchObject({ status: "scheduled", ends_at: null });
+      expect(Date.parse((await grant({ outbound_call_attempts: 2, starts_at: "2020-01-01T00:00:00Z" })).starts_at)).toBeGreaterThan(Date.now() - DAY);
+      // GET /billing lists them: the one that ends first first, those with no end after.
+      const billing = await asWorker(tx, (context) => getBillingForApi(context, operator));
+      expect(billing.top_ups.map((topUp) => topUp.id)).toEqual(expect.arrayContaining([granted.id, later.id]));
+      expect(billing.top_ups[0]!.id).toBe(granted.id);
+      for (const [body, path] of [
+        [{ voice_seconds: 60, starts_at: new Date(Date.now() + 400 * DAY).toISOString() }, "starts_at"],
+        [{ voice_seconds: 60, ends_at: new Date(Date.now() - DAY).toISOString() }, "ends_at"],
+        [{ voice_seconds: 60, starts_at: new Date(Date.now() + DAY).toISOString(), ends_at: new Date(Date.now() + 1_200 * DAY).toISOString() }, "ends_at"],
+      ] as const) {
+        await expect(grant(body)).rejects.toMatchObject({ status: 400, details: [{ path }] });
+      }
+      // Only an operator's platform key grants one.
+      await expect(asWorker(tx, (context) => grantTopUpForApi(context, { businessId: owner.businessId, apiKeyId: randomUUID() }, { voice_seconds: 60 }))).rejects.toMatchObject({ status: 403 });
+
+      const revoked = await asWorker(tx, (context) => revokeTopUpForApi(context, operator, granted.id));
+      expect(revoked).toMatchObject({ id: granted.id, status: "revoked" });
+      expect(await asWorker(tx, (context) => revokeTopUpForApi(context, operator, granted.id))).toEqual(revoked);
+      await expect(asWorker(tx, (context) => revokeTopUpForApi(context, operator, randomUUID()))).rejects.toMatchObject({ status: 404 });
+      const audited = await tx.select({ eventType: auditLogs.eventType }).from(auditLogs).where(and(eq(auditLogs.businessId, owner.businessId), eq(auditLogs.entityId, granted.id)));
+      expect(audited.map((row) => row.eventType).sort()).toEqual(["api.billing.top_up_granted", "api.billing.top_up_revoked"]);
+
+      // A top-up code: no plan, the top-up it adds, and the link that fills it in.
+      const issue = (body: unknown) => asWorker(tx, (context) => createBillingCodeForApi(context, { caller: { platformKeyId: keyId, partnerId: "lobbystack" }, idempotencyKey: null, body: apiBillingCodeCreateSchema.parse(body), brandName: "AlloPlace", baseUrl: "https://example.test" }));
+      const { code: issued } = await issue({ code: "api-minutes", top_up: { voice_seconds: 1_800, chat_units: 20, days: 14 }, max_uses: 5, expires_at: new Date(Date.now() + 7 * DAY).toISOString() });
+      expect(issued).toMatchObject({ code: "API-MINUTES", plan: null, top_up: { voice_seconds: 1_800, alert_sms_segments: 0, outbound_call_attempts: 0, chat_units: 20, days: 14 }, max_uses: 5, uses: 0, status: "active", link: "https://example.test/signup?promo=API-MINUTES" });
+      const listed = (kind: "plan" | "top_up") => asWorker(tx, (context) => listBillingCodesForApi(context, { kind, baseUrl: "https://example.test" }));
+      expect((await listed("top_up")).data.map((row) => row.id)).toContain(issued.id);
+      expect((await listed("plan")).data.map((row) => row.id)).not.toContain(issued.id);
+      const added = await asPerson(tx, owner, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: owner.businessId, userId: owner.userId, code: "api minutes".replace(" ", "-") }));
+      expect(added).toMatchObject({ topUp: { source: "code", code: "API-MINUTES", gives: { voiceSeconds: 1_800, chatAiUnits: 20 } } });
+      expect((await listed("top_up")).data.find((row) => row.id === issued.id)).toMatchObject({ uses: 1 });
     });
   });
 
@@ -371,13 +404,13 @@ describe.skipIf(!testUrl)("top-ups against PostgreSQL", () => {
       await tx.update(billingCodes).set({ status: "revoked", revokedAt: new Date() }).where(eq(billingCodes.code, "GONE-MINUTES"));
       await code(tx, { code: "THEIR-MINUTES", businessId: other.businessId });
       await code(tx, { code: "FOREVER-MINUTES", days: null, maxUses: null, expiresAt: null, businessId: owner.businessId });
-      expect(await asPerson(tx, other, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: other.businessId, code: "LAST-MINUTES" }))).toMatchObject({ topUp: {} });
+      expect(await asPerson(tx, other, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: other.businessId, userId: other.userId, code: "LAST-MINUTES" }))).toMatchObject({ topUp: {} });
       for (const typed of ["LAST-MINUTES", "OLD-MINUTES", "GONE-MINUTES", "THEIR-MINUTES", "NO-SUCH-CODE", "x"]) {
         expect(await asPerson(tx, owner, (scoped) => topUpCodeView(scoped, typed))).toBeNull();
-        expect(await asPerson(tx, owner, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: owner.businessId, code: typed }))).toEqual({ refusal: "invalid" });
+        expect(await asPerson(tx, owner, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: owner.businessId, userId: owner.userId, code: typed }))).toEqual({ refusal: "invalid" });
       }
       // A code bound to the business, with no use limit or end, lasts for good once added.
-      expect(await asPerson(tx, owner, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: owner.businessId, code: "FOREVER-MINUTES" }))).toMatchObject({ topUp: { endsAt: null } });
+      expect(await asPerson(tx, owner, (scoped) => redeemTopUpCodeInTransaction(scoped, { businessId: owner.businessId, userId: owner.userId, code: "FOREVER-MINUTES" }))).toMatchObject({ topUp: { endsAt: null } });
       // Nothing was added for the codes that didn't work.
       expect((await asPerson(tx, owner, (scoped) => listBusinessTopUps(scoped, owner.businessId))).map((topUp) => topUp.code)).toEqual(["FOREVER-MINUTES"]);
       // The month's usage period keys the rows, as before.

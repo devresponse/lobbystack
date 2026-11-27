@@ -4,14 +4,14 @@
 // that runs on calls. Agent tools that need the database fail, as they would
 // with the database down. See docs/voice/testing.md.
 //
-// OPENAI_API_KEY=... pnpm voice:eval [--scenario <name>]... [--runs <n>] [--concurrency <n>] [--snapshot <file.json> [--receptionist <id>]] [--browser] [--recorded-greeting]
+// OPENAI_API_KEY=... pnpm voice:eval [--scenario <name>]... [--runs <n>] [--concurrency <n>] [--snapshot <file.json> [--receptionist <id>]] [--browser] [--recorded-greeting] [--model gpt-live-1.1|gpt-live-1]
 
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
-import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, saysGoodbye, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
+import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_MODEL, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, saysGoodbye, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
 import { snapshotForReceptionist } from "@lobbystack/domain";
-import { callOpening, demoSnapshot, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, demoSnapshot, isLiveModel, LIVE_MODELS, type BusinessContextSnapshot, type LiveModel } from "@lobbystack/shared";
 import OpenAI from "openai";
 import type { SidebandWS } from "openai/resources/live/sideband/ws";
 import { LiveWS } from "openai/resources/live/ws";
@@ -40,16 +40,24 @@ const { values } = parseArgs({
     browser: { type: "boolean", default: false },
     // A call that opens with a recording of the greeting, as calls do unless LIVE_RECORDED_GREETING=false.
     "recorded-greeting": { type: "boolean", default: false },
+    // The GPT-Live model the receptionist runs on, LIVE_MODEL's unless set: run once on each to compare them.
+    model: { type: "string" },
   },
 });
 if (!process.env.OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY.");
+function chosenModel(name: string | undefined): LiveModel {
+  if (name === undefined) return LIVE_MODEL;
+  if (isLiveModel(name)) return name;
+  throw new Error(`--model must be ${LIVE_MODELS.join(" or ")}.`);
+}
+const liveModel = chosenModel(values.model);
 const scenarios = findScenarios(values.scenario);
 const loaded: BusinessContextSnapshot = values.snapshot ? JSON.parse(readFileSync(values.snapshot, "utf8")) : demoSnapshot;
 // A stored snapshot holds every receptionist, and a call gets one receptionist's view of it.
 const snapshot = loaded.receptionists ? snapshotForReceptionist(loaded, values.receptionist) : loaded;
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // Recorded once, as the worker does for the calls after the first.
-const greetingRecording = values["recorded-greeting"] ? (await recordGreeting(client, { greeting: callOpening(snapshot), voice: LIVE_VOICE, snapshot })).audio : undefined;
+const greetingRecording = values["recorded-greeting"] ? (await recordGreeting(client, { greeting: callOpening(snapshot), voice: LIVE_VOICE, snapshot, model: liveModel })).audio : undefined;
 const model = createAgentModel(liveDelegationEnvironment());
 if (!model) throw new Error("No delegation model: set OPENAI_API_KEY or the AI_CHAT_* variables.");
 
@@ -87,8 +95,10 @@ const CALLER_VOICE = "alloy";
 
 // GPT-Live says each caller line in a short session of its own, the way the
 // worker records a call's opening, and the line is kept only when GPT-Live's
-// transcript matches it. OpenAI's speech model gpt-4o-mini-tts voiced the
-// callers before and shuts down on 2027-01-06. Both give 16-bit PCM at 24 kHz.
+// transcript matches it. The callers speak on LIVE_MODEL's model whatever
+// --model says, so a run on each model hears the same kind of caller.
+// OpenAI's speech model gpt-4o-mini-tts voiced the callers before and shuts
+// down on 2027-01-06. Both give 16-bit PCM at 24 kHz.
 async function speak(text: string): Promise<Buffer> {
   const { audio } = await recordGreeting(client, { greeting: text, voice: CALLER_VOICE, snapshot }).catch((error: unknown) => {
     throw new Error(`Couldn't voice the caller's line "${text}": ${error instanceof Error ? error.message : String(error)}`);
@@ -100,10 +110,10 @@ async function speak(text: string): Promise<Buffer> {
 // The call's session, with WebSocket audio instead of SIP or WebRTC.
 function sessionConfig() {
   if (values.browser) {
-    const { store: _store, client: _client, ...session } = buildBrowserSessionConfig(snapshot, { greetingRecorded: greetingRecording !== undefined });
+    const { store: _store, client: _client, ...session } = buildBrowserSessionConfig(snapshot, { greetingRecorded: greetingRecording !== undefined, model: liveModel });
     return session;
   }
-  const { type: _type, store: _store, ...session } = buildPhoneSessionConfig(snapshot, { greetingRecorded: greetingRecording !== undefined });
+  const { type: _type, store: _store, ...session } = buildPhoneSessionConfig(snapshot, { greetingRecorded: greetingRecording !== undefined, model: liveModel });
   return session;
 }
 
@@ -267,7 +277,7 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
 
 // Each line takes a GPT-Live session of a few seconds, so they're voiced as many at once as runs go.
 const lines = [...new Set(scenarios.flatMap((scenario) => [scenario.opening ?? OPENING, ...scenario.lines.map((line) => line.text)]))];
-console.log(`Voicing ${lines.length} caller line${lines.length === 1 ? "" : "s"} with GPT-Live.`);
+console.log(`The receptionist runs on ${liveModel}. Voicing ${lines.length} caller line${lines.length === 1 ? "" : "s"} with GPT-Live.`);
 const audio = new Map<string, Buffer>();
 let nextLine = 0;
 await Promise.all(Array.from({ length: Math.min(Number(values.concurrency), lines.length) }, async () => {
@@ -292,6 +302,7 @@ await Promise.all(Array.from({ length: Math.min(Number(values.concurrency), jobs
 }));
 
 console.log("");
+console.log(`On ${liveModel}:`);
 for (const scenario of scenarios) {
   const rows = results.filter((row) => row.scenario === scenario);
   console.log(`${scenario.name.padEnd(17)} expect ${scenario.expect.padEnd(9)} passed ${rows.filter((row) => row.passed).length}/${rows.length}, greeted ${rows.filter((row) => row.greetedAfterMs !== undefined).length}/${rows.length}, one goodbye ${rows.filter((row) => row.goodbyes === 1).length}/${rows.length}`);

@@ -165,6 +165,31 @@ describe("billing provider startup validation", () => {
   });
 });
 
+// LIVE_MODEL picks the GPT-Live model calls run on; a typo would fail every call.
+describe("GPT-Live model startup validation", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+    for (const name of ["BETTER_AUTH_SECRET", "INTERNAL_SERVICE_SECRET", "INTERNAL_SERVICE_TOKEN", "WIDGET_SESSION_SECRET", "ENCRYPTION_KEY", "OTP_HASH_SECRET", "LOCAL_STORAGE_SIGNING_SECRET"]) {
+      vi.stubEnv(name, "strong-production-fixture-secret-12345");
+    }
+    vi.stubEnv("STORAGE_PROVIDER", "local");
+    mocks.getDatabase.mockImplementation((role: DatabaseRole) => ownRole(role));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("refuses a LIVE_MODEL it doesn't know, before opening database clients", async () => {
+    vi.stubEnv("LIVE_MODEL", "gpt-live-2");
+    await expect(register()).rejects.toThrow("LIVE_MODEL must be gpt-live-1.1 or gpt-live-1, or unset for gpt-live-1.1.");
+    expect(mocks.getDatabase).not.toHaveBeenCalled();
+    vi.stubEnv("LIVE_MODEL", "gpt-live-1");
+    await expect(register()).resolves.toBeUndefined();
+  });
+});
+
 // AUDIT-004: the website chat's limits per IP address always run on Railway, and its check's absence is said out loud.
 describe("website chat startup checks", () => {
   beforeEach(() => {

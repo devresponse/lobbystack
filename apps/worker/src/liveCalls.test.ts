@@ -39,6 +39,7 @@ vi.mock("@lobbystack/agent-core", () => ({
   WRAP_UP_MAX_MS: 40_000,
   GREETING_RECORDING_TTL_SECONDS: 604_800,
   LIVE_VOICE: "marin",
+  LIVE_MODEL: "gpt-live-1.1",
   greetingRecordingKey: (greeting: string) => `recording:${greeting}`,
   greetingRecordingFailedKey: (key: string) => `${key}:failed`,
   greetingRecordingInProgressKey: (key: string) => `${key}:recording`,
@@ -1144,14 +1145,14 @@ describe("liveDrainTimeoutMs", () => {
 });
 
 describe("live call latency telemetry", () => {
-  async function startCall() {
+  async function startCall(attach: Record<string, unknown> = {}) {
     vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
     vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
     vi.stubEnv("OPENAI_API_KEY", "sk-test");
     mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
     mocks.recordProductEvent.mockClear();
     const handler = createLiveCallHandler({ domain: { db: {} as never } });
-    await handler.handle(attachRequest({ sessionId: "live_2", businessId: "biz_1", callId: "call_2", channel: "web_voice", conversationId: "conv_2", callerPhone: "+14165550100" }), response());
+    await handler.handle(attachRequest({ sessionId: "live_2", businessId: "biz_1", callId: "call_2", channel: "web_voice", conversationId: "conv_2", callerPhone: "+14165550100", ...attach }), response());
     return mocks.controllerOptions.at(-1)!;
   }
 
@@ -1197,7 +1198,7 @@ describe("live call latency telemetry", () => {
       businessId: "biz_1",
       distinctId: "system:business:biz_1",
       actorType: "worker",
-      properties: { callId: "call_2", channel: "web_voice", provider: "openai_live", conversationId: "conv_2", agentMs: 1_800, totalMs: 1_812, tools: ["getBusinessHours"], toolCount: 2, modelSteps: 1, directAnswer: true, toolMs: 40, modelMs: 1_760, failed: false },
+      properties: { callId: "call_2", channel: "web_voice", provider: "openai_live", liveModel: "gpt-live-1.1", conversationId: "conv_2", agentMs: 1_800, totalMs: 1_812, tools: ["getBusinessHours"], toolCount: 2, modelSteps: 1, directAnswer: true, toolMs: 40, modelMs: 1_760, failed: false },
     });
     expect(JSON.stringify(mocks.recordProductEvent.mock.calls)).not.toMatch(/open until|4165550100/);
   });
@@ -1221,6 +1222,7 @@ describe("live call latency telemetry", () => {
         callId: "call_2",
         channel: "web_voice",
         provider: "openai_live",
+        liveModel: "gpt-live-1.1",
         conversationId: "conv_2",
         greetingMs: 1_100,
         firstSpeechMs: 1_100,
@@ -1247,6 +1249,29 @@ describe("live call latency telemetry", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(mocks.recordProductEvent).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "voice.call_latency_recorded" }));
+  });
+
+  it("records the GPT-Live model the admin started the session on, LIVE_MODEL's without one", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    // OpenAI refused gpt-live-1.1, so the admin started the session on gpt-live-1.
+    mocks.finishLiveCall.mockClear();
+    mocks.finishLiveCall.mockResolvedValueOnce(true);
+    const fellBack = await startCall({ model: "gpt-live-1" });
+    fellBack.onDelegation!(delegation as never);
+    fellBack.onClose!({ sessionId: "live_2", durationMs: 30_000, delegations: [delegation] } as never);
+    await vi.waitFor(() => expect(mocks.finishLiveCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: "call_2", model: "gpt-live-1" })));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(logLines(info).find((line) => line.message === "live.closed")).toMatchObject({ sessionId: "live_2", model: "gpt-live-1" });
+    expect(mocks.recordProductEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "voice.delegation_completed", properties: expect.objectContaining({ liveModel: "gpt-live-1" }) }));
+    expect(mocks.recordProductEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "voice.call_latency_recorded", properties: expect.objectContaining({ liveModel: "gpt-live-1" }) }));
+
+    info.mockClear();
+    mocks.finishLiveCall.mockClear();
+    const configured = await startCall({ sessionId: "live_3" });
+    configured.onClose!({ sessionId: "live_3", durationMs: 30_000, delegations: [] } as never);
+    await vi.waitFor(() => expect(mocks.finishLiveCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: "call_2", model: "gpt-live-1.1" })));
+    expect(logLines(info).find((line) => line.message === "live.closed")).toMatchObject({ sessionId: "live_3", model: "gpt-live-1.1" });
+    info.mockRestore();
   });
 
   it("records the delegation's model usage and cost as a voice.delegation generation", async () => {
@@ -1358,6 +1383,14 @@ describe("parseAttachRequest", () => {
     expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: kitsilano }))).toEqual({ ...call, receptionistId: kitsilano });
     expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: "kitsilano" }))).toEqual(call);
     expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: 7 }))).toEqual(call);
+  });
+
+  it("keeps the session's GPT-Live model only when it is one the worker knows", () => {
+    const call = { sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "voice" };
+    expect(parseAttachRequest(JSON.stringify({ ...call, model: "gpt-live-1" }))).toEqual({ ...call, model: "gpt-live-1" });
+    expect(parseAttachRequest(JSON.stringify({ ...call, model: "gpt-live-1.1" }))).toEqual({ ...call, model: "gpt-live-1.1" });
+    expect(parseAttachRequest(JSON.stringify({ ...call, model: "gpt-realtime-2.1" }))).toEqual(call);
+    expect(parseAttachRequest(JSON.stringify({ ...call, model: 1.1 }))).toEqual(call);
   });
 
   it("marks a retried delivery's attach as a resume", () => {

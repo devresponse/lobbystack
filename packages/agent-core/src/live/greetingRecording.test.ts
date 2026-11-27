@@ -24,6 +24,13 @@ describe("greeting recordings", () => {
     expect(greetingRecordingKey("Thanks for calling.", "marin")).not.toBe(`lobbystack:live:greeting-recording:${speechModelKey}`);
   });
 
+  // A new model records every opening again, so calls on it open in its own voice.
+  it("keys a recording by the calls' model, so gpt-live-1's recordings aren't played on gpt-live-1.1", () => {
+    const key = (model: string) => `lobbystack:live:greeting-recording:${createHash("sha256").update(JSON.stringify(["live-session-1", model, "marin", "Thanks for calling."])).digest("hex")}`;
+    expect(greetingRecordingKey("Thanks for calling.", "marin")).toBe(key("gpt-live-1.1"));
+    expect(greetingRecordingKey("Thanks for calling.", "marin")).not.toBe(key("gpt-live-1"));
+  });
+
   // Its failures and a recording under way sit next to it, so the admin and every worker find them.
   it("keeps a failed recording's and a recording under way's marks next to its key", () => {
     const key = greetingRecordingKey("Thanks for calling.", "marin");

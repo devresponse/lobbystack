@@ -1,7 +1,7 @@
 import { demoSnapshot } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
-import { buildBrowserSessionConfig, buildPhoneSessionConfig } from "./session";
+import { buildBrowserSessionConfig, buildPhoneSessionConfig, LIVE_MODEL } from "./session";
 
 // The greeting, then the notice that the call is with an AI and recorded.
 const openingText = "Thank you for calling Maple Family Clinic. You're speaking with an AI assistant, and this call is recorded and transcribed.";
@@ -43,5 +43,21 @@ describe("GPT-Live session config", () => {
     expect(browser).not.toContain("- Transfers:");
     expect(phone).toContain("- Transfers: connect the caller to a person when the business allows it.");
     expect(phone).not.toContain("web browser");
+  });
+
+  // OpenAI's GPT-Live-1.1 since 2026-11-19, unless LIVE_MODEL names gpt-live-1.
+  it("starts phone and browser sessions on gpt-live-1.1", () => {
+    expect(LIVE_MODEL).toBe("gpt-live-1.1");
+    expect(buildPhoneSessionConfig(demoSnapshot).model).toBe("gpt-live-1.1");
+    expect(buildBrowserSessionConfig(demoSnapshot).model).toBe("gpt-live-1.1");
+  });
+
+  // The fallback when OpenAI refuses the configured model, and the voice eval's --model.
+  it("starts a session on another model when asked, with the same instructions", () => {
+    const phone = buildPhoneSessionConfig(demoSnapshot, { model: "gpt-live-1" });
+    const browser = buildBrowserSessionConfig(demoSnapshot, { model: "gpt-live-1" });
+    expect(phone.model).toBe("gpt-live-1");
+    expect(browser.model).toBe("gpt-live-1");
+    expect(phone.instructions).toBe(buildPhoneSessionConfig(demoSnapshot).instructions);
   });
 });

@@ -4,7 +4,7 @@ OpenAI hosts call audio, and LobbyStack's admin and worker run the call. This re
 
 ## Status
 
-Accepted. Every phone number now sits on the Twilio SIP trunk, and we removed `apps/voice-gateway` from the repository.
+Accepted. Every phone number now sits on the Twilio SIP trunk, and we removed `apps/voice-gateway` from the repository. Since fork PR #245 (2026-11-27) calls run on `gpt-live-1.1`, the same Live API at the same price, and `LIVE_MODEL=gpt-live-1` goes back to the model named below ([choose the GPT-Live model](../voice/runtime.md#choose-the-gpt-live-model)).
 
 ## Decision
 

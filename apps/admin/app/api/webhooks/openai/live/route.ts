@@ -12,7 +12,7 @@ import { createWorkerDomainContext } from "@/lib/domain-context";
 import { reportServerError } from "@/lib/error-reporting";
 import { recordedGreetingFor, type RecordedGreeting } from "@/lib/live-greeting";
 import { attachWorkerToLiveSession, getLiveClient } from "@/lib/live-prototype";
-import { envFlag } from "@lobbystack/shared";
+import { envFlag, withLiveModelFallback } from "@lobbystack/shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -160,6 +160,9 @@ function createTiming() {
     greetingRecording: undefined as boolean | undefined,
     // Another delivery's decision on the call came before this one's accept.
     decisionAlreadyMade: undefined as true | undefined,
+    // The GPT-Live model the call was accepted on: LIVE_MODEL's, or gpt-live-1
+    // when OpenAI refused it (`live.model_fallback`).
+    model: undefined as string | undefined,
     mark(step: string) {
       steps[`${step}Ms`] = Math.round(performance.now() - receivedAt);
     },
@@ -177,7 +180,7 @@ function createTiming() {
       }));
     },
     log() {
-      const write = () => logEvent("info", "live.incoming", { eventAgeMs: this.eventAgeMs, routedBy: this.routedBy, greetingRecording: this.greetingRecording, decisionAlreadyMade: this.decisionAlreadyMade, ...steps });
+      const write = () => logEvent("info", "live.incoming", { eventAgeMs: this.eventAgeMs, routedBy: this.routedBy, greetingRecording: this.greetingRecording, decisionAlreadyMade: this.decisionAlreadyMade, model: this.model, ...steps });
       if (finishing) void finishing.then(write);
       else write();
     },
@@ -187,6 +190,17 @@ function createTiming() {
 type Timing = ReturnType<typeof createTiming>;
 
 type LiveClient = ReturnType<typeof getLiveClient>;
+
+type PhoneSession = ReturnType<typeof buildPhoneSessionConfig>;
+
+// Accepts the call on LIVE_MODEL's model, and on gpt-live-1 when OpenAI
+// refuses that one in a way gpt-live-1 may not share, such as a project that
+// doesn't allow gpt-live-1.1 or its own concurrent-session limit being full.
+// Answers the session the call was accepted with.
+async function acceptCall(client: LiveClient, sessionId: string, session: PhoneSession): Promise<PhoneSession> {
+  const accepted = await withLiveModelFallback(session, async (config) => { await client.live.sessions.accept(sessionId, { session: config }); }, (fallback) => logEvent("warn", "live.model_fallback", { channel: "voice", ...fallback }));
+  return accepted.config;
+}
 
 // Reserves minutes and records the call before accepting it, the same way the
 // Twilio media path does, so billing and limits behave identically. The
@@ -242,13 +256,15 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
   // top-ups may have grown. Its call may be under way, so it attaches as a resume:
   // the worker numbers turns after the saved ones and skips the greeting.
   const answeredBy = snapshot.receptionist?.id ?? input.receptionistId;
-  const attach = (options: { resume?: boolean; recordedGreeting?: RecordedGreeting } = {}) => attachWorkerToLiveSession({ sessionId: input.sessionId, businessId: input.businessId, callId: call.callId, conversationId: call.conversationId, channel: "voice", ...(input.from ? { callerPhone: input.from } : {}), ...(call.maxDurationMs !== undefined ? { maxDurationMs: call.maxDurationMs } : {}), ...(answeredBy ? { receptionistId: answeredBy } : {}), ...options });
+  const attach = (options: { resume?: boolean; recordedGreeting?: RecordedGreeting; model?: string } = {}) => attachWorkerToLiveSession({ sessionId: input.sessionId, businessId: input.businessId, callId: call.callId, conversationId: call.conversationId, channel: "voice", ...(input.from ? { callerPhone: input.from } : {}), ...(call.maxDurationMs !== undefined ? { maxDurationMs: call.maxDurationMs } : {}), ...(answeredBy ? { receptionistId: answeredBy } : {}), ...options });
   // A retried delivery. The first one may have died before accepting or before
   // the worker attached, so finish the job without touching the call record:
   // accepting an accepted session just fails, and attaching is idempotent.
   if (call.duplicate) {
-    await client.live.sessions.accept(input.sessionId, { session: buildPhoneSessionConfig(snapshot) }).catch(() => undefined);
-    input.timing.afterResponse(async () => { await attach({ resume: true }).catch(() => undefined); });
+    // Known only when this delivery's accept is the one that took the call.
+    const model = await acceptCall(client, input.sessionId, buildPhoneSessionConfig(snapshot)).then((session) => session.model, () => undefined);
+    input.timing.model = model;
+    input.timing.afterResponse(async () => { await attach({ resume: true, ...(model ? { model } : {}) }).catch(() => undefined); });
     return new NextResponse(null, { status: 200 });
   }
   // With a recording of the opening, the session starts with it as already
@@ -256,9 +272,11 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
   // next call. A failed check opens the call as before.
   const recordedGreeting = greeting.status === "fulfilled" ? greeting.value : undefined;
   if (recordedGreeting) input.timing.greetingRecording = recordedGreeting.play;
+  let model: string | undefined;
   try {
-    const sessionConfig = buildPhoneSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true });
-    await client.live.sessions.accept(input.sessionId, { session: sessionConfig });
+    const sessionConfig = await acceptCall(client, input.sessionId, buildPhoneSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true }));
+    model = sessionConfig.model;
+    input.timing.model = model;
     input.timing.mark("accept");
     // The instructions the call's voice model starts with, for its AI debug trace (ADR 0009). The call doesn't wait for it.
     void recordAiTrace(domain, { businessId: input.businessId, kind: "voice_session", channel: "voice", callId: call.callId, ...(call.conversationId ? { conversationId: call.conversationId } : {}), model: sessionConfig.model, snapshot, instructions: sessionConfig.instructions ?? undefined }).catch((error: unknown) => logEvent("warn", "live.ai_trace_unsaved", { errorType: error instanceof Error ? error.name : typeof error }));
@@ -281,12 +299,12 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
   // business, so the attach finishes after the response.
   input.timing.afterResponse(async () => {
     try {
-      await attach(recordedGreeting ? { recordedGreeting } : {});
+      await attach({ ...(recordedGreeting ? { recordedGreeting } : {}), ...(model ? { model } : {}) });
       input.timing.mark("attach");
     } catch (error) {
       // Without the worker nobody answers delegations, so end the call cleanly.
       await client.live.sessions.hangup(input.sessionId).catch(() => undefined);
-      await finishLiveCall(domain, { businessId: input.businessId, callId: call.callId, seconds: 0, end: "setup_failed" });
+      await finishLiveCall(domain, { businessId: input.businessId, callId: call.callId, seconds: 0, end: "setup_failed", ...(model ? { model } : {}) });
       throw error;
     }
   });

@@ -6,6 +6,8 @@ export type LiveCallTelemetryContext = {
   businessId: string;
   callId: string;
   channel: "voice" | "web_voice";
+  /** The GPT-Live model the session ran on, so latency compares across models. */
+  liveModel: string;
   conversationId?: string;
 };
 
@@ -22,6 +24,7 @@ function record(domain: DomainContext, call: LiveCallTelemetryContext, name: "vo
         callId: call.callId,
         channel: call.channel,
         provider: LIVE_CALL_PROVIDER,
+        liveModel: call.liveModel,
         ...(call.conversationId ? { conversationId: call.conversationId } : {}),
         ...properties,
       },

@@ -10,7 +10,9 @@ import { envFlag } from "@lobbystack/shared";
 
 /** `resume` marks a retried webhook delivery's attach to a call that may be under way. */
 // receptionistId: the receptionist answering, whose view of the snapshot the worker's agent uses; the default one without it.
-type WorkerAttachInput = { sessionId: string; businessId: string; callId: string; channel: "voice" | "web_voice"; conversationId?: string; callerPhone?: string; maxDurationMs?: number; intakeOnly?: boolean; resume?: boolean; recordedGreeting?: RecordedGreeting; receptionistId?: string };
+// `model`: the GPT-Live model the session started on, for the worker's logs
+// and the call's cost record.
+type WorkerAttachInput = { sessionId: string; businessId: string; callId: string; channel: "voice" | "web_voice"; conversationId?: string; callerPhone?: string; maxDurationMs?: number; intakeOnly?: boolean; resume?: boolean; recordedGreeting?: RecordedGreeting; receptionistId?: string; model?: string };
 
 // A draining worker answers a new attach with 503, and the admin tries the
 // worker's other copies at once. When every copy refuses, as when a release

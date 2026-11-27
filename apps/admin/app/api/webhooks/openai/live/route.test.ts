@@ -3,7 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { InvalidWebhookSignatureError } from "openai";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-const mocks = vi.hoisted(() => ({ unwrap: vi.fn(), reject: vi.fn(), accept: vi.fn(), hangup: vi.fn(), execute: vi.fn(), snapshot: vi.fn(), startLivePhoneCall: vi.fn(), finishLiveCall: vi.fn(), attach: vi.fn(), sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1", instructions: "Answer calls." })), recordedGreeting: vi.fn() }));
+const mocks = vi.hoisted(() => ({ unwrap: vi.fn(), reject: vi.fn(), accept: vi.fn(), hangup: vi.fn(), execute: vi.fn(), snapshot: vi.fn(), startLivePhoneCall: vi.fn(), finishLiveCall: vi.fn(), attach: vi.fn(), sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1.1", instructions: "Answer calls." })), recordedGreeting: vi.fn() }));
 
 vi.mock("@lobbystack/agent-core/live/session", () => ({ buildPhoneSessionConfig: mocks.sessionConfig }));
 // The cut of the business's snapshot for one receptionist is the domain's own.
@@ -119,6 +119,8 @@ describe("POST /api/webhooks/openai/live", () => {
     // It keeps the limit the first delivery reserved, and the worker continues the saved transcript.
     await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", channel: "voice", maxDurationMs: 500_000, resume: true })));
     expect(mocks.finishLiveCall).not.toHaveBeenCalled();
+    // The first delivery's accept chose the model, so the worker uses LIVE_MODEL's.
+    expect(mocks.attach.mock.calls[0]![0]).not.toHaveProperty("model");
   });
 
   // The first delivery may already be playing it, and a call under way gets no greeting.
@@ -210,8 +212,9 @@ describe("POST /api/webhooks/openai/live", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.accept).toHaveBeenCalledWith("live_1", expect.anything());
-    await vi.waitFor(() => expect(incomingLines(info)).toEqual([expect.objectContaining({ level: "info", sessionId: "live_1", businessId: "biz_1", callId: "call_1", eventAgeMs: expect.any(Number), lookupMs: expect.any(Number), recordMs: expect.any(Number), acceptMs: expect.any(Number), attachMs: expect.any(Number) })]));
-    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", channel: "voice" }));
+    await vi.waitFor(() => expect(incomingLines(info)).toEqual([expect.objectContaining({ level: "info", sessionId: "live_1", businessId: "biz_1", callId: "call_1", eventAgeMs: expect.any(Number), lookupMs: expect.any(Number), recordMs: expect.any(Number), acceptMs: expect.any(Number), attachMs: expect.any(Number), model: "gpt-live-1.1" })]));
+    expect(mocks.accept).toHaveBeenCalledOnce();
+    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", channel: "voice", model: "gpt-live-1.1" }));
     // A first delivery's attach isn't a resume, so the worker reads nothing extra.
     expect(mocks.attach.mock.calls[0]![0]).not.toHaveProperty("resume");
     expect(incomingLines(info)[0]).not.toHaveProperty("decisionAlreadyMade");
@@ -282,6 +285,52 @@ describe("POST /api/webhooks/openai/live", () => {
     expect(mocks.attach.mock.calls[0]![0]).not.toHaveProperty("recordedGreeting");
     expect(mocks.hangup).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
+  });
+
+  // A project without gpt-live-1.1, or that model's own concurrent-session limit full.
+  it("accepts the call on gpt-live-1 when OpenAI refuses gpt-live-1.1, and says so", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", position: 1 }] });
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: false, blocked: false });
+    mocks.accept.mockRejectedValueOnce(Object.assign(new Error("403 The model gpt-live-1.1 does not exist or you do not have access to it."), { status: 403, code: "model_not_found" })).mockResolvedValueOnce(undefined);
+    mocks.attach.mockResolvedValue(undefined);
+    mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }] } });
+
+    const response = await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.accept.mock.calls).toEqual([
+      ["live_1", { session: { model: "gpt-live-1.1", instructions: "Answer calls." } }],
+      ["live_1", { session: { model: "gpt-live-1", instructions: "Answer calls." } }],
+    ]);
+    const warnings = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(warnings).toEqual([expect.objectContaining({ level: "warn", message: "live.model_fallback", sessionId: "live_1", callId: "call_1", channel: "voice", status: 403, code: "model_not_found", model: "gpt-live-1.1", fallbackModel: "gpt-live-1" })]);
+    // The worker records the call's cost on the model it ran on.
+    await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", model: "gpt-live-1" })));
+    await vi.waitFor(() => expect(incomingLines(info)).toEqual([expect.objectContaining({ callId: "call_1", model: "gpt-live-1" })]));
+    expect(mocks.reject).not.toHaveBeenCalled();
+    expect(mocks.finishLiveCall).not.toHaveBeenCalled();
+  });
+
+  it("tries gpt-live-1 once, and rejects the call when OpenAI refuses it too", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", position: 1 }] });
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: false, blocked: false });
+    mocks.accept.mockRejectedValue(Object.assign(new Error("429 Too many concurrent sessions."), { status: 429, code: "rate_limit_exceeded" }));
+    mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }] } });
+
+    const response = await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.accept).toHaveBeenCalledTimes(2);
+    expect(mocks.finishLiveCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: "call_1", seconds: 0, end: "setup_failed" }));
+    expect(mocks.reject).toHaveBeenCalledWith("live_1", { status_code: 503 });
+    expect(mocks.attach).not.toHaveBeenCalled();
   });
 
   it("rejects a call it couldn't accept for another reason, and closes its record", async () => {

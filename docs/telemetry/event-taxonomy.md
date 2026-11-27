@@ -53,7 +53,7 @@ Do not duplicate ownership between runtimes unless there is a specific analytics
 - `voice.transfer_completed`
 - `voice.snapshot_loaded`
 - `voice.provider_cost_recorded`
-- `voice.delegation_completed`: the worker answered one GPT-Live delegation with the receptionist agent. Carries `agentMs` (agent run time), `totalMs` (from the delegation event to the answer, including the wait for the caller's last words), `tools` (distinct tool names), `toolCount`, `modelSteps` (model calls the agent made), `directAnswer` (true when a tool result went to GPT-Live without a model call to phrase it), `toolMs` (time spent in tools), `modelMs` (`agentMs` minus `toolMs`) and `failed`. The worker also records each delegation's tokens and cost as a `$ai_generation` with the operation `voice.delegation`, and each business summary it writes from the knowledge sources as one with the operation `business.summary`. It never carries the request, the answer or the caller's number.
+- `voice.delegation_completed`: the worker answered one GPT-Live delegation with the receptionist agent. Carries `agentMs` (agent run time), `totalMs` (from the delegation event to the answer, including the wait for the caller's last words), `tools` (distinct tool names), `toolCount`, `modelSteps` (model calls the agent made), `directAnswer` (true when a tool result went to GPT-Live without a model call to phrase it), `toolMs` (time spent in tools), `modelMs` (`agentMs` minus `toolMs`), `failed` and, since fork PR #245, `liveModel`, the GPT-Live model the call runs on. The worker also records each delegation's tokens and cost as a `$ai_generation` with the operation `voice.delegation`, and each business summary it writes from the knowledge sources as one with the operation `business.summary`. It never carries the request, the answer or the caller's number.
 - `voice.call_latency_recorded`: one summary per GPT-Live call, sent when the worker stops handling the call. See [GPT-Live call latency](#gpt-live-call-latency).
 
 #### GPT-Live call latency
@@ -73,6 +73,7 @@ GPT-Live sends no speech-started, speech-stopped or input-committed event. The w
 | `delegationCount`, `delegationFailedCount` | Delegations answered, and how many of them failed. |
 | `delegationP50TotalMs`, `delegationMaxTotalMs` | `totalMs` of those delegations. |
 | `durationMs` | How long the worker held the call. |
+| `liveModel` | The GPT-Live model the call ran on, `gpt-live-1.1` or `gpt-live-1`, since fork PR #245 ([choose the GPT-Live model](../voice/runtime.md#choose-the-gpt-live-model)). |
 
 The answer gap skips caller speech that ended while the receptionist was still talking, such as "mm-hmm" or an interruption, and answers that started before the caller finished. The session timeline starts when OpenAI starts the session, so ringing before a phone call is accepted doesn't count toward `greetingMs`.
 

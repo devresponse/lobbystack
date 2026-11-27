@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   hangup: vi.fn(),
   openaiHangup: vi.fn(async () => undefined),
-  sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1" })),
+  sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1.1" })),
   recordedGreeting: vi.fn(async (..._args: unknown[]): Promise<{ text: string; play: boolean } | undefined> => undefined),
 }));
 
@@ -76,7 +76,7 @@ describe("POST /api/voice/live/session", () => {
     expect(mocks.allowance).not.toHaveBeenCalled();
     expect(mocks.startLiveWebCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ sessionId: "live_1", billable: false, sessionPurpose: "prospect_demo", prospectDemoId: "demo_1" }));
     expect(mocks.recordProspectDemoCallStarted).toHaveBeenCalledWith(expect.anything(), { businessId: "biz_1", prospectDemoId: "demo_1", callId: "call_1", channel: "web_voice", provider: "openai_live" });
-    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", channel: "web_voice", intakeOnly: true, maxDurationMs: 120_000 }));
+    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", channel: "web_voice", intakeOnly: true, maxDurationMs: 120_000, model: "gpt-live-1.1" }));
   });
 
   it("stops before creating a session when the plan is out of minutes", async () => {
@@ -127,7 +127,7 @@ describe("POST /api/voice/live/session", () => {
     expect(mocks.hangup).toHaveBeenCalledWith("live_1");
     expect(mocks.openaiHangup).not.toHaveBeenCalled();
     // OpenAI bills 15 seconds for creating the WebRTC session; the caller heard nothing.
-    expect(mocks.finishLiveCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: "call_1", seconds: 15, measuredSeconds: 0, end: "setup_failed", channel: "web_voice" }));
+    expect(mocks.finishLiveCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: "call_1", seconds: 15, measuredSeconds: 0, end: "setup_failed", channel: "web_voice", model: "gpt-live-1.1" }));
     expect(mocks.recordProspectDemoCallError).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ prospectDemoId: "demo_1", callId: "call_1", reason: "web_call_start_failed" }));
   });
 
@@ -152,11 +152,34 @@ describe("POST /api/voice/live/session", () => {
     mocks.create.mockRejectedValue(APIError.generate(429, { error: { message: "You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota" } }, undefined, new Headers()));
     const response = await start("lobbystack-widget");
     expect(response.status).toBe(502);
+    // No credit holds for every model, so it isn't tried on gpt-live-1.
+    expect(mocks.create).toHaveBeenCalledOnce();
     expect(mocks.startLiveWebCall).not.toHaveBeenCalled();
     const lines = () => error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
     await vi.waitFor(() => expect(lines()).toContainEqual(expect.objectContaining({ message: "[admin] exception: OpenAI refused to create the live session (insufficient_quota): 429 You exceeded your current quota.", errorId: response.headers.get("x-error-id"), businessId: "biz_1" })));
     error.mockRestore();
     vi.unstubAllEnvs();
+  });
+
+  // A project without gpt-live-1.1, or that model's own concurrent-session limit full.
+  it("starts the call on gpt-live-1 when OpenAI refuses gpt-live-1.1, and says so", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.access.mockResolvedValue(widget);
+    mocks.create
+      .mockRejectedValueOnce(APIError.generate(403, { error: { message: "The model gpt-live-1.1 does not exist or you do not have access to it.", type: "invalid_request_error", code: "model_not_found" } }, undefined, new Headers()))
+      .mockResolvedValueOnce({ session: { id: "live_1" }, transport: { sdp: "answer" } });
+    const response = await start("lobbystack-widget");
+    expect(response.status).toBe(201);
+    expect(mocks.create.mock.calls.map(([request]) => (request as { session: { model: string } }).session.model)).toEqual(["gpt-live-1.1", "gpt-live-1"]);
+    const warnings = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(warnings).toContainEqual(expect.objectContaining({ level: "warn", message: "live.model_fallback", businessId: "biz_1", channel: "web_voice", widgetId: "lobbystack-widget", status: 403, code: "model_not_found", model: "gpt-live-1.1", fallbackModel: "gpt-live-1" }));
+    // The worker records the call's cost on the model it ran on.
+    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", model: "gpt-live-1" }));
+    const lines = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(lines).toContainEqual(expect.objectContaining({ message: "live.browser_start", sessionId: "live_1", model: "gpt-live-1" }));
+    info.mockRestore();
+    warn.mockRestore();
   });
 
   it("falls back to OpenAI's hangup when the worker can't close the session either", async () => {
@@ -225,7 +248,7 @@ describe("POST /api/voice/live/session", () => {
     const response = await start("lobbystack-widget");
     const lines = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
     const stage = expect.any(Number);
-    expect(lines).toContainEqual(expect.objectContaining({ message: "live.browser_start", businessId: "biz_1", sessionId: "live_1", callId: "call_1", widgetId: "lobbystack-widget", accessMs: stage, checksMs: stage, greetingMs: stage, openaiMs: stage, recordMs: stage, attachMs: stage, greetingRecording: true }));
+    expect(lines).toContainEqual(expect.objectContaining({ message: "live.browser_start", businessId: "biz_1", sessionId: "live_1", callId: "call_1", widgetId: "lobbystack-widget", model: "gpt-live-1.1", accessMs: stage, checksMs: stage, greetingMs: stage, openaiMs: stage, recordMs: stage, attachMs: stage, greetingRecording: true }));
     expect(response.headers.get("server-timing")).toMatch(/^access;dur=[\d.]+, checks;dur=[\d.]+, greeting;dur=[\d.]+, openai;dur=[\d.]+, record;dur=[\d.]+, attach;dur=[\d.]+$/);
     info.mockRestore();
   });

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { agentModelId, callerIsDone, closeLiveSession, createAgentModel, createReceptionistAgent, LiveCallController, liveDelegationEnvironment, receptionistInstructions, recordedGreetingEnabled, WRAP_UP_MAX_MS, type AgentChannel, type CallControl, type KeypadPasscodeCheck, type LiveCallSetup, type LiveCallSummary, type LiveCallWrapUp } from "@lobbystack/agent-core";
+import { agentModelId, callerIsDone, closeLiveSession, createAgentModel, createReceptionistAgent, LIVE_MODEL, LiveCallController, liveDelegationEnvironment, receptionistInstructions, recordedGreetingEnabled, WRAP_UP_MAX_MS, type AgentChannel, type CallControl, type KeypadPasscodeCheck, type LiveCallSetup, type LiveCallSummary, type LiveCallWrapUp } from "@lobbystack/agent-core";
 import {
   blockLiveCaller,
   extendLiveCallReservation,
@@ -20,7 +20,7 @@ import {
   type OpenLiveCall,
 } from "@lobbystack/domain";
 import { renewVoicePresenceGateway, updateVoicePresence } from "@lobbystack/jobs";
-import { callOpening, envFlag, isUuid, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, envFlag, isLiveModel, isUuid, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot, type LiveModel } from "@lobbystack/shared";
 import { logEvent, recordException, reportError, setSpanAttributes, withCallContext, withOpenSpan, type CallContext, type Span } from "@lobbystack/telemetry/node";
 import OpenAI from "openai";
 
@@ -73,6 +73,12 @@ type AttachRequest = {
    * paused or archived.
    */
   receptionistId?: string;
+  /**
+   * The GPT-Live model the admin started the session on: LIVE_MODEL's, or
+   * gpt-live-1 when OpenAI refused that one. It goes on the call's cost record
+   * and in its logs. Without it, as for a recovered call, LIVE_MODEL stands in.
+   */
+  model?: LiveModel;
   /** Set when this worker took the call over after its owner died. Never parsed from HTTP. */
   recovery?: OpenLiveCall;
 };
@@ -213,6 +219,7 @@ export function parseAttachRequest(raw: string): AttachRequest | undefined {
     ...(body.resume === true ? { resume: true } : {}),
     ...(typeof body.recordedGreeting?.text === "string" && body.recordedGreeting.text.trim() ? { recordedGreeting: { text: body.recordedGreeting.text.trim(), play: body.recordedGreeting.play === true } } : {}),
     ...(typeof body.receptionistId === "string" && isUuid(body.receptionistId) ? { receptionistId: body.receptionistId } : {}),
+    ...(isLiveModel(body.model) ? { model: body.model } : {}),
   };
 }
 
@@ -479,7 +486,9 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     const snapshotLoad = getCachedReceptionistSnapshot(input.domain, { businessId: request.businessId, receptionistId: request.receptionistId });
     const phone = request.channel === "voice";
     const call = { businessId: request.businessId, callId: request.callId };
-    const telemetryCall = { ...call, channel: request.channel, ...(request.conversationId ? { conversationId: request.conversationId } : {}) };
+    // The GPT-Live model the session runs on. `model` is the delegation agent's.
+    const liveModel = request.model ?? LIVE_MODEL;
+    const telemetryCall = { ...call, channel: request.channel, liveModel, ...(request.conversationId ? { conversationId: request.conversationId } : {}) };
     const recovery = request.recovery;
     // A phone call with a reservation grows it a slice at a time while it
     // runs. The domain stops it at the plan's minutes and at MAX_PHONE_CALL_MS.
@@ -591,7 +600,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
       const seconds = providerSeconds({ ...summary, durationMs }, request.channel);
       // Only the write that finishes the call queues the recording copy, so a
       // late retry that re-attaches to an ended call doesn't copy it twice.
-      const completed = await finishLiveCall(input.domain, { ...call, seconds, measuredSeconds: durationMs / 1000, end: end ?? endFromCloseReason(summary.closeReason), channel: request.channel, recording: { sessionId: request.sessionId, durationMs } });
+      const completed = await finishLiveCall(input.domain, { ...call, seconds, measuredSeconds: durationMs / 1000, end: end ?? endFromCloseReason(summary.closeReason), channel: request.channel, model: liveModel, recording: { sessionId: request.sessionId, durationMs } });
       // A recovered call missed its start, so its latency would mislead.
       if (completed && !recovery) recordLiveCallLatency(input.domain, telemetryCall, summary);
     };
@@ -655,7 +664,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
           return;
         }
         setPresence(request, false);
-        logEvent("info", "live.closed", { channel: request.channel, durationMs: summary.durationMs, billedSeconds: summary.billedSeconds, usageConfirmed: summary.usageConfirmed, closeReason: summary.closeReason, end, delegations: summary.delegations.length, outputAudio: summary.outputAudio, inputAudio: summary.inputAudio, lateAttach: summary.lateAttach, firstEventMs: summary.firstEventMs, limitWarningMs: summary.limitWarningMs, wrapUp: summary.wrapUp });
+        logEvent("info", "live.closed", { channel: request.channel, model: liveModel, durationMs: summary.durationMs, billedSeconds: summary.billedSeconds, usageConfirmed: summary.usageConfirmed, closeReason: summary.closeReason, end, delegations: summary.delegations.length, outputAudio: summary.outputAudio, inputAudio: summary.inputAudio, lateAttach: summary.lateAttach, firstEventMs: summary.firstEventMs, limitWarningMs: summary.limitWarningMs, wrapUp: summary.wrapUp });
         // The controller hands over the last turns just before it closes, and
         // finishing queues the summary job, so their writes come first.
         const pending = turnsSaved(turnWrites).then(() => retryWrite(() => finish(summary))).catch(reportFailure("live.finish"));

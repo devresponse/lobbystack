@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { HelpArticle } from "../apps/admin/src/lib/help/types";
-import { helpKbDrift, helpKbFolders, helpKbOutputs, readHelpKbConfig, screenGuide, screenGuides, SECTION_MAX_CHARACTERS, splitSection, withScreensBlock } from "./help-kb";
+import { readManifest, readManifestFiles } from "../packages/cli/src/manifest";
+import { helpKbDrift, helpKbFolders, helpKbOutputs, kbRoot, readHelpKbConfig, screenGuide, screenGuides, SECTION_MAX_CHARACTERS, splitSection, withScreensBlock } from "./help-kb";
 
 /** The knowledge base's passages: chunkText in packages/domain cuts at each heading, then at this many characters. */
 const PASSAGE_CHARACTERS = 1_800;
@@ -140,13 +141,31 @@ describe("a knowledge-base folder", () => {
   });
 });
 
-describe.each(helpKbFolders())("%s", (folder) => {
-  const config = readHelpKbConfig(folder);
-  const manifest = readFileSync(join(folder, config.manifest), "utf8").replace(/\r\n/g, "\n");
+/**
+ * Every knowledge base under devops/kb: a folder with screen guides names its
+ * manifest in help-kb.json, and any other folder holds one manifest named
+ * <name>-kb.yaml, such as realinfobot-sales-kb.yaml.
+ */
+function knowledgeBases(): Array<[name: string, folder: string, manifests: string[]]> {
+  return readdirSync(kbRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => {
+    const folder = join(kbRoot, entry.name);
+    const manifests = existsSync(join(folder, "help-kb.json")) ? [readHelpKbConfig(folder).manifest] : readdirSync(folder).filter((name) => name.endsWith("-kb.yaml"));
+    return [entry.name, folder, manifests];
+  });
+}
+
+describe.each(knowledgeBases())("devops/kb/%s", (_name, folder, manifests) => {
+  const manifestPath = join(folder, manifests[0] ?? "(no manifest)");
+  const manifest = existsSync(manifestPath) ? readFileSync(manifestPath, "utf8").replace(/\r\n/g, "\n") : "";
   const listed = [...manifest.matchAll(/^\s*- path: (\S+)\s*$/gm)].map((match) => match[1]!);
 
-  it("has the screen guides and the manifest's list of them up to date: run pnpm help:kb", () => {
-    expect(helpKbDrift(folder)).toEqual([]);
+  it("has one manifest", () => {
+    expect(manifests).toHaveLength(1);
+  });
+
+  it("is a manifest lobbystack onboard reads, with the documents it lists", async () => {
+    const files = await readManifestFiles(await readManifest(manifestPath), folder);
+    expect(files.map((file) => file.path)).toEqual(listed);
   });
 
   it("lists every document in the folder once, in the manifest", () => {
@@ -167,5 +186,11 @@ describe.each(helpKbFolders())("%s", (folder) => {
         expect(section.length, `${path}: ${section.split("\n")[0]}`).toBeLessThanOrEqual(PASSAGE_CHARACTERS);
       }
     }
+  });
+});
+
+describe.each(helpKbFolders())("%s", (folder) => {
+  it("has the screen guides and the manifest's list of them up to date: run pnpm help:kb", () => {
+    expect(helpKbDrift(folder)).toEqual([]);
   });
 });

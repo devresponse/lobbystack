@@ -2,6 +2,8 @@
 
 Everything a RealInfoBot business needs to answer questions about RealInfoBot itself: what it does, setting it up, every screen of the app, plans, prices and billing, privacy and the terms, and fixing common problems. One command loads it into a business through the API and makes that business's AI agent RealInfoBot's support assistant.
 
+For the people thinking of buying RealInfoBot, the sales knowledge base in [`../realinfobot-sales/`](../realinfobot-sales/README.md) goes into a business of its own.
+
 ## What's in this folder
 
 | Path | What it is |

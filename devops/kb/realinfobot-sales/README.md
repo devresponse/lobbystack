@@ -33,7 +33,7 @@ Every fact follows the app, as the maintainer chose on 2026-11-28 for the suppor
 1. **Make a business for sales alone,** such as "RealInfoBot Sales", separate from the support business. Documents, FAQs, rules and the business summary are shared by every AI agent of a business, so support and sales in one business would mix their answers, and both sets of FAQs would compete for the 8 every chat and call keeps ready.
 2. **Give it room.** On the free plan the assistant answers 5 website chats and 30 voice minutes a month, then stops. A managed plan has no allowances: with the deployment's operator platform key, run `pnpm -s lobbystack billing managed-plan --business <business id>`.
 3. **Make an API key** in that business, as an owner or admin: **Settings** > **API keys**, with `business:read`, `business:write`, `knowledge:read` and `knowledge:write`.
-4. **Match the name and time zone.** `business.name` ("RealInfoBot Sales") and `business.timezone` (America/Edmonton) in `realinfobot-sales-kb.yaml` are guesses: make them the business's own, letter for letter. A different name stops the run before anything changes, but a different time zone, or the same name in other capitals, changes the business. `pnpm -s lobbystack business get` shows both.
+4. **Match the name and time zone.** `business.name` and `business.timezone` in `realinfobot-sales-kb.yaml` are set for RealInfoBot's sales business on ca.realinfobot.com. For any other business, make them its own, letter for letter. A different name stops the run before anything changes, but a different time zone, or the same name in other capitals, changes the business. `pnpm -s lobbystack business get` shows both.
 
 ## Load it
 

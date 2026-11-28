@@ -486,6 +486,26 @@ describe("top-ups on sale on the plan page", () => {
     expect(JSON.parse(String(init!.body))).toEqual({ businessId: "business", topUp: "topup_100_90" });
   });
 
+  it("shows the top-ups on sale once when the screen draws again beside the promo code field", async () => {
+    const errors = vi.spyOn(console, "error");
+    setup({ plan: "free_cloud", extra: { topUpOffers: [offer] } });
+    expect(screen.getByText("billing.promo.link")).toBeTruthy();
+    expect(screen.getAllByText("billing.topUps.buy.title")).toHaveLength(1);
+    // Fresh billing data draws the screen again. The top-ups and the promo code field once shared a key, so each new
+    // drawing left the old top-ups in the page and added another below them.
+    const client = clients.at(-1)!;
+    for (let drawing = 0; drawing < 2; drawing += 1) {
+      await act(async () => {
+        client.setQueryData(["billing", "business"], (data: Record<string, unknown>) => ({ ...data, drawing }));
+        // React Query tells the screen on a timer.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    expect(screen.getAllByText("billing.topUps.buy.title")).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "100 extra minutes" })).toHaveLength(1);
+    expect(errors.mock.calls.some(([message]) => String(message).includes("two children with the same key"))).toBe(false);
+  });
+
   it("shows nothing to buy when no top-up can be bought now", () => {
     setup({ plan: "starter", extra: { topUpOffers: [{ ...offer, checkoutAvailable: false }] } });
     expect(screen.queryByText("billing.topUps.buy.title")).toBeNull();

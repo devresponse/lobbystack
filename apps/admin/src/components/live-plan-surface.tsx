@@ -324,8 +324,10 @@ export function LivePlanSurface() {
           {packs.length > 0 && !planPack && plan !== "self_host" && plan !== "enterprise" ? <HeldPacks locale={locale} packs={packs} /> : null}
           {/* Top-ups add to the plan without changing it; on Enterprise, which has no allowances, nothing draws on them. */}
           {plan !== "self_host" ? <HeldTopUps counted={plan !== "enterprise"} locale={locale} topUps={billing.data.topUps ?? []} /> : null}
-          {/* Top-ups on sale, on Free or a pack, for those who manage billing; nothing shows when none may be bought. */}
-          <TopUpOffers key={business.businessId} businessId={business.businessId} locale={locale} offers={billing.data.topUpOffers ?? []} />
+          {/* Top-ups on sale, on Free or a pack, for those who manage billing; nothing shows when none may be bought. Its key
+              differs from the promo code field's beside it: two siblings with one key made React leave the old section in
+              the page each time the screen drew again, so the top-ups showed twice, then more. */}
+          <TopUpOffers key={`top-ups:${business.businessId}`} businessId={business.businessId} locale={locale} offers={billing.data.topUpOffers ?? []} />
           {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} leavesPacks={packMinutesLeft > 0 ? { minutesLeft: packMinutesLeft } : null} /> : null}
           {(canUpgrade || canManage || paymentActionUrl || planActions) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

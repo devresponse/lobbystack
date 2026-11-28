@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { builtInBillingPlanLimits, builtInBillingPlanList, type BillingCodeView, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
+import { builtInBillingPlanLimits, builtInBillingPlanList, type BillingCodeView, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type BillingTopUpHolding } from "@lobbystack/shared";
 import { PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { LivePlanSurface } from "./live-plan-surface";
 import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
@@ -14,7 +14,7 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 const clients: QueryClient[] = [];
 beforeEach(() => { route.search = new URLSearchParams(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup({ provider = "polar", planActions = false, paymentActionUrl = null as string | null, cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null, packStatus = "paid", packEnded = null as "replaced" | "refunded" | null, packReplies = [] as Array<Record<string, unknown>>, extra = {} as Record<string, unknown> } = {}) {
+function setup({ provider = "polar", planActions = false, paymentActionUrl = null as string | null, cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null, packStatus = "paid", packEnded = null as "replaced" | "refunded" | null, packReplies = [] as Array<Record<string, unknown>>, topUpCheckout = "paid", topUpEnded = null as "refunded" | null, extra = {} as Record<string, unknown> } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
   const billing = { provider, providerName: provider === "stripe" ? "Stripe" : "Polar", planActions, cancelsAt, nextChange, paymentActionUrl, permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [], ...extra };
@@ -22,7 +22,9 @@ function setup({ provider = "polar", planActions = false, paymentActionUrl = nul
   // The pack checkout's reads, in turn when packReplies lists them, the last one repeating.
   let packReads = 0;
   const packReply = () => ({ status: packStatus, checkoutUrl: null, error: null, packStatus: packEnded, synced: packStatus === "paid" && !packEnded, closedForPlan: false, refusal: null, providerName: "Polar", ...packReplies[Math.min(packReads++, packReplies.length - 1)] });
-  const fetchMock = vi.fn(async (url: string) => url.includes("/packs/checkout?") ? Response.json(packReply()) : url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
+  // A top-up checkout's read: paid with its top-up live, unless topUpEnded says its payment went back first.
+  const topUpReply = () => ({ status: topUpCheckout, checkoutUrl: null, error: null, topUpStatus: topUpCheckout === "paid" ? topUpEnded ?? "active" : null, synced: topUpCheckout === "paid" && !topUpEnded, refusal: null, providerName: "Polar" });
+  const fetchMock = vi.fn(async (url: string) => url.includes("/top-ups/checkout?") ? Response.json(topUpReply()) : url.includes("/packs/checkout?") ? Response.json(packReply()) : url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
   if (billingFails) fetchMock.mockResolvedValueOnce(Response.json({ error: "Unavailable" }, { status: 503 }));
   vi.stubGlobal("fetch", fetchMock);
   render(<QueryClientProvider client={client}><UpgradePlanDialogProvider onOpen={vi.fn()}><LivePlanSurface /></UpgradePlanDialogProvider></QueryClientProvider>);
@@ -418,5 +420,96 @@ describe("prepaid packs on the plan page", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("top-ups on the plan page", () => {
+  const none = { voiceSeconds: 0, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 };
+  const topUp = (fields: Partial<BillingTopUpHolding>): BillingTopUpHolding => ({ id: "top-up", source: "grant", code: null, note: null, offer: null, names: null, amountCents: 0, refundedCents: 0, currency: null, gives: none, used: none, status: "active", startsAt: "2026-11-01T00:00:00Z", endsAt: null, createdAt: "2026-11-01T00:00:00Z", revokedAt: null, ...fields });
+  const held = [
+    topUp({ id: "spring", note: "Spring promotion", gives: { ...none, voiceSeconds: 3_600, outboundCallAttempts: 10 }, used: { ...none, voiceSeconds: 900 }, endsAt: "2026-12-31T00:00:00Z" }),
+    topUp({ id: "code", source: "code", code: "SPRING-HOURS", status: "scheduled", gives: { ...none, alertSmsSegments: 50 }, startsAt: "2027-01-01T12:00:00Z" }),
+    topUp({ id: "ended", note: "Last year's promotion", status: "expired", gives: { ...none, voiceSeconds: 600 }, endsAt: "2026-01-01T00:00:00Z" }),
+  ];
+
+  it("lists those that count now or will under the plan, with what each has left, and none that ended", () => {
+    setup({ plan: "starter", extra: { topUps: held } });
+    expect(screen.getByText("billing.topUps.title")).toBeTruthy();
+    expect(screen.getByText("billing.topUps.description")).toBeTruthy();
+    expect(screen.getByText("Spring promotion")).toBeTruthy();
+    // 45 of its 60 minutes and all 10 transfers left; a code's top-up named by its code, and when it starts.
+    expect(translate).toHaveBeenCalledWith("billing.topUps.left", { left: "45", total: "60" });
+    expect(translate).toHaveBeenCalledWith("billing.topUps.left", { left: "10", total: "10" });
+    expect(translate).toHaveBeenCalledWith("billing.topUps.fromCode", { code: "SPRING-HOURS" });
+    expect(translate).toHaveBeenCalledWith("billing.topUps.startsOn", { date: "Jan 1, 2027" });
+    expect(screen.queryByText("Last year's promotion")).toBeNull();
+  });
+
+  it("says nothing draws on them on Enterprise, and shows none on a self-hosted deployment or without any", () => {
+    setup({ plan: "enterprise", extra: { topUps: held } });
+    expect(screen.getByText("billing.topUps.notCounted")).toBeTruthy();
+    cleanup();
+    setup({ plan: "self_host", extra: { topUps: held } });
+    expect(screen.queryByText("billing.topUps.title")).toBeNull();
+    cleanup();
+    setup({ plan: "starter" });
+    expect(screen.queryByText("billing.topUps.title")).toBeNull();
+  });
+
+  it("names a bought top-up by its name on sale, and says when a dispute holds one", () => {
+    setup({ plan: "free_cloud", extra: { topUps: [
+      topUp({ id: "bought", source: "purchase", offer: "topup_100_90", names: { en: "100 extra minutes" }, amountCents: 2_500, currency: "cad", gives: { ...none, voiceSeconds: 6_000 }, endsAt: "2027-02-24T00:00:00Z" }),
+      topUp({ id: "held", source: "purchase", offer: "topup_retired", status: "frozen", amountCents: 2_500, currency: "cad", gives: { ...none, voiceSeconds: 6_000 }, endsAt: "2027-02-24T00:00:00Z" }),
+    ] } });
+    expect(screen.getByText("100 extra minutes")).toBeTruthy();
+    // Without its names, a purchase is said as bought.
+    expect(screen.getByText("billing.topUps.bought")).toBeTruthy();
+    expect(screen.getByText("billing.topUps.frozen")).toBeTruthy();
+  });
+});
+
+describe("top-ups on sale on the plan page", () => {
+  const offer = { code: "topup_100_90", names: { en: "100 extra minutes" }, gives: { voiceSeconds: 6_000, alertSmsSegments: 0, outboundCallAttempts: 0, chatAiUnits: 0 }, days: 90, amountCents: 2_500, currency: "cad", checkoutAvailable: true };
+
+  it("sells each top-up the business may buy with its price, what it adds and how long it lasts, and starts its checkout", async () => {
+    const fetchMock = setup({ plan: "free_cloud", extra: { topUpOffers: [offer, { ...offer, code: "topup_unsold", names: { en: "Unsold" }, checkoutAvailable: false }] } });
+    expect(screen.getByText("billing.topUps.buy.title")).toBeTruthy();
+    const card = screen.getByRole("region", { name: "100 extra minutes" });
+    expect(card.textContent).toContain("CA$25");
+    expect(translate).toHaveBeenCalledWith("billing.topUps.buy.lasts", { count: 90 });
+    // One the provider doesn't sell here shows no button.
+    expect(screen.queryByRole("region", { name: "Unsold" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "billing.topUps.buy.buy" }));
+    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit | undefined]>;
+    await waitFor(() => expect(calls.some(([url, init]) => url === "/api/billing/top-ups/checkout" && init?.method === "POST")).toBe(true));
+    const [, init] = calls.find(([url, request]) => url === "/api/billing/top-ups/checkout" && request?.method === "POST")!;
+    expect(JSON.parse(String(init!.body))).toEqual({ businessId: "business", topUp: "topup_100_90" });
+  });
+
+  it("shows nothing to buy when no top-up can be bought now", () => {
+    setup({ plan: "starter", extra: { topUpOffers: [{ ...offer, checkoutAvailable: false }] } });
+    expect(screen.queryByText("billing.topUps.buy.title")).toBeNull();
+  });
+
+  it("waits for a top-up's payment when the provider sends the person back, then says it was added and cleans the address", async () => {
+    route.search = new URLSearchParams("topUp=success&packCheckoutId=tc-1");
+    const fetchMock = setup({ plan: "free_cloud" });
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/settings/plan"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/billing/top-ups/checkout?checkoutId=tc-1&businessId=business", expect.objectContaining({ credentials: "include" }));
+    expect(translate).toHaveBeenCalledWith("billing.topUps.buy.toast.added");
+    // A top-up's return is never read as a pack's.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/packs/checkout?"))).toBe(false);
+    expect(route.router.replace).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [{ topUpCheckout: "failed" }, "billing.topUps.buy.toast.failed"],
+    [{ topUpEnded: "refunded" as const }, "billing.topUps.buy.toast.refundedFirst"],
+  ])("says what came of a top-up's payment (%o)", async (reply, key) => {
+    route.search = new URLSearchParams("topUp=success&packCheckoutId=tc-1");
+    setup({ plan: "free_cloud", ...reply });
+    await waitFor(() => expect(route.router.replace).toHaveBeenCalledWith("/settings/plan"));
+    expect(translate).toHaveBeenCalledWith(key);
+    expect(translate).not.toHaveBeenCalledWith("billing.topUps.buy.toast.added");
   });
 });

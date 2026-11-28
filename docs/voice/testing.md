@@ -10,6 +10,7 @@ Run `pnpm voice:eval` after any change that can alter what GPT-Live says or when
 - The call controller in `packages/agent-core/src/live/callController.ts`
 - The end-call flow: the `endCall` tool, the caller check in `packages/agent-core/src/live/callerDone.ts`, or the backend prompt
 - What the worker sends GPT-Live as delegation results
+- The GPT-Live model calls run on (`LIVE_MODEL`, `packages/shared/src/liveModel.ts`): run the eval on both models, as under [Compare GPT-Live models](#compare-gpt-live-models)
 
 Run `pnpm voice:call` once the change is deployed to staging, before you merge. It covers what the eval skips: Twilio, the SIP trunk, the admin webhook, and the worker attaching to the call.
 
@@ -25,6 +26,15 @@ Run it with an OpenAI API key:
 OPENAI_API_KEY=your_openai_api_key pnpm voice:eval
 ```
 
+The script takes the key from the shell, not from `.env`. In PowerShell, set it first in the same window. With PowerShell 7, `Read-Host -MaskInput` asks for it without showing it, so the key stays off the screen and out of PowerShell's history file, which keeps every line typed in full:
+
+```powershell
+$env:OPENAI_API_KEY = Read-Host -MaskInput "OpenAI key"
+pnpm voice:eval
+```
+
+Use a project key, which starts with `sk-proj-`. An admin key, which starts with `sk-admin-`, can't open GPT-Live sessions: the eval stops before any run, and each caller line it tried to voice shows "Voice session access denied".
+
 These options change what runs:
 
 - **`--scenario <name>`**: runs one scenario. Repeat it to run several. Without it, every scenario runs.
@@ -34,6 +44,7 @@ These options change what runs:
 - **`--receptionist <id>`**: with a stored snapshot of a business with several receptionists, plays a call to this one, in its view of the snapshot, as a real call gets it. Without it, the default receptionist takes the call. See [Check several receptionists](#check-several-receptionists).
 - **`--browser`**: plays a browser call, like one from the website widget, instead of a phone call. GPT-Live gets the browser call's instructions, the agent runs on the `web_voice` channel, and the caller's audio skips the phone-line filter. Use it after a change to what browser calls hear, such as how they handle a caller who asks for a person.
 - **`--recorded-greeting`**: opens each call with a recording of the greeting, as phone and browser calls do unless `LIVE_RECORDED_GREETING=false` (see [Open calls with a recording](runtime.md#open-calls-with-a-recording)). Without it, a run opens with the greeting command, which a real call falls back on when it has no recording. The script records the opening once, in a GPT-Live session as the worker does since fork PR #97. A run fails when the receptionist speaks again after the recording, before the caller does. OpenAI's reference sends the copy of the caller's audio only to sidebands, and the eval talks to GPT-Live over a WebSocket session instead, so its recording plays 3 seconds after the session starts rather than when the caller's audio arrives.
+- **`--model <name>`**: runs the receptionist on `gpt-live-1.1` or `gpt-live-1` whatever `LIVE_MODEL` says, since fork PR #245. Without it, the receptionist runs on `LIVE_MODEL`'s model, `gpt-live-1.1` unless set. See [Compare GPT-Live models](#compare-gpt-live-models).
 
 Each run uses under a minute of GPT-Live audio, plus a delegation model call for each hand-over. The default 24 runs should take about 7 minutes. Before them, the 13 distinct caller lines of the default scenarios take one GPT-Live session of a few seconds each, as many at once as `--concurrency` allows. If GPT-Live doesn't say a line as written in three tries, the eval stops before any run and prints the line and what GPT-Live said.
 
@@ -98,6 +109,20 @@ OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --snapshot snapshot.json --re
 ```
 
 The `other-receptionist` scenario runs only by name. Its caller asks for a referral, so use a snapshot where another receptionist handles referrals. The receptionist should say which one handles it and offer to take a message, since it can't transfer the call to another receptionist. The eval fails a run that announces a transfer, but can't check the name, so read the reply.
+
+### Compare GPT-Live models
+
+Calls run on `gpt-live-1.1` since fork PR #245, and `LIVE_MODEL=gpt-live-1` goes back to the earlier model ([choose the GPT-Live model](runtime.md#choose-the-gpt-live-model)). To see how the two differ, run the same scenarios on each, with the same number of runs:
+
+```bash
+OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --model gpt-live-1 --runs 5
+OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --model gpt-live-1.1 --runs 5
+```
+
+- `--model` sets the model of the receptionist's sessions and of the opening `--recorded-greeting` records. The callers' lines are voiced on `LIVE_MODEL`'s model either way, so both runs hear the same kind of caller.
+- The first line names the model, and so does the summary, which starts with `On gpt-live-1.1:`. Compare the pass counts, how often and how soon the receptionist greeted, and the goodbyes, then read the replies for the claimed gains: names, letters, numbers and accents.
+- Add `--recorded-greeting`, `--browser`, `--snapshot` or a language's scenarios to both runs to compare those calls.
+- Each run is under a minute of GPT-Live at $0.05 a minute on either model, so the two runs above, 40 each with the default scenarios, cost under $5 with the caller lines and the delegation model's calls.
 
 ## Place real test calls
 

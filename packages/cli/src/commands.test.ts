@@ -407,6 +407,25 @@ describe("billing status", () => {
     expect(result.out).toMatch(/pack_250_365\s+active\s+250\s+250\s+2026-11-01T10:00:00\.000Z\s+never ends/);
   });
 
+  const topUp = { id: "8c3f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", source: "grant", code: null, note: "Spring promotion", gives: { voice_seconds: 3_600, alert_sms_segments: 0, outbound_call_attempts: 5, chat_units: 0 }, used: { voice_seconds: 930, alert_sms_segments: 0, outbound_call_attempts: 1, chat_units: 0 }, status: "active", starts_at: "2026-11-20T10:00:00.000Z", ends_at: null, created_at: "2026-11-20T10:00:00.000Z", revoked_at: null };
+
+  it("prints each top-up after the plan, with what it has left of what it gave", async () => {
+    const api = fakeApi({ "GET /api/v1/billing": { body: { data: { ...billing, plan: "free_cloud", packs: [], top_ups: [topUp] } } } });
+    const result = await runCli(["billing", "status"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(result.out).toMatch(/Plan:\s+free_cloud/);
+    expect(result.out).toContain("Top-ups");
+    expect(result.out).toMatch(/grant\s+active\s+44\/60\s+-\s+4\/5\s+-\s+2026-11-20T10:00:00\.000Z\s+never ends\s+Spring promotion/);
+  });
+
+  it("grants a top-up from flags, in seconds, and says how to revoke it", async () => {
+    const api = fakeApi({ "POST /api/v1/billing/top-ups": { status: 201, body: { data: { ...topUp, used: { voice_seconds: 0, alert_sms_segments: 0, outbound_call_attempts: 0, chat_units: 0 } } } } });
+    const result = await runCli(["billing", "top-up", "--voice-seconds", "3600", "--outbound-call-attempts", "5", "--note", "Spring promotion"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent[0]!.body).toEqual({ voice_seconds: 3_600, outbound_call_attempts: 5, note: "Spring promotion" });
+    expect(result.out).toContain(`lobbystack billing top-up-revoke ${topUp.id}`);
+  });
+
   it("prints the plan alone for a business without packs, as before", async () => {
     const api = fakeApi({ "GET /api/v1/billing": { body: { data: { ...billing, plan: "free_cloud", packs: [] } } } });
     const result = await runCli(["billing", "status"], { fetch: api.fetch });

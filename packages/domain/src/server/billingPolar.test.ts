@@ -56,7 +56,12 @@ async function apply(fake: FakePolar, file: BillingProfile, options: Partial<Pol
 
 const summary = (steps: ReadonlyArray<{ object: string; action: string }>) => steps.map((step) => `${step.action} ${step.object}`);
 
-/** AlloPlace's catalog with the file's packs, as apply and verify build it. catalogFor leaves them out. */
+/** The brand file without its top-up on sale, for the packs' own tests. */
+function packFile(change: (file: Record<string, any>) => void = () => undefined): BillingProfile {
+  return profile((file) => { delete file.topUps; change(file); });
+}
+
+/** AlloPlace's catalog with the file's packs and top-ups, as apply and verify build it. catalogFor leaves them out. */
 function catalogWithPacks(file: BillingProfile) {
   return desiredPolarCatalog({ brand: "alloplace", profile: file, plans: desiredBillingPlans(file), packs: desiredBillingPacks(file), webhookUrl });
 }
@@ -436,7 +441,7 @@ describe("planPolarChanges", () => {
 
 describe("Polar packs", () => {
   it("gives each pack a one-time product with its price, and leaves the rest as a file without packs has it", () => {
-    const file = profile();
+    const file = packFile();
     const catalog = catalogWithPacks(file);
     expect(catalog.packs.map((pack) => [pack.pack, pack.name, pack.cents, pack.currency, pack.terms])).toEqual(desiredBillingPacks(file).map((pack) => [pack.code, pack.names.en, pack.price.cents, "cad", pack.terms_hash]));
     expect(catalog.packs.at(-1)).toMatchObject({ pack: "pack_1000_365", name: "1,000 minutes, 365 days", cents: 19900 });
@@ -444,7 +449,7 @@ describe("Polar packs", () => {
   });
 
   it("makes a private one-time product for each pack after every call a file without packs gets, links each, and makes no call on a second run", async () => {
-    const file = profile();
+    const file = packFile();
     const plain = await plan(createFakePolar(), file);
     const fake = createFakePolar();
     const { first } = await applyWithPacks(fake, file);
@@ -474,9 +479,9 @@ describe("Polar packs", () => {
 
   it("changes a pack's price on its own product, and puts back its name, its visibility and the Credits taken off it", async () => {
     const fake = createFakePolar();
-    await applyWithPacks(fake, profile());
+    await applyWithPacks(fake, packFile());
     const product = fake.state.products.find((entry) => entry.metadata.lobbystack_pack === "pack_250_90")!;
-    const raised = () => profile((file) => {
+    const raised = () => packFile((file) => {
       file.packs.pack_250_90.prices.onceCents = 6000;
     });
     const { first } = await applyWithPacks(fake, raised());
@@ -497,12 +502,12 @@ describe("Polar packs", () => {
 
   it("refuses a pack product that bills on a cycle, and replaces it with a one-time product only with --allow-replace", async () => {
     const fake = createFakePolar();
-    await applyWithPacks(fake, profile());
+    await applyWithPacks(fake, packFile());
     const product = fake.state.products.find((entry) => entry.metadata.lobbystack_pack === "pack_250_90")!;
     product.recurring_interval = "month";
     product.recurring_interval_count = 1;
-    expect(await planWithPacks(fake, profile())).toEqual({ steps: [], refusals: [{ object: "product", subject: 'Product "250 minutes, 90 days"', message: "\"250 minutes, 90 days\" bills every 1 month, a pack is paid once, and Polar never changes a product's billing cycle. Run with --allow-replace to make a one-time product and archive this one." }] });
-    const { first } = await applyWithPacks(fake, profile(), { allowReplace: true });
+    expect(await planWithPacks(fake, packFile())).toEqual({ steps: [], refusals: [{ object: "product", subject: 'Product "250 minutes, 90 days"', message: "\"250 minutes, 90 days\" bills every 1 month, a pack is paid once, and Polar never changes a product's billing cycle. Run with --allow-replace to make a one-time product and archive this one." }] });
+    const { first } = await applyWithPacks(fake, packFile(), { allowReplace: true });
     expect(first.steps.map((step) => [step.action, step.changes])).toEqual([
       ["create", ['replaces "250 minutes, 90 days", which bills every 1 month: 55.00 CAD once', "private: only an API checkout sells it"]],
       ["archive", ["replaced by a one-time product"]],
@@ -513,9 +518,9 @@ describe("Polar packs", () => {
 
   it("archives a pack product the file no longer has only with --allow-archive, leaves the plans' products alone, and brings it back with the pack", async () => {
     const fake = createFakePolar();
-    await applyWithPacks(fake, profile());
+    await applyWithPacks(fake, packFile());
     const product = fake.state.products.find((entry) => entry.metadata.lobbystack_pack === "pack_250_90")!;
-    const fewer = profile((file) => {
+    const fewer = packFile((file) => {
       delete file.packs.pack_250_90;
     });
     expect(await planWithPacks(fake, fewer)).toEqual({ steps: [], refusals: [{ object: "product", subject: 'Product "250 minutes, 90 days"', message: "It sells pack pack_250_90, which the file no longer has. Run with --allow-archive to archive it; packs bought through it keep their minutes." }] });
@@ -523,12 +528,33 @@ describe("Polar packs", () => {
     expect(first.steps).toEqual([expect.objectContaining({ action: "archive", leftover: true, path: `/v1/products/${product.id}`, changes: ["the file no longer sells it; packs bought through it keep their minutes"] })]);
     expect(fake.state.products.filter((entry) => entry.is_archived).map((entry) => entry.id)).toEqual([product.id]);
     // A file without packs at all would archive every pack product, and no plan's.
-    const none = await plan(fake, profile((file) => {
+    const none = await plan(fake, packFile((file) => {
       delete file.packs;
     }));
     expect(none.steps).toEqual([]);
     expect(none.refusals.map((refusal) => refusal.message.match(/^It sells pack (pack_\d+_\d+)/)?.[1])).toEqual(catalogWithPacks(fewer).packs.map((pack) => pack.pack));
-    const { first: back } = await applyWithPacks(fake, profile());
+    const { first: back } = await applyWithPacks(fake, packFile());
     expect(back.steps).toEqual([expect.objectContaining({ action: "update", path: `/v1/products/${product.id}`, changes: ["bring it back: the file sells this pack again"], body: { is_archived: false } })]);
+  });
+});
+
+describe("Polar top-ups", () => {
+  // A top-up on sale is sold as a pack is: a private one-time product of its own, tagged with its code, after the packs'.
+  it("makes a top-up's private one-time product after every pack's, and links it as a pack's", async () => {
+    const file = profile();
+    const fake = createFakePolar();
+    const { first } = await applyWithPacks(fake, file);
+    const step = first.steps.findIndex((entry) => entry.produces === "pack:topup_100_90");
+    expect(first.steps[step]).toMatchObject({
+      object: "product",
+      action: "create",
+      subject: 'Product "100 extra minutes"',
+      changes: ["25.00 CAD once", "private: only an API checkout sells it"],
+      body: { name: "100 extra minutes", recurring_interval: null, visibility: "private", prices: [{ amount_type: "fixed", price_amount: 2500, price_currency: "cad" }], metadata: { lobbystack_brand: "alloplace", lobbystack_pack: "topup_100_90" } },
+    });
+    expect(step).toBeGreaterThan(first.steps.findIndex((entry) => entry.produces === "pack:pack_1000_365"));
+    const links = polarLinkPlans({ catalog: catalogWithPacks(file), plans: desiredBillingPlans(file), snapshot: await client(fake).readSnapshot(), now });
+    expect(links.missing).toEqual([]);
+    expect(links.packs.find((pack) => pack.code === "topup_100_90")).toMatchObject({ currency: "cad", provider_ref: fake.state.products.find((product) => product.metadata.lobbystack_pack === "topup_100_90")!.id });
   });
 });

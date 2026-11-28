@@ -3,7 +3,7 @@ import { APIError } from "openai";
 
 import { buildBrowserSessionConfig } from "@lobbystack/agent-core/live/session";
 import { finishLiveCall, getWebVoiceBillingAllowance, recordAiTrace, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, snapshotForReceptionist, startLiveWebCall } from "@lobbystack/domain";
-import type { BusinessContextSnapshot } from "@lobbystack/shared";
+import { withLiveModelFallback, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
 import { asApiResponse, readJson } from "@/lib/api-helpers";
 import { loadValidBusinessSnapshot } from "@/lib/business-snapshot";
@@ -135,12 +135,16 @@ async function startBrowserCall(request: Request) {
     timing.mark("greeting");
 
     const client = getLiveClient();
-    const sessionConfig = buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true });
-    const live = await client.live
-      .create({ session: sessionConfig, transport: { type: "webrtc", sdp: body.sdp } })
-      .catch((error: unknown) => {
-        throw error instanceof APIError && typeof error.status === "number" ? new LiveSessionRefusedError(error) : error;
-      });
+    // On LIVE_MODEL's model, and on gpt-live-1 when OpenAI refuses that one in
+    // a way gpt-live-1 may not share, such as a project that doesn't allow
+    // gpt-live-1.1 or its own concurrent-session limit being full.
+    const { config: sessionConfig, result: live } = await withLiveModelFallback(
+      buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true }),
+      async (session) => await client.live.create({ session, transport: { type: "webrtc", sdp: body.sdp } }),
+      (fallback) => logEvent("warn", "live.model_fallback", { channel: "web_voice", widgetId: access.widgetId, ...fallback }),
+    ).catch((error: unknown) => {
+      throw error instanceof APIError && typeof error.status === "number" ? new LiveSessionRefusedError(error) : error;
+    });
     timing.mark("openai");
     const sessionId = live.session.id;
     addToCallContext({ sessionId });
@@ -175,11 +179,12 @@ async function startBrowserCall(request: Request) {
           ...(access.prospectDemoId ? { intakeOnly: true } : {}),
           ...(recordedGreeting ? { recordedGreeting } : {}),
           ...(receptionistId ? { receptionistId } : {}),
+          model: sessionConfig.model,
         }),
       ]);
       timing.mark("attach");
       // Where the wait before the call connects went, for the logs.
-      logEvent("info", "live.browser_start", { widgetId: access.widgetId, ...timing.stages(), ...(recordedGreeting ? { greetingRecording: recordedGreeting.play } : {}) });
+      logEvent("info", "live.browser_start", { widgetId: access.widgetId, model: sessionConfig.model, ...timing.stages(), ...(recordedGreeting ? { greetingRecording: recordedGreeting.play } : {}) });
       // GPT-Live writes no transcript for the greeting's recording, so the
       // browser's captions get its words here.
       return NextResponse.json({ sessionId, endToken: liveSessionEndToken(sessionId), sdp: live.transport.sdp, ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}), ...(recordedGreeting?.play ? { greeting: recordedGreeting.text } : {}) }, { status: 201, headers: { ...cors, "server-timing": timing.header() } });
@@ -191,7 +196,7 @@ async function startBrowserCall(request: Request) {
         .catch(() => client.live.sessions.hangup(sessionId))
         .catch((endError: unknown) => logEvent("error", "live.browser_start_cleanup_failed", { error: endError }));
       // OpenAI bills 15 seconds for creating a WebRTC session, even one that never starts.
-      if (callId) await finishLiveCall(domain, { businessId: access.businessId, callId, seconds: WEBRTC_CREATION_SECONDS, measuredSeconds: 0, end: "setup_failed", channel: "web_voice" }).catch(() => undefined);
+      if (callId) await finishLiveCall(domain, { businessId: access.businessId, callId, seconds: WEBRTC_CREATION_SECONDS, measuredSeconds: 0, end: "setup_failed", channel: "web_voice", model: sessionConfig.model }).catch(() => undefined);
       if (access.prospectDemoId) await recordProspectDemoCallError(domain, { businessId: access.businessId, prospectDemoId: access.prospectDemoId, ...(callId ? { callId } : {}), reason: "web_call_start_failed" }).catch(() => undefined);
       const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined;
       if (code === "voice_limit_reached") return denied(402, code, cors);

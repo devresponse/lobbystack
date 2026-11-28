@@ -1,4 +1,4 @@
-import type { BillingPlanLimits, BillingPlanSlug } from "@lobbystack/shared";
+import type { BillingPlanLimits, BillingPlanSlug, BillingTopUpOffer } from "@lobbystack/shared";
 import type { AnalyticsChannelCounts } from "./analytics-channels";
 
 export type WorkspaceViewModel = {
@@ -130,7 +130,23 @@ export type BillingUsageViewModel = {
     usageComplete: boolean;
     /** The live prepaid packs' balances on the prepaid tier, which every use draws instead of a monthly allowance; absent or null otherwise. */
     pack?: PackUsageViewModel | null;
+    /** What the live top-ups hold on top of the plan, which uses draw once the plan's own allowance is used up; null without one. */
+    topUp?: TopUpUsageViewModel | null;
   } | null;
+  /** The top-ups on sale, each saying whether the viewer may buy it now; absent from answers before top-ups were sold. */
+  topUpOffers?: BillingTopUpOffer[];
+};
+
+/** What a business's live top-ups hold of each allowance, as GET /api/billing's usage status reports it. */
+export type TopUpUsageViewModel = {
+  voiceSeconds: PackAllowanceViewModel;
+  alertSmsSegments: PackAllowanceViewModel;
+  outboundCallAttempts: PackAllowanceViewModel;
+  chatAiUnits: PackAllowanceViewModel;
+  /** When the live top-up that ends first ends; null when none ends. */
+  nextEndsAt: string | null;
+  /** When the last live top-up ends; null when one never ends. */
+  lastEndsAt: string | null;
 };
 
 /** What a pack holds of one allowance for its whole length: its total after refunds, what was used, and what is left. */

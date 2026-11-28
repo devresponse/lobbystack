@@ -1,6 +1,6 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  const { assertProductionSecrets, booleanSettingErrors, brandStartupReport, currentBrand, resolveBrand } = await import("@lobbystack/shared");
+  const { assertProductionSecrets, booleanSettingErrors, brandStartupReport, currentBrand, liveModelSettingErrors, resolveBrand } = await import("@lobbystack/shared");
   assertProductionSecrets(process.env, [
     "BETTER_AUTH_SECRET",
     "INTERNAL_SERVICE_SECRET",
@@ -12,8 +12,9 @@ export async function register(): Promise<void> {
   ]);
   // A true/false setting whose value is neither, such as LIVE_PROTOTYPE_ENABLED=enabled,
   // used to read as off and say nothing (AUDIT-017). Now the admin doesn't start,
-  // and names every setting it can't read.
-  const settingErrors = booleanSettingErrors(process.env);
+  // and names every setting it can't read. So does a LIVE_MODEL it doesn't know,
+  // which would otherwise fail every call.
+  const settingErrors = [...booleanSettingErrors(process.env), ...liveModelSettingErrors(process.env)];
   if (settingErrors.length) throw new Error(settingErrors.join(" "));
   // On Railway the limits per IP address always run (AUDIT-004): without the
   // header that names the visitor's address, the admin doesn't start, and

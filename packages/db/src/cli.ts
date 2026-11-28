@@ -360,6 +360,10 @@ async function main(): Promise<void> {
         if (receptionistFailures.length > 0) {
           throw new Error(`Receptionist grant verification failed for: ${receptionistFailures.join(", ")}`);
         }
+        const topUpFailures = await verifyTopUpGrants(migrator);
+        if (topUpFailures.length > 0) {
+          throw new Error(`Top-up grant verification failed for: ${topUpFailures.join(", ")}`);
+        }
         const controlFailures = await controlRoleFailures(migrator.db);
         if (controlFailures.length > 0) {
           throw new Error(`Control panel role verification failed for: ${controlFailures.join(", ")}`);
@@ -535,6 +539,44 @@ async function verifyReceptionistGrants(client: ReturnType<typeof createDatabase
       select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
       where p.oid = to_regprocedure(function_name) and acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
     )
+  `);
+  return result.rows.map((row) => row.failure);
+}
+
+/**
+ * The top-up tables' grants (migration 0154). A top-up and its draws go only
+ * with their business, so no role deletes either. Only the worker writes them;
+ * the app only reads them, and reads and adds a top-up code only through
+ * app.billing_top_up_code and app.redeem_billing_top_up_code, which no other
+ * role may run.
+ */
+async function verifyTopUpGrants(client: ReturnType<typeof createDatabaseClient>): Promise<string[]> {
+  const result = await client.db.execute<{ failure: string }>(sql`
+    select role_name || ':' || table_name || ':' || privilege_type as failure
+    from (values
+      ('lobbystack_app', 'billing_top_ups', 'SELECT'), ('lobbystack_app', 'billing_top_up_draws', 'SELECT'),
+      ('lobbystack_worker', 'billing_top_ups', 'SELECT'), ('lobbystack_worker', 'billing_top_ups', 'INSERT'), ('lobbystack_worker', 'billing_top_ups', 'UPDATE'),
+      ('lobbystack_worker', 'billing_top_up_draws', 'SELECT'), ('lobbystack_worker', 'billing_top_up_draws', 'INSERT'), ('lobbystack_worker', 'billing_top_up_draws', 'UPDATE'),
+      ('lobbystack_readonly', 'billing_top_ups', 'SELECT'), ('lobbystack_readonly', 'billing_top_up_draws', 'SELECT')
+    ) as expected(role_name, table_name, privilege_type)
+    where not has_table_privilege(role_name, 'public.' || table_name, privilege_type)
+    union all
+    select role_name || ':' || table_name || ':DELETE'
+    from unnest(array['lobbystack_app', 'lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
+    cross join unnest(array['billing_top_ups', 'billing_top_up_draws']) as table_name
+    where exists (select 1 from pg_roles where rolname = role_name)
+      and has_table_privilege(role_name, 'public.' || table_name, 'DELETE')
+    union all
+    select 'lobbystack_app:' || table_name || ':' || privilege_type
+    from unnest(array['billing_top_ups', 'billing_top_up_draws']) as table_name
+    cross join unnest(array['INSERT', 'UPDATE']) as privilege_type
+    where has_table_privilege('lobbystack_app', 'public.' || table_name, privilege_type)
+    union all
+    select role_name || ':' || function_name || ':EXECUTE'
+    from unnest(array['lobbystack_app', 'lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
+    cross join unnest(array['app.billing_top_up_code(text)', 'app.redeem_billing_top_up_code(text)']) as function_name
+    where exists (select 1 from pg_roles where rolname = role_name)
+      and has_function_privilege(role_name, function_name, 'EXECUTE') <> (role_name = 'lobbystack_app')
   `);
   return result.rows.map((row) => row.failure);
 }

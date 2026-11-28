@@ -5,10 +5,10 @@ exports[`pnpm billing's output > applies alloplace, then verifies it 1`] = `
   "applied": {
     "code": 0,
     "err": "",
-    "out": "alloplace billing.json v1 (11bba3cd1000) to https://demo.alloplace.com and Polar sandbox organization Test organization (org_test)
+    "out": "alloplace billing.json v1 (92dacb785ef0) to https://demo.alloplace.com and Polar sandbox organization Test organization (org_test)
 
 Postgres: the file is applied
-Polar: 20 calls
+Polar: 21 calls
   tag Meter "Voice minutes": tag it as LobbyStack's
   tag Meter "Alert SMS segments": tag it as LobbyStack's
   tag Meter "Call transfers": tag it as LobbyStack's
@@ -27,9 +27,10 @@ Polar: 20 calls
   create Product "1,000 minutes, 90 days": 179.00 CAD once; private: only an API checkout sells it
   create Product "1,000 minutes, 180 days": 189.00 CAD once; private: only an API checkout sells it
   create Product "1,000 minutes, 365 days": 199.00 CAD once; private: only an API checkout sells it
+  create Product "100 extra minutes": 25.00 CAD once; private: only an API checkout sells it
   archive Product "Starter annual": replaced by a product that invoices its overage each month; its subscribers keep it
   archive Product "Pro annual": replaced by a product that invoices its overage each month; its subscribers keep it
-Links: 4 live prices of 2 sold plans and 9 packs, written once Polar sells what the file says
+Links: 4 live prices of 2 sold plans, 9 packs and 1 top-up, written once Polar sells what the file says
 
 Polar:
   done tag Meter "Voice minutes": tag it as LobbyStack's
@@ -50,30 +51,31 @@ Polar:
   done create Product "1,000 minutes, 90 days": 179.00 CAD once; private: only an API checkout sells it
   done create Product "1,000 minutes, 180 days": 189.00 CAD once; private: only an API checkout sells it
   done create Product "1,000 minutes, 365 days": 199.00 CAD once; private: only an API checkout sells it
+  done create Product "100 extra minutes": 25.00 CAD once; private: only an API checkout sells it
   done archive Product "Starter annual": replaced by a product that invoices its overage each month; its subscribers keep it
   done archive Product "Pro annual": replaced by a product that invoices its overage each month; its subscribers keep it
 
-Links: recorded 24 changes in run <uuid>.
+Links: recorded 26 changes in run <uuid>.
 
-alloplace billing.json v1 (11bba3cd1000) against Polar sandbox and https://demo.alloplace.com
+alloplace billing.json v1 (92dacb785ef0) against Polar sandbox and https://demo.alloplace.com
 
 File and Postgres
-  ok     catalog 11bba3cd1000 applied
+  ok     catalog 92dacb785ef0 applied
   ok     the deployed code was built with this file
-  ok     4 plans, 4 live prices, 9 packs, 9 live pack prices
-  ok     2 sold plans and 9 packs active and linked
+  ok     4 plans, 4 live prices, 9 packs, 1 top-up, 10 live pack and top-up prices
+  ok     2 sold plans, 9 packs and 1 top-up active and linked
 
 File and Polar
   ok     currency CAD, one subscription per customer, plan changes on in the portal
   ok     3 meters
   ok     no Credits on the products: the worker reports only each month's overage
-  ok     4 products and 9 one-time pack products, tagged and priced as the file says, annual ones invoicing overage each month
+  ok     4 products and 10 one-time pack and top-up products, tagged and priced as the file says, annual ones invoicing overage each month
   ok     no discounts
   ok     webhook https://demo.alloplace.com/api/webhooks/polar, Raw, on, API version 2026-10
   ok     nothing else tagged for alloplace
 
 Postgres and Polar
-  ok     4 products and 9 pack products linked, all live, tagged and priced as the rows say
+  ok     4 products and 10 pack and top-up products linked, all live, tagged and priced as the rows say
   ok     Polar sandbox organization Test organization
   ok     webhook secrets match
   warn   product_vars: POLAR_STARTER_ANNUAL_PRODUCT_ID is product_0016, not the linked product product_0035. Checkout sells the linked product and ignores the variable, so remove it from the instance.
@@ -89,7 +91,7 @@ Result: in sync (exit 0).",
         {
           "code": "catalog_hash",
           "level": "ok",
-          "message": "catalog 11bba3cd1000 applied",
+          "message": "catalog 92dacb785ef0 applied",
           "pair": "file_postgres",
           "subject": "catalog",
         },
@@ -103,14 +105,14 @@ Result: in sync (exit 0).",
         {
           "code": "plan_rows",
           "level": "ok",
-          "message": "4 plans, 4 live prices, 9 packs, 9 live pack prices",
+          "message": "4 plans, 4 live prices, 9 packs, 1 top-up, 10 live pack and top-up prices",
           "pair": "file_postgres",
           "subject": "rows",
         },
         {
           "code": "not_linked",
           "level": "ok",
-          "message": "2 sold plans and 9 packs active and linked",
+          "message": "2 sold plans, 9 packs and 1 top-up active and linked",
           "pair": "file_postgres",
           "subject": "links",
         },
@@ -138,7 +140,7 @@ Result: in sync (exit 0).",
         {
           "code": "product",
           "level": "ok",
-          "message": "4 products and 9 one-time pack products, tagged and priced as the file says, annual ones invoicing overage each month",
+          "message": "4 products and 10 one-time pack and top-up products, tagged and priced as the file says, annual ones invoicing overage each month",
           "pair": "file_polar",
           "subject": "product",
         },
@@ -166,7 +168,7 @@ Result: in sync (exit 0).",
         {
           "code": "linked_id",
           "level": "ok",
-          "message": "4 products and 9 pack products linked, all live, tagged and priced as the rows say",
+          "message": "4 products and 10 pack and top-up products linked, all live, tagged and priced as the rows say",
           "pair": "postgres_polar",
           "subject": "links",
         },
@@ -219,12 +221,13 @@ exports[`pnpm billing's output > plans alloplace on an empty organization 1`] = 
   "out": {
     "brand": "alloplace",
     "catalog": [],
-    "hash": "11bba3cd1000a0f965210608b649775b5f46653aa7bc86129f377cfb085b75df",
+    "hash": "92dacb785ef0db2ea08a6c195c9c3dc492a7dc78b07c5332d63222e8f0019e58",
     "instance": "https://demo.alloplace.com",
     "links": {
       "packs": 9,
       "plans": 2,
       "prices": 4,
+      "top_ups": 1,
     },
     "polar": {
       "env": "sandbox",
@@ -388,6 +391,15 @@ exports[`pnpm billing's output > plans alloplace on an empty organization 1`] = 
         "object": "product",
         "subject": "Product "1,000 minutes, 365 days"",
       },
+      {
+        "action": "create",
+        "changes": [
+          "25.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "100 extra minutes"",
+      },
     ],
   },
 }
@@ -400,12 +412,13 @@ exports[`pnpm billing's output > plans alloplace on the objects polar-setup.mjs 
   "out": {
     "brand": "alloplace",
     "catalog": [],
-    "hash": "11bba3cd1000a0f965210608b649775b5f46653aa7bc86129f377cfb085b75df",
+    "hash": "92dacb785ef0db2ea08a6c195c9c3dc492a7dc78b07c5332d63222e8f0019e58",
     "instance": "https://demo.alloplace.com",
     "links": {
       "packs": 9,
       "plans": 2,
       "prices": 4,
+      "top_ups": 1,
     },
     "polar": {
       "env": "sandbox",
@@ -573,6 +586,15 @@ exports[`pnpm billing's output > plans alloplace on the objects polar-setup.mjs 
         "subject": "Product "1,000 minutes, 365 days"",
       },
       {
+        "action": "create",
+        "changes": [
+          "25.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "100 extra minutes"",
+      },
+      {
         "action": "archive",
         "changes": [
           "replaced by a product that invoices its overage each month; its subscribers keep it",
@@ -600,12 +622,13 @@ exports[`pnpm billing's output > plans realinfobot on an empty organization 1`] 
   "out": {
     "brand": "realinfobot",
     "catalog": [],
-    "hash": "ec72d0319be891a8ef41d88ca2e93b4ef0b2c40fda328c39f0778ded43233b01",
+    "hash": "f688803fe7cb5bb72453388de014ed1b15fe7e7fa016db98ea85f1a8c44cc2da",
     "instance": "https://demo.alloplace.com",
     "links": {
       "packs": 3,
       "plans": 0,
       "prices": 0,
+      "top_ups": 1,
     },
     "polar": {
       "env": "sandbox",
@@ -681,6 +704,15 @@ exports[`pnpm billing's output > plans realinfobot on an empty organization 1`] 
         "object": "product",
         "subject": "Product "Pro: 6 listings, 365 days"",
       },
+      {
+        "action": "create",
+        "changes": [
+          "39.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "100 extra minutes"",
+      },
     ],
   },
 }
@@ -693,12 +725,13 @@ exports[`pnpm billing's output > plans realinfobot on the objects polar-setup.mj
   "out": {
     "brand": "realinfobot",
     "catalog": [],
-    "hash": "ec72d0319be891a8ef41d88ca2e93b4ef0b2c40fda328c39f0778ded43233b01",
+    "hash": "f688803fe7cb5bb72453388de014ed1b15fe7e7fa016db98ea85f1a8c44cc2da",
     "instance": "https://demo.alloplace.com",
     "links": {
       "packs": 3,
       "plans": 0,
       "prices": 0,
+      "top_ups": 1,
     },
     "polar": {
       "env": "sandbox",
@@ -756,6 +789,15 @@ exports[`pnpm billing's output > plans realinfobot on the objects polar-setup.mj
         ],
         "object": "product",
         "subject": "Product "Pro: 6 listings, 365 days"",
+      },
+      {
+        "action": "create",
+        "changes": [
+          "39.00 CAD once",
+          "private: only an API checkout sells it",
+        ],
+        "object": "product",
+        "subject": "Product "100 extra minutes"",
       },
     ],
   },

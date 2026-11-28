@@ -1,18 +1,20 @@
 import { and, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 
 import { billingAccounts, billingCheckoutRequests, billingPackCheckouts, billingPackOffers, billingPackPlans, billingPackPrices, billingPacks, businesses, enqueueOutbox, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { isBillingPackStatus, isUuid, isYearlyBillingInterval, type BillingPackStatus } from "@lobbystack/shared";
+import { isBillingPackStatus, isUuid, isYearlyBillingInterval, topUpSoldOnPlan, type BillingPackKind, type BillingPackStatus, type BillingTopUpStatus, type TopUpCheckoutRefusalCode } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, BILLING_CHECKOUT_EXPIRES_MS, isLiveSubscriptionState, isManagedBillingAccount, isReplacedSubscription, loadPlanChangePayment, lockBillingAccount, OPEN_PURCHASE_REFUSAL, openPackCheckout, type BillingCheckoutClaim, type BillingCheckoutLimit } from "./billing";
-import { packCheckoutTerms } from "./billingPacks";
+import { packCheckoutTerms, type PackPlanTerms } from "./billingPacks";
+import { readBusinessTopUp } from "./billingTopUps";
 import { billingProviderConfigured } from "./billingPlans";
 import { readBillingDeployment } from "./billingProvider";
 import type { DomainContext } from "./context";
 import { loadBillingContext } from "./usage";
 
-// Checkouts for prepaid minute packs: the plan checkout's steps in billing.ts,
-// kept in a table of their own, billing_pack_checkouts. The dashboard or the
+// Checkouts for prepaid minute packs, and for top-ups on sale (0155), which
+// are sold the same way: the plan checkout's steps in billing.ts, kept in a
+// table of their own, billing_pack_checkouts. The dashboard or the
 // API makes a row; the billing.createPackCheckout job claims it and asks the
 // deployment's provider for a one-time payment page; billing.reconcile marks
 // it paid when the payment arrives, as it adds the pack. A business makes one
@@ -38,10 +40,13 @@ export function isPackCheckoutStatus(value: string | null | undefined): value is
 export const packCheckoutRefusalCodes = ["managed_plan", "pack_not_sold_on_plan", "pack_yearly_plan", "pack_past_due", "plan_change_payment_waiting", "pack_not_on_sale", "plan_change_pending"] as const;
 export type PackCheckoutRefusalCode = (typeof packCheckoutRefusalCodes)[number];
 
-const refused = (code: PackCheckoutRefusalCode, message: string) => Object.assign(new Error(message), { status: 409, code });
+const refused = (code: PackCheckoutRefusalCode | TopUpCheckoutRefusalCode, message: string) => Object.assign(new Error(message), { status: 409, code });
 
 /** Why a checkout the job can't make failed when its pack stopped selling between the click and the job. */
 export const PACK_NOT_ON_SALE = "This pack isn't on sale right now.";
+
+/** Why a top-up checkout is refused, or its job fails, when the top-up isn't on sale. */
+export const TOP_UP_NOT_ON_SALE = "This top-up isn't on sale right now.";
 
 /** Why a checkout that waited too long for its job failed: nobody waits on its page any more. */
 const PACK_CHECKOUT_WAITED = "This request waited too long to run.";
@@ -104,8 +109,32 @@ export async function createPackCheckoutRequestInTransaction(
   if (subscriptionId && isYearlyBillingInterval(account?.billingInterval)) throw refused("pack_yearly_plan", "This business pays for a yearly plan. Set it to end at its renewal, and buy a pack once it ends.");
   if (subscriptionId && account?.subscriptionState === "past_due") throw refused("pack_past_due", "This business has a payment past due. Settle it before buying a pack.");
   if (subscriptionId && await loadPlanChangePayment(tx, { businessId: input.businessId, subscriptionId })) throw refused("plan_change_payment_waiting", "An upgrade of this business's plan is waiting for its payment. Pay it, or buy a pack once it expires.");
-  const [offer] = await tx.select({ priceId: billingPackOffers.priceId, providerRef: billingPackOffers.providerRef, voiceSec: billingPackOffers.voiceSec, days: billingPackOffers.days, smsSeg: billingPackOffers.smsSeg, callsOut: billingPackOffers.callsOut, chatUnits: billingPackOffers.chatUnits, kbBytes: billingPackOffers.kbBytes, numbers: billingPackOffers.numbers, receptionists: billingPackOffers.receptionists }).from(billingPackOffers).where(eq(billingPackOffers.code, input.pack)).limit(1);
+  const offer = await readOffer(tx, input.pack, "pack");
   if (!offer?.providerRef) throw refused("pack_not_on_sale", PACK_NOT_ON_SALE);
+  return await queuePackCheckout(tx, input, offer, subscriptionId, env);
+}
+
+/** A pack or top-up on sale by its code, with its live price, or undefined when none of that kind is. */
+async function readOffer(tx: DatabaseTransaction, code: string, kind: BillingPackKind): Promise<(Omit<PackPlanTerms, "code"> & { priceId: string; providerRef: string | null }) | undefined> {
+  const [offer] = await tx.select({ priceId: billingPackOffers.priceId, providerRef: billingPackOffers.providerRef, voiceSec: billingPackOffers.voiceSec, days: billingPackOffers.days, smsSeg: billingPackOffers.smsSeg, callsOut: billingPackOffers.callsOut, chatUnits: billingPackOffers.chatUnits, kbBytes: billingPackOffers.kbBytes, numbers: billingPackOffers.numbers, receptionists: billingPackOffers.receptionists }).from(billingPackOffers)
+    .where(and(eq(billingPackOffers.code, code), eq(billingPackOffers.kind, kind))).limit(1);
+  return offer;
+}
+
+/**
+ * Makes the checkout row a pack or a top-up checkout asked for, after its own
+ * refusals, under the billing lock its caller took: the person's open
+ * checkout for the same code and billing email comes back instead; any other
+ * open purchase of the business is a 409 plan_change_pending; checkLimit runs
+ * only before a new row is made.
+ */
+async function queuePackCheckout(
+  tx: DatabaseTransaction,
+  input: { userId: string; businessId: string; pack: string; billingEmail?: string | undefined; checkLimit?: BillingCheckoutLimit | undefined },
+  offer: Omit<PackPlanTerms, "code"> & { priceId: string },
+  subscriptionId: string | null,
+  env: Record<string, string | undefined>,
+): Promise<{ id: string; created: boolean }> {
   const now = Date.now();
   // Under the lock, so two clicks at once make one row. One older than its 15 minutes fails rather than runs.
   const [open] = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts).where(and(
@@ -153,6 +182,48 @@ export async function createPackCheckoutRequestInTransaction(
   return { id: row.id, created: true };
 }
 
+/**
+ * Queues a checkout for a top-up on sale in the name of the person asking, as
+ * a pack's is queued. Callers authorize first. Refused with a 409, in this
+ * order: a business on a managed plan; one on any plan but Free and a
+ * prepaid pack, since Starter and Pro go on past their allowance and are
+ * billed for it, and Enterprise and self-hosted deployments have no
+ * allowances; and a top-up that isn't on sale, which needs a live price a
+ * link recorded at the provider. A top-up replaces nothing, so its checkout
+ * names no subscription. The rest is a pack checkout's: the person's open
+ * checkout for the same top-up and billing email comes back, and any other
+ * open purchase of the business is a 409 plan_change_pending.
+ */
+export async function createTopUpCheckoutRequestInTransaction(
+  tx: DatabaseTransaction,
+  input: { userId: string; businessId: string; topUp: string; billingEmail?: string | undefined; checkLimit?: BillingCheckoutLimit | undefined },
+  env: Record<string, string | undefined> = process.env,
+): Promise<{ id: string; created: boolean }> {
+  // The plan checkout's lock, so a top-up, a pack and a plan can't start at once, nor beside reconcile or a managed plan.
+  await lockBillingAccount(tx, input.businessId);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
+  if (isManagedBillingAccount(account)) throw refused("managed_plan", "This business is on a managed plan, billed directly by the operator.");
+  const { plan } = await loadBillingContext(tx, input.businessId);
+  if (!topUpSoldOnPlan(plan)) {
+    throw refused("top_up_not_sold_on_plan", plan === "starter" || plan === "pro" ? "Top-ups are sold on Free and on prepaid packs. On Starter and Pro, use past the plan's allowance goes on and is billed with the plan." : "Top-ups aren't sold on this business's plan.");
+  }
+  const offer = await readOffer(tx, input.topUp, "top_up");
+  if (!offer?.providerRef) throw refused("top_up_not_on_sale", TOP_UP_NOT_ON_SALE);
+  const { topUp, ...rest } = input;
+  return await queuePackCheckout(tx, { ...rest, pack: topUp }, offer, null, env);
+}
+
+/** The dashboard's top-up checkout, from one of the business's admins. */
+export async function createTopUpCheckoutRequest(
+  context: DomainContext,
+  input: { userId: string; businessId: string; topUp: string; billingEmail?: string | undefined; checkLimit?: BillingCheckoutLimit | undefined },
+): Promise<string> {
+  return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: "operator" }, async (tx) => {
+    await requireBusinessAdmin(tx, { userId: input.userId, businessId: input.businessId });
+    return (await createTopUpCheckoutRequestInTransaction(tx, input)).id;
+  });
+}
+
 /** The dashboard's pack checkout, from one of the business's admins. */
 export async function createPackCheckoutRequest(
   context: DomainContext,
@@ -169,6 +240,8 @@ export type PackCheckoutWork = {
   id: string;
   businessId: string;
   pack: string;
+  /** A pack's checkout, or a top-up's (0155), whose payment page sends the person back to its own marker. */
+  kind: BillingPackKind;
   priceId: string;
   status: string;
   /** The provider's object that sells the pack at the row's price; null once that price is retired, the pack no longer active, or no link recorded one. */
@@ -196,6 +269,7 @@ export async function loadPackCheckoutRequest(context: DomainContext, input: { b
       providerRef: billingPackPrices.providerRef,
       retiredAt: billingPackPrices.retiredAt,
       packStatus: billingPackPlans.status,
+      kind: billingPackPlans.kind,
       customerEmail: users.email,
       billingEmail: billingPackCheckouts.billingEmail,
       billingKey: billingAccounts.billingKey,
@@ -211,9 +285,10 @@ export async function loadPackCheckoutRequest(context: DomainContext, input: { b
       .where(and(eq(billingPackCheckouts.id, input.checkoutId), eq(billingPackCheckouts.businessId, input.businessId)))
       .limit(1);
     if (!row) return null;
-    const { providerRef, retiredAt, packStatus, billingKey, ...work } = row;
+    const { providerRef, retiredAt, packStatus, billingKey, kind, ...work } = row;
     return {
       ...work,
+      kind: kind === "top_up" ? "top_up" : "pack",
       priceRef: providerRef && retiredAt === null && packStatus === "active" ? providerRef : null,
       externalCustomerId: billingKey ?? `business:${input.businessId}`,
       customerId: work.customerId ?? null,
@@ -314,10 +389,12 @@ export async function markPackCheckoutPaidInTransaction(tx: DatabaseTransaction,
   return rows.length > 0;
 }
 
-/** A pack checkout as the dashboard and the API show it. */
+/** A pack or top-up checkout as the dashboard and the API show it. */
 export type PackCheckoutView = {
   id: string;
   pack: string;
+  /** What it sells: a pack, or a top-up on sale (0155). */
+  kind: BillingPackKind;
   /** The row's status, except that a page left unpaid past its expiry reads as expired. */
   status: PackCheckoutStatus;
   /**
@@ -328,6 +405,9 @@ export type PackCheckoutView = {
    * arrives, and on a checkout paid before 0149.
    */
   packStatus: BillingPackStatus | null;
+  /** The top-up a top-up checkout's payment added, once it arrived, and where it stands now; null before, and on a pack's checkout. */
+  topUpId: string | null;
+  topUpStatus: BillingTopUpStatus | null;
   /** Where the business pays: only while the page is ready and hasn't expired. */
   checkoutUrl: string | null;
   /** Why it failed or expired; null otherwise. */
@@ -340,11 +420,14 @@ export type PackCheckoutView = {
 /** The business's checkout, read in the caller's transaction; null when it has none by that ID. */
 export async function readPackCheckoutInTransaction(tx: DatabaseTransaction, input: { businessId: string; checkoutId: string }, now = new Date()): Promise<PackCheckoutView | null> {
   if (!isUuid(input.checkoutId)) return null;
-  const [row] = await tx.select({ id: billingPackCheckouts.id, pack: billingPackCheckouts.pack, status: billingPackCheckouts.status, checkoutUrl: billingPackCheckouts.checkoutUrl, error: billingPackCheckouts.error, expiresAt: billingPackCheckouts.expiresAt, createdAt: billingPackCheckouts.createdAt, updatedAt: billingPackCheckouts.updatedAt, packStatus: billingPacks.status })
+  const [row] = await tx.select({ id: billingPackCheckouts.id, pack: billingPackCheckouts.pack, kind: billingPackPlans.kind, status: billingPackCheckouts.status, checkoutUrl: billingPackCheckouts.checkoutUrl, error: billingPackCheckouts.error, expiresAt: billingPackCheckouts.expiresAt, createdAt: billingPackCheckouts.createdAt, updatedAt: billingPackCheckouts.updatedAt, packStatus: billingPacks.status, topUpId: billingPackCheckouts.topUpId })
     .from(billingPackCheckouts)
+    .innerJoin(billingPackPlans, eq(billingPackPlans.code, billingPackCheckouts.pack))
     .leftJoin(billingPacks, and(eq(billingPacks.id, billingPackCheckouts.packId), eq(billingPacks.businessId, billingPackCheckouts.businessId)))
     .where(and(eq(billingPackCheckouts.id, input.checkoutId), eq(billingPackCheckouts.businessId, input.businessId))).limit(1);
   if (!row) return null;
+  // A top-up's status depends on its dates and what is left, so it is read as the business's list reads it.
+  const topUp = row.topUpId ? await readBusinessTopUp(tx, input.businessId, row.topUpId, now) : null;
   const stored = isPackCheckoutStatus(row.status) ? row.status : "pending";
   // The row stays ready once its page is made; past the page's expiry nobody can pay on it.
   const lapsed = stored === "ready" && row.expiresAt.getTime() <= now.getTime();
@@ -352,8 +435,11 @@ export async function readPackCheckoutInTransaction(tx: DatabaseTransaction, inp
   return {
     id: row.id,
     pack: row.pack,
+    kind: row.kind === "top_up" ? "top_up" : "pack",
     status,
     packStatus: isBillingPackStatus(row.packStatus) ? row.packStatus : null,
+    topUpId: topUp?.id ?? null,
+    topUpStatus: topUp?.status ?? null,
     checkoutUrl: status === "ready" ? row.checkoutUrl : null,
     error: lapsed ? PACK_CHECKOUT_PAGE_EXPIRED : status === "failed" || status === "expired" ? row.error : null,
     expiresAt: row.expiresAt,

@@ -602,6 +602,8 @@
       "packDescription": "Vaše stavke dolaze iz dopuna minuta i traju dok svaka dopuna ne istekne, umesto da se obnavljaju svakog meseca.",
       "packBlockedDescription": "Nema preostalih minuta. Pozivi dobijaju signal zauzeća dok ne kupite novu dopunu minuta.",
       "packAllowanceBlockedDescription": "Ništa nije preostalo. Kupite novu dopunu minuta da biste dobili još.",
+      "topUpLeft": "Bonusi: preostalo {{left}} od {{total}} {{unit}}",
+      "buyTopUp": "Kupite bonus",
       "overageCount": "{{count}} preko limita",
       "overageCost": "≈ {{amount}} za prekoračenja",
       "noOverages": "Bez prekoračenja — potrošnja je strogo ograničena na uključeni iznos.",
@@ -681,6 +683,78 @@
         "gaveWay": "Paket je počeo pre nego što je ovo plaćanje stiglo, pa dopuna minuta nije dodata. Novac će Vam biti vraćen.",
         "refundedFirst": "Ovo plaćanje je vraćeno ili osporeno preko banke, pa dopuna minuta nije dodata.",
         "closedForPlan": "Za ovu firmu je počeo paket, pa je plaćanje ove dopune minuta zatvoreno."
+      }
+    },
+    "topUps": {
+      "title": "Bonusi",
+      "description": "Dodatne stavke uz vaš paket, koje se koriste kada se potroše stavke vašeg paketa. Vaš paket ostaje isti.",
+      "notCounted": "Vaš paket nema ograničenja, pa se bonusi ne koriste dok ga imate.",
+      "granted": "Bonus",
+      "fromCode": "Bonus iz koda {{code}}",
+      "bought": "Kupljeni bonus",
+      "kinds": {
+        "voice": "Minuti razgovora",
+        "transfers": "Pokušaji preusmeravanja",
+        "sms": "SMS upozorenja",
+        "chats": "Razgovori u četu na sajtu"
+      },
+      "amounts": {
+        "voice_one": "{{amount}} minut razgovora",
+        "voice_few": "{{amount}} minuta razgovora",
+        "voice_other": "{{amount}} minuta razgovora",
+        "transfers_one": "{{amount}} pokušaj preusmeravanja",
+        "transfers_few": "{{amount}} pokušaja preusmeravanja",
+        "transfers_other": "{{amount}} pokušaja preusmeravanja",
+        "sms_one": "{{amount}} SMS upozorenje",
+        "sms_few": "{{amount}} SMS upozorenja",
+        "sms_other": "{{amount}} SMS upozorenja",
+        "chats_one": "{{amount}} razgovor u četu na sajtu",
+        "chats_few": "{{amount}} razgovora u četu na sajtu",
+        "chats_other": "{{amount}} razgovora u četu na sajtu"
+      },
+      "left": "Preostalo {{left}} od {{total}}",
+      "startsOn": "Počinje {{date}}",
+      "endsOn": "Ističe {{date}}",
+      "neverEnds": "Bez datuma isteka",
+      "frozen": "Na čekanju dok je spor oko plaćanja otvoren",
+      "code": {
+        "adds": "Ovaj kod dodaje vašem paketu:",
+        "lasts_one": "Važi {{count}} dan od dodavanja.",
+        "lasts_few": "Važi {{count}} dana od dodavanja.",
+        "lasts_other": "Važi {{count}} dana od dodavanja.",
+        "noEnd": "Ne ističe.",
+        "planStays": "Vaš paket ostaje isti. Ovo se koristi kada se potroše njegove stavke.",
+        "add": "Dodaj mom paketu",
+        "adding": "Dodavanje...",
+        "added": "Bonus je dodat.",
+        "usedHere": "Ova firma je već dodala ovaj kod.",
+        "usedByYou": "Već ste dodali ovaj kod.",
+        "usedError": "Ovaj kod je već dodat.",
+        "failed": "Nije moguće dodati ovaj kod. Pokušajte ponovo."
+      },
+      "buy": {
+        "title": "Kupite bonus",
+        "description": "Dodatne stavke uz vaš paket, koje plaćate jednom. Vaš paket ostaje isti: ovo se koristi kada se potroše njegove stavke.",
+        "lasts_one": "Važi {{count}} dan od plaćanja.",
+        "lasts_few": "Važi {{count}} dana od plaćanja.",
+        "lasts_other": "Važi {{count}} dana od plaćanja.",
+        "noEnd": "Ne ističe.",
+        "buy": "Kupi",
+        "buying": "Otvaranje stranice za plaćanje...",
+        "toast": {
+          "added": "Bonus je dodat.",
+          "failed": "Plaćanje nije prošlo, pa bonus nije dodat.",
+          "processing": "Plaćanje se obrađuje. Bonus će se pojaviti ovde čim stigne.",
+          "refundedFirst": "Ovo plaćanje je vraćeno ili osporeno preko banke, pa bonus nije dodat.",
+          "checkoutFailed": "Nije moguće otvoriti stranicu za plaćanje. Pokušajte ponovo.",
+          "checkoutExpired": "Stranica za plaćanje je istekla. Pokušajte ponovo."
+        },
+        "refusals": {
+          "managed_plan": "Vašim paketom se upravlja umesto vas, pa ovde nije moguće kupiti bonuse.",
+          "top_up_not_sold_on_plan": "Bonusi se prodaju uz paket Free i dopune minuta. Vaš paket se umesto toga nastavlja i posle svojih stavki.",
+          "top_up_not_on_sale": "Ovaj bonus trenutno nije u prodaji.",
+          "plan_change_pending": "Druga kupovina za ovu firmu je još u toku. Pokušajte ponovo za minut."
+        }
       }
     },
     "transactions": {

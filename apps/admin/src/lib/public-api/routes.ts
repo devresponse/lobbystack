@@ -50,6 +50,8 @@ import {
   deleteWebhookEndpoint,
   endManagedPlanForApi,
   endPromoPlanForApi,
+  grantTopUpForApi,
+  revokeTopUpForApi,
   expandKnowledgeSourceForApi,
   generateContactPasscodesForApi,
   getAppointmentForApi,
@@ -73,6 +75,8 @@ import {
   listAiTracesForApi,
   getCheckoutForApi,
   getPackCheckoutForApi,
+  createTopUpCheckoutForApi,
+  getTopUpCheckoutForApi,
   getSubscriptionChangeForApi,
   getPhoneNumberClaimForApi,
   getContactForApi,
@@ -144,12 +148,14 @@ import {
   apiBillingCatalogApplySchema,
   apiBillingCatalogLinkSchema,
   apiBillingCodeCreateSchema,
+  apiBillingTopUpCreateSchema,
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
   apiUserCreateSchema,
   apiCalendarConnectionUpdateSchema,
   apiCheckoutCreateSchema,
   apiPackCheckoutCreateSchema,
+  apiTopUpCheckoutCreateSchema,
   apiClaimLinkCreateSchema,
   apiManagedPlanCreateSchema,
   apiNotificationPreferencesUpdateSchema,
@@ -419,6 +425,9 @@ export const v1 = {
   // A prepaid pack's checkout is a call to the billing provider too, counted with plan checkouts.
   createPackCheckout: (request: Request) => handleApiRequest(request, "createPackCheckout", async ({ context, caller }) => ({ body: data(await createPackCheckoutForApi(context, caller, await readApiBody(request, apiPackCheckoutCreateSchema), { available: packCheckoutConfigured(process.env), checkLimit: requireCheckoutAllowed })) })),
   getPackCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getPackCheckout", async ({ context, caller }) => ({ body: data(await getPackCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
+  // A top-up's checkout is a call to the billing provider as a pack's is, counted with plan checkouts.
+  createTopUpCheckout: (request: Request) => handleApiRequest(request, "createTopUpCheckout", async ({ context, caller }) => ({ body: data(await createTopUpCheckoutForApi(context, caller, await readApiBody(request, apiTopUpCheckoutCreateSchema), { available: packCheckoutConfigured(process.env), checkLimit: requireCheckoutAllowed })) })),
+  getTopUpCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getTopUpCheckout", async ({ context, caller }) => ({ body: data(await getTopUpCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
   // Each new change is a call to the billing provider, so it counts toward the checkout limits.
   cancelBillingPlan: (request: Request) => handleApiRequest(request, "cancelBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "cancel", { checkLimit: requireCheckoutAllowed })) })),
   resumeBillingPlan: (request: Request) => handleApiRequest(request, "resumeBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "resume", { checkLimit: requireCheckoutAllowed })) })),
@@ -436,6 +445,15 @@ export const v1 = {
   endPromoPlan: (request: Request) => handleApiRequest(request, "endPromoPlan", async ({ context, caller, credential }) => {
     requireOperatorKey(credential, "end a promo plan");
     return { body: data(await endPromoPlanForApi(context, caller)) };
+  }),
+  // A top-up adds to what a business may use without a payment, so only the operator's own keys give or take one.
+  createTopUp: (request: Request) => handleApiRequest(request, "createTopUp", async ({ context, caller, credential }) => {
+    requireOperatorKey(credential, "grant a top-up");
+    return { status: 201, body: data(await grantTopUpForApi(context, caller, await readApiBody(request, apiBillingTopUpCreateSchema))) };
+  }),
+  revokeTopUp: (request: Request, { params }: Params<"top_up_id">) => handleApiRequest(request, "revokeTopUp", async ({ context, caller, credential }) => {
+    requireOperatorKey(credential, "revoke a top-up");
+    return { body: data(await revokeTopUpForApi(context, caller, uuidParam((await params).top_up_id, "top_up_id"))) };
   }),
   getBillingCatalog: (request: Request) => handleApiRequest(request, "getBillingCatalog", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage the billing catalog");
@@ -465,7 +483,7 @@ export const v1 = {
   }),
   listBillingCodes: (request: Request) => handleApiRequest(request, "listBillingCodes", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage promo codes");
-    return { body: await listBillingCodesForApi(context, { ...pageQuery(request), plan: textParam(request, "plan", 48), businessId: optionalUuidParam(request, "business_id"), baseUrl: appOrigin(request) }) };
+    return { body: await listBillingCodesForApi(context, { ...pageQuery(request), plan: textParam(request, "plan", 48), kind: textParam(request, "kind", 8), businessId: optionalUuidParam(request, "business_id"), baseUrl: appOrigin(request) }) };
   }),
   revokeBillingCode: (request: Request, { params }: Params<"code_id">) => handleApiRequest(request, "revokeBillingCode", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage promo codes");

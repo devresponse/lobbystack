@@ -108,7 +108,7 @@ describe("the requests Polar receives", () => {
     });
 
     function packCheckout(extra: Record<string, unknown> = {}) {
-      return { id: checkoutId, businessId, pack: "minutes_500_90", priceId: "00000000-0000-4000-8000-0000000000e1", status: "processing", priceRef: "product-pack-500-90", customerEmail: "owner@example.com", billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: null, businessName: "Allo Salon", onboardingStage: "complete", ...extra };
+      return { id: checkoutId, businessId, kind: "pack" as const, pack: "minutes_500_90", priceId: "00000000-0000-4000-8000-0000000000e1", status: "processing", priceRef: "product-pack-500-90", customerEmail: "owner@example.com", billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: null, businessName: "Allo Salon", onboardingStage: "complete", ...extra };
     }
 
     it("for a new customer", async () => {

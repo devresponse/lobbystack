@@ -32,7 +32,7 @@ function packJob(checkoutId: string, businessId = randomUUID()): JobEnvelope {
 
 function work(job: JobEnvelope, input: Partial<PackCheckoutWork> = {}): PackCheckoutWork {
   const businessId = job.businessId!;
-  return { id: String(job.payload.checkoutId), businessId, pack: "minutes_500_90", priceId: "price-row-1", status: "processing", priceRef: "price_pack_500_90", customerEmail: "owner@example.com", billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: null, businessName: "Allo Salon", onboardingStage: "complete", ...input };
+  return { id: String(job.payload.checkoutId), businessId, kind: "pack", pack: "minutes_500_90", priceId: "price-row-1", status: "processing", priceRef: "price_pack_500_90", customerEmail: "owner@example.com", billingEmail: null, externalCustomerId: `business:${businessId}`, customerId: null, businessName: "Allo Salon", onboardingStage: "complete", ...input };
 }
 
 /** The deployment's Stripe account, selling the pack at its one-time price. */

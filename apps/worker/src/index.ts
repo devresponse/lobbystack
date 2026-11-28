@@ -1,6 +1,6 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, registerPoolMetrics, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer, recordedGreetingEnabled } from "@lobbystack/agent-core";
-import { assertProductionSecrets, booleanSettingErrors, brandEmailLogo, brandStartupReport, currentBrand, emailSender, envFlag, isMaintenanceMode } from "@lobbystack/shared";
+import { assertProductionSecrets, booleanSettingErrors, brandEmailLogo, brandStartupReport, currentBrand, emailSender, envFlag, isMaintenanceMode, liveModelSettingErrors } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, jobQueues, type FleetQueueCounts, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
@@ -104,8 +104,8 @@ async function main(): Promise<void> {
   ]);
   // A true/false setting whose value is neither, such as SMTP_SECURE=ssl, used to
   // read as off and say nothing (AUDIT-017). Now the worker refuses to start, and
-  // names every setting it can't read.
-  const settingErrors = booleanSettingErrors(process.env);
+  // names every setting it can't read, LIVE_MODEL included.
+  const settingErrors = [...booleanSettingErrors(process.env), ...liveModelSettingErrors(process.env)];
   if (settingErrors.length) throw new Error(settingErrors.join(" "));
   // The brand emails and texts go out under, from APP_BASE_URL like the admin's.
   const brand = brandStartupReport(currentBrand());

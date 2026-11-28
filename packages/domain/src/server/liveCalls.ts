@@ -1,7 +1,7 @@
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 
 import { billingUsageEvents, calls, contacts, enqueueOutbox, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
-import { MAX_PHONE_CALL_MS } from "@lobbystack/shared";
+import { isLiveModel, liveModelSetting, MAX_PHONE_CALL_MS, type LiveModel } from "@lobbystack/shared";
 
 import { reserveOutboundCallAttempt } from "./billing";
 import type { DomainContext } from "./context";
@@ -17,9 +17,13 @@ import { boundedReconciledVoiceSeconds } from "./voiceRecovery";
 
 export const LIVE_CALL_PROVIDER = "openai_live";
 
-// gpt-live-1 voice sessions: $0.05 per minute, billed per second.
-// https://developers.openai.com/api/docs/models/gpt-live-1
-const LIVE_PRICING = { usdPerMinute: 0.05, version: "gpt-live-1-2026-07", source: "https://developers.openai.com/api/docs/models/gpt-live-1", effectiveDate: "2026-07-08" };
+// GPT-Live voice sessions, either model: $0.05 per active minute, billed per
+// second. The lower standby rate is for browser sessions set to pause, which
+// LobbyStack's calls aren't. https://developers.openai.com/api/docs/pricing
+const LIVE_PRICING: Record<LiveModel, { usdPerMinute: number; version: string; source: string; effectiveDate: string }> = {
+  "gpt-live-1.1": { usdPerMinute: 0.05, version: "gpt-live-1.1-2026-11", source: "https://developers.openai.com/api/docs/models/gpt-live-1.1", effectiveDate: "2026-11-19" },
+  "gpt-live-1": { usdPerMinute: 0.05, version: "gpt-live-1-2026-07", source: "https://developers.openai.com/api/docs/models/gpt-live-1", effectiveDate: "2026-07-08" },
+};
 
 /** Why a live call ended, mapped to the dispositions billing already knows. */
 export type LiveCallEnd =
@@ -203,10 +207,13 @@ export async function liveCallHasRecording(context: DomainContext, input: { busi
  * abandoned call isn't charged OpenAI's minimum. With `recording`, the write
  * that finalizes the call also queues the copy of OpenAI's stored recording.
  */
-export async function finishLiveCall(context: DomainContext, input: { businessId: string; callId: string; seconds: number; measuredSeconds?: number; end: LiveCallEnd; endedAt?: Date; channel?: "voice" | "web_voice"; recording?: { sessionId: string; durationMs: number } }) {
+export async function finishLiveCall(context: DomainContext, input: { businessId: string; callId: string; seconds: number; measuredSeconds?: number; end: LiveCallEnd; endedAt?: Date; channel?: "voice" | "web_voice"; recording?: { sessionId: string; durationMs: number }; model?: string }) {
   const seconds = Math.max(0, input.seconds);
   const status = input.end === "transferred" ? "transferred" : input.end === "blocked_contact" ? "blocked" : "completed";
-  const costUsd = (seconds / 60) * LIVE_PRICING.usdPerMinute;
+  // The model the session ran on, as the admin started it; LIVE_MODEL when nobody knows.
+  const model = isLiveModel(input.model) ? input.model : liveModelSetting(process.env);
+  const pricing = LIVE_PRICING[model];
+  const costUsd = (seconds / 60) * pricing.usdPerMinute;
   const completed = await completeCall(context, {
     businessId: input.businessId,
     callId: input.callId,
@@ -240,12 +247,12 @@ export async function finishLiveCall(context: DomainContext, input: { businessId
     quantity: seconds,
     quantityUnit: "second",
     provider: "openai",
-    model: "gpt-live-1",
+    model,
     operation: "live_session",
-    pricingVersion: LIVE_PRICING.version,
-    pricingSource: LIVE_PRICING.source,
-    pricingEffectiveDate: LIVE_PRICING.effectiveDate,
-    pricingRates: { usdPerMinute: LIVE_PRICING.usdPerMinute },
+    pricingVersion: pricing.version,
+    pricingSource: pricing.source,
+    pricingEffectiveDate: pricing.effectiveDate,
+    pricingRates: { usdPerMinute: pricing.usdPerMinute },
     callId: input.callId,
   });
   return completed;

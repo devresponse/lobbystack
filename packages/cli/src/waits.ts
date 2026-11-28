@@ -35,6 +35,15 @@ export const packCheckoutWait: WaitSpec = {
     : `The pack's checkout expired: ${reason(data)}. Start another checkout.`),
 };
 
+export const topUpCheckoutWait: WaitSpec = {
+  operation: "getTopUpCheckout",
+  param: "checkout_id",
+  done: (data) => ["ready", "paid", "failed", "expired"].includes(String(data.status)),
+  failed: (data) => (data.status === "failed" ? `The top-up's checkout failed: ${reason(data)}. Start another checkout.`
+    : data.status === "expired" ? `The top-up's checkout expired: ${reason(data)}. Start another checkout.`
+    : undefined),
+};
+
 export const subscriptionChangeWait: WaitSpec = {
   operation: "getSubscriptionChange",
   param: "change_id",

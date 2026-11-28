@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BillingEmailForm } from "@/components/billing-email-form";
 import { Button } from "@/components/ui/button";
 import { isUpgradeInProgress } from "@/lib/upgrade-in-progress";
-import { usePackCheckout } from "./use-pack-checkout";
+import { usePackCheckout, type PackCheckoutKind } from "./use-pack-checkout";
 
 // A prepaid pack's checkout, as the plan step and the Upgrade plan dialog run
 // it from a pack's card: what a purchase posts, the one trip to the payment
@@ -36,9 +36,9 @@ function serve({ post = () => Response.json({ checkoutId: "pc-1" }, { status: 20
   return fetchMock;
 }
 
-/** A pack card's button and the billing email form, as the screens wire them to the hook. */
-function Buyer({ pack }: { pack: string }) {
-  const checkout = usePackCheckout("business");
+/** A pack card's button and the billing email form, as the screens wire them to the hook; kind top_up for a top-up's card. */
+function Buyer({ pack, kind = "pack" }: { pack: string; kind?: PackCheckoutKind }) {
+  const checkout = usePackCheckout("business", kind === "top_up" ? "top-up" : "pack", kind);
   const prompt = checkout.emailPrompt;
   return <>
     <Button disabled={checkout.pending} loading={checkout.pending} loadingLabel="billing.actions.openingCheckout" onClick={() => checkout.start(pack)} type="button">Buy</Button>
@@ -46,12 +46,12 @@ function Buyer({ pack }: { pack: string }) {
   </>;
 }
 
-function renderBuyer(pack = "pack-500-180") {
+function renderBuyer(pack = "pack-500-180", kind: PackCheckoutKind = "pack") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
   const assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, assign });
-  const view = render(<QueryClientProvider client={client}><Buyer pack={pack} /></QueryClientProvider>);
+  const view = render(<QueryClientProvider client={client}><Buyer kind={kind} pack={pack} /></QueryClientProvider>);
   return { assign, view, client };
 }
 
@@ -153,5 +153,40 @@ describe("buying a prepaid pack from its card", () => {
     await userEvent.click(screen.getByRole("button", { name: "Buy" }));
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(2));
     expect(posted(fetchMock)).toHaveLength(2);
+  });
+});
+
+describe("buying a top-up from its card", () => {
+  it("posts the card's top-up to its own address and goes to its payment page once", async () => {
+    const fetchMock = serve();
+    const { assign } = renderBuyer("topup_100_90", "top_up");
+    await userEvent.click(screen.getByRole("button", { name: "Buy" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/pc-1"));
+    expect(posted(fetchMock)).toEqual([["/api/billing/top-ups/checkout", { businessId: "business", topUp: "topup_100_90" }]]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/billing/top-ups/checkout?checkoutId=pc-1&businessId=business", expect.objectContaining({ credentials: "include" }));
+  });
+
+  it("says why the checkout refused the top-up, and that a page didn't open, in the top-up's words", async () => {
+    serve({ post: () => Response.json({ error: "Top-ups are sold on Free and on prepaid packs.", code: "top_up_not_sold_on_plan" }, { status: 409 }) });
+    renderBuyer("topup_100_90", "top_up");
+    await userEvent.click(screen.getByRole("button", { name: "Buy" }));
+    await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.topUps.buy.refusals.top_up_not_sold_on_plan"));
+    // A pack's refusal code means nothing here, so it reads as a failed checkout.
+    serve({ post: () => Response.json({ error: "This business pays for a yearly plan.", code: "pack_yearly_plan" }, { status: 409 }) });
+    await userEvent.click(screen.getByRole("button", { name: "Buy" }));
+    await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.topUps.buy.toast.checkoutFailed"));
+    serve({ statuses: [{ status: "expired", error: "This request waited too long to run." }] });
+    await userEvent.click(screen.getByRole("button", { name: "Buy" }));
+    await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.topUps.buy.toast.checkoutExpired"));
+  });
+
+  it.each([
+    [{ synced: true, topUpStatus: "active" }, "success", "billing.topUps.buy.toast.added"],
+    [{ synced: false, topUpStatus: "refunded" }, "error", "billing.topUps.buy.toast.refundedFirst"],
+  ] as const)("says what came of a top-up checkout already paid in another tab (%o)", async (answer, kind, key) => {
+    serve({ statuses: [{ status: "paid", ...answer }] });
+    renderBuyer("topup_100_90", "top_up");
+    await userEvent.click(screen.getByRole("button", { name: "Buy" }));
+    await waitFor(() => expect(alerts[kind]).toHaveBeenCalledWith(key));
   });
 });

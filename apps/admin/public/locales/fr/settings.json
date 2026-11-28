@@ -602,6 +602,8 @@
       "packDescription": "Vos allocations viennent de vos packs de minutes et durent jusqu'à la fin de chaque pack, au lieu de repartir à zéro chaque mois.",
       "packBlockedDescription": "Plus aucune minute. Les appels sonnent occupé jusqu'à l'achat d'un autre pack de minutes.",
       "packAllowanceBlockedDescription": "Plus rien de disponible. Achetez un autre pack de minutes pour en avoir plus.",
+      "topUpLeft": "Recharges : {{left}} {{unit}} restant(s) sur {{total}}",
+      "buyTopUp": "Acheter une recharge",
       "overageCount": "{{count}} au-dessus de la limite",
       "overageCost": "≈ {{amount}} de dépassements",
       "noOverages": "Aucun dépassement — l'utilisation est plafonnée au volume inclus.",
@@ -681,6 +683,78 @@
         "gaveWay": "Un forfait a démarré avant l'arrivée de ce paiement, donc aucun pack de minutes n'a été ajouté. Le paiement vous sera remboursé.",
         "refundedFirst": "Ce paiement a été remboursé ou a fait l'objet d'une rétrofacturation, donc aucun pack de minutes n'a été ajouté.",
         "closedForPlan": "Un forfait a démarré pour cette entreprise, donc le paiement de ce pack de minutes a été fermé."
+      }
+    },
+    "topUps": {
+      "title": "Recharges",
+      "description": "Des allocations en plus de votre forfait, utilisées une fois celles de votre forfait épuisées. Votre forfait reste le même.",
+      "notCounted": "Votre forfait n'a pas de limite, alors ces recharges ne sont pas utilisées tant que vous l'avez.",
+      "granted": "Recharge",
+      "fromCode": "Recharge du code {{code}}",
+      "bought": "Recharge achetée",
+      "kinds": {
+        "voice": "Minutes vocales",
+        "transfers": "Tentatives de transfert",
+        "sms": "Alertes SMS",
+        "chats": "Conversations de clavardage du site"
+      },
+      "amounts": {
+        "voice_one": "{{amount}} minute vocale",
+        "voice_many": "{{amount}} minutes vocales",
+        "voice_other": "{{amount}} minutes vocales",
+        "transfers_one": "{{amount}} tentative de transfert",
+        "transfers_many": "{{amount}} tentatives de transfert",
+        "transfers_other": "{{amount}} tentatives de transfert",
+        "sms_one": "{{amount}} alerte SMS",
+        "sms_many": "{{amount}} alertes SMS",
+        "sms_other": "{{amount}} alertes SMS",
+        "chats_one": "{{amount}} conversation de clavardage du site",
+        "chats_many": "{{amount}} conversations de clavardage du site",
+        "chats_other": "{{amount}} conversations de clavardage du site"
+      },
+      "left": "{{left}} restant(s) sur {{total}}",
+      "startsOn": "Commence le {{date}}",
+      "endsOn": "Prend fin le {{date}}",
+      "neverEnds": "Sans date de fin",
+      "frozen": "En attente tant qu'un litige de paiement est ouvert",
+      "code": {
+        "adds": "Ce code ajoute à votre forfait :",
+        "lasts_one": "Valable {{count}} jour à partir de son ajout.",
+        "lasts_many": "Valable {{count}} jours à partir de son ajout.",
+        "lasts_other": "Valable {{count}} jours à partir de son ajout.",
+        "noEnd": "Sans date d'expiration.",
+        "planStays": "Votre forfait reste le même. Ces ajouts servent une fois ses propres allocations épuisées.",
+        "add": "Ajouter à mon forfait",
+        "adding": "Ajout...",
+        "added": "Recharge ajoutée.",
+        "usedHere": "Cette entreprise a déjà ajouté ce code.",
+        "usedByYou": "Vous avez déjà ajouté ce code.",
+        "usedError": "Ce code a déjà été ajouté.",
+        "failed": "Impossible d'ajouter ce code. Réessayez."
+      },
+      "buy": {
+        "title": "Acheter une recharge",
+        "description": "Des allocations en plus de votre forfait, payées une seule fois. Votre forfait reste le même : elles servent une fois ses propres allocations épuisées.",
+        "lasts_one": "Valable {{count}} jour à partir de votre paiement.",
+        "lasts_many": "Valable {{count}} jours à partir de votre paiement.",
+        "lasts_other": "Valable {{count}} jours à partir de votre paiement.",
+        "noEnd": "Sans date d'expiration.",
+        "buy": "Acheter",
+        "buying": "Ouverture de la page de paiement...",
+        "toast": {
+          "added": "Votre recharge a été ajoutée.",
+          "failed": "Votre paiement n'a pas abouti, donc aucune recharge n'a été ajoutée.",
+          "processing": "Votre paiement est en cours de traitement. Votre recharge s'affichera ici dès son arrivée.",
+          "refundedFirst": "Ce paiement a été remboursé ou a fait l'objet d'une rétrofacturation, donc aucune recharge n'a été ajoutée.",
+          "checkoutFailed": "Impossible d'ouvrir la page de paiement. Réessayez.",
+          "checkoutExpired": "La page de paiement a expiré. Réessayez."
+        },
+        "refusals": {
+          "managed_plan": "Votre forfait est géré pour vous, donc les recharges ne peuvent pas être achetées ici.",
+          "top_up_not_sold_on_plan": "Les recharges sont vendues avec le forfait Gratuit et les packs de minutes. Votre forfait continue plutôt au-delà de ses allocations.",
+          "top_up_not_on_sale": "Cette recharge n'est pas en vente pour le moment.",
+          "plan_change_pending": "Un autre achat pour cette entreprise est encore en cours. Réessayez dans une minute."
+        }
       }
     },
     "transactions": {

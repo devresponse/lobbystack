@@ -61,7 +61,7 @@ describe("recordGreeting", () => {
     expect(start).toMatchObject({
       type: "session.start",
       session: {
-        model: "gpt-live-1",
+        model: "gpt-live-1.1",
         audio: { output: { voice: "marin" }, format: { type: "audio/pcm", rate: 24_000 } },
         input: [{ role: "developer", content: [{ type: "input_text", text: greetingCommand(opening) }] }],
       },
@@ -84,6 +84,16 @@ describe("recordGreeting", () => {
     expect(socket.sent.at(-1)).toEqual({ type: "session.close" });
     await vi.advanceTimersByTimeAsync(500);
     expect(socket.closed).toBe(true);
+  });
+
+  // The voice eval's --model records the receptionist's opening on the model under test.
+  it("records on another model when asked", async () => {
+    const recording = recordGreeting({} as never, { ...input, model: "gpt-live-1" });
+    const socket = await started(1);
+    expect((socket.sent[0] as { session: Record<string, unknown> }).session.model).toBe("gpt-live-1");
+    say(socket, opening);
+    await vi.advanceTimersByTimeAsync(1_500);
+    await expect(recording).resolves.toMatchObject({ tries: 1 });
   });
 
   it("waits through a pause until the transcript has the whole opening", async () => {

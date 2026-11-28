@@ -4,14 +4,14 @@ const article: HelpArticle = {
   slug: "usage",
   title: "Usage",
   section: "settings",
-  summary: "See how much of your plan's voice minutes, transfer attempts, SMS alerts and knowledge storage the business has used, and when the monthly allowances start again.",
+  summary: "See how much of your plan's voice minutes, transfer attempts, SMS alerts and knowledge storage the business has used, what its top-ups have left, and when the monthly allowances start again.",
   screenPaths: ["/settings/usage"],
   location: ["Sidebar", "Manage", "Settings", "Usage"],
   access: "Everyone on the team can open this screen. It only shows figures, so there is nothing to change here. Owners and admins change the plan on the **Plan** screen.",
   purpose: [
     "The **Usage** screen shows how much of what your plan includes the business has used so far: the minutes your AI receptionist spent on calls, its attempts to transfer callers, the text alerts and appointment texts sent for the business and the space the text of your documents and website pages takes. It is the first tab of **Settings**, so it opens when you select **Settings** in the sidebar.",
     "Each line compares what was used with what is included, and a bar fills up as the business uses it. Check it to see how close you are to a limit before calls or texts stop, or before extra usage starts to cost money.",
-    "A plan's allowances of minutes, transfers and texts start again at the beginning of each month. Prepaid packs work differently: what they include lasts until each pack ends, so the screen measures usage against what your packs hold instead.",
+    "A plan's allowances of minutes, transfers and texts start again at the beginning of each month. Prepaid packs work differently: what they include lasts until each pack ends, so the screen measures usage against what your packs hold instead. Top-ups add voice minutes, transfer attempts and texts on top of your plan, without changing it. They're used only once the plan's own allowance of that kind runs out, and a line under that kind's bar shows what they have left.",
     "The figures are for the whole business. When the business has several AI agents, every receptionist draws on the same allowances.",
   ],
   areas: [
@@ -20,8 +20,10 @@ const article: HelpArticle = {
     { name: "Voice minutes", description: "The minutes the receptionist spent on calls, rounded to a tenth of a minute, out of the minutes included." },
     { name: "Transfer attempts", description: "How many calls the receptionist tried to put through to a person at your business, out of the attempts included." },
     { name: "SMS alerts", description: "The text messages sent for the business, counted in segments, out of the segments included: text alerts to your team, the code that verifies a phone for those alerts, and the appointment confirmations and reminders texted to customers." },
+    { name: "Buy a top-up", description: "A button beside **Included usage**, shown to owners and admins on the free plan or on prepaid packs where top-ups are on sale. It opens **Buy a top-up** on the **Plan** tab, where a top-up adds minutes on top of your plan for a one-time payment." },
+    { name: "Top-ups", description: "A line under **Voice minutes**, **Transfer attempts** or **SMS alerts**, such as **Top-ups: 45 of 60 min left**, shows what the business's top-ups still hold of that kind, out of what they gave. It shows from the day a top-up of that kind starts until the day it ends, even once it's used up, but not on a plan with custom pricing. The numbers above it leave out what a top-up covered." },
     { name: "Knowledge base", description: "The space the text of your documents and website pages takes, in MB, out of the storage your plan includes. This line never shows a limit message, but a full bar means new documents and website pages can't be added." },
-    { name: "Limit reached", description: "When a line is used up and can't go further, because your plan stops at its allowance or the **Monthly spending cap** stops it, its bar turns red and the message under it starts with **Limit reached** and says usage is paused until the next period. On prepaid packs, the message says **No minutes left** for voice minutes, or **None left** for transfers and texts, and asks you to buy another pack." },
+    { name: "Limit reached", description: "When a line is used up and can't go further, because your plan stops at its allowance or the **Monthly spending cap** stops it, its bar turns red and the message under it starts with **Limit reached** and says usage is paused until the next period. On prepaid packs, the message says **No minutes left** for voice minutes, or **None left** for transfers and texts, and asks you to buy another pack. While a top-up still holds some of that kind, the line carries on from the top-up, so it doesn't show this message even with a full bar." },
   ],
   tasks: [
     {
@@ -38,6 +40,8 @@ const article: HelpArticle = {
         "Select the **Plan** tab.",
         "If you aren't an owner or admin, ask one to do the rest. Only they can change the plan or the spending cap.",
         "If the **Monthly spending cap** there says **Cap reached**, raise or remove the cap.",
+        "If you were given a top-up code, select **Have a promo code?**, type the code, select **Apply**, then **Add to my plan**. It adds to your plan without changing it.",
+        "On the free plan or prepaid packs, you can also buy a top-up: select **Buy** under **Buy a top-up** and pay on the secure payment page. It adds to your plan without changing it.",
         "Otherwise, select the upgrade button under **Your plan** to open the **Upgrade plan** dialog.",
         "Choose a plan that includes more, or a prepaid pack where packs are offered, and complete the payment if a payment page opens.",
         "Come back to the **Usage** tab. The new allowances show as soon as the change goes through.",
@@ -62,7 +66,8 @@ const article: HelpArticle = {
     "On plans that bill pay-as-you-go usage, calls, transfers and texts keep working past what's included and the extra is billed. The line then shows more used than included and its bar stays full. Owners and admins can limit that extra cost with the **Monthly spending cap** on the **Plan** screen.",
     "With prepaid packs, each use draws on the pack that ends first. What a pack still holds when it ends is lost, even while another pack is running.",
     "A line that shows what was used followed by **Custom allowance** follows the terms of your custom plan rather than a fixed number, so it has no bar.",
-    "Website chats also count toward an allowance on some plans, but this screen doesn't list them.",
+    "Website chats also count toward an allowance on some plans, but this screen doesn't list them. Website chats a top-up gives show only on the **Plan** screen, under **Top-ups**.",
+    "A top-up is used only once the plan's own allowance of that kind runs out, or on prepaid packs once the packs hold none of it, and the top-up that ends first is used first. What a top-up covers isn't billed and doesn't count toward the **Monthly spending cap**, and what it still holds when it ends is lost.",
     "The screen shows the current month only. After a change of plan, the new allowances show at once, and usage already recorded this month counts against them. After a switch between prepaid packs and a subscription, the new allowances count from the moment of the switch.",
     "Each business has its own plan and usage. If you belong to several businesses, the screen shows the one chosen in the business menu at the top of the sidebar.",
   ],
@@ -82,6 +87,10 @@ const article: HelpArticle = {
     {
       question: "Why does a line show more used than included?",
       answer: "Your plan bills pay-as-you-go usage, so use past the allowance carries on and is billed. Owners and admins can set a **Monthly spending cap** on the **Plan** screen to limit what it costs. It can also happen after a move to a plan that includes less, because the usage already recorded this month counts against the new allowance.",
+    },
+    {
+      question: "A line is used up, but calls or texts still work. Why?",
+      answer: "A top-up is covering them. Once the plan's own allowance of a kind runs out, each use draws on a top-up that still holds some, and the line under the bar, such as **Top-ups: 12 of 60 min left**, counts down. What a top-up covers isn't billed. When the top-ups of that kind are used up or end, the line says **Limit reached** as usual, or on plans that bill pay-as-you-go usage, use past the allowance is billed.",
     },
     {
       question: "Why don't the voice minutes match the length of my calls?",
@@ -109,7 +118,7 @@ const article: HelpArticle = {
     },
   ],
   related: ["plan", "knowledge", "calls", "notifications", "phone-number", "ai-settings"],
-  keywords: ["usage", "minutes used", "minutes left", "out of minutes", "allowance", "quota", "limit reached", "busy signal", "voice minutes", "transfer attempts", "SMS alerts", "text segments", "knowledge storage", "reset date", "billing period", "prepaid pack balance"],
+  keywords: ["usage", "minutes used", "minutes left", "out of minutes", "allowance", "quota", "limit reached", "busy signal", "voice minutes", "transfer attempts", "SMS alerts", "text segments", "knowledge storage", "reset date", "billing period", "prepaid pack balance", "top-up", "top-up left", "extra minutes"],
 };
 
 export default article;

@@ -4,12 +4,12 @@ const article: HelpArticle = {
   slug: "plan",
   title: "Plan",
   section: "settings",
-  summary: "See your plan and what it includes, move to another plan or buy a prepaid pack, use a promo code, cap overage spending and manage payments and invoices.",
+  summary: "See your plan, what it includes and any top-ups on top of it, move to another plan, buy a prepaid pack or a top-up, use a promo code, cap overage spending and manage payments and invoices.",
   screenPaths: ["/settings/plan"],
   location: ["Sidebar", "Manage", "Settings", "Plan"],
-  access: "Everyone on the team can see the plan, what it includes, the packs the business holds and the spending cap. Only owners and admins can upgrade, buy a pack, use a promo code, change the spending cap, manage or cancel the subscription and see the transaction history.",
+  access: "Everyone on the team can see the plan, what it includes, the packs and top-ups the business holds and the spending cap. Only owners and admins can upgrade, buy a pack or a top-up, use a promo code, add a top-up code, change the spending cap, manage or cancel the subscription and see the transaction history.",
   purpose: [
-    "The **Plan** screen shows the business's plan: its name, its price and what it includes for your AI receptionist. It is also where owners and admins move to another plan, buy a prepaid pack, use a promo code and manage payments.",
+    "The **Plan** screen shows the business's plan: its name, its price and what it includes for your AI receptionist. It is also where owners and admins move to another plan, buy a prepaid pack or a top-up, use a promo code and manage payments.",
     "A paid plan renews every month or every year, and its allowances of voice minutes, transfer attempts and SMS alerts start again each month. A paid plan that shows **+ pay-as-you-go usage** also bills the usage past those allowances, which the **Monthly spending cap** can limit. A prepaid pack is paid once and lasts a set number of days, or has no end date, without renewing, and what it includes stops when it runs out.",
     "You pay on the secure payment page, and you manage your payment method and invoices in the billing portal, which **Manage subscription** opens. The plans, packs and prices on offer are shown in the **Upgrade plan** dialog and can change over time.",
   ],
@@ -18,7 +18,9 @@ const article: HelpArticle = {
     { name: "Your plan", description: "The plan's name and its price, followed by **/ month**, or **/ month, billed annually** for a yearly plan. A paid plan that bills usage over its allowances adds **+ pay-as-you-go usage**, and a plan with custom pricing says so instead of showing a price. Lines under the price can show a promo discount and when the promo plan ends, the date your plan ends or changes to another plan, that your bank asks you to confirm a payment, or how usage over your allowance is billed. On one prepaid pack, it shows the pack's name, its price for its length and the date it ends, or that it has no end date. With several packs, it shows **Prepaid Plan** and the date the last one ends, or that it has no end date." },
     { name: "What's included", description: "What the plan includes: voice minutes, how many receptionists can be active at once, transfer attempts and SMS alerts each month, and knowledge storage. On prepaid packs, it shows what your packs include for their whole length, and on a custom plan it says which allowances are custom." },
     { name: "Your packs", description: "Shown when the business holds several prepaid packs, or a pack beside another plan. Each pack shows its name, its price for its length, the minutes left out of its total with a bar, and the date it ends or **Never ends**. **On hold while a payment dispute is open** means nothing can be drawn from that pack until the dispute is settled." },
-    { name: "Have a promo code?", description: "A link that opens a field for a promo code. A valid code shows the plan it unlocks, any discount and for how long, what the plan includes and its prices. Only owners and admins see it, and not on a plan with custom pricing." },
+    { name: "Top-ups", description: "Shown when the business has extra allowances on top of its plan, given as part of a promotion, added with a top-up code or bought. Each top-up shows its title, which is a note about it, **Top-up from code** and the code, the name of a top-up the business bought, or **Top-up**, then **Ends on** and a date, **Never ends**, or **Starts on** and a date when it starts later, and for each allowance it gives, such as **Voice minutes** or **Website chats**, how much is left, such as **45 of 60 left**. **On hold while a payment dispute is open** means nothing can be drawn from a bought top-up until the dispute is settled. A top-up that is used up, ended or was taken back isn't shown." },
+    { name: "Buy a top-up", description: "Shown on the free plan and on prepaid packs to owners and admins, where top-ups are on sale. Each top-up has a card with its name, its price, what it adds, such as **100 voice minutes**, how long it lasts, such as **Lasts 90 days from your payment.**, and a **Buy** button that opens the secure payment page." },
+    { name: "Have a promo code?", description: "A link that opens a field for a promo code. A valid code shows the plan it unlocks, any discount and for how long, what the plan includes and its prices, or for a top-up code what it adds to your plan. Only owners and admins see it, and not on a plan with custom pricing." },
     { name: "Plan buttons", description: "The buttons under the plan, which only owners and admins see. **Complete payment** shows when your bank asks you to confirm a payment. The upgrade button opens the **Upgrade plan** dialog: it reads **Upgrade to** followed by a higher plan's name when plans can be bought, and **Upgrade plan** when only prepaid packs can. **Manage subscription** opens the billing portal. Where your plan can be changed from this screen, **Cancel plan**, **Resume** and **Keep my plan** show when they apply." },
     { name: "Monthly spending cap", description: "Shown on paid plans that bill pay-as-you-go usage. It shows **No spending cap is set**, or the **Current overage spend** this month against the cap with a bar, and **Cap reached** once the spend gets there. Owners and admins can set, update or remove the cap, and everyone else sees a note that only owners and admins can change it." },
     { name: "Transaction history", description: "The business's 20 most recent orders, refunds and setup fees from the payment provider, with the **Date**, **Description**, **Amount**, **Status** and an **Invoice** link where there is one. The status reads, for example, **Paid**, **Pending**, **Refunded** or **Partial refund**. A refund shows with a minus sign, and a refunded payment shows how much was refunded under its amount. Only owners and admins see it, once the business has at least one transaction." },
@@ -29,6 +31,7 @@ const article: HelpArticle = {
       description: "The form that opens from the **Have a promo code?** link. A code from a promo link, or one kept from sign-up, is filled in and checked as soon as the screen opens. In the offer, an allowance the plan includes more of than the regular plan it's based on is marked **More than** followed by that plan's name. If the business holds prepaid packs, the offer warns that starting its plan ends them and the minutes left on them.",
       fields: [
         { name: "Promo code", requirement: "required", description: "The code you were given: letters and digits, sometimes in groups joined by hyphens. Letter case and spaces don't matter. **Apply** stays off until you enter a code. Select **Apply** to check it, which shows **Checking...** for a moment, or **Cancel** to close the form." },
+        { name: "Add to my plan", description: "After a valid top-up code, the offer reads **This code adds to your plan:** and lists what it adds, such as **60 voice minutes**, and how long it lasts, such as **Lasts 30 days from when you add it.** or **It doesn't expire.** Select **Add to my plan** to add it straight away, with no payment. When the business or you already added the code, the offer says so instead of showing the button." },
         { name: "Monthly and Yearly", description: "After a valid code, a box for each billing period the plan is sold with shows its price, with the regular price crossed out when the code takes money off. Its button reads **Subscribe monthly** or **Subscribe yearly**, or **Switch to it monthly** or **Switch to it yearly** when you already pay for a plan. **Not on sale right now** means that period can't be bought. When the business already has the plan the code unlocks, the offer says so instead of showing the prices." },
       ],
     },
@@ -50,7 +53,7 @@ const article: HelpArticle = {
     },
     {
       title: "Billing email",
-      description: "Appears in the **Upgrade plan** dialog or under a promo code's offer when the payment provider can't use your email for this business, for example because it already handles another business's billing.",
+      description: "Appears in the **Upgrade plan** dialog, under a promo code's offer or under **Buy a top-up** when the payment provider can't use your email for this business, for example because it already handles another business's billing.",
       fields: [
         { name: "Billing email", requirement: "required", description: "The email that should get this business's receipts. **Continue** stays off while the field is empty. Select **Continue** to try the payment again with it, or **Cancel** to stop." },
       ],
@@ -78,6 +81,15 @@ const article: HelpArticle = {
       ],
     },
     {
+      title: "Buy a top-up",
+      steps: [
+        "Open **Settings** in the sidebar and select the **Plan** tab, or select **Buy a top-up** on the **Usage** tab.",
+        "Under **Buy a top-up**, check what each top-up adds and how long it lasts.",
+        "Select **Buy** on the top-up you want.",
+        "Pay on the secure payment page. When you come back, a message says **Your top-up was added.**, and it shows under **Top-ups**. If the payment is still processing, the message says so and the top-up shows once the payment arrives.",
+      ],
+    },
+    {
       title: "Use a promo code",
       steps: [
         "Select **Have a promo code?** under **Your plan**.",
@@ -85,6 +97,15 @@ const article: HelpArticle = {
         "Check the plan the code unlocks, its discount and what it includes.",
         "Select the button for the billing period you want, such as **Subscribe monthly**.",
         "Pay on the secure payment page. If the business already pays for a plan, the plan changes without one.",
+      ],
+    },
+    {
+      title: "Add a top-up code",
+      steps: [
+        "Select **Have a promo code?** under **Your plan**.",
+        "Type the code in **Promo code** and select **Apply**.",
+        "Check what the code adds and how long it lasts.",
+        "Select **Add to my plan**. A message says **Top-up added.**, and the top-up shows under **Top-ups**.",
       ],
     },
     {
@@ -143,6 +164,13 @@ const article: HelpArticle = {
     "When you cancel, usage over what's included is still billed until the end date.",
     "A promo plan can last a set number of months. A line under **Your plan** says until when, and whether it then moves to the regular plan it's based on or ends, and the owners get an email a week before. A promo plan set to end this way can't be resumed here.",
     "A promo code can be used once by each business.",
+    "A top-up adds voice minutes, transfer attempts, SMS alerts or website chats on top of your plan, and your plan stays as it is. Calls, transfers, texts and chats use a top-up only once the plan's own allowance of that kind runs out, on prepaid packs once the packs hold none of it, and the top-up that ends first is used first.",
+    "On a plan that bills pay-as-you-go usage, what a top-up covers isn't billed and doesn't count toward the **Monthly spending cap**. Website chats past the allowance cost nothing on those plans, so they don't use a top-up.",
+    "A top-up code can be added once by each business, and once by each person, so the same person can't add it to several businesses. What a top-up still holds when it ends is lost.",
+    "On a plan with custom pricing, which has no limits, top-ups aren't used while you're on it, and the screen says so. They count again if the business moves to a plan with allowances before they end.",
+    "Top-ups are sold on the free plan and on prepaid packs. Plans that bill pay-as-you-go usage carry on past their allowance and bill it instead, so they don't sell top-ups, and neither does a plan with custom pricing.",
+    "A bought top-up is paid once, never renews and lasts from your payment. Your plan stays as it is, and a top-up you hold stays when the plan or pack changes. Top-ups aren't added automatically when an allowance runs out.",
+    "If a top-up's payment is refunded, the top-up loses the refunded share of what it gave, out of what it still holds, and a full refund takes it back. While a dispute over the payment is open, the top-up is on hold: it counts again if the payment stands and is taken back if the money is returned. For a refund, contact support.",
     "A discount code for a prepaid pack goes on the secure payment page, where that page has a field for one. **Have a promo code?** takes only codes for plans, so it says a pack's code isn't valid.",
     "A prepaid pack is paid once, never renews and has no pay-as-you-go usage. Each use draws on the pack that ends first, and what a pack still holds when it ends is lost.",
     "While a pack is the plan, the owners get an email when a fifth of the minutes is left, when none is left, and 30 and 7 days before a pack ends.",
@@ -189,6 +217,26 @@ const article: HelpArticle = {
     {
       question: "Why does my promo code say it isn't valid?",
       answer: "The code may be mistyped, expired, revoked or used up, it may be meant for another business, this business may have used it already, or its plan may no longer be on sale. Check the code with whoever gave it to you. If the offer says you're already on this plan, the business already pays for the plan the code unlocks. If it says the plan isn't sold with that billing period, choose the other period. **Unable to check this code** means it couldn't be checked just then, so try again.",
+    },
+    {
+      question: "It says This code was already added. Why?",
+      answer: "A top-up code adds its top-up once to each business, and once for each person. Someone on the team already added it here, or you added it for another business. The top-up it added shows under **Top-ups** on the business that has it.",
+    },
+    {
+      question: "Why isn't my top-up being used?",
+      answer: "A top-up is used only once your plan's own allowance of that kind runs out, so while the plan still covers your usage, the top-up stays as it is. A top-up that shows **Starts on** isn't used before that date. On a plan with custom pricing, top-ups aren't used at all, and on plans that bill pay-as-you-go usage, website chats never use one, since they cost nothing there.",
+    },
+    {
+      question: "Why can't I buy a top-up?",
+      answer: "Top-ups are sold only on the free plan and on prepaid packs, only to owners and admins, and only where they're on sale. On a plan that bills pay-as-you-go usage, use past the allowance carries on and is billed with the plan instead, so **Buy a top-up** doesn't show there. A plan that's managed for you doesn't sell them either.",
+    },
+    {
+      question: "It says my payment didn't go through, or was refunded or charged back, so no top-up was added.",
+      answer: "The business didn't get the top-up. If the payment didn't go through, or the payment page expired, select **Buy** again and pay on the new payment page. If it was refunded or charged back before it arrived, buy the top-up again if you still want it, or contact support.",
+    },
+    {
+      question: "A top-up I bought says On hold while a payment dispute is open.",
+      answer: "The payment for it is disputed, for example because a chargeback was asked for with your bank. Nothing is drawn from the top-up until the dispute is settled. It counts again if the payment stands, and it's taken back if the money is returned.",
     },
     {
       question: "It says there were too many tries, or too many codes tried. What now?",
@@ -244,7 +292,7 @@ const article: HelpArticle = {
     },
   ],
   related: ["usage", "onboarding-plan", "team", "ai-agents", "phone-number", "knowledge"],
-  keywords: ["billing", "subscription", "upgrade", "change plan", "downgrade", "cancel subscription", "annual billing", "prepaid pack", "promo code", "coupon", "discount", "invoice", "receipt", "refund", "payment method", "payment failed", "past due", "spending cap", "overage", "pay-as-you-go", "billing portal"],
+  keywords: ["billing", "subscription", "upgrade", "change plan", "downgrade", "cancel subscription", "annual billing", "prepaid pack", "promo code", "coupon", "discount", "top-up", "top-up code", "buy a top-up", "extra minutes", "buy minutes", "credits", "invoice", "receipt", "refund", "payment method", "payment failed", "past due", "spending cap", "overage", "pay-as-you-go", "billing portal"],
 };
 
 export default article;

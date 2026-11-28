@@ -15,7 +15,8 @@ import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } 
 import { createFakePolar } from "./billingPolar.testing";
 import { loadPromoEndWork, recordPromoEnd } from "./billingPromoEnd";
 import { advanceOnboardingStage } from "./onboarding";
-import { createCheckoutForApi, endPromoPlanForApi, getBillingForApi, getOnboardingForApi } from "./publicApi/operations";
+import { createCheckoutForApi, getBillingForApi, getOnboardingForApi } from "./publicApi/operations";
+import { endPromoPlanForApi } from "./publicApi/operatorBilling";
 import { createBusiness } from "./tenancy";
 import { getUsageStatusInTransaction, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction } from "./usage";
 

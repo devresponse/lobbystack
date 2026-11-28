@@ -19,6 +19,7 @@ import { dateField, numberField, recordObject, stringField } from "./billingFiel
 import { applyPackEventInTransaction, applyStripePackRefundInTransaction, packsGiveWayToSubscriptionInTransaction, subscriptionLiveSince, type PackEventInput } from "./billingPackEvents";
 import { clearPackNumberReleaseInTransaction } from "./billingPacks";
 import { limitsFor, polarProductLinks, readBillingCatalogSnapshot, readBillingPlanLimitBook } from "./billingPlans";
+import { readLiveTopUps, topUpBalance } from "./billingTopUps";
 import { readBillingDeployment } from "./billingProvider";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
 
@@ -96,7 +97,8 @@ export const WIDGET_CHAT_DAILY_MINIMUM = 10;
 /**
  * How many website chats the receptionist may start in one UTC day
  * (AUDIT-004): `percent` of the chats the business has for the month, or of
- * its packs' chats on a pack, rounded up and never under ten. A script that
+ * its packs' chats on a pack, with its live top-ups' chats either way,
+ * rounded up and never under ten. A script that
  * gets past the other limits then spends at most that much of the allowance a
  * day, and the team hears about it the first day. Null without a number of
  * chats to take a share of, as on an unlimited plan, or without a percent,
@@ -120,8 +122,10 @@ async function widgetChatDailyLimitReachedInTransaction(
   if (input.percent === null) return null;
   const started = (await tx.select({ id: billingUsageEvents.id }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey), gt(billingUsageEvents.quantity, 0))).limit(1))[0];
   if (started) return null;
-  const allowance = input.plan === "prepaid" ? (await readUsageStatusInTransaction(tx, { businessId: input.businessId })).pack?.chatAiUnits.total ?? null : input.included;
-  const limit = widgetChatDailyLimit(allowance, input.percent);
+  const own = input.plan === "prepaid" ? (await readUsageStatusInTransaction(tx, { businessId: input.businessId })).pack?.chatAiUnits.total ?? null : input.included;
+  // A top-up's chats count toward the day's share as the plan's do, so a large one isn't spent ten a day.
+  const topUpChats = own === null ? 0 : topUpBalance(await readLiveTopUps(tx, input.businessId))?.allowances.chat_ai_tokens.total ?? 0;
+  const limit = widgetChatDailyLimit(own === null ? null : own + topUpChats, input.percent);
   if (limit === null) return null;
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`widget-chat-day:${input.businessId}`}, 0))`);
   const dayStart = new Date();
@@ -144,7 +148,8 @@ export async function getWidgetChatAllowance(
     if (status.chatAiTokensIncluded === null || status.overagesBillable) {
       return { allowed: true, errorCode: null, plan: status.plan };
     }
-    if (status.chatAiBlocked || Math.max(0, status.chatAiTokensIncluded - status.chatAiTokensUsed) < 1) {
+    // A top-up's chats carry on once the month's are used up.
+    if (status.chatAiBlocked || Math.max(0, status.chatAiTokensIncluded - status.chatAiTokensUsed) + (status.topUp?.chatAiUnits.left ?? 0) < 1) {
       return { allowed: false, errorCode: billingErrorCodes.chatAiLimitReached, plan: status.plan };
     }
     return { allowed: true, errorCode: null, plan: status.plan };

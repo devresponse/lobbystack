@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray, isNull, min, or, sql } from "drizzle-orm";
 
-import { auditLogs, billingAccounts, billingPackCheckouts, billingPackPrices, billingPacks, billingTransactions, enqueueOutbox, providerEvents, type DatabaseTransaction } from "@lobbystack/db";
-import { isPaidSubscription, isReplacedSubscription, isUuid, isYearlyBillingInterval, liveSubscriptionStates } from "@lobbystack/shared";
+import { auditLogs, billingAccounts, billingPackCheckouts, billingPackPlans, billingPackPrices, billingPacks, billingTransactions, enqueueOutbox, providerEvents, type DatabaseTransaction } from "@lobbystack/db";
+import { isPaidSubscription, isReplacedSubscription, isUuid, isYearlyBillingInterval, liveSubscriptionStates, type BillingPackKind } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 
@@ -23,6 +23,7 @@ import {
   type PackChange,
   type PackPlanTerms,
 } from "./billingPacks";
+import { applyTopUpRefundInTransaction, closeTopUpDisputeInTransaction, freezeTopUpInTransaction, recordTopUpPurchaseInTransaction, type TopUpChange } from "./billingTopUps";
 import { recordProductEventInTransaction } from "./productEvents";
 import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 
@@ -58,8 +59,16 @@ import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 //   provider couldn't close or by a payment that settled later, gives way to
 //   the plan: LobbyStack refunds nothing on its own (decision 5), so
 //   ops.billing.pack_gave_way and an audit row name the payment to refund.
-// - Everything here acts on rows that name a pack, so an event about no pack
-//   changes nothing, and a business that never bought one sees no change.
+// - Top-ups on sale (0155) are sold as packs are, so their payments, refunds
+//   and disputes arrive the same way, and the catalog row the payment names
+//   says which it is. A top-up's payment adds a top-up (billingTopUps.ts)
+//   and switches nothing: the plan, its allowances and its subscription stay,
+//   and a plan that starts later leaves the top-up as it is. A refund takes
+//   its share off the top-up, or ends it when the whole payment went back; a
+//   dispute freezes it until it closes.
+// - Everything here acts on rows that name a pack or a top-up, so an event
+//   about neither changes nothing, and a business that never bought one sees
+//   no change.
 
 /** The account as reconcile read it before the event, which decides what a pack's payment switches from. */
 export type PackSwitchAccount = {
@@ -87,8 +96,8 @@ export type PackEventInput = {
   order?: { transactionId: string; orderId: string; status: string; amountCents: number; refundedCents: number; currency: string; occurredAt: Date; productId: string | undefined; metadata: Record<string, unknown>; checkoutId: string | undefined } | undefined;
 };
 
-/** Which pack a payment bought: the terms its checkout kept, else the catalog's now, and the price it was sold at. */
-type BoughtPack = { terms: PackPlanTerms; priceId: string | null };
+/** Which pack or top-up a payment bought: the terms its checkout kept, else the catalog's now, the price it was sold at, and which it is. */
+type BoughtPack = { terms: PackPlanTerms; priceId: string | null; kind: BillingPackKind };
 
 /**
  * Applies what a stored event says about a pack, if anything: a pack checkout's
@@ -111,10 +120,14 @@ export async function applyPackEventInTransaction(tx: DatabaseTransaction, input
  * refunded amount so far. Null when no pack has the payment, so the refund is
  * about something else; a pack bought later reads it back then.
  */
-export async function applyStripePackRefundInTransaction(tx: DatabaseTransaction, input: { businessId: string; paymentRef: string; refundedCents: number; at: Date }): Promise<PackChange | null> {
+export async function applyStripePackRefundInTransaction(tx: DatabaseTransaction, input: { businessId: string; paymentRef: string; refundedCents: number; at: Date }): Promise<PackChange | TopUpChange | null> {
   const change = await applyPackRefundInTransaction(tx, { businessId: input.businessId, provider: "stripe", providerRef: input.paymentRef, refundedCents: input.refundedCents, at: input.at });
-  if (change) await afterPackChange(tx, input.businessId, change);
-  return change;
+  if (change) {
+    await afterPackChange(tx, input.businessId, change);
+    return change;
+  }
+  // A top-up's payment, refunded the same way.
+  return await applyTopUpRefundInTransaction(tx, { businessId: input.businessId, provider: "stripe", providerRef: input.paymentRef, refundedCents: input.refundedCents, at: input.at });
 }
 
 /**
@@ -195,9 +208,11 @@ async function closePackCheckoutsForPlan(tx: DatabaseTransaction, input: { busin
   const openStatuses = ["pending", "processing", "ready"];
   // Read first, locking what is open, so a business without an open pack checkout has nothing written.
   // A page still being made can be made after its request's 15 minutes, so it closes whatever its expiry says.
+  // A top-up's checkout stays open: a top-up paid once the plan started adds to that plan as any top-up does.
   const open = await tx.select({ id: billingPackCheckouts.id }).from(billingPackCheckouts)
-    .where(and(eq(billingPackCheckouts.businessId, input.businessId), or(inArray(billingPackCheckouts.status, ["pending", "processing"]), and(eq(billingPackCheckouts.status, "ready"), gt(billingPackCheckouts.expiresAt, input.at)))))
-    .for("update");
+    .innerJoin(billingPackPlans, eq(billingPackPlans.code, billingPackCheckouts.pack))
+    .where(and(eq(billingPackCheckouts.businessId, input.businessId), eq(billingPackPlans.kind, "pack"), or(inArray(billingPackCheckouts.status, ["pending", "processing"]), and(eq(billingPackCheckouts.status, "ready"), gt(billingPackCheckouts.expiresAt, input.at)))))
+    .for("update", { of: billingPackCheckouts });
   if (!open.length) return;
   const closed = await tx.update(billingPackCheckouts)
     .set({ status: sql`case when ${billingPackCheckouts.status} = 'ready' then 'expired' else 'failed' end`, error: PACK_CHECKOUT_CLOSED_FOR_PLAN, updatedAt: input.at })
@@ -236,7 +251,9 @@ async function applyStripePackCheckout(tx: DatabaseTransaction, input: PackEvent
   const transactionId = invoiceRef
     ? await invoiceOrderRow(tx, { businessId: input.businessId, invoiceRef, amountCents, currency, customerId, occurredAt: paidAt })
     : await recordStripePackOrder(tx, { businessId: input.businessId, paymentRef, amountCents, refundedCents: Math.min(history.refundedCents, amountCents), currency, customerId, occurredAt: paidAt });
-  await recordPurchase(tx, input, { bought, providerRef: paymentRef, amountCents, currency, paidAt, transactionId, boughtAt: checkoutStartedAt(payload) ?? paidAt, history, checkoutId: checkoutId && isUuid(checkoutId) ? checkoutId : undefined });
+  const purchase: Purchase = { bought, providerRef: paymentRef, amountCents, currency, paidAt, transactionId, boughtAt: checkoutStartedAt(payload) ?? paidAt, history, checkoutId: checkoutId && isUuid(checkoutId) ? checkoutId : undefined };
+  if (bought.kind === "top_up") await recordTopUpPurchase(tx, input, purchase);
+  else await recordPurchase(tx, input, purchase);
 }
 
 async function applyPolarPackOrder(tx: DatabaseTransaction, input: PackEventInput, order: NonNullable<PackEventInput["order"]>): Promise<boolean> {
@@ -254,9 +271,15 @@ async function applyPolarPackOrder(tx: DatabaseTransaction, input: PackEventInpu
   // As on Stripe, the pack is ordered against a subscription from when the business asked for its checkout, so a
   // subscription bought while the payment page was open is the later choice and wins.
   const boughtAt = (checkoutId ? await packCheckoutCreatedAt(tx, input.businessId, checkoutId) : undefined) ?? order.occurredAt;
+  const purchase: Purchase = { bought, providerRef: order.orderId, amountCents: order.amountCents, currency: order.currency, paidAt: order.occurredAt, transactionId: order.transactionId, boughtAt, history: { refundedCents: order.refundedCents, dispute: null }, checkoutId };
+  if (bought.kind === "top_up") {
+    // The order carries its refunds, so whichever of its events comes first adds the top-up with them.
+    await recordTopUpPurchase(tx, input, purchase);
+    return true;
+  }
   // The order carries its refunds, so whichever of its events comes first adds the pack with them, and a pack whose
   // payment went back wholly before it arrived switches nothing.
-  await recordPurchase(tx, input, { bought, providerRef: order.orderId, amountCents: order.amountCents, currency: order.currency, paidAt: order.occurredAt, transactionId: order.transactionId, boughtAt, history: { refundedCents: order.refundedCents, dispute: null }, checkoutId });
+  await recordPurchase(tx, input, purchase);
   const refund = await applyPackRefundInTransaction(tx, { businessId: input.businessId, provider: "polar", providerRef: order.orderId, refundedCents: order.refundedCents, at: input.eventCreatedAt });
   if (refund) await afterPackChange(tx, input.businessId, refund);
   return true;
@@ -265,9 +288,23 @@ async function applyPolarPackOrder(tx: DatabaseTransaction, input: PackEventInpu
 async function applyStripePackDispute(tx: DatabaseTransaction, input: PackEventInput): Promise<boolean> {
   const paymentRef = stringField(input.payload, "paymentRef");
   if (!paymentRef) return false;
-  const change = await applyDispute(tx, input.businessId, paymentRef, stringField(input.payload, "disputeOutcome"), dateField(input.payload, "occurredAt") ?? input.eventCreatedAt, stringField(input.payload, "id"));
-  if (change) await afterPackChange(tx, input.businessId, change);
-  return change !== null;
+  const outcome = stringField(input.payload, "disputeOutcome");
+  const at = dateField(input.payload, "occurredAt") ?? input.eventCreatedAt;
+  const disputeId = stringField(input.payload, "id");
+  const change = await applyDispute(tx, input.businessId, paymentRef, outcome, at, disputeId);
+  if (change) {
+    await afterPackChange(tx, input.businessId, change);
+    return true;
+  }
+  // A top-up's payment, disputed the same way.
+  return (await applyTopUpDispute(tx, input.businessId, paymentRef, outcome, at, disputeId)) !== null;
+}
+
+/** A Stripe dispute's opening or close, for a top-up's payment, as applyDispute does for a pack's. */
+async function applyTopUpDispute(tx: DatabaseTransaction, businessId: string, paymentRef: string, outcome: string | undefined, at: Date, disputeId?: string): Promise<TopUpChange | null> {
+  if (outcome === "opened") return await freezeTopUpInTransaction(tx, { businessId, provider: "stripe", providerRef: paymentRef, ...(disputeId ? { alreadyClosed: () => stripeDisputeClosed(tx, businessId, disputeId) } : {}) });
+  if (outcome === "won" || outcome === "lost") return await closeTopUpDisputeInTransaction(tx, { businessId, provider: "stripe", providerRef: paymentRef, won: outcome === "won", at });
+  return null;
 }
 
 /** A Stripe dispute's opening or close. An opening of disputeId leaves a live pack live when that dispute's close was applied first. */
@@ -366,6 +403,47 @@ async function recordPurchase(tx: DatabaseTransaction, input: PackEventInput, pu
       previousPlan: switched === "topped_up" ? "prepaid" : switched === "replaced" || switched === "beside" || switched === "gave_way" ? input.account?.plan ?? "none" : "free_cloud",
     },
   });
+}
+
+/**
+ * Adds the top-up a payment bought, once, and names it on its checkout. A
+ * refund or a dispute the provider sent before the payment arrived applies
+ * at once, so a payment wholly refunded first adds a top-up already ended.
+ * Nothing else changes: a top-up switches no plan, whatever the business is
+ * on when its payment arrives, so a plan started while its page was open
+ * keeps it too. An audit row records the purchase.
+ */
+async function recordTopUpPurchase(tx: DatabaseTransaction, input: PackEventInput, purchase: Purchase): Promise<void> {
+  const provider = input.provider === "polar" ? "polar" : "stripe";
+  const { terms } = purchase.bought;
+  const recorded = await recordTopUpPurchaseInTransaction(tx, {
+    businessId: input.businessId,
+    offer: { code: terms.code, voiceSec: terms.voiceSec, smsSeg: terms.smsSeg, callsOut: terms.callsOut, chatUnits: terms.chatUnits, days: terms.days },
+    priceId: purchase.bought.priceId,
+    provider,
+    providerRef: purchase.providerRef,
+    amountCents: purchase.amountCents,
+    currency: purchase.currency,
+    paidAt: purchase.paidAt,
+    transactionId: purchase.transactionId,
+  });
+  if (purchase.checkoutId) await linkTopUpCheckout(tx, { businessId: input.businessId, checkoutId: purchase.checkoutId, topUpId: recorded.topUpId });
+  // A Polar order carries its refunds on every event, so each applies them; Stripe's came before the payment did.
+  const now = new Date();
+  if (purchase.history.refundedCents > 0) await applyTopUpRefundInTransaction(tx, { businessId: input.businessId, provider, providerRef: purchase.providerRef, refundedCents: purchase.history.refundedCents, at: now });
+  if (!recorded.created) return;
+  if (purchase.history.dispute) {
+    await freezeTopUpInTransaction(tx, { businessId: input.businessId, provider, providerRef: purchase.providerRef });
+    if (purchase.history.dispute !== "opened") await closeTopUpDisputeInTransaction(tx, { businessId: input.businessId, provider, providerRef: purchase.providerRef, won: purchase.history.dispute === "won", at: now });
+  }
+  await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.top_up_purchased", entityType: "billing_top_up", entityId: recorded.topUpId, payload: { topUp: terms.code, provider, providerRef: purchase.providerRef, amountCents: purchase.amountCents, currency: purchase.currency, voiceSec: terms.voiceSec, smsSeg: terms.smsSeg, callsOut: terms.callsOut, chatUnits: terms.chatUnits, days: terms.days } });
+}
+
+/** Names on a top-up checkout the top-up its payment added, so its page can tell what became of it. */
+async function linkTopUpCheckout(tx: DatabaseTransaction, input: { businessId: string; checkoutId: string; topUpId: string }): Promise<void> {
+  if (!isUuid(input.checkoutId)) return;
+  await tx.update(billingPackCheckouts).set({ topUpId: input.topUpId, updatedAt: new Date() })
+    .where(and(eq(billingPackCheckouts.id, input.checkoutId), eq(billingPackCheckouts.businessId, input.businessId), isNull(billingPackCheckouts.topUpId), isNull(billingPackCheckouts.packId)));
 }
 
 type Switch = "replaced" | "beside" | "gave_way" | "started" | "topped_up";
@@ -490,8 +568,8 @@ async function packOfStripeCheckout(tx: DatabaseTransaction, businessId: string,
   const byPrice = priceRef ? await packOfPrice(tx, isUuid(priceRef) ? { id: priceRef } : { providerRef: priceRef }) : null;
   if (byPrice) return byPrice;
   const code = stringField(payload, "packCode");
-  const terms = code ? await readPackPlan(tx, code) : null;
-  return terms ? { terms, priceId: null } : null;
+  const plan = code ? await readPackPlan(tx, code) : null;
+  return plan ? { terms: plan, priceId: null, kind: plan.kind } : null;
 }
 
 /**
@@ -502,8 +580,8 @@ async function packOfStripeCheckout(tx: DatabaseTransaction, businessId: string,
 async function packOfPrice(tx: DatabaseTransaction, reference: { id: string } | { providerRef: string }): Promise<BoughtPack | null> {
   const [price] = await tx.select({ id: billingPackPrices.id, pack: billingPackPrices.pack }).from(billingPackPrices)
     .where("id" in reference ? eq(billingPackPrices.id, reference.id) : eq(billingPackPrices.providerRef, reference.providerRef)).limit(1);
-  const terms = price ? await readPackPlan(tx, price.pack) : null;
-  return price && terms ? { terms, priceId: price.id } : null;
+  const plan = price ? await readPackPlan(tx, price.pack) : null;
+  return price && plan ? { terms: plan, priceId: price.id, kind: plan.kind } : null;
 }
 
 /**
@@ -517,8 +595,10 @@ async function packOfCheckout(tx: DatabaseTransaction, businessId: string, check
   const [checkout] = await tx.select({ pack: billingPackCheckouts.pack, priceId: billingPackCheckouts.priceId, terms: billingPackCheckouts.terms }).from(billingPackCheckouts)
     .where(and(eq(billingPackCheckouts.id, checkoutId), eq(billingPackCheckouts.businessId, businessId))).limit(1);
   if (!checkout) return null;
-  const terms = readPackCheckoutTerms(checkout.pack, checkout.terms) ?? await readPackPlan(tx, checkout.pack);
-  return terms ? { terms, priceId: checkout.priceId } : null;
+  // The catalog's row says whether it sold a pack or a top-up, which a code keeps for good.
+  const plan = await readPackPlan(tx, checkout.pack);
+  const terms = readPackCheckoutTerms(checkout.pack, checkout.terms) ?? plan;
+  return terms ? { terms, priceId: checkout.priceId, kind: plan?.kind ?? "pack" } : null;
 }
 
 /** Names on a pack checkout the pack its payment added, so its page can tell what became of it. */

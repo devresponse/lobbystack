@@ -1,4 +1,4 @@
-import { withoutSoundTags, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { withoutSoundTags, type BusinessContextSnapshot, type LiveModel } from "@lobbystack/shared";
 import type OpenAI from "openai";
 import type { SessionConfig } from "openai/resources/live/live";
 import { LiveWS } from "openai/resources/live/ws";
@@ -166,14 +166,15 @@ async function sayOpening(client: OpenAI, session: SessionConfig, greeting: stri
 /**
  * Records the call's opening, `greeting`, as GPT-Live says it at the start of
  * a phone call in `voice`. The session has the business's instructions from
- * `snapshot`, with the opening as its greeting. Returns the recording, base64
- * 16-bit PCM at 24 kHz, and how many sessions it took. Throws when none of
- * the three said the opening.
+ * `snapshot`, with the opening as its greeting, on the calls' model unless
+ * `model` names another, as the voice eval's `--model` does. Returns the
+ * recording, base64 16-bit PCM at 24 kHz, and how many sessions it took.
+ * Throws when none of the three said the opening.
  */
-export async function recordGreeting(client: OpenAI, input: { greeting: string; voice: string; snapshot: BusinessContextSnapshot }, options: { signal?: AbortSignal } = {}): Promise<{ audio: string; tries: number }> {
+export async function recordGreeting(client: OpenAI, input: { greeting: string; voice: string; snapshot: BusinessContextSnapshot; model?: LiveModel }, options: { signal?: AbortSignal } = {}): Promise<{ audio: string; tries: number }> {
   if (!input.greeting.trim()) throw new Error("The call opens with nothing to record.");
   // A WebSocket session isn't accepted like a call, and isn't kept.
-  const { type: _type, store: _store, ...call } = buildPhoneSessionConfig({ ...input.snapshot, greeting: input.greeting, recordingNotice: false }, { voice: input.voice });
+  const { type: _type, store: _store, ...call } = buildPhoneSessionConfig({ ...input.snapshot, greeting: input.greeting, recordingNotice: false }, { voice: input.voice, ...(input.model ? { model: input.model } : {}) });
   const session: SessionConfig = { ...call, audio: { ...call.audio, format: { type: "audio/pcm", rate: RATE } } };
   const failures: string[] = [];
   for (let tries = 1; tries <= TRIES; tries += 1) {

@@ -32,7 +32,7 @@ A screen guide is made for the knowledge base, which cuts a document at each hea
 
 ## Write documents the search finds
 
-The topic guides follow the rules in [the RealInfoBot folder's README](../../devops/kb/realinfobot/README.md#how-its-written): one question per section, in the words a customer would use, each section standing alone with full links, "Also asked as" lines with other words for the subject, and no section over 1,500 characters. Where the website or the legal pages differ from the app, the guides follow the app.
+The topic guides follow the rules in [the RealInfoBot folder's README](../../devops/kb/realinfobot/README.md#how-its-written): one question per section, in the words a customer would use, each section standing alone with full links, "Also asked as" lines with other words for the subject, and no section over 1,500 characters. Where the website or the legal pages differ from the app, the guides follow the app, as the maintainer chose on 2026-11-28 ([decisions](../project/decisions.md#choose-what-to-build)).
 
 The knowledge search runs a keyword search and a meaning-based search together ([knowledge](../knowledge/architecture.md)). A keyword-only run of RealInfoBot's 86 test questions, with the app's own passage cutting and ranking on a local PostgreSQL, found a document that answers 85 of them among the first 6 passages, after "Also asked as" lines were added for the 14 it first missed.
 

@@ -87,7 +87,7 @@ A keyword-only run of the 86 questions in `questions.yaml`, with the app's own p
 
 ## Where the website and the app differ
 
-Where realinfobot.com or the legal pages say something the app doesn't do, the knowledge base follows the app, and summarizes the legal pages without the parts that differ:
+Where realinfobot.com or the legal pages say something the app doesn't do, the knowledge base follows the app, and summarizes the legal pages without the parts that differ. The maintainer chose this on 2026-11-28, and the website and the legal pages are to change to match the app:
 
 - The Terms of Service describe a Listing Pass in US dollars, with 300 minutes and 500 text replies, and credits that expire after 12 months. The app sells packs in Canadian dollars: 250 minutes and 300 website chats for 180 days, or 3 or 6 listings at once for 365 days.
 - The website and its blog say buyers can text the listing and get answers. The AI never answers texts: they wait on the **Messages** screen for a person.

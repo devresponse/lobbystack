@@ -9,8 +9,8 @@ business:
   # With a business API key, a name that isn't the business's stops the run
   # before anything changes. A time zone that isn't the business's changes it,
   # so check the details line of a --plan run says unchanged.
-  name: RealInfoBot
-  timezone: America/Edmonton
+  name: Realinfobot Support
+  timezone: America/Creston
 
 # The business's default AI agent. A run replaces these settings and leaves the
 # others as they are. Leave this section out to load the knowledge alone.

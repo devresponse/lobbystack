@@ -1,0 +1,94 @@
+# The Log in screen in the RealInfoBot app
+
+Sign in to the dashboard with your account's email address and password.
+
+- Where to find it: Open the app while signed out
+- Who can use it: Anyone can open this page. If you're already signed in, it takes you straight to the dashboard.
+- Address: https://ca.realinfobot.com/login
+
+Also known as: sign in, login, log on, welcome back, can't sign in, wrong password, locked out, access the dashboard, verification code, stay signed in, sign out, log out.
+
+## What the Log in screen is for
+
+The log-in page is the way into the dashboard. Each person who works in the app signs in with their own account: an email address and a password. To give someone access to a business, an owner or admin invites them on the **Team** screen.
+
+When you open the app while signed out, it sends you here. After you sign in, the dashboard opens on **Home**, or on the setup step where you left off if your business hasn't finished setup.
+
+If your email address hasn't been confirmed yet, the app may ask for a 6-digit code it emails you before it lets you in. It asks only once your password is right.
+
+## What you see on the Log in screen
+
+- **The app's panel**: On a wide screen, the left half of the page shows the app's logo and name at the top, and in the middle a headline, what the receptionist does and three things it does for you. On a phone it's a band above the form with the logo, the name, the headline and the help button.
+- **Welcome back**: The form's title, with **Sign in to your account to continue.** under it. Below are the **Email** and **Password** fields.
+- **Forgot password?**: The link beside the **Password** label. It opens the page where you get a reset code by email and choose a new password.
+- **Sign in**: Checks your email address and password and signs you in. It reads **Signing in...** while it works, and any problem shows just above it.
+- **Don't have an account? Create one**: Opens the sign-up page, to create a new account.
+- **Terms and Privacy**: Links at the bottom of the page that open the terms and the privacy policy in a new tab.
+- **Verify your email**: Replaces the form when your address still needs confirming. It names the address the code was sent to, with the **Verification code** boxes, **Verify email**, **Send a new code** and **Use a different email**, which takes you back to the form. The buttons read **Verifying...** and **Sending a new code...** while they work, and any problem shows under the code boxes.
+
+## Welcome back, on the Log in screen
+
+- **Email** (Required): The address of your account. Capital letters don't matter. If what you typed isn't a complete address, the field shows **Provided email address is invalid.** when you move on.
+- **Password** (Required): Your account's password, exactly as you set it. Capital letters matter here.
+
+## Verify your email, on the Log in screen
+
+Shown only when the app asks you to confirm your address after you select **Sign in**.
+
+- **Verification code** (Required): The 6-digit code from the email the app sent when you selected **Sign in**. You can type it or paste it, and only digits are kept. It works for 10 minutes, and three wrong tries use it up. **Verify email** turns on once all six digits are in.
+
+## How to sign in, on the Log in screen
+
+1. Open the app's address in your browser.
+2. Enter your **Email** and **Password**.
+3. Select **Sign in**. The dashboard opens, or the setup step where you left off.
+
+## How to sign in with a verification code, on the Log in screen
+
+1. Enter your **Email** and **Password** and select **Sign in** as usual.
+2. If **Verify your email** appears, open the email the app just sent you.
+3. Enter the 6-digit code in **Verification code** and select **Verify email**. The app signs you in.
+4. If the code doesn't arrive, select **Send a new code**. If a security check appears above that button, complete it and select **Send a new code** again.
+
+## How to get back in when you've forgotten your password, on the Log in screen
+
+1. Select **Forgot password?** beside the **Password** label.
+2. Follow the steps to get a reset code and choose a new password. The app signs you in when you're done.
+
+## How to sign in with a different account, on the Log in screen
+
+1. Select **Sign out**. In the dashboard it's in the menu with your email address at the bottom of the sidebar, and during setup it's at the top right of each step.
+2. On the log-in page, sign in with the other account's email address and password.
+
+## Good to know about the Log in screen
+
+- You stay signed in on the same browser until you sign out, or until 30 days pass without you using the app.
+- Changing your password on the **Account** screen, or resetting it, signs you out on your other devices and browsers.
+- When another page sends you here to sign in first, such as an invitation, signing in takes you back to that page so you can carry on. **Create one** keeps that page too, so a new account comes back to it once it's confirmed.
+- If you belong to more than one business, the dashboard opens on the one you used last. Switch businesses with the business menu at the top of the sidebar.
+- After several sign-in tries in a minute, the app stops checking for a moment and answers **Incorrect email or password. Please try again.** even when both are right. Wait a minute before trying again.
+- To change the email address or password you sign in with, use the **Account** screen once you're signed in.
+
+## Why does it say Incorrect email or password? (Log in screen)
+
+The app couldn't match the address and password. Check the address for typos and make sure Caps Lock is off, then try again. If you've forgotten the password, select **Forgot password?** to choose a new one. If an account was made for you and you haven't chosen a password yet, use **Forgot password?** too: it sets your first password. If you've never created an account, select **Create one**, or ask an owner or admin of your business to invite you. After several tries in a minute, wait a minute before trying again.
+
+## The app asks for a verification code. Where do I find it? (Log in screen)
+
+The app emails a 6-digit code to the address you signed in with, so look in your spam or junk folder too. If it hasn't arrived after a minute, select **Send a new code**. If a security check appears, complete it and select **Send a new code** again. A code works for 10 minutes, and only the code in the newest email works.
+
+## Why does it say the verification code is invalid, has expired or had too many incorrect attempts? (Log in screen)
+
+A code works for 10 minutes and allows three wrong tries, and only the code in the newest email works. Check the six digits, or select **Send a new code** and enter the code from the newest email. After several tries in a minute, the app turns codes down for a moment, so wait a minute before trying again. If it says **Please wait before requesting another verification code.**, use the newest code you have: the app sends at most one code a minute, and three an hour, to the same address.
+
+## What does Your email is verified. Sign in to continue mean? (Log in screen)
+
+Your code worked and your address is confirmed, but the app couldn't finish signing you in. Enter your password and select **Sign in**. If you came from the sign-up page and the address already had an account, use that account's password, or select **Forgot password?** to choose a new one.
+
+## Why do I keep coming back to the log-in page after signing in? (Log in screen)
+
+The app uses a cookie to keep you signed in. Allow cookies for the app's address in your browser's settings, or try another browser.
+
+## Why does a setup step open instead of the dashboard? (Log in screen)
+
+Your business hasn't finished setup yet, so the app opens the step where you left off. Once the last step is done, signing in opens **Home**. If the step asks for the name of your business but you meant to join a team you were invited to, open the link in the invitation email and accept it instead. The same step opens when you're no longer on any business's team, for example after you were removed from it: ask an owner or admin to invite you again.

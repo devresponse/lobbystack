@@ -34,6 +34,7 @@ The commands this guide uses, in one place. Each one names the section that expl
 | Go back from a move to PostgreSQL 18, or put the new project's settings files back | `node devops/redeploy.mjs back .env.bootstrap-<name>` puts production back on the old project from wherever the cutover got to (G1 to G9), and `recover` puts the `-pg18` files back from the backup folder (R1), from fork PR #236. Not yet run against Railway | [devops/redeploy.md](../../../devops/redeploy.md#back-g1-to-g9) |
 | Make new local passwords | `pnpm env:generate --force`, then `docker compose down -v` | [2.9](part-2-local-development.md#29-stop-reset-and-update) |
 | Add a brand, after editing `brands/` | `pnpm brands:build` | [3.6](part-3-outside-services.md#36-your-brand) |
+| Bring a brand's support knowledge base up to date after a help page changes, then load it into the brand's support business | `pnpm help:kb`, then `pnpm lobbystack onboard devops/kb/<brand>/<manifest> --plan` and the same without `--plan` | [support knowledge base](../../features/support-knowledge-base.md) |
 | Build the website chat's loader again | `pnpm widget:embed:build` | [8.7](part-8-troubleshooting.md#87-the-website-chat) |
 
 **Passwords and secrets** ([4.3](part-4-test-environment.md#43-make-the-passwords-and-secrets)). Each prints a new 64-character value: `openssl rand -hex 32` on a Mac, on Linux or in Git Bash, or `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` wherever Node.js is installed.

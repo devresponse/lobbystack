@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
-import { apiBusinessCreateSchema, apiPhoneNumberSearchSchema, apiPublicProfileUpdateSchema, apiReceptionistCreateSchema, apiReceptionistUpdateSchema, apiRuleCreateSchema, apiServiceCreateSchema, weekdays } from "@lobbystack/shared";
+import { apiBusinessCreateSchema, apiKnowledgeEntryUpdateSchema, apiPhoneNumberSearchSchema, apiPublicProfileUpdateSchema, apiReceptionistCreateSchema, apiReceptionistUpdateSchema, apiRuleCreateSchema, apiServiceCreateSchema, weekdays } from "@lobbystack/shared";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -37,6 +37,13 @@ export function websiteKey(value: string): string {
   }
 }
 
+/**
+ * An FAQ's or text entry's labels and priority, as PATCH /knowledge/{entry_id}
+ * takes them: the entries with the highest priority are the ones every call
+ * and chat keeps ready.
+ */
+const entryLabels = { tags: apiKnowledgeEntryUpdateSchema.shape.tags, priority: apiKnowledgeEntryUpdateSchema.shape.priority };
+
 /** The text a name is found by on a rerun. */
 export const nameKey = (value: string) => value.trim().toLowerCase();
 
@@ -69,8 +76,8 @@ export const manifestSchema = z.strictObject({
     websites: z.array(z.string().trim().min(1)).optional(),
     read_full_site: z.boolean().optional(),
     files: z.array(fileEntry).optional(),
-    faqs: z.array(z.strictObject({ question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000) })).optional(),
-    texts: z.array(z.strictObject({ title: z.string().trim().min(1).max(300), content: z.string().trim().min(1).max(20_000) })).optional(),
+    faqs: z.array(z.strictObject({ question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000), ...entryLabels })).optional(),
+    texts: z.array(z.strictObject({ title: z.string().trim().min(1).max(300), content: z.string().trim().min(1).max(20_000), ...entryLabels })).optional(),
   }).optional(),
   public_profile: apiPublicProfileUpdateSchema.optional(),
   plan: z.union([

@@ -64,6 +64,7 @@ knowledge:
   faqs:
     - question: Do you take emergency calls?
       answer: Yes, 24/7 for existing customers.
+      priority: 50
 receptionist:
   greeting: Thanks for calling Acme Plumbing, how can I help?
   transfer_mode: on_urgent
@@ -111,8 +112,8 @@ owner:
 | `knowledge.websites` | Los sitios que lee la recepcionista. La primera lectura toma una muestra de cada sitio. |
 | `knowledge.read_full_site` | `true` espera esa muestra y luego lee el resto de cada sitio. |
 | `knowledge.files` | Archivos PDF, Word, de texto, Markdown, JPEG, PNG, WebP o TIFF de hasta 25 MB, como rutas dentro de la carpeta del manifiesto. Dé a una entrada `path`, `title` y `tags` para nombrarla. |
-| `knowledge.faqs` | Preguntas y respuestas. Una pregunta frecuente con la misma pregunta recibe la respuesta nueva. |
-| `knowledge.texts` | Notas con un `title` y un `content`. Una nota con el mismo título recibe el contenido nuevo. |
+| `knowledge.faqs` | Preguntas y respuestas. Una pregunta frecuente con la misma pregunta recibe la respuesta nueva. `priority`, de -100 a 100, ordena las preguntas frecuentes y las notas que cada llamada y cada chat tiene a mano, de la más alta a la más baja, y `tags` reemplaza las etiquetas de una entrada. Si falta alguno, la entrada conserva lo que tiene. |
+| `knowledge.texts` | Notas con un `title` y un `content`. Una nota con el mismo título recibe el contenido nuevo. `priority` y `tags` funcionan como en las preguntas frecuentes. |
 | `public_profile` | Los campos de `PATCH /public-profile`, que configura la [página pública](/es/settings/public-profile) del negocio en `/profile/<slug>`: `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` y `widget_key_id`. `published: true` publica la página. Las partes de la dirección que el archivo omite conservan su valor. |
 | `plan` | `checkout` con un `plan` (`starter` o `pro`) y un `interval` (`monthly` o `annual`). O `managed: true` para un plan que se factura fuera del proveedor de facturación, que solo la clave de plataforma de un operador puede definir. |
 | `phone_number` | Los campos de `POST /phone-numbers/search`: `country`, `kind`, `area_code`, `city`, `region` y `postal_code`. El comando reserva el primer número que ofrece la búsqueda. |

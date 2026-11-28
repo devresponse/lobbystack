@@ -54,6 +54,7 @@
     "env:generate": "node scripts/generate-env.mjs",
     "api:openapi": "tsx --tsconfig scripts/tsconfig.json scripts/write-openapi.ts",
     "brands:build": "tsx --tsconfig scripts/tsconfig.json scripts/write-brands.ts",
+    "help:kb": "tsx --tsconfig scripts/tsconfig.json scripts/help-kb.ts",
     "billing": "tsx --tsconfig scripts/tsconfig.json scripts/billing.ts",
     "billing:scenarios": "tsx --tsconfig scripts/tsconfig.json scripts/billing-scenarios.ts",
     "db:check": "pnpm --filter @lobbystack/db db:check",

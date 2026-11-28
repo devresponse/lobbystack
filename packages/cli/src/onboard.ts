@@ -7,6 +7,7 @@ import { isUuid, ONBOARDING_CRAWL_PAGE_LIMIT, weekdays } from "@lobbystack/share
 import { createClient, type Client } from "./client";
 import { stringValue, type Command, type CommandContext, type Values } from "./command";
 import { ApiError, CliError, exitCodes, type ExitCode } from "./errors";
+import { labelChanges, type WantedEntry } from "./entryLabels";
 import { nameKey, readManifest, readManifestFiles, websiteKey, type Manifest, type ManifestFile } from "./manifest";
 import { defaultSleep, listAll, waitUntilDone, type Row } from "./operations";
 import { completeUpload, uploadKnowledgeFile } from "./upload";
@@ -439,7 +440,7 @@ async function syncRules(run: Run): Promise<void> {
   }
 }
 
-async function syncEntries(run: Run, type: "faq" | "text", wanted: ReadonlyArray<{ title: string; content: string }>): Promise<void> {
+async function syncEntries(run: Run, type: "faq" | "text", wanted: ReadonlyArray<WantedEntry>): Promise<void> {
   if (!wanted.length) return;
   const current = await listAll(async (cursor) => await run.client.call("listKnowledgeEntries", { query: { type, ...(cursor ? { cursor } : {}) } }));
   const steps = type === "faq" ? "FAQs" : "texts";
@@ -448,13 +449,18 @@ async function syncEntries(run: Run, type: "faq" | "text", wanted: ReadonlyArray
     const existing = current.find((row) => sameName(row.title, entry.title));
     if (!existing) {
       if (run.plan) { run.log({ step: steps, action: "would add", detail: entry.title }); continue; }
-      await sendOnce(run, step, async (key) => await run.client.call("createKnowledgeEntry", { body: type === "faq" ? { type, question: entry.title, answer: entry.content } : { type, title: entry.title, content: entry.content }, idempotencyKey: key }));
+      const created = (await sendOnce(run, step, async (key) => await run.client.call("createKnowledgeEntry", { body: type === "faq" ? { type, question: entry.title, answer: entry.content } : { type, title: entry.title, content: entry.content }, idempotencyKey: key }))).data as Row;
       await run.save();
+      // A new entry takes labels and a priority only from an update. If the run stops before it, the next run finds the entry and sends them.
+      const labels = labelChanges(entry);
+      if (Object.keys(labels).length) await run.client.call("updateKnowledgeEntry", { params: { entry_id: String(created.id) }, body: labels });
       run.log({ step: steps, action: "added", detail: entry.title });
       continue;
     }
     delete run.state.keys[step];
-    await apply(run, `${type === "faq" ? "FAQ" : "text"} ${entry.title}`, existing.content === entry.content ? [] : [type === "faq" ? "answer" : "content"], async () => { await run.client.call("updateKnowledgeEntry", { params: { entry_id: String(existing.id) }, body: { content: entry.content } }); });
+    const changes: Row = { ...(existing.content === entry.content ? {} : { content: entry.content }), ...labelChanges(entry, existing) };
+    const fields = Object.keys(changes).map((field) => (field === "content" && type === "faq" ? "answer" : field));
+    await apply(run, `${type === "faq" ? "FAQ" : "text"} ${entry.title}`, fields, async () => { await run.client.call("updateKnowledgeEntry", { params: { entry_id: String(existing.id) }, body: changes }); });
   }
 }
 
@@ -635,7 +641,7 @@ async function syncKnowledge(run: Run): Promise<void> {
     }
   }
   await syncFiles(run);
-  await syncEntries(run, "faq", (knowledge?.faqs ?? []).map((faq) => ({ title: faq.question, content: faq.answer })));
+  await syncEntries(run, "faq", (knowledge?.faqs ?? []).map((faq) => ({ title: faq.question, content: faq.answer, tags: faq.tags, priority: faq.priority })));
   await syncEntries(run, "text", knowledge?.texts ?? []);
   if (!knowledge?.read_full_site) return;
   for (const website of websites) {

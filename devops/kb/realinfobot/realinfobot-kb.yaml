@@ -1,0 +1,263 @@
+# RealInfoBot's support knowledge base, for lobbystack onboard: the documents,
+# the FAQs that every chat and call keeps ready, and the settings that make the
+# business's default AI agent RealInfoBot's support assistant. README.md in this
+# folder says how to load it. pnpm help:kb writes the lines between
+# "screens:start" and "screens:end"; edit the rest by hand.
+
+business:
+  # The business to load into, as it is now: its exact name and time zone.
+  # With a business API key, a name that isn't the business's stops the run
+  # before anything changes. A time zone that isn't the business's changes it,
+  # so check the details line of a --plan run says unchanged.
+  name: Realinfobot Support
+  timezone: America/Creston
+
+# The business's default AI agent. A run replaces these settings and leaves the
+# others as they are. Leave this section out to load the knowledge alone.
+receptionist:
+  greeting: Hi, this is RealInfoBot's assistant. I can answer questions about RealInfoBot's features, plans and billing. How can I help?
+  # What the assistant says about the business. It's the business's, shared by
+  # every AI agent, and once set here the AI no longer rewrites it.
+  summary: >-
+    RealInfoBot, made by Real Info Box Inc. of Calgary, Alberta, gives real
+    estate agents an AI assistant for each listing. Buyers scan the QR code on
+    the sign or call the listing's number, and the assistant answers from the
+    agent's facts, any hour, in the buyer's language, then sends every inquiry
+    to the agent. There's a free plan and listing packs paid once in Canadian
+    dollars. Support is at support@realinfobot.com.
+  # Support books nothing: a caller who wants a person leaves a message.
+  booking_mode: "off"
+  chat_instructions: |
+    You are RealInfoBot's support assistant. You help real estate agents, their teams and people thinking of buying RealInfoBot with questions about RealInfoBot: what it does, setting it up, using the app at https://ca.realinfobot.com, its features, plans, prices and billing, privacy and policies, and fixing common problems.
+
+    Search your knowledge before you answer anything about a feature, a price, a limit, a step or a policy, and answer only from what it returns and from this prompt, never from general knowledge or a guess. When it doesn't have the answer, say you don't have that detail and suggest emailing support@realinfobot.com.
+
+    Words: the app and its screen guides call a listing's AI agent a receptionist. Each listing has its own AI agent, so say listing or AI agent to the person, and read "receptionist" in your knowledge as "AI agent".
+
+    For how-to questions, give the steps in order, naming the screen and the buttons as the app shows them, such as Settings, then the Plan tab, and give the screen's link when your knowledge has one. Keep replies short, and offer more detail rather than writing it all at once.
+
+    Prices are in Canadian dollars, before tax. Listing packs are paid once, with no subscription and nothing that renews. Never make up a price, a limit, a date or a feature.
+
+    You can't see or change anyone's account, listings, calls, payments or settings, and you can't promise a refund, a credit, an exception or a fix. For those, such as a refund, a payment problem, a bug or a change only support can make, ask the person to email support@realinfobot.com from their account's email address, with their order number for a payment. If they'd rather be called back, take a message with their name and phone number.
+
+    Never ask for a password, a verification code, an API key or a card number. If someone shares one, tell them to change it.
+
+    Give no legal, tax, financial or real estate advice. For the terms or the privacy policy, sum up what your knowledge says and give the link: https://realinfobot.com/ca/legal/terms or https://realinfobot.com/ca/legal/privacy.
+
+    Reply in the language the person writes in.
+  voice_instructions: |
+    You are RealInfoBot's support assistant on a call. You help real estate agents, their teams and people thinking of buying RealInfoBot with questions about RealInfoBot: what it does, setting it up, using the app, its features, plans, prices and billing, privacy and policies, and fixing common problems.
+
+    Look up your knowledge before you answer anything about a feature, a price, a limit, a step or a policy, and answer only from it and from these instructions, never from general knowledge or a guess. When it doesn't have the answer, say so and offer to take a message for RealInfoBot's support team, or suggest emailing support at realinfobot dot com.
+
+    The app and its guides call a listing's AI agent a receptionist. Say listing or AI agent to the caller.
+
+    Speak in short sentences. Give steps one or two at a time, naming the screen and buttons as the app shows them, and don't read out web addresses unless the caller asks for one. Prices are in Canadian dollars, before tax, and listing packs are paid once, with no subscription.
+
+    You can't see or change anyone's account or payments, and you can't promise refunds, credits or fixes: take a message with the caller's name and number, or suggest emailing support. Never ask for a password, a verification code or a card number. Give no legal, tax, financial or real estate advice.
+
+knowledge:
+  files:
+    # The screen guides first and the topic guides last: a chat or call names
+    # the 40 documents added or changed last as what it can look up, so the
+    # topic guides, uploaded last, are among them.
+    # screens:start
+    - path: screens/sign-up.md
+      title: "Screen guide: Sign up"
+    - path: screens/log-in.md
+      title: "Screen guide: Log in"
+    - path: screens/reset-password.md
+      title: "Screen guide: Reset your password"
+    - path: screens/accept-invitation.md
+      title: "Screen guide: Accept an invitation"
+    - path: screens/onboarding-business.md
+      title: "Setup step guide: First, what is the name of your business?"
+    - path: screens/onboarding-website.md
+      title: "Setup step guide: What is your business's website?"
+    - path: screens/onboarding-knowledge.md
+      title: "Setup step guide: Add training documents"
+    - path: screens/onboarding-greeting.md
+      title: "Setup step guide: How should we greet your callers?"
+    - path: screens/onboarding-number.md
+      title: "Setup step guide: Pick your AI's phone number"
+    - path: screens/onboarding-attribution.md
+      title: "Setup step guide: How did you hear about the app?"
+    - path: screens/home.md
+      title: "Screen guide: Home"
+    - path: screens/calls.md
+      title: "Screen guide: Calls"
+    - path: screens/call-details.md
+      title: "Screen guide: Call details"
+    - path: screens/messages.md
+      title: "Screen guide: Messages"
+    - path: screens/contacts.md
+      title: "Screen guide: Contacts"
+    - path: screens/contact-details.md
+      title: "Screen guide: Contact details"
+    - path: screens/appointments.md
+      title: "Screen guide: Appointments"
+    - path: screens/ai-settings.md
+      title: "Screen guide: AI settings"
+    - path: screens/ai-agents.md
+      title: "Screen guide: AI agents"
+    - path: screens/knowledge.md
+      title: "Screen guide: Knowledge"
+    - path: screens/questions.md
+      title: "Screen guide: Questions"
+    - path: screens/services.md
+      title: "Screen guide: Services"
+    - path: screens/rules.md
+      title: "Screen guide: Rules"
+    - path: screens/analytics.md
+      title: "Screen guide: Analytics"
+    - path: screens/integrations.md
+      title: "Screen guide: Integrations"
+    - path: screens/webhooks.md
+      title: "Screen guide: Webhooks"
+    - path: screens/website-widget.md
+      title: "Screen guide: Website widget"
+    - path: screens/team.md
+      title: "Screen guide: Team"
+    - path: screens/phone-number.md
+      title: "Screen guide: Phone Number"
+    - path: screens/preferences.md
+      title: "Screen guide: Preferences"
+    - path: screens/notifications.md
+      title: "Screen guide: Notifications"
+    - path: screens/public-profile.md
+      title: "Screen guide: Public profile"
+    - path: screens/qr-code.md
+      title: "Screen guide: QR code"
+    - path: screens/connected-apps.md
+      title: "Screen guide: Connected apps"
+    - path: screens/api-keys.md
+      title: "Screen guide: API keys"
+    - path: screens/account.md
+      title: "Screen guide: Account"
+    - path: screens/setup-guide.md
+      title: "Screen guide: Setup guide"
+    - path: screens/affiliate-program.md
+      title: "Screen guide: Affiliate program"
+    - path: screens/confirm-email-change.md
+      title: "Screen guide: Confirm your new email"
+    - path: screens/cancel-account.md
+      title: "Screen guide: Cancel your account"
+    - path: screens/oauth-consent.md
+      title: "Screen guide: Connect an app"
+    # screens:end
+    - path: guides/01-about-realinfobot.md
+      title: About RealInfoBot
+    - path: guides/02-how-realinfobot-works.md
+      title: How RealInfoBot works
+    - path: guides/03-getting-started.md
+      title: Getting started with RealInfoBot
+    - path: guides/04-plans-and-pricing.md
+      title: RealInfoBot plans and pricing
+    - path: guides/05-billing-and-payments.md
+      title: RealInfoBot billing and payments
+    - path: guides/06-listings-and-ai-agents.md
+      title: RealInfoBot listings and AI agents
+    - path: guides/07-calls-and-phone-number.md
+      title: RealInfoBot calls and phone number
+    - path: guides/08-texts-alerts-and-notifications.md
+      title: RealInfoBot texts, alerts and notifications
+    - path: guides/09-qr-codes-signs-and-listing-pages.md
+      title: RealInfoBot QR codes, signs and listing pages
+    - path: guides/10-website-chat.md
+      title: RealInfoBot website chat
+    - path: guides/11-teaching-the-assistant.md
+      title: "Teaching your RealInfoBot assistant: knowledge, rules and questions"
+    - path: guides/12-inquiries-contacts-and-integrations.md
+      title: RealInfoBot inquiries, contacts, analytics and integrations
+    - path: guides/13-team-account-and-security.md
+      title: RealInfoBot team, account and security
+    - path: guides/14-privacy-data-and-recording.md
+      title: RealInfoBot privacy, data and call recording
+    - path: guides/15-troubleshooting.md
+      title: RealInfoBot troubleshooting
+    - path: guides/16-quick-answers.md
+      title: RealInfoBot quick answers
+    - path: guides/17-terms-and-policies.md
+      title: RealInfoBot terms and policies at a glance
+    - path: guides/18-affiliate-program.md
+      title: RealInfoBot affiliate program
+    - path: guides/19-plan-and-usage-screens.md
+      title: RealInfoBot Plan and Usage screens
+  # Every chat and call keeps the 8 FAQs with the highest priority ready, with
+  # no search. These carry 93 to 100, above the 0 an entry gets by default.
+  faqs:
+    - question: How much does RealInfoBot cost?
+      priority: 100
+      answer: >-
+        RealInfoBot has a free plan and three listing packs, paid once in
+        Canadian dollars plus tax, with no subscription. Free, CA$0: 1 listing,
+        30 voice minutes and 5 website chats a month, and no phone number.
+        1 listing for 180 days, CA$99: 250 voice minutes and 300 website chats.
+        3 listings for 365 days, CA$249: 750 minutes and 1,800 chats. 6 listings
+        for 365 days, CA$449: 1,500 minutes and 3,600 chats. Every pack includes
+        1 phone number for the account. Extra minutes cost CA$39 for 100,
+        lasting 180 days. Owners and admins buy on the Plan tab in Settings,
+        https://ca.realinfobot.com/settings/plan.
+    - question: What is RealInfoBot?
+      priority: 99
+      answer: >-
+        RealInfoBot gives each of a real estate agent's listings an AI assistant
+        that answers buyers' questions about the home at any hour, in the
+        buyer's language, only from the facts the agent adds. Buyers scan the
+        QR code on the sign to chat on the listing's page, and with a listing
+        pack they can call its RealInfoBot number. Every inquiry reaches the
+        agent with a summary and the transcript, and buyers who leave their
+        details become contacts. The app is at https://ca.realinfobot.com.
+    - question: How do I contact RealInfoBot support?
+      priority: 98
+      answer: >-
+        Email support@realinfobot.com, from your account's email address if you
+        have an account. People answer Monday to Friday, 9 a.m. to 5 p.m.
+        Mountain time, and aim to reply within 2 business days. Say what you
+        expected and when it happened, and give your order number for a payment
+        question. Support can also set up a listing with you.
+    - question: How do I get started with RealInfoBot?
+      priority: 97
+      answer: >-
+        Sign up at https://ca.realinfobot.com/en/signup with your email and a
+        password, and enter the code emailed to you. Setup takes about ten
+        minutes: your business's name, a plan (the free plan needs no payment),
+        your website's address, your listing's facts or documents, the greeting
+        and, with a pack, a phone number. Then create a chat widget on the
+        Website widget screen, choose it on Settings > Public profile, publish
+        your page there, and print your QR code from Settings > QR code.
+    - question: Is RealInfoBot a subscription, and how do I cancel?
+      priority: 96
+      answer: >-
+        No. Listing packs are paid once and end on their date, so nothing renews
+        and there's nothing to cancel, and the free plan costs nothing. To close
+        the account, an owner uses Cancel account on Settings > Team, which
+        closes the business without deleting anything, or Delete business, which
+        erases it for good.
+    - question: Can I get a refund?
+      priority: 95
+      answer: >-
+        Yes, in full, if you ask within 30 days of buying a listing pack,
+        whatever was used. After 30 days there's no refund, including for unused
+        minutes and listings that sell early. Email support@realinfobot.com with
+        your account email and order number. Polar, RealInfoBot's merchant of
+        record, returns the money to your payment method.
+    - question: Does each listing get its own phone number?
+      priority: 94
+      answer: >-
+        No. Every listing pack includes one RealInfoBot phone number for the
+        account, and the free plan has none. Each listing has its own AI agent,
+        web page and QR codes. With several listings, set the number to your
+        main AI agent on Settings > Phone Number: it answers from every
+        listing's facts, and callers say which home they mean.
+    - question: Does the RealInfoBot assistant answer text messages?
+      priority: 93
+      answer: >-
+        No. The AI answers phone calls and chats only. Texts to your RealInfoBot
+        number wait on the Messages screen, where you or your team reply by
+        hand. RealInfoBot texts only alerts to your team, verification codes,
+        and showing confirmations and reminders that buyers agreed to.
+
+# Leave the business's setup steps as they are.
+onboarding:
+  complete: false

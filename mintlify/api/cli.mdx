@@ -64,6 +64,7 @@ knowledge:
   faqs:
     - question: Do you take emergency calls?
       answer: Yes, 24/7 for existing customers.
+      priority: 50
 receptionist:
   greeting: Thanks for calling Acme Plumbing, how can I help?
   transfer_mode: on_urgent
@@ -111,8 +112,8 @@ owner:
 | `knowledge.websites` | Sites the receptionist reads. The first read takes a sample of each site. |
 | `knowledge.read_full_site` | `true` waits for that sample, then reads the rest of each site. |
 | `knowledge.files` | PDF, Word, text, Markdown, JPEG, PNG, WebP or TIFF files up to 25 MB, as paths inside the manifest's folder. Give an entry `path`, `title` and `tags` to name it. |
-| `knowledge.faqs` | Questions and answers. An FAQ with the same question gets the new answer. |
-| `knowledge.texts` | Notes with a `title` and `content`. A note with the same title gets the new content. |
+| `knowledge.faqs` | Questions and answers. An FAQ with the same question gets the new answer. `priority`, from -100 to 100, ranks the FAQs and notes every call and chat keeps ready, highest first, and `tags` replaces an entry's labels. Leave either out to keep what the entry has. |
+| `knowledge.texts` | Notes with a `title` and `content`. A note with the same title gets the new content. `priority` and `tags` work as for FAQs. |
 | `public_profile` | The fields of `PATCH /public-profile`, which sets up the business's [public page](/settings/public-profile) at `/profile/<slug>`: `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` and `widget_key_id`. `published: true` publishes the page. Address parts the file leaves out keep what they have. |
 | `plan` | `checkout` with a `plan` (`starter` or `pro`) and an `interval` (`monthly` or `annual`). Or `managed: true` for a plan billed outside the billing provider, which only an operator's platform key can set. |
 | `phone_number` | The fields of `POST /phone-numbers/search`: `country`, `kind`, `area_code`, `city`, `region` and `postal_code`. The command claims the first number the search offers. |

@@ -225,7 +225,15 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
       return ok(upload.source, 201);
     }
     if (route === "GET /knowledge") return page(world.entries.filter((entry) => entry.type === url.searchParams.get("type")));
-    if (route === "POST /knowledge") { const entry = body!.type === "faq" ? { id: id(), type: "faq", title: body!.question, content: body!.answer } : { id: id(), ...body }; world.entries.push(entry); return ok(entry, 201); }
+    // As the API: an FAQ carries the faq tag, a new entry has priority 0, and an update keeps the faq tag whatever labels it sends.
+    if (route === "POST /knowledge") { const entry = body!.type === "faq" ? { id: id(), type: "faq", title: body!.question, content: body!.answer, tags: ["faq"], priority: 0 } : { id: id(), type: "text", title: body!.title, content: body!.content, tags: [], priority: 0 }; world.entries.push(entry); return ok(entry, 201); }
+    if (matches("PATCH /knowledge/*", route)) {
+      const entry = world.entries.find((row) => path.endsWith(String(row.id)));
+      if (!entry) return error(404, "not_found", "Knowledge entry not found.");
+      const { tags, ...rest } = body!;
+      Object.assign(entry, rest, tags ? { tags: [...(entry.type === "faq" ? ["faq"] : []), ...(tags as string[]).filter((tag) => tag !== "faq")] } : {});
+      return ok(entry);
+    }
     if (route === "GET /public-profile") return ok(world.profile);
     // Address parts the request leaves out keep theirs, as in the API.
     if (route === "PATCH /public-profile") {
@@ -384,6 +392,11 @@ describe("the manifest", () => {
     expect(await readManifest(manifest).then(() => null, (value: Error) => value.message)).toMatch(/receptionists\[0\]: .*copy_from_id/);
   });
 
+  it("takes an FAQ's priority and labels as the API does", async () => {
+    await writeFile(manifest, manifestYaml.replace("      answer: Yes, 24/7 for existing customers.\n", "      answer: Yes, 24/7 for existing customers.\n      priority: 101\n      tags: [\"\"]\n"));
+    await expect(readManifest(manifest)).rejects.toThrow(/knowledge\.faqs\[0\]\.tags\[0\]: [\s\S]*knowledge\.faqs\[0\]\.priority: /);
+  });
+
   it("refuses two entries a rerun couldn't tell apart", async () => {
     await writeFile(manifest, `${manifestYaml}rules:\n  - { title: Gas leaks, content: Leave the building. }\n  - { title: gas leaks , content: Call the gas company. }\n`.replace("websites: [https://acmeplumbing.ca]", "websites: [https://acmeplumbing.ca, acmeplumbing.ca/]"));
     const error = await readManifest(manifest).then(() => null, (value: Error) => value.message);
@@ -537,6 +550,44 @@ describe("lobbystack onboard", () => {
     expect(rerun.out).toContain("public profile updated      show_map");
     expect(world.writes).toEqual(["PATCH /public-profile"]);
     expect(world.profile).toMatchObject({ address: { line1: "12 King Street West", city: "Toronto" }, show_map: false });
+  });
+
+  it("gives FAQs and text entries their priority and labels, then changes only what differs", async () => {
+    const { world, fetch } = fakeWorld();
+    await writeFile(manifest, manifestYaml.replace(
+      "      answer: Yes, 24/7 for existing customers.\n",
+      "      answer: Yes, 24/7 for existing customers.\n      priority: 90\n      tags: [emergency, faq]\n  texts:\n    - title: Service area\n      content: Toronto and the GTA.\n      tags: [area]\n",
+    ));
+    expect((await onboard(["--yes"], fetch)).code).toBe(exitCodes.ok);
+    const faq = world.entries.find((entry) => entry.type === "faq")!;
+    const text = world.entries.find((entry) => entry.type === "text")!;
+    expect(faq).toMatchObject({ priority: 90, tags: ["faq", "emergency"] });
+    expect(text).toMatchObject({ priority: 0, tags: ["area"] });
+    expect(world.writes.filter((write) => write.startsWith("PATCH /knowledge/"))).toEqual([`PATCH /knowledge/${String(faq.id)}`, `PATCH /knowledge/${String(text.id)}`]);
+
+    world.writes.length = 0;
+    expect((await onboard([], fetch)).code).toBe(exitCodes.ok);
+    expect(world.writes).toEqual([]);
+
+    // A priority changed in the dashboard goes back to the manifest's, and one the manifest leaves out stays as it is.
+    faq.priority = 5;
+    text.priority = 7;
+    const rerun = await onboard([], fetch);
+    expect(rerun.out).toMatch(/FAQ Do you do emergency calls\? +updated +priority/);
+    expect(world.writes).toEqual([`PATCH /knowledge/${String(faq.id)}`]);
+    expect(faq.priority).toBe(90);
+    expect(text.priority).toBe(7);
+  });
+
+  it("sends a new FAQ's priority on the next run when the run stopped before it", async () => {
+    const { world, fetch } = fakeWorld();
+    await writeFile(manifest, manifestYaml.replace("      answer: Yes, 24/7 for existing customers.\n", "      answer: Yes, 24/7 for existing customers.\n      priority: 90\n"));
+    world.fail.add("PATCH /knowledge/*");
+    expect((await onboard(["--yes"], fetch)).code).toBe(exitCodes.failed);
+    expect(world.entries).toEqual([expect.objectContaining({ type: "faq", priority: 0 })]);
+
+    expect((await onboard(["--yes"], fetch)).code).toBe(exitCodes.ok);
+    expect(world.entries).toEqual([expect.objectContaining({ type: "faq", priority: 90 })]);
   });
 
   it("with an operator's key and a checkout, sends the claim link first and exits 4 until the plan is paid", async () => {

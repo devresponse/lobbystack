@@ -1,0 +1,4 @@
+# lobbystack onboard keeps the IDs of what it uploaded next to each manifest.
+# They belong to one dashboard and stay on the computer that ran the import.
+*.state.json
+*.state.json.*.bak

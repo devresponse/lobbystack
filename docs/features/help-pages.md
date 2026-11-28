@@ -26,6 +26,8 @@ Until this change, a question mark at the top right of the dashboard opened the 
 
 `/en/help.md` is every help page in one Markdown file, in the index's order, each page under its own heading with its address. It is made from the same content as the pages, so it is never out of step with them. Load it into an AI support assistant, a ticketing tool's knowledge base, or a business's own **Knowledge** screen (as an upload) for a receptionist that answers questions about the app. The HTML pages work for a crawler too: each is one article with plain headings, lists and no script-only content.
 
+For a brand's own support assistant, `pnpm help:kb` writes each page as a document of its own, in the brand's name and with the brand's dashboard address, cut to fit the knowledge base's passages, into the brand's folder under `devops/kb/` ([support knowledge base](support-knowledge-base.md)).
+
 ## Know which screens have a page
 
 Every page of the app has a help page except these, which `help-content.test.ts` names:
@@ -62,7 +64,7 @@ The help pages must read true on every deployment, for every brand, now and late
 
 ### Check it
 
-`apps/admin/src/lib/help/help-content.test.ts` runs with the admin's tests and fails on a page that breaks the rules above (a banned word, also inside a name joined with underscores, a missing part, a sentence without a full stop, a dash, a `{{placeholder}}`, a code name, even in a code mark unless it's an API scope the screen shows, a mark in a name or title, an address with a language prefix, a related page that doesn't exist), on an article file the registry doesn't list, on two pages claiming one address or an address that isn't a page of the app, and on a page anywhere under `apps/admin/app/` that no help page explains and the test doesn't name. It checks the words around the pages, such as the index's introduction and the Markdown file's, for banned words and brand names too. `apps/admin/src/lib/help/validate.test.ts` checks the rules themselves. `apps/admin/src/components/screen-help-button.test.tsx` checks the panel, its focus and its related pages, and `apps/admin/e2e/help-pages.e2e.ts` opens the index, every page, the Markdown file and the panel in a browser, on a large screen and a phone, including a related page, scrolling from the keyboard and closing from the strip beside it.
+`apps/admin/src/lib/help/help-content.test.ts` runs with the admin's tests and fails on a page that breaks the rules above (a banned word, also inside a name joined with underscores, a missing part, a sentence without a full stop, a dash, a `{{placeholder}}`, a code name, even in a code mark unless it's an API scope the screen shows, a mark in a name or title, an address with a language prefix, a related page that doesn't exist), on an article file the registry doesn't list, on two pages claiming one address or an address that isn't a page of the app, and on a page anywhere under `apps/admin/app/` that no help page explains and the test doesn't name. It checks the words around the pages, such as the index's introduction and the Markdown file's, for banned words and brand names too. `apps/admin/src/lib/help/validate.test.ts` checks the rules themselves. `scripts/help-kb.test.ts`, in `pnpm test:scripts`, fails when a brand's screen guides under `devops/kb/` fall behind the pages: run `pnpm help:kb` and commit what it writes. `apps/admin/src/components/screen-help-button.test.tsx` checks the panel, its focus and its related pages, and `apps/admin/e2e/help-pages.e2e.ts` opens the index, every page, the Markdown file and the panel in a browser, on a large screen and a phone, including a related page, scrolling from the keyboard and closing from the strip beside it.
 
 ### Add a page for a new screen
 
@@ -70,6 +72,7 @@ The help pages must read true on every deployment, for every brand, now and late
 2. Add it to `apps/admin/src/lib/help/registry.ts`: its import, and its place in the list, which is its place in its section of the index.
 3. Put the screen's address in `screenPaths`, with `{name}` for a part that changes, such as `/contacts/{contactId}`, so the question mark finds it.
 4. Run `pnpm --filter @lobbystack/admin exec vitest run src/lib/help`.
+5. Run `pnpm help:kb`, which adds the page to each brand's support knowledge base, or add its slug to `skip` in a brand's `devops/kb/<brand>/help-kb.json`, with why, when the brand doesn't offer the screen.
 
 ## Code map
 

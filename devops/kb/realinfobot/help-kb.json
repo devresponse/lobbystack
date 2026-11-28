@@ -1,0 +1,15 @@
+{
+  "appName": "RealInfoBot",
+  "appUrl": "https://ca.realinfobot.com",
+  "manifest": "realinfobot-kb.yaml",
+  "folder": "screens",
+  "skip": {
+    "onboarding-plan": "Describes monthly and yearly plans. RealInfoBot sells packs paid once: guides/03-getting-started.md and guides/04-plans-and-pricing.md cover its plan step.",
+    "plan": "Describes subscriptions and the spending cap, which RealInfoBot doesn't sell: guides/19-plan-and-usage-screens.md replaces it.",
+    "usage": "Describes monthly resets and pay-as-you-go usage: guides/19-plan-and-usage-screens.md replaces it.",
+    "onboarding-brand": "The white-label step for a deployment's operator, not a RealInfoBot customer's.",
+    "prospect-demo": "Partners' demos for their prospects, which RealInfoBot customers don't use.",
+    "claim-demo": "Partners' demos for their prospects, which RealInfoBot customers don't use.",
+    "prospect-demos": "Partners' demos for their prospects, which RealInfoBot customers don't use."
+  }
+}

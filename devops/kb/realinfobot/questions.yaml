@@ -1,0 +1,207 @@
+# Support questions to try once the knowledge base is loaded, worded the way
+# agents ask them, each with the documents that answer it. An entry with faq
+# is also answered by that FAQ, which every chat and call has ready.
+#
+# Try one with: pnpm lobbystack knowledge search "<question>"
+# The documents under answered_by should be among the passages it finds.
+
+# Prices and billing
+- question: how much does it cost per listing?
+  answered_by: [guides/04-plans-and-pricing.md]
+  faq: How much does RealInfoBot cost?
+- question: Is there a monthly fee?
+  answered_by: [guides/04-plans-and-pricing.md]
+  faq: Is RealInfoBot a subscription, and how do I cancel?
+- question: What do I get on the free plan?
+  answered_by: [guides/04-plans-and-pricing.md]
+- question: Do I get a phone number on the free plan?
+  answered_by: [guides/04-plans-and-pricing.md, guides/07-calls-and-phone-number.md]
+- question: Can I buy more minutes without buying another pack?
+  answered_by: [guides/04-plans-and-pricing.md, guides/19-plan-and-usage-screens.md]
+- question: Are your prices in US dollars?
+  answered_by: [guides/04-plans-and-pricing.md]
+- question: Do I pay GST on top of the price?
+  answered_by: [guides/04-plans-and-pricing.md, guides/05-billing-and-payments.md]
+- question: Where do I enter my discount code?
+  answered_by: [guides/05-billing-and-payments.md, guides/19-plan-and-usage-screens.md]
+- question: The promo code says it's not valid
+  answered_by: [guides/19-plan-and-usage-screens.md]
+- question: I need an invoice for my accountant
+  answered_by: [guides/05-billing-and-payments.md, guides/19-plan-and-usage-screens.md]
+- question: When does my pack expire?
+  answered_by: [guides/05-billing-and-payments.md]
+- question: Can I upgrade from the 1 listing pack to the 3 listing pack?
+  answered_by: [guides/05-billing-and-payments.md]
+- question: I want a refund
+  answered_by: [guides/05-billing-and-payments.md]
+  faq: Can I get a refund?
+- question: How do I cancel my subscription?
+  answered_by: [guides/05-billing-and-payments.md]
+  faq: Is RealInfoBot a subscription, and how do I cancel?
+- question: My card was declined when I tried to pay
+  answered_by: [guides/05-billing-and-payments.md]
+- question: I paid but my account still shows the free plan
+  answered_by: [guides/15-troubleshooting.md, guides/05-billing-and-payments.md]
+- question: What happens when I run out of minutes?
+  answered_by: [guides/04-plans-and-pricing.md, guides/19-plan-and-usage-screens.md]
+- question: Do my test calls use up minutes?
+  answered_by: [guides/19-plan-and-usage-screens.md, guides/04-plans-and-pricing.md]
+- question: Who is Polar?
+  answered_by: [guides/05-billing-and-payments.md]
+- question: How many minutes do I have left?
+  answered_by: [guides/19-plan-and-usage-screens.md, screens/home.md]
+
+# Getting started
+- question: How do I sign up?
+  answered_by: [guides/03-getting-started.md, screens/sign-up.md]
+- question: I never got the code to confirm my email
+  answered_by: [screens/sign-up.md, guides/13-team-account-and-security.md]
+- question: How long does setup take?
+  answered_by: [guides/03-getting-started.md]
+- question: Can you set it up for me?
+  answered_by: [guides/01-about-realinfobot.md]
+- question: How do I try the assistant before buyers call it?
+  answered_by: [guides/03-getting-started.md]
+- question: What is the Getting started checklist?
+  answered_by: [guides/03-getting-started.md, screens/setup-guide.md]
+- question: Do I need to be technical to use this?
+  answered_by: [guides/16-quick-answers.md]
+
+# Listings and AI agents
+- question: How do I add a second listing?
+  answered_by: [guides/06-listings-and-ai-agents.md, screens/ai-agents.md]
+- question: How many listings can I have at the same time?
+  answered_by: [guides/06-listings-and-ai-agents.md, guides/04-plans-and-pricing.md]
+- question: My listing sold, what should I do?
+  answered_by: [guides/06-listings-and-ai-agents.md]
+- question: Can I reuse my QR sign on my next house?
+  answered_by: [guides/06-listings-and-ai-agents.md, guides/09-qr-codes-signs-and-listing-pages.md]
+- question: I have two listings and one number, how does it know which house a caller means?
+  answered_by: [guides/06-listings-and-ai-agents.md, guides/07-calls-and-phone-number.md]
+  faq: Does each listing get its own phone number?
+- question: What is a receptionist?
+  answered_by: [guides/16-quick-answers.md]
+- question: Can I change the assistant's voice?
+  answered_by: [guides/16-quick-answers.md, screens/ai-settings.md]
+- question: How do I change what callers hear when it picks up?
+  answered_by: [guides/07-calls-and-phone-number.md, screens/ai-settings.md]
+
+# Calls and the phone number
+- question: Can I use my own cell number?
+  answered_by: [guides/07-calls-and-phone-number.md]
+- question: Can it transfer the caller to me?
+  answered_by: [guides/07-calls-and-phone-number.md, screens/ai-settings.md]
+- question: How long can a call last?
+  answered_by: [guides/07-calls-and-phone-number.md]
+- question: Someone keeps calling my listing number, can I block them?
+  answered_by: [guides/07-calls-and-phone-number.md]
+- question: Callers get a busy signal
+  answered_by: [guides/15-troubleshooting.md, guides/07-calls-and-phone-number.md]
+- question: Are calls recorded?
+  answered_by: [guides/14-privacy-data-and-recording.md]
+- question: Can two buyers call at the same time?
+  answered_by: [guides/16-quick-answers.md]
+
+# Texts and alerts
+- question: Will the bot reply to texts from buyers?
+  answered_by: [guides/08-texts-alerts-and-notifications.md]
+  faq: Does the RealInfoBot assistant answer text messages?
+- question: How do I get a text when someone inquires?
+  answered_by: [guides/08-texts-alerts-and-notifications.md, screens/notifications.md]
+- question: Why can't I turn on SMS alerts?
+  answered_by: [guides/08-texts-alerts-and-notifications.md]
+- question: I'm not getting any email notifications
+  answered_by: [guides/08-texts-alerts-and-notifications.md, guides/15-troubleshooting.md]
+- question: A buyer replied STOP, what happens now?
+  answered_by: [guides/08-texts-alerts-and-notifications.md]
+
+# QR codes, listing pages and website chat
+- question: Where do I get my QR code?
+  answered_by: [guides/09-qr-codes-signs-and-listing-pages.md, screens/qr-code.md]
+- question: Do you print the signs?
+  answered_by: [guides/09-qr-codes-signs-and-listing-pages.md, guides/01-about-realinfobot.md]
+- question: How do I add the chat to my website?
+  answered_by: [guides/10-website-chat.md, screens/website-widget.md]
+- question: The chat bubble doesn't show up on my site
+  answered_by: [guides/15-troubleshooting.md, guides/10-website-chat.md]
+- question: Can buyers call from the listing page?
+  answered_by: [guides/07-calls-and-phone-number.md, guides/09-qr-codes-signs-and-listing-pages.md]
+- question: How many people scanned my sign?
+  answered_by: [guides/09-qr-codes-signs-and-listing-pages.md, screens/qr-code.md]
+- question: Can I jump into a chat with a buyer?
+  answered_by: [guides/10-website-chat.md]
+
+# Teaching the assistant
+- question: How do I upload my feature sheet?
+  answered_by: [guides/11-teaching-the-assistant.md, screens/knowledge.md]
+- question: I uploaded the property taxes but the assistant didn't know them
+  answered_by: [guides/11-teaching-the-assistant.md, guides/15-troubleshooting.md]
+- question: The assistant gave a buyer the wrong answer, how do I fix it?
+  answered_by: [guides/11-teaching-the-assistant.md, guides/15-troubleshooting.md]
+- question: What file types can I upload?
+  answered_by: [screens/knowledge.md, guides/11-teaching-the-assistant.md]
+- question: What are rules?
+  answered_by: [guides/11-teaching-the-assistant.md, screens/rules.md]
+- question: Where can I see questions the assistant couldn't answer?
+  answered_by: [guides/11-teaching-the-assistant.md, screens/questions.md]
+
+# Inquiries, contacts and integrations
+- question: Where do I see who called?
+  answered_by: [guides/12-inquiries-contacts-and-integrations.md, screens/calls.md]
+- question: Can I export my leads to a spreadsheet?
+  answered_by: [guides/12-inquiries-contacts-and-integrations.md]
+- question: Does it work with Follow Up Boss?
+  answered_by: [guides/12-inquiries-contacts-and-integrations.md]
+- question: Can it book showings into my Google Calendar?
+  answered_by: [guides/02-how-realinfobot-works.md, guides/12-inquiries-contacts-and-integrations.md]
+- question: Does it pull my listing from MLS or REALTOR.ca?
+  answered_by: [guides/16-quick-answers.md]
+
+# Team and account
+- question: How do I give my assistant access to my account?
+  answered_by: [guides/13-team-account-and-security.md, screens/team.md]
+- question: I forgot my password
+  answered_by: [guides/13-team-account-and-security.md, screens/reset-password.md]
+- question: How do I change my email address?
+  answered_by: [guides/13-team-account-and-security.md, screens/account.md]
+- question: How do I delete my account?
+  answered_by: [guides/13-team-account-and-security.md, screens/cancel-account.md]
+- question: Is there two-factor authentication?
+  answered_by: [guides/13-team-account-and-security.md]
+
+# Privacy and terms
+- question: Do you use my data to train AI?
+  answered_by: [guides/14-privacy-data-and-recording.md]
+- question: Where is my data stored?
+  answered_by: [guides/14-privacy-data-and-recording.md]
+- question: Is RealInfoBot PIPEDA compliant?
+  answered_by: [guides/14-privacy-data-and-recording.md]
+- question: Can the assistant give buyers advice on what to offer?
+  answered_by: [guides/01-about-realinfobot.md, guides/17-terms-and-policies.md]
+- question: Is this an emergency line?
+  answered_by: [guides/17-terms-and-policies.md, guides/01-about-realinfobot.md]
+
+# Everything else
+- question: What languages does it speak?
+  answered_by: [guides/01-about-realinfobot.md]
+- question: Does it work in the US?
+  answered_by: [guides/01-about-realinfobot.md]
+- question: Is there an app for my phone?
+  answered_by: [guides/16-quick-answers.md]
+- question: How do I reach a real person?
+  answered_by: [guides/01-about-realinfobot.md]
+  faq: How do I contact RealInfoBot support?
+- question: How does the affiliate program work?
+  answered_by: [guides/18-affiliate-program.md, screens/affiliate-program.md]
+- question: When do affiliates get paid?
+  answered_by: [guides/18-affiliate-program.md]
+- question: What is the free guide?
+  answered_by: [guides/16-quick-answers.md]
+- question: Can I use it for rentals?
+  answered_by: [guides/16-quick-answers.md, guides/01-about-realinfobot.md]
+- question: I run a brokerage with 30 agents, does it work for us?
+  answered_by: [guides/16-quick-answers.md]
+- question: What is an API key for?
+  answered_by: [screens/api-keys.md]
+- question: What are webhooks?
+  answered_by: [screens/webhooks.md]

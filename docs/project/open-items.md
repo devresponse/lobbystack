@@ -209,6 +209,12 @@ The docs no longer link to the original project's sites, but some code and confi
 
 What each triage closed, and each pull request that finished an item, grouped by date, newest first, with the reason. Add a later date's group above this one.
 
+### Closed on 2026-11-28
+
+| Item | Why it's closed |
+| --- | --- |
+| **Buy a top-up** showed twice on **Settings > Plan**, on RealInfoBot's production after its sync to `releases/r2` at `1edce65` | The top-ups on sale and the promo code field beside them had the same React key, so each time the screen drew again, after the first, React left the old top-ups section in the page and added another: two, then more, each with a **Buy** button. Fork PR #248 gives the top-ups their own key, with a test that draws the screen again and finds the section once |
+
 ### Closed on 2026-11-27
 
 | Item | Why it's closed |

@@ -26,6 +26,15 @@ Run it with an OpenAI API key:
 OPENAI_API_KEY=your_openai_api_key pnpm voice:eval
 ```
 
+The script takes the key from the shell, not from `.env`. In PowerShell, set it first in the same window. With PowerShell 7, `Read-Host -MaskInput` asks for it without showing it, so the key stays off the screen and out of PowerShell's history file, which keeps every line typed in full:
+
+```powershell
+$env:OPENAI_API_KEY = Read-Host -MaskInput "OpenAI key"
+pnpm voice:eval
+```
+
+Use a project key, which starts with `sk-proj-`. An admin key, which starts with `sk-admin-`, can't open GPT-Live sessions: the eval stops before any run, and each caller line it tried to voice shows "Voice session access denied".
+
 These options change what runs:
 
 - **`--scenario <name>`**: runs one scenario. Repeat it to run several. Without it, every scenario runs.
